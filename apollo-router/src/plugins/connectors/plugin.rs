@@ -17,6 +17,8 @@ use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::connectors::configuration::ConnectorsConfig;
+use crate::plugins::connectors::declared_errors::CONNECTOR_ERRORS_EXTENSION_KEY;
+use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
 use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::execution;
@@ -118,24 +120,41 @@ impl Plugin for Connectors {
                                     limits.log();
                                 }
                             });
-                            if is_debug_enabled
-                                && let Some(debug) = res.context.extensions().with_lock(|lock| {
-                                    lock.get::<Arc<Mutex<ConnectorContext>>>().cloned()
+                            let debug = is_debug_enabled
+                                .then(|| {
+                                    res.context.extensions().with_lock(|lock| {
+                                        lock.get::<Arc<Mutex<ConnectorContext>>>().cloned()
+                                    })
                                 })
-                            {
-                                let (parts, stream) = res.response.into_parts();
+                                .flatten();
 
-                                let stream = stream.map(move |mut chunk| {
+                            // Errors declared with `->withError` are reported
+                            // here rather than in `errors`: the fields they
+                            // describe resolved, and the GraphQL spec reserves
+                            // `errors` for positions absent from `data`. The
+                            // fetch service has already lifted them out of the
+                            // subgraph responses' `errors` and into the
+                            // context; this is where they reach the client.
+                            let context = res.context.clone();
+                            let (parts, stream) = res.response.into_parts();
+
+                            let stream = stream.map(move |mut chunk| {
+                                if let Some(errors) = ConnectorDeclaredErrors::drain(&context) {
+                                    chunk
+                                        .extensions
+                                        .insert(CONNECTOR_ERRORS_EXTENSION_KEY, errors);
+                                }
+                                if let Some(debug) = &debug {
                                     let serialized = { &debug.lock().clone().serialize() };
                                     chunk.extensions.insert(
                                         CONNECTORS_DEBUG_KEY,
                                         json!({"version": "2", "data": serialized }),
                                     );
-                                    chunk
-                                });
+                                }
+                                chunk
+                            });
 
-                                res.response = http::Response::from_parts(parts, Box::pin(stream));
-                            }
+                            res.response = http::Response::from_parts(parts, Box::pin(stream));
 
                             Ok(res)
                         }
@@ -187,3 +206,104 @@ impl Plugin for Connectors {
 pub(crate) const PLUGIN_NAME: &str = "connectors";
 
 register_plugin!("apollo", PLUGIN_NAME, Connectors);
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use serde_json_bytes::Value;
+
+    use super::*;
+    use crate::graphql;
+    use crate::json_ext::Path;
+    use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
+    use crate::plugins::test::PluginTestHarness;
+
+    /// One declared error, as it looks on arrival from a connector fetch.
+    fn declared() -> graphql::Error {
+        graphql::Error::builder()
+            .message("balance unavailable")
+            .path(Path::from("account/balance"))
+            .extension_code("CONNECTORS_MAPPING_ERROR")
+            .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+            .build()
+    }
+
+    async fn harness() -> PluginTestHarness<Connectors> {
+        PluginTestHarness::builder()
+            .config("connectors: {}")
+            .build()
+            .await
+            .expect("plugin should load")
+    }
+
+    /// The far end of the hand-off, asserted on what the client actually
+    /// receives: a declared error reaches the response `extensions`, with the
+    /// path the fetch node gave it, and reaches `errors` not at all — the
+    /// field it describes is present in `data`, and the spec reserves `errors`
+    /// for positions that are not.
+    #[tokio::test]
+    async fn declared_errors_are_reported_in_the_response_extensions() {
+        let harness = harness().await;
+
+        let service = harness.supergraph_service(|req| async move {
+            // Stands in for a connector fetch completing mid-request.
+            ConnectorDeclaredErrors::take_marked(&req.context, &mut vec![declared()]);
+
+            supergraph::Response::fake_builder()
+                .data(json!({ "account": { "balance": 0 } }))
+                .context(req.context)
+                .build()
+        });
+
+        let mut response = service.call_default().await.unwrap();
+        let chunks: Vec<graphql::Response> = response.response.body_mut().collect().await;
+
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].errors.is_empty());
+        assert_eq!(
+            chunks[0].extensions.get(CONNECTOR_ERRORS_EXTENSION_KEY),
+            Some(&json!([{
+                "message": "balance unavailable",
+                "path": ["account", "balance"],
+                "extensions": { "code": "CONNECTORS_MAPPING_ERROR" },
+            }])),
+        );
+
+        // On the wire, the execution result has no `errors` entry at all —
+        // the spec requires it to be absent, not empty, when execution raised
+        // nothing — and no entry outside `data`/`errors`/`extensions`.
+        let serialized = serde_json_bytes::to_value(&chunks[0]).expect("serializes");
+        let serialized = serialized.as_object().expect("a map");
+        assert_eq!(
+            serialized
+                .keys()
+                .map(|key| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["data", "extensions"],
+        );
+    }
+
+    /// The common case: a request whose connectors declared nothing gets no
+    /// `connectorErrors` key at all, rather than an empty array.
+    #[tokio::test]
+    async fn a_response_without_declared_errors_carries_no_extension() {
+        let harness = harness().await;
+
+        let service = harness.supergraph_service(|req| async move {
+            supergraph::Response::fake_builder()
+                .data(json!({ "account": { "balance": 0 } }))
+                .context(req.context)
+                .build()
+        });
+
+        let mut response = service.call_default().await.unwrap();
+        let chunks: Vec<graphql::Response> = response.response.body_mut().collect().await;
+
+        assert_eq!(chunks.len(), 1);
+        assert!(
+            !chunks[0]
+                .extensions
+                .contains_key(CONNECTOR_ERRORS_EXTENSION_KEY)
+        );
+    }
+}

@@ -310,6 +310,7 @@ impl Response {
             data: data.clone(),
             problems,
             key: response_key,
+            errors: vec![],
         };
 
         let mut response_builder = http::Response::builder();

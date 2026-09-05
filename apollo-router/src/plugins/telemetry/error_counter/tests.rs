@@ -1,6 +1,13 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use apollo_federation::connectors::JSONSelection;
+use apollo_federation::connectors::runtime::errors::RuntimeError;
+use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
+use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+use apollo_federation::connectors::runtime::key::ResponseKey;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
@@ -26,6 +33,7 @@ use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::plugins::telemetry::apollo::SubgraphErrorConfig;
+use crate::plugins::telemetry::error_counter::count_connector_errors;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_operation_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
@@ -38,6 +46,7 @@ use crate::services::ExecutionResponse;
 use crate::services::RouterResponse;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
+use crate::services::connector;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -103,6 +112,136 @@ async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
             unwrap_from_context::<HashSet<Uuid>>(&new_response.context, COUNTED_ERRORS),
             HashSet::from([error_id])
         )
+    }
+    .with_metrics()
+    .await;
+}
+
+#[tokio::test]
+async fn test_count_connector_errors_counts_declared_errors() {
+    async {
+        let config = ErrorsConfiguration {
+            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let context = Context::default();
+        let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+        let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+        let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+        let mut declared = RuntimeError::new(
+            "balance unavailable",
+            &ResponseKey::RootField {
+                name: "account".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$").unwrap()),
+            },
+        )
+        .with_code("CONNECTORS_MAPPING_ERROR");
+        declared.subgraph_name = Some("accounts".into());
+        declared.path = "account/balance".to_string();
+
+        // Counted straight off the mapped response, before the client-facing
+        // payload — and so before `include_subgraph_errors` has any say in
+        // whether the error reaches a client at all.
+        count_connector_errors(
+            &connector::request_service::Response {
+                context,
+                subgraph_name: "accounts".to_string(),
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: http::Response::builder()
+                        .status(200)
+                        .body(())
+                        .unwrap()
+                        .into_parts()
+                        .0,
+                })),
+                mapped_response: MappedResponse::Data {
+                    data: json!({ "account": { "balance": 0 } }),
+                    key: ResponseKey::RootField {
+                        name: "account".to_string(),
+                        inputs: Default::default(),
+                        selection: Arc::new(JSONSelection::parse("$").unwrap()),
+                    },
+                    problems: vec![],
+                    errors: vec![declared],
+                },
+            },
+            &config,
+        );
+
+        assert_counter!(
+            "apollo.router.operations.error",
+            1,
+            "apollo.operation.id" = "some-id",
+            "graphql.operation.name" = "SomeOperation",
+            "graphql.operation.type" = "query",
+            "apollo.client.name" = "client-1",
+            "apollo.client.version" = "version-1",
+            "graphql.error.extensions.code" = "CONNECTORS_MAPPING_ERROR",
+            "graphql.error.extensions.severity" = "ERROR",
+            "graphql.error.path" = "/account/balance",
+            "apollo.router.error.service" = "accounts"
+        );
+
+        assert_counter!(
+            "apollo.router.graphql_error",
+            1,
+            code = "CONNECTORS_MAPPING_ERROR"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// A connector response that *failed* declares nothing: the one error
+/// explaining the failure is counted at the execution layer, where every other
+/// connector error is, so counting it here too would double count it.
+#[tokio::test]
+async fn test_count_connector_errors_ignores_failed_responses() {
+    async {
+        let config = ErrorsConfiguration {
+            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let key = ResponseKey::RootField {
+            name: "account".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$").unwrap()),
+        };
+        let mut error = RuntimeError::new("Request failed", &key).with_code("CONNECTORS_FETCH");
+        error.subgraph_name = Some("accounts".into());
+
+        count_connector_errors(
+            &connector::request_service::Response {
+                context: Context::default(),
+                subgraph_name: "accounts".to_string(),
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: http::Response::builder()
+                        .status(500)
+                        .body(())
+                        .unwrap()
+                        .into_parts()
+                        .0,
+                })),
+                mapped_response: MappedResponse::Error {
+                    error,
+                    key,
+                    problems: vec![],
+                },
+            },
+            &config,
+        );
+
+        assert_counter_not_exists!(
+            "apollo.router.graphql_error",
+            u64,
+            code = "CONNECTORS_FETCH"
+        );
     }
     .with_metrics()
     .await;
