@@ -139,7 +139,7 @@ itertools = "0.15.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
 jsonschema = { version = "0.49.0", default-features = false }
-jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.18.0"
