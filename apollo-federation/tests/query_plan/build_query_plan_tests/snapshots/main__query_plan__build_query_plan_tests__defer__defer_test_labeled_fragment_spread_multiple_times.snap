@@ -1,0 +1,59 @@
+---
+source: apollo-federation/tests/query_plan/build_query_plan_tests/defer.rs
+expression: plan
+---
+QueryPlan {
+  Defer {
+    Primary {
+      Fetch(service: "Subgraph1", id: 0) {
+        {
+          a {
+            __typename
+            id
+          }
+          b {
+            __typename
+            id
+          }
+        }
+      },
+    }, [
+      Deferred(depends: [0], path: "a", label: "ItemFragment") {
+        { v }:
+        Flatten(path: "a") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                v
+              }
+            }
+          },
+        },
+      },
+      Deferred(depends: [0], path: "b", label: "ItemFragment") {
+        { v }:
+        Flatten(path: "b") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                v
+              }
+            }
+          },
+        },
+      },
+    ]
+  },
+}
