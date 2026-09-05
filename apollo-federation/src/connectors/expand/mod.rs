@@ -729,6 +729,16 @@ mod helpers {
                 .iter()
                 .any(|d| d.name == self.interface_object_name);
 
+            // Only copy keys for `@interfaceObject` types, and always as
+            // `resolvable: false`. Copying a declared `@key` onto a non-entity
+            // connector's output type (e.g. a `Query` field connector mapping
+            // from `$args`) as resolvable would give the query planner a second,
+            // spurious entity path and let it route reference resolution through
+            // the wrong connector. See RH-1401.
+            if !is_interface_object {
+                return Ok(());
+            }
+
             let pos = ObjectTypeDefinitionPosition {
                 type_name: original_output_type.name.clone(),
             };
@@ -742,21 +752,18 @@ mod helpers {
                     .argument_by_name("fields", self.original_schema.schema())
                     .map_err(|_| internal_error!("@key(fields:) argument missing"))?;
 
-                let mut arguments = vec![Node::new(Argument {
-                    name: name!("fields"),
-                    value: key_fields.clone(),
-                })];
-
-                if is_interface_object {
-                    arguments.push(Node::new(Argument {
-                        name: name!("resolvable"),
-                        value: Node::new(Value::Boolean(false)),
-                    }));
-                }
-
                 let key = Directive {
                     name: key.name.clone(),
-                    arguments,
+                    arguments: vec![
+                        Node::new(Argument {
+                            name: name!("fields"),
+                            value: key_fields.clone(),
+                        }),
+                        Node::new(Argument {
+                            name: name!("resolvable"),
+                            value: Node::new(Value::Boolean(false)),
+                        }),
+                    ],
                 };
                 pos.insert_directive(to_schema, Component::new(key))?;
             }
