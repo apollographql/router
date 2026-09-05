@@ -1708,6 +1708,7 @@ mod tests {
                 multipart_defer: true,
                 multipart_subscription: true,
                 json: true,
+                graphql_response_json: false,
                 wildcard: true,
             })
         });
