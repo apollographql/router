@@ -499,4 +499,175 @@ type Query {
             }
         "#);
     }
+
+    // =========================================================================================
+    // `flatten_unnecessary_fragments` is idempotent and semantically equivalent to the input
+    // (proptest-graph-notes.md, "Supporting operation properties"). This schema and shape
+    // deliberately mirror `does_not_duplicate_fragments_regression_router782` above: a real past
+    // bug lived in exactly this "redundant nested fragment duplicated across an abstract-type
+    // wrapper" shape, and the function's own PORT_NOTE flags that a second flattening pass could
+    // in principle find newly-liftable selections a first pass didn't ("this could be worth
+    // investigating"), which is exactly what the idempotence check below probes.
+    // =========================================================================================
+    mod flatten_proptest {
+        use apollo_compiler::Schema;
+        use proptest::prelude::*;
+        use proptest::proptest;
+
+        use super::super::*;
+        use crate::correctness::compare_operations;
+        use crate::operation::Operation;
+
+        const FLATTEN_TEST_SCHEMA: &str = r#"
+            interface Node {
+                id: ID!
+            }
+            interface HasNodes {
+                nodes: [Node!]!
+            }
+            type MySpecialNode implements Node & HasNodes {
+                id: ID!
+                value: String
+                nodes: [Node!]!
+            }
+            type Query {
+                nodes: [Node]
+            }
+        "#;
+
+        fn schema() -> ValidFederationSchema {
+            let schema = Schema::parse_and_validate(FLATTEN_TEST_SCHEMA, "schema.graphql").unwrap();
+            ValidFederationSchema::new(schema).unwrap()
+        }
+
+        /// Mirrors the shape of `does_not_duplicate_fragments_regression_router782`'s query:
+        /// a top-level `__typename`/`... on MySpecialNode` under `Node`, plus an optional
+        /// `... on HasNodes { ... on Node { ... } } }` wrapper — redundant (`HasNodes`/`Node` are
+        /// both satisfied by the same runtime type here) and, when it repeats the same
+        /// `... on MySpecialNode` fragment the top level already has, exactly the duplication
+        /// shape the regression fixed.
+        #[derive(Debug, Clone, Copy)]
+        struct FlattenSpec {
+            top_typename: bool,
+            direct_special_node: bool,
+            nested_wrapper: bool,
+            nested_typename: bool,
+            nested_special_node: bool,
+        }
+
+        fn flatten_spec_strategy() -> impl Strategy<Value = FlattenSpec> {
+            any::<(bool, bool, bool, bool, bool)>().prop_map(
+                |(
+                    top_typename,
+                    direct_special_node,
+                    nested_wrapper,
+                    nested_typename,
+                    nested_special_node,
+                )| FlattenSpec {
+                    top_typename,
+                    direct_special_node,
+                    nested_wrapper,
+                    nested_typename,
+                    nested_special_node,
+                },
+            )
+        }
+
+        fn build_query(spec: FlattenSpec) -> String {
+            let mut parts = Vec::new();
+            if spec.top_typename {
+                parts.push("__typename".to_string());
+            }
+            if spec.direct_special_node {
+                parts.push("... on MySpecialNode { value }".to_string());
+            }
+            if spec.nested_wrapper {
+                let mut inner = Vec::new();
+                if spec.nested_typename {
+                    inner.push("__typename".to_string());
+                }
+                if spec.nested_special_node {
+                    inner.push("... on MySpecialNode { value }".to_string());
+                }
+                if inner.is_empty() {
+                    // A composite selection can't be empty; fall back to a harmless field.
+                    inner.push("__typename".to_string());
+                }
+                parts.push(format!(
+                    "... on HasNodes {{ ... on Node {{ {} }} }}",
+                    inner.join(" ")
+                ));
+            }
+            if parts.is_empty() {
+                parts.push("__typename".to_string());
+            }
+            format!("{{ nodes {{ {} }} }}", parts.join(" "))
+        }
+
+        /// Parse `source` as a fresh document and assert its response shape is semantically
+        /// equal (in both directions) to `reference`'s. Response-shape comparison is
+        /// schema-aware: unlike `SelectionSet::containment`'s structural, type-condition-name
+        /// keyed comparison, it knows that two differently-named conditions can select the exact
+        /// same runtime types. An earlier version of this property used `containment` here and
+        /// immediately found a false-positive "meaning changed" report on
+        /// `{ nodes { ... on HasNodes { ... on Node { ... on MySpecialNode { value } } } } }` ->
+        /// `{ nodes { ... on MySpecialNode { value } } }`: in this schema `MySpecialNode` is the
+        /// only type implementing `HasNodes`, so the two selections are genuinely equivalent, but
+        /// `containment` doesn't reason about runtime-type-set equivalence across differently
+        /// named conditions — the wrong oracle for this property, not a bug in `flatten_...`.
+        fn assert_same_response_shape(
+            schema: &ValidFederationSchema,
+            reference: &str,
+            source: &str,
+        ) {
+            let reference_doc = executable::ExecutableDocument::parse_and_validate(
+                schema.schema(),
+                reference,
+                "reference.graphql",
+            )
+            .unwrap();
+            let source_doc = executable::ExecutableDocument::parse_and_validate(
+                schema.schema(),
+                source,
+                "source.graphql",
+            )
+            .unwrap();
+            compare_operations(schema, &reference_doc, &source_doc).unwrap_or_else(|e| {
+                panic!("`{source}` does not have the same response shape as `{reference}`: {e}")
+            });
+            compare_operations(schema, &source_doc, &reference_doc).unwrap_or_else(|e| {
+                panic!("`{reference}` does not have the same response shape as `{source}`: {e}")
+            });
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(256))]
+
+            #[test]
+            fn flatten_unnecessary_fragments_is_idempotent_and_meaning_preserving(
+                spec in flatten_spec_strategy(),
+            ) {
+                let schema = schema();
+                let query = build_query(spec);
+                let operation = Operation::parse(schema.clone(), &query, "query.graphql").unwrap();
+                let original = &operation.selection_set;
+
+                let flat1 = original
+                    .flatten_unnecessary_fragments(&original.type_position, &schema)
+                    .unwrap();
+                assert_same_response_shape(&schema, &query, &format!("{flat1}"));
+
+                let flat2 = flat1
+                    .flatten_unnecessary_fragments(&flat1.type_position, &schema)
+                    .unwrap();
+                prop_assert_eq!(
+                    &flat1,
+                    &flat2,
+                    "a second flatten_unnecessary_fragments pass changed the result: `{}` -> `{}`",
+                    flat1,
+                    flat2
+                );
+            }
+        }
+    }
 }

@@ -261,3 +261,310 @@ impl PlanNode {
         }
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use std::cell::Cell;
+
+    use proptest::prelude::*;
+    use proptest::proptest;
+
+    use super::*;
+
+    fn plan_name_strategy() -> impl Strategy<Value = Name> {
+        prop::sample::select(vec!["a", "b", "node", "items", "TypeA", "TypeB", "ctx"])
+            .prop_map(|value| Name::new(value).unwrap())
+    }
+
+    fn conditions_strategy() -> impl Strategy<Value = Option<Conditions>> {
+        prop::option::of(prop::collection::vec(plan_name_strategy(), 0..4))
+    }
+
+    fn fetch_data_path_strategy() -> impl Strategy<Value = Vec<FetchDataPathElement>> {
+        prop::collection::vec(
+            prop_oneof![
+                (plan_name_strategy(), conditions_strategy())
+                    .prop_map(|(name, conditions)| FetchDataPathElement::Key(name, conditions)),
+                conditions_strategy().prop_map(FetchDataPathElement::AnyIndex),
+                plan_name_strategy().prop_map(FetchDataPathElement::TypenameEquals),
+                Just(FetchDataPathElement::Parent),
+            ],
+            0..7,
+        )
+    }
+
+    fn query_path_strategy() -> impl Strategy<Value = Vec<QueryPathElement>> {
+        prop::collection::vec(
+            prop_oneof![
+                plan_name_strategy()
+                    .prop_map(|response_key| QueryPathElement::Field { response_key }),
+                plan_name_strategy().prop_map(|type_condition| {
+                    QueryPathElement::InlineFragment { type_condition }
+                }),
+            ],
+            0..6,
+        )
+    }
+
+    fn json_value_strategy() -> BoxedStrategy<serde_json_bytes::Value> {
+        prop_oneof![
+            Just(serde_json_bytes::Value::Null),
+            any::<bool>().prop_map(serde_json_bytes::Value::Bool),
+            any::<i64>().prop_map(|value| serde_json_bytes::Value::from(value)),
+            "[a-zA-Z0-9 _-]{0,16}".prop_map(|value| serde_json_bytes::Value::String(value.into())),
+        ]
+        .prop_recursive(3, 32, 4, |inner| {
+            prop_oneof![
+                prop::collection::vec(inner.clone(), 0..4).prop_map(serde_json_bytes::Value::Array),
+                prop::collection::btree_map("[a-z]{1,8}", inner, 0..4).prop_map(|entries| {
+                    serde_json_bytes::Value::Object(
+                        entries
+                            .into_iter()
+                            .map(|(key, value)| (key.into(), value))
+                            .collect(),
+                    )
+                }),
+            ]
+        })
+        .boxed()
+    }
+
+    fn rewrite_strategy() -> impl Strategy<Value = Arc<FetchDataRewrite>> {
+        prop_oneof![
+            (fetch_data_path_strategy(), json_value_strategy()).prop_map(|(path, value)| {
+                Arc::new(FetchDataRewrite::ValueSetter(FetchDataValueSetter {
+                    path,
+                    set_value_to: value,
+                }))
+            }),
+            (fetch_data_path_strategy(), plan_name_strategy()).prop_map(|(path, rename_key_to)| {
+                Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                    path,
+                    rename_key_to,
+                }))
+            }),
+        ]
+    }
+
+    fn requires_selection_strategy() -> BoxedStrategy<requires_selection::Selection> {
+        (prop::option::of(plan_name_strategy()), plan_name_strategy())
+            .prop_map(|(alias, name)| {
+                requires_selection::Selection::Field(requires_selection::Field {
+                    alias,
+                    name,
+                    selections: Vec::new(),
+                })
+            })
+            .prop_recursive(3, 32, 4, |inner| {
+                prop_oneof![
+                    (
+                        prop::option::of(plan_name_strategy()),
+                        plan_name_strategy(),
+                        prop::collection::vec(inner.clone(), 0..4),
+                    )
+                        .prop_map(|(alias, name, selections)| {
+                            requires_selection::Selection::Field(requires_selection::Field {
+                                alias,
+                                name,
+                                selections,
+                            })
+                        }),
+                    (
+                        prop::option::of(plan_name_strategy()),
+                        prop::collection::vec(inner, 0..4),
+                    )
+                        .prop_map(|(type_condition, selections)| {
+                            requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
+                                    type_condition,
+                                    selections,
+                                },
+                            )
+                        }),
+                ]
+            })
+            .boxed()
+    }
+
+    fn fetch_node_strategy() -> BoxedStrategy<FetchNode> {
+        (
+            prop::sample::select(vec!["accounts", "products", "reviews"]),
+            prop::option::of(any::<u64>()),
+            prop::collection::vec(plan_name_strategy(), 0..4),
+            prop::collection::vec(requires_selection_strategy(), 0..4),
+            prop::option::of(plan_name_strategy()),
+            prop::sample::select(vec![
+                executable::OperationType::Query,
+                executable::OperationType::Mutation,
+                executable::OperationType::Subscription,
+            ]),
+            prop::collection::vec(rewrite_strategy(), 0..4),
+            prop::collection::vec(rewrite_strategy(), 0..4),
+            prop::collection::vec(rewrite_strategy(), 0..4),
+        )
+            .prop_map(
+                |(
+                    subgraph_name,
+                    id,
+                    variable_usages,
+                    requires,
+                    operation_name,
+                    operation_kind,
+                    input_rewrites,
+                    output_rewrites,
+                    context_rewrites,
+                )| FetchNode {
+                    subgraph_name: Arc::from(subgraph_name),
+                    id,
+                    variable_usages,
+                    requires,
+                    operation_document: serializable_document::SerializableDocument::from_string(
+                        "query Generated { __typename }",
+                    ),
+                    operation_name,
+                    operation_kind,
+                    input_rewrites: Arc::new(input_rewrites),
+                    output_rewrites,
+                    context_rewrites,
+                },
+            )
+            .boxed()
+    }
+
+    fn plan_node_strategy() -> BoxedStrategy<PlanNode> {
+        fetch_node_strategy()
+            .prop_map(|fetch| PlanNode::Fetch(Box::new(fetch)))
+            .prop_recursive(4, 64, 4, |inner| {
+                let optional_node =
+                    || prop::option::of(inner.clone()).prop_map(|node| node.map(Box::new));
+                prop_oneof![
+                    prop::collection::vec(inner.clone(), 0..4)
+                        .prop_map(|nodes| PlanNode::Sequence(SequenceNode { nodes })),
+                    prop::collection::vec(inner.clone(), 0..4)
+                        .prop_map(|nodes| PlanNode::Parallel(ParallelNode { nodes })),
+                    (fetch_data_path_strategy(), inner.clone()).prop_map(|(path, node)| {
+                        PlanNode::Flatten(FlattenNode {
+                            path,
+                            node: Box::new(node),
+                        })
+                    }),
+                    (plan_name_strategy(), optional_node(), optional_node()).prop_map(
+                        |(condition_variable, if_clause, else_clause)| {
+                            PlanNode::Condition(Box::new(ConditionNode {
+                                condition_variable,
+                                if_clause,
+                                else_clause,
+                            }))
+                        }
+                    ),
+                    (
+                        prop::option::of(Just(".{ __typename }".to_string())),
+                        optional_node(),
+                        prop::collection::vec(
+                            (
+                                prop::collection::vec(any::<u16>(), 0..4),
+                                prop::option::of(Just("generated-label".to_string())),
+                                query_path_strategy(),
+                                prop::option::of(Just(".{ __typename }".to_string())),
+                                optional_node(),
+                            ),
+                            0..4,
+                        ),
+                    )
+                        .prop_map(
+                            |(primary_selection, primary_node, deferred)| {
+                                PlanNode::Defer(DeferNode {
+                                    primary: PrimaryDeferBlock {
+                                        sub_selection: primary_selection,
+                                        node: primary_node,
+                                    },
+                                    deferred: deferred
+                                        .into_iter()
+                                        .map(|(depends, label, query_path, sub_selection, node)| {
+                                            DeferredDeferBlock {
+                                                depends: depends
+                                                    .into_iter()
+                                                    .map(|id| DeferredDependency {
+                                                        id: id.to_string(),
+                                                    })
+                                                    .collect(),
+                                                label,
+                                                query_path,
+                                                sub_selection,
+                                                node,
+                                            }
+                                        })
+                                        .collect(),
+                                })
+                            }
+                        ),
+                ]
+            })
+            .boxed()
+    }
+
+    fn top_level_plan_node_strategy() -> BoxedStrategy<TopLevelPlanNode> {
+        let plan = plan_node_strategy();
+        prop_oneof![
+            plan.clone().prop_map(|node| match node {
+                PlanNode::Fetch(fetch) => TopLevelPlanNode::Fetch(fetch),
+                PlanNode::Sequence(sequence) => TopLevelPlanNode::Sequence(sequence),
+                PlanNode::Parallel(parallel) => TopLevelPlanNode::Parallel(parallel),
+                PlanNode::Flatten(flatten) => TopLevelPlanNode::Flatten(flatten),
+                PlanNode::Defer(defer) => TopLevelPlanNode::Defer(defer),
+                PlanNode::Condition(condition) => TopLevelPlanNode::Condition(condition),
+            }),
+            (fetch_node_strategy(), prop::option::of(plan)).prop_map(|(primary, rest)| {
+                TopLevelPlanNode::Subscription(SubscriptionNode {
+                    primary: Box::new(primary),
+                    rest: rest.map(Box::new),
+                })
+            }),
+        ]
+        .boxed()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        /// The serialized plan AST is a public boundary consumed by the router. Generate every
+        /// node/path/rewrite family recursively and require serialization to be stable after a
+        /// deserialize-reserialize cycle. Statistics' documented NaN/null normalization is checked
+        /// separately because IEEE NaN is intentionally not equal to itself.
+        #[test]
+        fn query_plan_json_round_trip_is_stable(
+            node in prop::option::of(top_level_plan_node_strategy()),
+            evaluated_plan_count in 0usize..10_000,
+            evaluated_plan_paths in 0usize..10_000,
+            best_plan_cost in prop_oneof![Just(f64::NAN), -1.0e9f64..1.0e9f64],
+        ) {
+            let plan = QueryPlan {
+                node,
+                statistics: QueryPlanningStatistics {
+                    evaluated_plan_count: Cell::new(evaluated_plan_count),
+                    evaluated_plan_paths: Cell::new(evaluated_plan_paths),
+                    best_plan_cost,
+                },
+            };
+            let serialized = serde_json::to_vec(&plan).unwrap();
+            let round_trip: QueryPlan = serde_json::from_slice(&serialized).unwrap();
+            let reserialized = serde_json::to_vec(&round_trip).unwrap();
+
+            prop_assert_eq!(reserialized, serialized, "query-plan JSON was not stable");
+            prop_assert_eq!(&round_trip.node, &plan.node);
+            prop_assert_eq!(
+                round_trip.statistics.evaluated_plan_count.get(),
+                evaluated_plan_count,
+            );
+            prop_assert_eq!(
+                round_trip.statistics.evaluated_plan_paths.get(),
+                evaluated_plan_paths,
+            );
+            if best_plan_cost.is_nan() {
+                prop_assert!(round_trip.statistics.best_plan_cost.is_nan());
+            } else {
+                prop_assert_eq!(round_trip.statistics.best_plan_cost, best_plan_cost);
+            }
+        }
+    }
+}
