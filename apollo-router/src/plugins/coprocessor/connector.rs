@@ -456,7 +456,7 @@ where
 
     // Extract data from the transport result
     let (headers_to_send, status_to_send) = match &response.transport_result {
-        Ok(Some(TransportResponse::Http(http_response))) => {
+        Some(Ok(TransportResponse::Http(http_response))) => {
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
@@ -479,7 +479,7 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Ok(None) | Ok(Some(TransportResponse::MappingOnly)) | Err(_) => (None, None),
+        None | Some(Ok(TransportResponse::MappingOnly)) | Some(Err(_)) => (None, None),
     };
 
     // Extract body from mapped response
@@ -546,14 +546,14 @@ where
     if let Some(control) = co_processor_output.control {
         let new_status = control.get_http_status()?;
         // Update the transport result status if it was successful
-        if let Ok(Some(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        if let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
         {
             http_response.inner.status = new_status;
         }
     }
 
     if let Some(headers) = co_processor_output.headers
-        && let Ok(Some(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        && let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
     {
         http_response.inner.headers = internalize_header_map(headers)?;
     }

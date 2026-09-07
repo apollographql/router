@@ -3450,7 +3450,7 @@ mod tests {
                                     let response = Response {
                                         context: context.clone(),
                                         subgraph_name: String::new(),
-                                        transport_result: Ok(Some(TransportResponse::Http(
+                                        transport_result: Some(Ok(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
                                             },

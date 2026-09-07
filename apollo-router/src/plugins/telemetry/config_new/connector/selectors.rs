@@ -280,7 +280,7 @@ impl Selector for ConnectorSelector {
                 default,
                 redact,
             } => {
-                if let Ok(Some(TransportResponse::Http(ref http_response))) =
+                if let Some(Ok(TransportResponse::Http(ref http_response))) =
                     response.transport_result
                 {
                     let header_value = http_response
@@ -308,7 +308,7 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
             } => {
-                if let Ok(Some(TransportResponse::Http(ref http_response))) =
+                if let Some(Ok(TransportResponse::Http(ref http_response))) =
                     response.transport_result
                 {
                     let status = http_response.inner.status;
@@ -325,7 +325,7 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseBodySize {
                 connector_http_response_body_size,
             } if *connector_http_response_body_size => {
-                if let Ok(Some(TransportResponse::Http(ref http_response))) =
+                if let Some(Ok(TransportResponse::Http(ref http_response))) =
                     response.transport_result
                 {
                     http_response
@@ -570,7 +570,7 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name: String::new(),
-            transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
+            transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
@@ -592,7 +592,7 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name: String::new(),
-            transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
+            transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
@@ -616,7 +616,7 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name,
-            transport_result: Ok(Some(TransportResponse::Http(HttpResponse {
+            transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
                     .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)

@@ -1203,7 +1203,7 @@ mod test {
                 .await
                 .unwrap()
                 .transport_result
-                .is_ok()
+                .is_some_and(|result| result.is_ok())
         );
 
         let request = get_fake_connector_request(None, "testing".to_string());
@@ -1215,9 +1215,14 @@ mod test {
             .await
             .expect("it responded");
 
-        assert!(response.transport_result.is_err());
+        assert!(
+            response
+                .transport_result
+                .as_ref()
+                .is_some_and(|result| result.is_err())
+        );
         assert!(matches!(
-            response.transport_result.err().unwrap(),
+            response.transport_result.unwrap().err().unwrap(),
             Error::RateLimited
         ));
 
@@ -1232,7 +1237,7 @@ mod test {
                 .await
                 .unwrap()
                 .transport_result
-                .is_ok()
+                .is_some_and(|result| result.is_ok())
         );
     }
 

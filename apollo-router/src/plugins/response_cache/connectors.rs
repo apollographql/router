@@ -1242,9 +1242,9 @@ impl ConnectorRequestCacheService {
                     return Ok(connector::request_service::Response {
                             context: request.context,
                             subgraph_name,
-                            transport_result: Err(
+                            transport_result: Some(Err(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
-                            ),
+                            )),
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1495,7 +1495,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     // No transport happened — served from the response cache.
-                    transport_result: Ok(None),
+                    transport_result: None,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -1748,7 +1748,7 @@ fn connector_response_cache_control(
     response: &connector::request_service::Response,
     connector_ttl: Duration,
 ) -> Option<CacheControl> {
-    let Ok(Some(
+    let Some(Ok(
         apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
             http_response,
         ),

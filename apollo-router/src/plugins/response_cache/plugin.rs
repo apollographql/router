@@ -854,7 +854,7 @@ impl PluginPrivate for ResponseCache {
             return ServiceBuilder::new()
                 .map_response(
                     move |response: crate::services::connector::request_service::Response| {
-                        if let Ok(Some(
+                        if let Some(Ok(
                             apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
                                 ref http_response,
                             ),

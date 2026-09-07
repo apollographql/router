@@ -109,6 +109,8 @@ impl Request {
         self.context
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
+
     /// The original request made to the router, which produced this connector request.
     ///
     /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
@@ -173,7 +175,7 @@ pub struct Response {
     /// changes. Rewriting the status or headers here therefore makes telemetry
     /// disagree with what the client actually receives unless you make the
     /// corresponding change through the mapped-response accessors.
-    pub transport_result: Result<Option<TransportResponse>, Error>,
+    pub transport_result: Option<Result<TransportResponse, Error>>,
 
     /// The mapped response, including any mapping problems encountered when processing
     /// the response. This is what is merged into the GraphQL response returned to the
@@ -268,7 +270,7 @@ impl Response {
         Self {
             context,
             subgraph_name,
-            transport_result: Err(error),
+            transport_result: Some(Err(error)),
             mapped_response,
         }
     }
@@ -295,7 +297,7 @@ impl Response {
         Response {
             context: request_context,
             subgraph_name,
-            transport_result: Err(Error::TransportFailure(message)),
+            transport_result: Some(Err(Error::TransportFailure(message))),
             mapped_response: MappedResponse::Error {
                 error,
                 key: request_key,
@@ -330,7 +332,7 @@ impl Response {
         Self {
             context,
             subgraph_name: String::new(),
-            transport_result: Ok(Some(http_response.into())),
+            transport_result: Some(Ok(http_response.into())),
             mapped_response,
         }
     }
@@ -451,7 +453,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     Ok(Response {
                         context: request.context,
                         subgraph_name: original_subgraph_name,
-                        transport_result: Ok(Some(TransportResponse::MappingOnly)),
+                        transport_result: Some(Ok(TransportResponse::MappingOnly)),
                         mapped_response: mapped,
                     })
                 }
