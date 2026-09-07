@@ -543,7 +543,7 @@ fn find_disabled_mode_rejection(
                     return Some((source.clone(), kind_str));
                 }
             }
-            InvalidationRequest::CacheTag { .. } => {
+            InvalidationRequest::CacheTag { scope, .. } => {
                 let mut names = request.subgraph_names();
                 names.sort();
                 for name in names {
@@ -555,9 +555,9 @@ fn find_disabled_mode_rejection(
                     let connector_has_invalidation_config = connector_config
                         .sources
                         .get(&name)
-                        .map(|s| s.invalidation.is_some())
-                        .unwrap_or(false)
-                        || connector_config.all.invalidation.is_some();
+                        .is_some_and(|s| s.invalidation.is_some())
+                        || (connector_config.all.invalidation.is_some()
+                            && matches!(scope, CacheScope::Connector));
                     let connector_enabled = connector_has_invalidation_config
                         && connector_config
                             .effective_indexes(&name)
@@ -928,38 +928,6 @@ indexes:
                 r#type: "User".to_string(),
             },
         ];
-        assert_eq!(
-            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
-            None
-        );
-    }
-
-    #[test]
-    fn find_disabled_mode_rejection_cache_tag_allowed_by_connector_config() {
-        // Subgraph side disables cache_tag for the name, but the connector side has an
-        // invalidation config with cache_tag enabled — the request must be permitted.
-        let cfg = subgraph_config(
-            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
-            None,
-        );
-        let connector_cfg = ConnectorCacheConfiguration {
-            all: ConnectorCacheSource {
-                invalidation: Some(SubgraphInvalidationConfig {
-                    enabled: true,
-                    shared_key: "k".to_string(),
-                    indexes: InvalidationIndexes::default(),
-                }),
-                ..Default::default()
-            },
-            sources: HashMap::new(),
-        };
-        let mut subgraphs = std::collections::HashSet::new();
-        subgraphs.insert("graph.api".to_string());
-        let body = vec![InvalidationRequest::CacheTag {
-            scope: CacheScope::Subgraph,
-            subgraphs,
-            cache_tag: "tag-1".to_string(),
-        }];
         assert_eq!(
             find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
             None
