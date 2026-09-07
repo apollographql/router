@@ -187,11 +187,15 @@ pub(crate) struct Merger {
 
 impl Merger {
     pub(crate) fn new(
-        subgraphs: Vec<Subgraph<Validated>>,
+        mut subgraphs: Vec<Subgraph<Validated>>,
         options: CompositionOptions,
     ) -> Result<Self, FederationError> {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
         let mut error_reporter = ErrorReporter::new(names.clone());
+        // Seed the error reporter with hints from subgraphs, so merge hints are appended to the end
+        for subgraph in subgraphs.iter_mut() {
+            error_reporter.add_hints(subgraph.take_hints());
+        }
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
         let Some(join_spec) =
