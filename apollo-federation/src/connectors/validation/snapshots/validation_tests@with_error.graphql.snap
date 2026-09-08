@@ -6,9 +6,16 @@ input_file: apollo-federation/src/connectors/validation/test_data/with_error.gra
 [
     Message {
         code: InvalidSelection,
-        message: "`@connect(selection:)` on `Query.noArguments` contains an invalid mapping for field `status`: Method ->withError requires at least one argument",
+        message: "`@connect(selection:)` on `Query.noArguments` contains an invalid mapping for field `status`: Method ->withError requires exactly one argument, got 0",
         locations: [
             54:23..54:32,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.tooManyArguments` contains an invalid mapping for field `status`: Method ->withError requires exactly one argument, got 2",
+        locations: [
+            66:23..66:32,
         ],
     },
 ]

@@ -417,12 +417,12 @@ pub fn handle_mapping_only_response(
 /// [`InputPath`](crate::connectors::json_selection::immutable::InputPath):
 /// where the mapping was reading in the *source* JSON, interleaved with
 /// `->method` markers for the methods it passed through. In a mapping like
-/// `balance: amount->withError(...)` that path says `amount` — the API's field
+/// `balance: amount->withGraphQLError(...)` that path says `amount` — the API's
 /// — while the response path is `balance`. The two coincide only when the
 /// mapping happens to be a rename-free passthrough.
 ///
 /// The `->method` markers are dropped: they describe the mapping's internals,
-/// and the customer feedback's objection to a path reading `["->withError"]`
+/// and the customer feedback's objection to a path reading `["->withGraphQLError"]`
 /// applies just as well here.
 fn selection_path(error: &ApplyToError) -> String {
     error
@@ -437,7 +437,7 @@ fn selection_path(error: &ApplyToError) -> String {
         .join(".")
 }
 
-/// Turn an error the schema author declared with `->withError` into the
+/// Turn an error the schema author declared with `->withGraphQLError` into the
 /// client-facing report it was written to be.
 ///
 /// The result is a [`RuntimeError`] because that is the type the connectors
@@ -459,7 +459,7 @@ fn selection_path(error: &ApplyToError) -> String {
 ///
 /// This deliberately does not use `ApplyToError::path`, which records where the
 /// mapping was *reading* in the API's JSON. The two diverge under any rename:
-/// `balance: amount->withError(...)` reads `amount` and writes `balance`, and
+/// `balance: amount->withGraphQLError(...)` reads `amount` and writes `balance`, and
 /// `acct: { bal: amount->... }` reads `amount` and writes `acct.bal`. The read
 /// path is still useful for debugging a mapping, so it is preserved under
 /// `extensions.connector.selectionPath`.
@@ -535,9 +535,10 @@ pub(super) fn map_response(
     // are the language's, addressed to the author. The split decides what
     // *additionally* travels to the client — it does not decide what reaches
     // the debugger, which is why `warnings` below still receives both kinds.
-    // `->withError` shipped as a debugger and telemetry feature, and mapping
-    // problems are what both of those read, so removing declared errors from
-    // them would be a regression dressed up as a feature.
+    // `->withError` is the debugger and telemetry feature, and mapping problems
+    // are what both of those read, so removing declared errors from them would
+    // be a regression dressed up as a feature: an author who declares a
+    // client-facing error still wants to see it while debugging.
     //
     // Selecting rather than partitioning, for the same reason: the errors are
     // needed twice, in two different shapes. Client-facing errors are built
@@ -548,9 +549,9 @@ pub(super) fn map_response(
     // availability is decided by `ArrowMethod::is_public`, and every method's
     // *behavior* is version-invariant — the rstest cases across V0_2..V0_5 in
     // the methods directory exist to assert exactly that. Gating this would
-    // make `->withError` mean two different things depending on a connector's
-    // `@link` URL, for a method that has never shipped and so has no earlier
-    // behavior to preserve. Writing `->withError` is itself the opt-in.
+    // make `->withGraphQLError` mean two different things depending on a
+    // connector's `@link` URL, for a method that has never shipped and so has
+    // no earlier behavior to preserve. Writing it is itself the opt-in.
     let declared = apply_to_errors
         .iter()
         .filter(|error| error.kind() == ApplyToErrorKind::Declared)
@@ -699,12 +700,12 @@ pub enum MappedResponse {
         data: Value,
         key: ResponseKey,
         problems: Vec<Problem>,
-        /// Errors the mapping author declared with `->withError`, to be
+        /// Errors the mapping author declared with `->withGraphQLError`, to be
         /// reported to the client alongside this data.
         ///
         /// Distinct from `problems`, which never leave the router: these are
         /// addressed to the client, and the field resolves normally in spite
-        /// of them — that combination is the whole point of `->withError`, and
+        /// of them — that combination is the whole point of `->withGraphQLError`, and
         /// is why they cannot ride along in the `Error` variant instead.
         ///
         /// They are deliberately *not* GraphQL errors. [The spec][spec] says a
@@ -721,7 +722,7 @@ pub enum MappedResponse {
 }
 
 impl MappedResponse {
-    /// Removes the errors the mapping author declared with `->withError`, so
+    /// Removes the errors the mapping author declared with `->withGraphQLError`, so
     /// the caller can report them out of band.
     ///
     /// They must leave before [`Self::add_to_data`] runs: that function builds
@@ -738,7 +739,7 @@ impl MappedResponse {
     /// array. How data is added depends on the `ResponseKey`: it's either a
     /// property directly on the map, or stored in the `_entities` array.
     ///
-    /// Errors declared with `->withError` are not added: they are not GraphQL
+    /// Errors declared with `->withGraphQLError` are not added: they are not GraphQL
     /// errors, and [`Self::take_declared_errors`] is how they are collected.
     pub fn add_to_data(
         self,
@@ -1285,7 +1286,7 @@ mod tests {
         }
     }
 
-    /// The whole point of `->withError`, asserted where it actually has to
+    /// The whole point of `->withGraphQLError`, asserted where it actually has to
     /// hold: the field resolves with its default *and* the error is reported,
     /// carrying the author's code and structured fields. Asserted through the
     /// pair of functions that build the client-facing response — the declared
@@ -1298,7 +1299,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
-            r#"balance: amount ?? $("<missing>")->withError({
+            r#"balance: amount ?? $("<missing>")->withGraphQLError({
                 message: "Field 'amount' was not found"
                 extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
             })"#,
@@ -1342,12 +1343,12 @@ mod tests {
         // The path names the GraphQL field the error is about, through the
         // mapping's *output* — `balance`, the field written, not `amount`, the
         // field read. This is the acceptance criterion the original feedback
-        // raised about a path reading `["->withError"]`.
+        // raised about a path reading `["->withGraphQLError"]`.
         assert_eq!(errors[0].path, "account/balance");
     }
 
     /// Surfacing a declared error to the client must not take it away from the
-    /// author. `->withError` shipped as a debugger and telemetry feature, and
+    /// author. `->withError` is the debugger and telemetry feature, and
     /// mapping problems are what both of those read, so a declared error has
     /// to appear in *both* places — the split decides what additionally
     /// reaches the client, not what stops reaching the debugger.
@@ -1356,7 +1357,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
-            r#"balance: amount ?? $("<missing>")->withError("Field 'amount' was not found")"#,
+            r#"balance: amount ?? $("<missing>")->withGraphQLError("Field 'amount' was not found")"#,
         );
 
         let mut mapped = map_response(
@@ -1392,32 +1393,32 @@ mod tests {
         let cases: &[(&str, Value, &str)] = &[
             // A plain rename.
             (
-                r#"balance: amount->withError("x")"#,
+                r#"balance: amount->withGraphQLError("x")"#,
                 json!({ "amount": 1 }),
                 "account/balance",
             ),
             // Nesting: the path is the full route through the output object,
             // which shares no segment with the input path (`amount`).
             (
-                r#"acct: { bal: amount->withError("x") }"#,
+                r#"acct: { bal: amount->withGraphQLError("x") }"#,
                 json!({ "amount": 1 }),
                 "account/acct/bal",
             ),
             // A deep read collapsing to a shallow write.
             (
-                r#"bal: a.b.c->withError("x")"#,
+                r#"bal: a.b.c->withGraphQLError("x")"#,
                 json!({ "a": { "b": { "c": 1 } } }),
                 "account/bal",
             ),
             // ->map is index-preserving, so the element is named.
             (
-                r#"rows: items->map(@.code->withError("x"))"#,
+                r#"rows: items->map(@.code->withGraphQLError("x"))"#,
                 json!({ "items": [{ "code": 1 }] }),
                 "account/rows/0",
             ),
             // Auto-mapping a subselection over an array, down to the field.
             (
-                r#"rows: items { c: code->withError("x") }"#,
+                r#"rows: items { c: code->withGraphQLError("x") }"#,
                 json!({ "items": [{ "code": 1 }] }),
                 "account/rows/0/c",
             ),
@@ -1446,7 +1447,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
-            r#"rows: items->filter(@.keep->withError("checking"))"#,
+            r#"rows: items->filter(@.keep->withGraphQLError("checking"))"#,
         );
 
         let mut mapped = map_response(
@@ -1496,7 +1497,7 @@ mod tests {
         assert_eq!(mapped.take_declared_errors().len(), 0);
     }
 
-    /// `->withError` behaves the same at every spec version, like every other
+    /// `->withGraphQLError` behaves the same at every spec version, like every other
     /// mapping method. Nothing about a method's behavior is version-dependent —
     /// the rstest cases spanning V0_2..V0_5 throughout the methods directory
     /// exist to assert that — so this is written the same way, to catch anyone
@@ -1511,7 +1512,7 @@ mod tests {
         let connector = make_connector(None, spec);
         let key = root_field_key_with_selection(
             "account",
-            r#"balance: amount ?? $("<missing>")->withError("Field 'amount' was not found")"#,
+            r#"balance: amount ?? $("<missing>")->withGraphQLError("Field 'amount' was not found")"#,
         );
 
         let mut mapped = map_response(
@@ -1535,18 +1536,17 @@ mod tests {
         );
     }
 
-    /// Every declared error is reported, however many there are. The feature
-    /// exists so an author can record every defect they find, so truncating
-    /// would quietly defeat the thing it was asked for — and nothing else in
-    /// the router truncates a response's errors either. Response size is an
-    /// operator policy, set upstream via the `http_max_response_size` connector
-    /// limit, not a constant hidden in the mapping layer.
+    /// The mapping layer itself imposes no cap: every declared error the
+    /// mapping produced is built here, one per element, and none is summarized
+    /// away. Bounding what a client receives is an operator policy applied
+    /// later, by `truncate_mapping_errors` reading
+    /// `limits.connector.max_mapping_errors`, and its default is no limit.
     #[test]
-    fn declared_errors_are_not_truncated() {
+    fn the_mapping_layer_does_not_truncate_declared_errors() {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "rows",
-            r#"$.rows->map(@.code->withError("bad code:", @))"#,
+            r#"$.rows->map(@.code->withGraphQLError("bad code"))"#,
         );
 
         let row_count = 500;
@@ -1584,7 +1584,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "rows",
-            r#"$.rows->map(@.code->withError("bad code:", @))"#,
+            r#"$.rows->map(@.code->withGraphQLError("bad code"))"#,
         );
 
         let mut mapped = map_response(
@@ -1600,8 +1600,8 @@ mod tests {
         // Identical messages, still two errors — aggregation would have made
         // this one problem with a count of 2.
         assert_eq!(errors.len(), 2);
-        assert_eq!(errors[0].message, "bad code: 7");
-        assert_eq!(errors[1].message, "bad code: 7");
+        assert_eq!(errors[0].message, "bad code");
+        assert_eq!(errors[1].message, "bad code");
 
         // And each one still says which element it came from.
         let selection_paths = errors

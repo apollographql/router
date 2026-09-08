@@ -12,7 +12,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withError("Unrecognized code:", @)
+        status: code->withError("Unrecognized code")
         """
     )
 
@@ -22,7 +22,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code ?? $("<missing>")->withError({
+        status: code ?? $("<missing>")->withGraphQLError({
             message: "Field 'code' was not found"
             extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
         })
@@ -35,7 +35,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code ?? $("<missing>")->withError({
+        status: code ?? $("<missing>")->withGraphQLError({
             message: $config.verboseErrors->match([true, $.detail], [@, "An error occurred"])
             extensions: { code: "INTERNAL_SERVER_ERROR" }
         })
@@ -55,6 +55,28 @@ type Query {
         """
     )
 
+    # INVALID - caught at composition: the arity is exactly one, because the
+    # message is one value and a second argument has no meaning to fall back on.
+    tooManyArguments: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError("saw:", @)
+        """
+    )
+
+    graphQLErrorFromAString: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withGraphQLError("Field 'code' was not found")
+        """
+    )
+
     # NOT caught, and correctly so: the API response has no declared shape, so
     # a path into it cannot be checked statically.
     unknownFieldInArgument: T
@@ -63,7 +85,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withError("saw:", @.nonexistent)
+        status: code->withError(@.nonexistent)
         """
     )
 }
