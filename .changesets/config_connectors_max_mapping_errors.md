@@ -1,6 +1,6 @@
 ### Add `limits.connector.max_mapping_errors` to bound connector mapping errors
 
-Connector response mappings can report errors in the response's `extensions.connectorErrors` with the [`->withError` mapping method](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling). A `->withError` inside a `->map` records one error per element, so a mapping over a large API response can contribute one error per row.
+Connector response mappings can report errors in the response's `extensions.connectorErrors` with the [`->withGraphQLError` mapping method](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling). A `->withGraphQLError` inside a `->map` records one error per element, so a mapping over a large API response can contribute one error per row.
 
 A new limit caps how many such errors one connector response may contribute, alongside the existing `http_max_response_size`:
 
@@ -30,6 +30,6 @@ Truncation is also reported as telemetry. The router increments the `apollo.rout
 
 Declared errors are observable whether or not a limit truncates them. Every error a mapping declares with `->withError` is counted by `apollo.router.operations.error`, alongside the usual operation and client attributes and an `apollo.router.error.service` attribute naming the connector's subgraph. That is the counter to watch for the volume a connector is producing; `apollo.router.limits.connector_mapping_errors.exceeded` fires only once a response has already been truncated.
 
-The default is no limit: every declared error is reported, matching how the router passes through subgraph errors. The limit applies only to errors a mapping declares with `->withError`; mapping *problems* — the mapping language's own diagnostics — are never sent to clients and are unaffected.
+The default is no limit: every declared error is reported, matching how the router passes through subgraph errors. The limit applies only to errors a mapping declares with `->withGraphQLError`. Diagnostics recorded with `->withError`, and the mapping language's own problems, are never sent to clients and are unaffected.
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160
