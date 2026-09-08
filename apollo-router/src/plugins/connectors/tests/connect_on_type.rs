@@ -660,3 +660,318 @@ async fn batch_with_max_size_over_batch_size() {
     ]);
     plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
+
+// --- $batch DEDUPLICATION ----------------------------------------------------
+//
+// The router dedupes entity representations by value when it builds the
+// `representations` variable for a fetch (see `Variables::new` in
+// `query_planner/fetch.rs`). Connectors receive that already-deduped list as
+// `$batch` and do no further dedup of their own. The tests below pin that
+// contract down from the outside: what reaches the wire, and how the single
+// returned entity is fanned back out to every position that referenced it.
+
+/// The same entity referenced from several positions in the parent data
+/// appears exactly once in `$batch`, and the one returned object is copied
+/// back into every referencing position.
+#[tokio::test]
+async fn batch_dedupes_repeated_representations() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 3 },
+            { "id": 1 },
+            { "id": 3 },
+            { "id": 2 },
+            { "id": 1 },
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/users-batch"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "name": "Leanne Graham", "username": "Bret" },
+            { "id": 2, "name": "Ervin Howell", "username": "Antonette" },
+            { "id": 3, "name": "Clementine Bauch", "username": "Samantha" },
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/batch.graphql"),
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          }
+        ]
+      }
+    }
+    "#);
+
+    super::req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/users"),
+            // Five references, three distinct ids, in order of first appearance.
+            Matcher::new()
+                .method("POST")
+                .path("/users-batch")
+                .body(json!({ "ids": [3, 1, 2] })),
+        ],
+    );
+}
+
+/// Dedup happens before `batch.maxSize` chunking, so chunk boundaries are
+/// computed over distinct keys and a key never appears in two chunks of the
+/// same fetch.
+#[tokio::test]
+async fn batch_dedupes_before_max_size_chunking() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 3 },
+            { "id": 1 },
+            { "id": 3 },
+            { "id": 2 },
+            { "id": 1 },
+            { "id": 4 },
+            { "id": 5 },
+            { "id": 4 },
+            { "id": 6 },
+            { "id": 7 },
+            { "id": 6 },
+            { "id": 3 },
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/users-batch"))
+        .and(body_json(json!({ "ids": [3, 1, 2, 4, 5] })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "name": "Leanne Graham", "username": "Bret" },
+            { "id": 2, "name": "Ervin Howell", "username": "Antonette" },
+            { "id": 3, "name": "Clementine Bauch", "username": "Samantha" },
+            { "id": 4, "name": "John Doe", "username": "jdoe" },
+            { "id": 5, "name": "John Wick", "username": "jwick" },
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/users-batch"))
+        .and(body_json(json!({ "ids": [6, 7] })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 6, "name": "Jack Reacher", "username": "reacher" },
+            { "id": 7, "name": "James Bond", "username": "jbond" },
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/batch-max-size.graphql"),
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 4,
+            "name": "John Doe",
+            "username": "jdoe"
+          },
+          {
+            "id": 5,
+            "name": "John Wick",
+            "username": "jwick"
+          },
+          {
+            "id": 4,
+            "name": "John Doe",
+            "username": "jdoe"
+          },
+          {
+            "id": 6,
+            "name": "Jack Reacher",
+            "username": "reacher"
+          },
+          {
+            "id": 7,
+            "name": "James Bond",
+            "username": "jbond"
+          },
+          {
+            "id": 6,
+            "name": "Jack Reacher",
+            "username": "reacher"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          }
+        ]
+      }
+    }
+    "#);
+
+    // Twelve references collapse to seven distinct ids, which `maxSize: 5`
+    // splits into a chunk of five and a chunk of two. The two POSTs are
+    // independent, so assert them order-free.
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
+            Matcher::new()
+                .method("POST")
+                .path("/users-batch")
+                .body(json!({ "ids": [3, 1, 2, 4, 5] })),
+            Matcher::new()
+                .method("POST")
+                .path("/users-batch")
+                .body(json!({ "ids": [6, 7] })),
+        ]),
+    ]);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
+}
+
+/// Dedup is by whole representation, not by any one scalar. With a compound
+/// key, two representations that share an `id` but differ in `region` are
+/// distinct entities, so `$batch.id` legitimately repeats and each entity is
+/// matched back by its full key.
+#[tokio::test]
+async fn batch_compound_key_keeps_representations_that_share_a_scalar() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "region": "A" },
+            { "id": 1, "region": "B" },
+            { "id": 1, "region": "A" },
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/users-batch"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            // Returned in the opposite order from the request, to show that
+            // matching is by key value rather than by position.
+            { "id": 1, "region": "B", "name": "Alice from B" },
+            { "id": 1, "region": "A", "name": "Alice from A" },
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/batch-compound-key.graphql"),
+        &mock_server.uri(),
+        "query { users { id region name } }",
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "region": "A",
+            "name": "Alice from A"
+          },
+          {
+            "id": 1,
+            "region": "B",
+            "name": "Alice from B"
+          },
+          {
+            "id": 1,
+            "region": "A",
+            "name": "Alice from A"
+          }
+        ]
+      }
+    }
+    "#);
+
+    super::req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/users"),
+            // Three references, two distinct (id, region) pairs. The `id`
+            // scalar repeats because the representations differ in `region`.
+            Matcher::new()
+                .method("POST")
+                .path("/users-batch")
+                .body(json!({ "ids": [1, 1], "regions": ["A", "B"] })),
+        ],
+    );
+}

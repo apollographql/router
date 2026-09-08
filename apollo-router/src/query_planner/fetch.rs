@@ -1361,4 +1361,59 @@ mod tests {
         assert_eq!(errors[1].path.as_ref().unwrap(), &Path(vec![key("users")]));
         assert_eq!(errors[2].path.as_ref().unwrap(), &Path(vec![key("users")]));
     }
+
+    /// Regression test for the representation dedup that connector `$batch`
+    /// (and plain `_entities` fetches) rely on: identical representations
+    /// collapse to one entry in `representations`, in order of first
+    /// appearance, and `inverted_paths` remembers every path that produced
+    /// each entry so the single returned entity can be fanned back out.
+    #[test]
+    fn variables_dedupe_identical_representations_and_track_all_paths() {
+        let schema = test_schema();
+        let request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+        let data = json!({
+            "t": [
+                { "__typename": "T", "id": "1", "extra": "ignored" },
+                { "__typename": "T", "id": "2" },
+                { "__typename": "T", "id": "1", "extra": "also ignored" },
+            ]
+        });
+        let current_dir = Path(vec![key("t"), flatten()]);
+
+        let variables = Variables::new(
+            &make_requires(),
+            &[],
+            &data,
+            &current_dir,
+            &request,
+            &schema,
+            &None,
+            &None,
+        )
+        .expect("at least one representation");
+
+        // Three entities in the parent data, two distinct keys. Fields outside
+        // the `requires` selection (`extra`) play no part in equality.
+        assert_eq!(
+            variables.variables.get("representations"),
+            Some(&json!([{ "id": "1" }, { "id": "2" }])),
+        );
+
+        // Representation 0 (`id: 1`) came from t/0 and t/2; representation 1
+        // (`id: 2`) came from t/1 alone.
+        assert_eq!(
+            variables.inverted_paths,
+            vec![
+                vec![
+                    Path(vec![key("t"), index(0)]),
+                    Path(vec![key("t"), index(2)]),
+                ],
+                vec![Path(vec![key("t"), index(1)])],
+            ],
+        );
+    }
 }
