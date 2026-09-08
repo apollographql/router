@@ -975,3 +975,91 @@ async fn batch_compound_key_keeps_representations_that_share_a_scalar() {
         ],
     );
 }
+
+/// Response alignment is by key value, never by position. The API may return
+/// the batch in any order, include objects that were not requested, and omit
+/// some that were. Each requested representation is matched to the returned
+/// object carrying the same key; representations with no match null out.
+#[tokio::test]
+async fn batch_response_matched_by_key_not_position() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 3 },
+            { "id": 1 },
+            { "id": 3 },
+            { "id": 2 },
+            { "id": 4 },
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/users-batch"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            // Shuffled relative to the request, with an object nobody asked
+            // for (99) and one that was asked for missing (4).
+            { "id": 2, "name": "Ervin Howell", "username": "Antonette" },
+            { "id": 99, "name": "Not Requested", "username": "extra" },
+            { "id": 3, "name": "Clementine Bauch", "username": "Samantha" },
+            { "id": 1, "name": "Leanne Graham", "username": "Bret" },
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/batch.graphql"),
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          },
+          {
+            "id": 4,
+            "name": null,
+            "username": null
+          }
+        ]
+      }
+    }
+    "#);
+
+    super::req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/users"),
+            Matcher::new()
+                .method("POST")
+                .path("/users-batch")
+                .body(json!({ "ids": [3, 1, 2, 4] })),
+        ],
+    );
+}
