@@ -820,6 +820,124 @@ mod tests {
         "#);
     }
 
+    /// Batch responses are aligned to representations by key value, never by
+    /// position. One response exercises all three ways the array can differ
+    /// from the request: reordered, an unrequested extra object, and a
+    /// requested object that is missing (which becomes Null).
+    #[tokio::test]
+    async fn test_handle_responses_batch_reordered_extra_and_missing() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
+            schema_subtypes_map: Default::default(),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Post,
+                body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data { id name }").unwrap(),
+            entity_resolver: Some(EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        });
+
+        let keys = connector
+            .resolvable_key(
+                &Schema::parse_and_validate("type Query { _: ID } type User { id: ID! }", "")
+                    .unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+
+        let response1: http::Response<RouterBody> = http::Response::builder()
+            // Requested [1, 2, 3]; returned 2 then 1, plus an unrequested 99,
+            // and no 3 at all.
+            .body(router::body::from_bytes(
+                r#"{"data":[{"id": "2","name":"B"},{"id": "99","name":"unrequested"},{"id": "1","name":"A"}]}"#,
+            ))
+            .unwrap();
+
+        let mut inputs: RequestInputs = RequestInputs::default();
+        let representations = serde_json_bytes::json!([
+            {"__typename": "User", "id": "1"},
+            {"__typename": "User", "id": "2"},
+            {"__typename": "User", "id": "3"},
+        ]);
+        inputs.batch = representations
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_object().unwrap().clone())
+            .collect_vec();
+
+        let response_key1 = ResponseKey::BatchEntity {
+            selection: Arc::new(JSONSelection::parse("$.data { id name }").unwrap()),
+            keys,
+            inputs,
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        assert_debug_snapshot!(res.response.body().data, @r#"
+        Some(
+            Object({
+                "_entities": Array([
+                    Object({
+                        "id": String(
+                            "1",
+                        ),
+                        "name": String(
+                            "A",
+                        ),
+                    }),
+                    Object({
+                        "id": String(
+                            "2",
+                        ),
+                        "name": String(
+                            "B",
+                        ),
+                    }),
+                    Null,
+                ]),
+            }),
+        )
+        "#);
+    }
+
     #[tokio::test]
     async fn test_handle_responses_entity_field() {
         let connector = Arc::new(Connector {
