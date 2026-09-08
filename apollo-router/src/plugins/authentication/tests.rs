@@ -48,6 +48,7 @@ use super::Header;
 use super::JWT_CONTEXT_KEY;
 use super::JWTConf;
 use super::JwtStatus;
+use super::OnError;
 use super::Source;
 use super::authenticate;
 use super::has_authenticated_jwt;
@@ -265,7 +266,9 @@ async fn it_rejects_when_there_is_no_auth_header() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_is_missing() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `RedactedError` is the default.
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "invalid")
@@ -294,7 +297,9 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `RedactedError` is the default.
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer")
@@ -323,7 +328,9 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `RedactedError` is the default.
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer header.payload")
@@ -351,7 +358,9 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `RedactedError` is the default.
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
@@ -380,7 +389,9 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `RedactedError` is the default.
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
@@ -599,7 +610,9 @@ async fn it_inserts_success_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, None).await;
+    // Explicit `Error`: this test asserts the detailed message on the response, which is
+    // only returned in that mode now that `RedactedError` is the default.
+    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
@@ -1041,6 +1054,9 @@ async fn issuer_check() {
         .unwrap();
 
     let mut config = JWTConf::default();
+    // Explicit `Error`: this test asserts the detailed issuer-mismatch message, which is
+    // only returned in that mode now that `RedactedError` is the default.
+    config.on_error = OnError::Error;
     config.sources.push(Source::Header {
         name: super::default_header_name(),
         value_prefix: super::default_header_value_prefix(),
@@ -1226,6 +1242,9 @@ async fn audience_check() {
         .unwrap();
 
     let mut config = JWTConf::default();
+    // Explicit `Error`: this test asserts the detailed audience-mismatch message, which is
+    // only returned in that mode now that `RedactedError` is the default.
+    config.on_error = OnError::Error;
     config.sources.push(Source::Header {
         name: super::default_header_name(),
         value_prefix: super::default_header_value_prefix(),
@@ -2741,9 +2760,10 @@ mod redacted_errors {
     }
 
     #[tokio::test]
-    async fn it_does_not_redact_by_default() {
-        // Redaction is opt-in: omitting `on_error` must keep today's detailed messages.
-        let (service_response, response) = send_with_authorization(None, UNDECODABLE_JWT).await;
+    async fn it_does_not_redact_when_on_error_is_error() {
+        // Explicitly setting `on_error: Error` must keep the detailed messages.
+        let (service_response, response) =
+            send_with_authorization(Some("Error"), UNDECODABLE_JWT).await;
 
         let expected_error = graphql::Error::builder()
             .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
@@ -2751,6 +2771,15 @@ mod redacted_errors {
             .build();
 
         crate::assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_redacts_by_default() {
+        // Redaction is the default: omitting `on_error` must redact the message.
+        let (service_response, response) = send_with_authorization(None, UNDECODABLE_JWT).await;
+
+        assert_redacted(&response, &["Base64", "offset", "Cannot decode JWT"]);
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
     }
 
