@@ -116,9 +116,7 @@ impl Plugin for CustomPlugin {
 
 // Register the plugin in the Router plugin registry.
 // Format: register_plugin!("group", "name", StructName);
-// TSH-23556 (Capital One): renamed from "rust.custom_plugin" so the config
-// key and any logs/metrics tied to it are identifiable as this ticket's repro.
-register_plugin!("capitalone", "tsh_23556_valuable_repro", CustomPlugin);
+register_plugin!("rust", "custom_plugin", CustomPlugin);
 
 #[cfg(test)]
 mod tests {
@@ -126,7 +124,7 @@ mod tests {
     async fn display_message() {
         let config = serde_json::json!({
             "plugins": {
-                "capitalone.tsh_23556_valuable_repro": {
+                "rust.custom_plugin": {
                     "name": "Bob"
                 }
             }
