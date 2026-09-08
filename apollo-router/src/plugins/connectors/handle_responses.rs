@@ -605,7 +605,7 @@ mod tests {
     /// `subgraph_name`.
     fn mapped_with_structured_declared_error() -> MappedResponse {
         let selection = JSONSelection::parse(
-            r#"balance: amount ?? $("<missing>")->withError({
+            r#"balance: amount ?? $("<missing>")->withGraphQLError({
                 message: "Field 'amount' was not found"
                 extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
             })"#,
@@ -808,7 +808,7 @@ mod tests {
     /// mapping with a `->withError` inside a `->map` would produce.
     fn mapped_with_declared_errors(count: usize) -> (MappedResponse, Connector) {
         let selection =
-            JSONSelection::parse(r#"$.rows->map(@.code->withError("bad code:", @))"#).unwrap();
+            JSONSelection::parse(r#"$.rows->map(@.code->withGraphQLError("bad code"))"#).unwrap();
         let response_key = ResponseKey::RootField {
             name: "rows".to_string(),
             inputs: Default::default(),
