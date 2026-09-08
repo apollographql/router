@@ -13,4 +13,4 @@ authentication:
       on_error: Error
 ```
 
-By [@zachfetters](https://github.com/zachfetters) in https://github.com/apollographql/router/pull/TODO
+By [@zachfetters](https://github.com/zachfetters) in https://github.com/apollographql/router/pull/10191
