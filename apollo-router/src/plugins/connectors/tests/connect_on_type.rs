@@ -1063,3 +1063,82 @@ async fn batch_response_matched_by_key_not_position() {
         ],
     );
 }
+
+/// The canonical statement of the dedup contract, in the shape the question
+/// is usually asked: given input keys `[1, 1, 1, 2]`, the outbound request
+/// asks for only the distinct keys (`?ids=1,2`), and results are fanned back
+/// out to every original position.
+#[tokio::test]
+async fn batch_query_params_request_only_distinct_keys() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1 },
+            { "id": 1 },
+            { "id": 1 },
+            { "id": 2 },
+        ])))
+        .mount(&mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user-details"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "name": "Leanne Graham", "username": "Bret" },
+            { "id": 2, "name": "Ervin Howell", "username": "Antonette" },
+        ])))
+        .mount(&mock_server)
+        .await;
+
+    let response = super::execute(
+        include_str!("../testdata/batch-query.graphql"),
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        Default::default(),
+        None,
+        |_| {},
+        None,
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          }
+        ]
+      }
+    }
+    "#);
+
+    super::req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new().method("GET").path("/users"),
+            // `?ids=1,2`, URL-encoded: four references, two distinct keys.
+            Matcher::new()
+                .method("GET")
+                .path("/user-details")
+                .query("ids=1%2C2"),
+        ],
+    );
+}
