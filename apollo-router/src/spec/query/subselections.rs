@@ -32,6 +32,10 @@ impl Serialize for SubSelectionKey {
     where
         S: serde::Serializer,
     {
+        debug_assert!(
+            !self.defer_path.iter().any(|segment| segment.contains('|')),
+            "defer_path segments must not contain the `|` separator"
+        );
         let s = format!(
             "{:?}|{}|{}",
             self.defer_conditions.bits,
@@ -57,7 +61,7 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter
-            .write_str("a string containing the defer label and defer conditions separated by |")
+            .write_str("a string containing the defer conditions, label and path separated by |")
     }
 
     fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
@@ -65,7 +69,10 @@ impl Visitor<'_> for SubSelectionKeyVisitor {
         E: serde::de::Error,
     {
         if let Some((bits_str, rest)) = s.split_once('|') {
-            let (label, path) = rest.split_once('|').unwrap_or((rest, ""));
+            // Split from the right: `@defer(label:)` is an arbitrary string and may contain `|`,
+            // while path segments are response keys, which cannot. (The fallback parses the
+            // pre-`defer_path` two-field format, where the whole remainder is the label.)
+            let (label, path) = rest.rsplit_once('|').unwrap_or((rest, ""));
             Ok(SubSelectionKey {
                 defer_conditions: BooleanValues {
                     bits: bits_str
@@ -392,4 +399,44 @@ fn collect_from_selection_set<'a>(
         }
     }
     Ok(primary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BooleanValues;
+    use super::SubSelectionKey;
+
+    #[track_caller]
+    fn assert_round_trips(key: SubSelectionKey) {
+        let serialized = serde_json::to_string(&key).unwrap();
+        let deserialized: SubSelectionKey = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, key, "did not round trip through {serialized}");
+    }
+
+    /// `SubSelectionKey` is serialized as a JSON object key when a `Query` goes through the
+    /// distributed query plan cache, so it must round trip: a key that comes back different is a
+    /// lookup miss, and a missed deferred subselection silently yields an empty incremental
+    /// payload. `@defer(label:)` is an arbitrary string and may contain any number of the `|`
+    /// field separator; path segments are response keys, which cannot.
+    #[test]
+    fn sub_selection_key_round_trips() {
+        let cases = [
+            (None, &[][..]),
+            (Some("_UserFrag"), &["currentUser"][..]),
+            (Some("0"), &["currentUser", "activeOrganization"][..]),
+            (Some("_a|b"), &[][..]),
+            (Some("_a|b"), &["a", "b"][..]),
+            (Some("_a|b|c"), &["a", "b"][..]),
+            (Some("_a|"), &["a"][..]),
+        ];
+        for (defer_label, defer_path) in cases {
+            for bits in [0, 5] {
+                assert_round_trips(SubSelectionKey {
+                    defer_label: defer_label.map(str::to_owned),
+                    defer_conditions: BooleanValues { bits },
+                    defer_path: defer_path.iter().map(|s| (*s).to_owned()).collect(),
+                });
+            }
+        }
+    }
 }

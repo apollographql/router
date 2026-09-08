@@ -4,4 +4,19 @@ The duplicate `@defer(label:)` check from the [GHSA-gr6h-4wpf-xp52](https://gith
 
 Label uniqueness is now validated on the document, before fragment expansion, still rejecting the operations behind the original security advisory. Operations that reuse a labeled `@defer` via fragment spreads plan and execute correctly: one incremental response per spread position, each carrying the user-provided label and distinguished by its `path`.
 
+Example query that was rejected but now is correctly processed
+
+```graphql
+{
+    currentUser { ...UserFragment }
+    otherUser { ...UserFragment }
+}
+fragment UserFragment on User {
+    id
+    ... @defer(label: "UserFragmentLabel") {
+        name
+    }
+}
+```
+
 By [@tninesling](https://github.com/tninesling)
