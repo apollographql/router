@@ -138,7 +138,9 @@ impl Service<SupergraphRequest> for SupergraphService {
             // client-actionable error is already returned as an `Ok` response upstream in
             // `service_call`. Log the detail for operators, but do not put it in the response
             // as it could leak internal information (e.g. query planner internals) to the
-            // caller. This mirrors `internal_server_error` in the axum factory.
+            // caller. This mirrors `internal_server_error` in the axum factory, but we don't
+            // just return Err to trigger that because it would skip plugins/coprocessors
+            // (including telemetry), and that would break backwards compatibility.
             tracing::error!(code = "INTERNAL_SERVER_ERROR", err = %error);
             let errors = vec![
                 crate::error::Error::builder()
