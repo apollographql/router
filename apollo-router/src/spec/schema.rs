@@ -165,9 +165,10 @@ impl Schema {
             }
         }
 
-        f64_histogram!(
+        f64_histogram_with_unit!(
             "apollo.router.schema.load.duration",
             "Time spent loading the supergraph schema, in seconds.",
+            "s",
             start.elapsed().as_secs_f64()
         );
 

@@ -128,9 +128,13 @@ some of which has been copied here for reference:
 * Instruments should use non-prefixed units (i.e. `By` instead of `MiBy`) unless there is good
   technical reason to not do so.
 
-We have not yet modified the existing metrics because some metric exporters (notably
-Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
-change for customers. Ideally this will be accomplished in router 3.
+Migrating an existing metric to the `_with_unit!` macros is a customer-breaking change for any
+metric whose unit triggers a Prometheus suffix (e.g. `s` → `_seconds`, `By` → `_bytes`), since the
+exported Prometheus name changes. Router 3.x migrated a batch of duration and byte-count metrics
+this way as part of ROUTER-1777; see the router 3.x upgrade guide for the full list of renamed
+Prometheus names. Call out any such rename in a `breaking_` changeset and the upgrade guide.
+Annotation units (`{request}`, `{event}`, …) do **not** trigger a Prometheus suffix, so metrics
+whose natural unit is an annotation can migrate to `_with_unit!` without a breaking rename.
 
 Examples of Prometheus metric renaming; note that annotations are not appended to the metric names:
 

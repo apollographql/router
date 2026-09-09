@@ -54,9 +54,10 @@ impl Drop for MultipartRequestState {
         );
 
         for file_size in &self.file_sizes {
-            u64_histogram!(
+            u64_histogram_with_unit!(
                 "apollo.router.operations.file_uploads.file_size",
                 "file upload sizes",
+                "By",
                 (*file_size) as u64
             );
         }
