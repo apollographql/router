@@ -8,6 +8,7 @@ A new limit caps how many such errors one connector response may contribute, alo
 limits:
   connector:
     all:
+      http_max_response_size: 2000000 # the existing limit, for comparison
       max_mapping_errors: 100 # at most 100 mapping errors per connector response
     sources:
       my_subgraph.my_api:
