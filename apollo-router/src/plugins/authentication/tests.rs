@@ -268,7 +268,8 @@ async fn it_rejects_when_there_is_no_auth_header() {
 async fn it_rejects_when_auth_prefix_is_missing() {
     // Explicit `Error`: this test asserts the detailed message, which is only returned in
     // that mode now that `RedactedError` is the default.
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "invalid")
@@ -299,7 +300,8 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
     // Explicit `Error`: this test asserts the detailed message, which is only returned in
     // that mode now that `RedactedError` is the default.
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer")
@@ -330,7 +332,8 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
 async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
     // Explicit `Error`: this test asserts the detailed message, which is only returned in
     // that mode now that `RedactedError` is the default.
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer header.payload")
@@ -360,7 +363,8 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     // Explicit `Error`: this test asserts the detailed message, which is only returned in
     // that mode now that `RedactedError` is the default.
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
@@ -391,7 +395,8 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
     // Explicit `Error`: this test asserts the detailed message, which is only returned in
     // that mode now that `RedactedError` is the default.
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
@@ -612,7 +617,8 @@ async fn it_inserts_success_jwt_status_into_context() {
 async fn it_inserts_failure_jwt_status_into_context() {
     // Explicit `Error`: this test asserts the detailed message on the response, which is
     // only returned in that mode now that `RedactedError` is the default.
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, Some("Error")).await;
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("Error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
@@ -1053,10 +1059,12 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    let mut config = JWTConf::default();
     // Explicit `Error`: this test asserts the detailed issuer-mismatch message, which is
     // only returned in that mode now that `RedactedError` is the default.
-    config.on_error = OnError::Error;
+    let mut config = JWTConf {
+        on_error: OnError::Error,
+        ..JWTConf::default()
+    };
     config.sources.push(Source::Header {
         name: super::default_header_name(),
         value_prefix: super::default_header_value_prefix(),
@@ -1241,10 +1249,12 @@ async fn audience_check() {
         .build()
         .unwrap();
 
-    let mut config = JWTConf::default();
     // Explicit `Error`: this test asserts the detailed audience-mismatch message, which is
     // only returned in that mode now that `RedactedError` is the default.
-    config.on_error = OnError::Error;
+    let mut config = JWTConf {
+        on_error: OnError::Error,
+        ..JWTConf::default()
+    };
     config.sources.push(Source::Header {
         name: super::default_header_name(),
         value_prefix: super::default_header_value_prefix(),
