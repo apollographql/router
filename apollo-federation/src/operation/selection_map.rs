@@ -318,9 +318,17 @@ impl SelectionMap {
         }
     }
 
+    /// Insert a selection into the map. If a selection with an equal key is already present, it
+    /// is overwritten in place (keeping its original position); otherwise the new selection is
+    /// appended.
     pub(crate) fn insert(&mut self, value: Selection) {
-        let hash = self.hash_key(value.key());
-        self.raw_insert(hash, value);
+        let key = value.key();
+        let hash = self.hash_key(key);
+        if let Some(bucket) = self.table.find_mut(hash, key_eq(&self.selections, key)) {
+            self.selections[bucket.index] = value;
+        } else {
+            self.raw_insert(hash, value);
+        }
     }
 
     /// Remove a selection from the map. Returns the selection and its numeric index.
@@ -617,5 +625,228 @@ impl<'a> VacantEntry<'a> {
             )));
         };
         Ok(SelectionValue::new(self.map.raw_insert(self.hash, value)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::operation::tests::parse_operation;
+    use crate::operation::tests::parse_schema;
+
+    const SCHEMA: &str = r#"
+        type Query {
+            a: T
+            b: T
+            c: T
+        }
+
+        type T {
+            x: Int
+            y: Int
+        }
+    "#;
+
+    fn selection_from_source(
+        schema: &crate::schema::ValidFederationSchema,
+        source: &str,
+    ) -> Selection {
+        let query = format!("{{ {source} }}");
+        let operation = parse_operation(schema, &query);
+        operation
+            .selection_set
+            .selections
+            .values()
+            .next()
+            .expect("selection source must produce exactly one top-level selection")
+            .clone()
+    }
+
+    /// Minimized regression for the bug found by `selection_map_matches_last_write_wins_model`:
+    /// inserting a selection under a key that's already present used to append a second entry
+    /// instead of overwriting the first, in violation of the documented last-write-wins contract.
+    #[test]
+    fn insert_overwrites_equal_key_without_changing_position() {
+        let schema = parse_schema(SCHEMA);
+        let mut map = SelectionMap::new();
+
+        map.insert(selection_from_source(&schema, "a { x }"));
+        map.insert(selection_from_source(&schema, "b { x }"));
+        map.insert(selection_from_source(&schema, "b { y }"));
+
+        assert_eq!(
+            map.len(),
+            2,
+            "the second `b` insertion should overwrite the first"
+        );
+        let values: Vec<&Selection> = map.values().collect();
+        assert_eq!(values[0], &selection_from_source(&schema, "a { x }"));
+        assert_eq!(
+            values[1],
+            &selection_from_source(&schema, "b { y }"),
+            "the surviving `b` entry should hold the last-written value, in its original position"
+        );
+    }
+
+    /// A slow, obviously-correct model of `SelectionMap`'s documented last-write-wins overwrite
+    /// semantics: a key that already exists keeps its position but gets the new value.
+    fn model_insert(model: &mut Vec<(OwnedSelectionKey, Selection)>, value: Selection) {
+        let key = value.key().to_owned_key();
+        if let Some(existing) = model.iter_mut().find(|(k, _)| *k == key) {
+            existing.1 = value;
+        } else {
+            model.push((key, value));
+        }
+    }
+
+    fn response_name() -> impl Strategy<Value = &'static str> {
+        prop_oneof![Just("a"), Just("b"), Just("c")]
+    }
+
+    fn key_name() -> impl Strategy<Value = &'static str> {
+        prop_oneof![Just("a"), Just("b"), Just("c"), Just("z")]
+    }
+
+    fn sub_selection() -> impl Strategy<Value = &'static str> {
+        prop_oneof![Just("x"), Just("y"), Just("x y")]
+    }
+
+    fn selection_source() -> impl Strategy<Value = String> {
+        (response_name(), sub_selection()).prop_map(|(name, sub)| format!("{name} {{ {sub} }}"))
+    }
+
+    #[derive(Debug, Clone)]
+    enum Command {
+        Insert(String),
+        Get(String),
+        Remove(String),
+        Retain(Vec<String>),
+        Extend(Vec<String>),
+    }
+
+    fn command() -> impl Strategy<Value = Command> {
+        prop_oneof![
+            3 => selection_source().prop_map(Command::Insert),
+            2 => key_name().prop_map(|n| Command::Get(n.to_string())),
+            2 => key_name().prop_map(|n| Command::Remove(n.to_string())),
+            1 => prop::collection::vec(key_name(), 0..3)
+                .prop_map(|names| Command::Retain(names.into_iter().map(String::from).collect())),
+            2 => prop::collection::vec(selection_source(), 0..3).prop_map(Command::Extend),
+        ]
+    }
+
+    /// Compares production state against the model: length, iteration order and content,
+    /// structural (order-independent) equality against a freshly reconstructed map, and
+    /// lookups for every name in the small generated key universe.
+    fn assert_map_matches_model(map: &SelectionMap, model: &[(OwnedSelectionKey, Selection)]) {
+        let actual: Vec<&Selection> = map.values().collect();
+        let expected: Vec<&Selection> = model.iter().map(|(_, value)| value).collect();
+        assert_eq!(actual, expected, "iteration order/content mismatch");
+        assert_eq!(map.len(), model.len());
+        assert_eq!(map.is_empty(), model.is_empty());
+
+        let rebuilt: SelectionMap = model.iter().map(|(_, value)| value.clone()).collect();
+        assert_eq!(
+            map, &rebuilt,
+            "map should equal a freshly reconstructed map"
+        );
+
+        for name in ["a", "b", "c", "z"] {
+            let name = Name::new(name).unwrap();
+            let key = SelectionKey::field_name(&name);
+            let owned_key = key.to_owned_key();
+            let expected = model
+                .iter()
+                .find(|(k, _)| *k == owned_key)
+                .map(|(_, value)| value);
+            assert_eq!(map.get(key), expected, "lookup mismatch for {name}");
+            assert_eq!(map.contains_key(key), expected.is_some());
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn selection_map_matches_last_write_wins_model(commands in prop::collection::vec(command(), 0..40)) {
+            let schema = parse_schema(SCHEMA);
+            let mut map = SelectionMap::new();
+            let mut model: Vec<(OwnedSelectionKey, Selection)> = Vec::new();
+
+            for command in commands {
+                match command {
+                    Command::Insert(source) => {
+                        let selection = selection_from_source(&schema, &source);
+                        map.insert(selection.clone());
+                        model_insert(&mut model, selection);
+                    }
+                    Command::Get(name) => {
+                        let name = Name::new(&name).unwrap();
+                        let key = SelectionKey::field_name(&name);
+                        let owned_key = key.to_owned_key();
+                        let expected = model
+                            .iter()
+                            .find(|(k, _)| *k == owned_key)
+                            .map(|(_, value)| value.clone());
+                        prop_assert_eq!(map.get(key).cloned(), expected);
+                    }
+                    Command::Remove(name) => {
+                        let name = Name::new(&name).unwrap();
+                        let key = SelectionKey::field_name(&name);
+                        let owned_key = key.to_owned_key();
+                        let model_index = model.iter().position(|(k, _)| *k == owned_key);
+                        let removed = map.remove(key);
+                        match (removed, model_index) {
+                            (Some((index, selection)), Some(model_index)) => {
+                                prop_assert_eq!(index, model_index);
+                                let (_, model_selection) = model.remove(model_index);
+                                prop_assert_eq!(selection, model_selection);
+                            }
+                            (None, None) => {}
+                            (actual, expected_index) => {
+                                prop_assert!(
+                                    false,
+                                    "remove presence mismatch: actual={:?} expected_index={:?}",
+                                    actual,
+                                    expected_index
+                                );
+                            }
+                        }
+                    }
+                    Command::Retain(names) => {
+                        let keep: HashSet<String> = names.into_iter().collect();
+                        map.retain(|key, _| match key {
+                            SelectionKey::Field { response_name, .. } => {
+                                keep.contains(response_name.as_str())
+                            }
+                            _ => false,
+                        });
+                        model.retain(|(key, _)| match key {
+                            OwnedSelectionKey::Field { response_name, .. } => {
+                                keep.contains(response_name.as_str())
+                            }
+                            _ => false,
+                        });
+                    }
+                    Command::Extend(sources) => {
+                        let selections: Vec<Selection> = sources
+                            .iter()
+                            .map(|source| selection_from_source(&schema, source))
+                            .collect();
+                        let other: SelectionMap = selections.iter().cloned().collect();
+                        map.extend(other);
+                        for selection in selections {
+                            model_insert(&mut model, selection);
+                        }
+                    }
+                }
+
+                assert_map_matches_model(&map, &model);
+            }
+        }
     }
 }
