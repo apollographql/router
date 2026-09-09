@@ -918,8 +918,6 @@ mod test {
         /// otherwise.
         #[test]
         fn mapping_error_limit_is_unset_by_default() {
-            use crate::plugins::limits::ConnectorMappingErrorLimit;
-
             let config: Config = ConnectorConfiguration::<ConnectorLimits>::default().into();
             assert_eq!(config.connector_mapping_error_limit("products.rest"), None);
 
@@ -933,8 +931,6 @@ mod test {
                 config.connector_response_size_limit("products.rest"),
                 Some(ConnectorResponseSizeLimit(1024)),
             );
-
-            let _ = ConnectorMappingErrorLimit(0);
         }
 
         /// Same resolution order as the size limit: a per-source setting wins,
