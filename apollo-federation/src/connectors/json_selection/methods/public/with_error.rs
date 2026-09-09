@@ -122,8 +122,10 @@ fn with_error_method(
             None,
             vec![ApplyToError::new(
                 format!(
-                    "Method ->{} requires exactly one argument, got {}",
+                    "Method ->{}{} requires exactly one argument, the value to record \
+                     as the message, got {}",
                     method_name.as_ref(),
+                    printed_args(),
                     args.len(),
                 ),
                 input_path.to_vec(),
@@ -189,8 +191,12 @@ fn with_error_shape(
     let [arg] = args else {
         return Shape::error(
             format!(
-                "Method ->{} requires exactly one argument, got {}",
+                "Method ->{}{} requires exactly one argument, the value to record \
+                 as the message, got {}",
                 method_name.as_ref(),
+                method_args
+                    .map(|method_args| method_args.pretty_print_with_indentation(true, 0))
+                    .unwrap_or_default(),
                 args.len(),
             ),
             method_name.shape_location(context.source_id()),
@@ -217,10 +223,45 @@ mod tests {
     use serde_json_bytes::Value as JSON;
     use serde_json_bytes::json;
 
+    use crate::assert_snapshot;
     use crate::connectors::JSONSelection;
     use crate::connectors::json_selection::ApplyToError;
     use crate::connectors::json_selection::ApplyToErrorKind;
     use crate::selection;
+
+    /// Every way this method can be called wrongly, and the exact text an
+    /// author is told. The companion to the same snapshot in
+    /// `with_connector_error.rs`, and worth reading beside it: the two methods
+    /// deliberately differ in strictness, because a diagnostic is read only by
+    /// its author while a declared error reaches a client, and the difference
+    /// should be visible in what they say.
+    #[test]
+    fn every_with_error_diagnostic() {
+        let cases = [
+            ("no arguments", r#"$->withError"#),
+            ("two arguments", r#"$->withError("a", "b")"#),
+            (
+                "an argument that produces nothing",
+                r#"$->withError(@.nope)"#,
+            ),
+            (
+                "a non-string argument, which is serialized rather than refused",
+                r#"$->withError($(42))"#,
+            ),
+        ];
+
+        let mut report = String::new();
+        for (label, selection) in cases {
+            let (_, errors) = selection!(selection).apply_to(&json!({ "id": 1 }));
+            report.push_str(&format!("{label}\n  {selection}\n"));
+            for error in &errors {
+                report.push_str(&format!("    [{:?}] {}\n", error.kind(), error.message()));
+            }
+            report.push('\n');
+        }
+
+        assert_snapshot!(report);
+    }
 
     /// Apply `selection` to `data`, assert the value flowed through unchanged,
     /// and hand back the messages that were recorded.
@@ -466,7 +507,10 @@ mod tests {
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
-                    "message": "Method ->withError requires exactly one argument, got 0",
+                    "message": concat!(
+                        "Method ->withError requires exactly one argument, ",
+                        "the value to record as the message, got 0",
+                    ),
                     "path": ["->withError"],
                     "range": [3, 12],
                 }))],
@@ -483,7 +527,10 @@ mod tests {
         assert_eq!(value, None);
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
-            vec!["Method ->withError requires exactly one argument, got 2"],
+            vec![concat!(
+                r#"Method ->withError("a", "b") requires exactly one argument, "#,
+                "the value to record as the message, got 2",
+            )],
         );
     }
 

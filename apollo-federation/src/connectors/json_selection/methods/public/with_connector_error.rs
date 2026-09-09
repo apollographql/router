@@ -390,9 +390,62 @@ mod tests {
     use pretty_assertions::assert_eq;
     use serde_json_bytes::json;
 
+    use crate::assert_snapshot;
     use crate::connectors::json_selection::ApplyToError;
     use crate::connectors::json_selection::ApplyToErrorKind;
     use crate::selection;
+
+    /// Every way this method can be called wrongly, and the exact text an
+    /// author is told. Gathered in one snapshot because the value of these
+    /// messages is comparative: whether each one points at the real mistake is
+    /// a judgement you make by reading them together, and a diff here is the
+    /// only place a change in that quality shows up as a change.
+    #[test]
+    fn every_with_connector_error_diagnostic() {
+        let cases = [
+            ("no arguments", r#"$->withConnectorError"#),
+            ("two arguments", r#"$->withConnectorError("a", "b")"#),
+            ("a bare number", r#"$->withConnectorError($(42))"#),
+            ("a bare array", r#"$->withConnectorError($([1, 2]))"#),
+            ("an empty object", r#"$->withConnectorError({})"#),
+            (
+                "a misspelled `message`",
+                r#"$->withConnectorError({ messge: "typo" })"#,
+            ),
+            (
+                "several keys, none of them `message`",
+                r#"$->withConnectorError({ messge: "typo", code: "OOPS" })"#,
+            ),
+            (
+                "a non-string `message`",
+                r#"$->withConnectorError({ message: 42 })"#,
+            ),
+            (
+                "non-object `extensions`",
+                r#"$->withConnectorError({ message: "m", extensions: "nope" })"#,
+            ),
+            (
+                "an author field outside `extensions`",
+                r#"$->withConnectorError({ message: "m", code: "OOPS" })"#,
+            ),
+            (
+                "an argument that produces nothing",
+                r#"$->withConnectorError(@.nope)"#,
+            ),
+        ];
+
+        let mut report = String::new();
+        for (label, selection) in cases {
+            let (_, errors) = selection!(selection).apply_to(&json!({ "id": 1 }));
+            report.push_str(&format!("{label}\n  {selection}\n"));
+            for error in &errors {
+                report.push_str(&format!("    [{:?}] {}\n", error.kind(), error.message()));
+            }
+            report.push('\n');
+        }
+
+        assert_snapshot!(report);
+    }
 
     /// The short spelling: a string is the message, and the result is declared,
     /// meaning an author asked for it rather than the language reporting on

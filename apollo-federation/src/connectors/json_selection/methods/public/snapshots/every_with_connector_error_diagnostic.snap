@@ -1,0 +1,49 @@
+---
+source: apollo-federation/src/connectors/json_selection/methods/public/with_connector_error.rs
+expression: report
+---
+no arguments
+  $->withConnectorError
+    [Diagnostic] Method ->withConnectorError requires exactly one argument, a string message or an object with a `message`, got 0
+
+two arguments
+  $->withConnectorError("a", "b")
+    [Diagnostic] Method ->withConnectorError("a", "b") requires exactly one argument, a string message or an object with a `message`, got 2
+
+a bare number
+  $->withConnectorError($(42))
+    [Diagnostic] Method ->withConnectorError($(42)) declared no error because its argument must be a string or an object with a `message`, got a number
+
+a bare array
+  $->withConnectorError($([1, 2]))
+    [Diagnostic] Method ->withConnectorError($([1, 2])) declared no error because its argument must be a string or an object with a `message`, got an array
+
+an empty object
+  $->withConnectorError({})
+    [Diagnostic] Method ->withConnectorError({}) declared no error because `message` must be a string, got nothing; this object is empty
+
+a misspelled `message`
+  $->withConnectorError({ messge: "typo" })
+    [Diagnostic] Method ->withConnectorError( { messge: "typo" } ) declared no error because `message` must be a string, got nothing; this object has `messge`
+
+several keys, none of them `message`
+  $->withConnectorError({ messge: "typo", code: "OOPS" })
+    [Diagnostic] Method ->withConnectorError( { messge: "typo", code: "OOPS" } ) declared no error because `message` must be a string, got nothing; this object has `messge`, `code`
+
+a non-string `message`
+  $->withConnectorError({ message: 42 })
+    [Diagnostic] Method ->withConnectorError( { message: 42 } ) declared no error because `message` must be a string, got a number
+
+non-object `extensions`
+  $->withConnectorError({ message: "m", extensions: "nope" })
+    [Diagnostic] Method ->withConnectorError( { message: "m", extensions: "nope" } ) declared no error because `extensions` must be an object, got a string
+
+an author field outside `extensions`
+  $->withConnectorError({ message: "m", code: "OOPS" })
+    [Diagnostic] Method ->withConnectorError( { message: "m", code: "OOPS" } ) ignored unknown field `code`; a connector error carries only `message` and `extensions`, so an author-supplied field belongs inside `extensions`, as in `extensions: { code: ... }`
+    [Declared] m
+
+an argument that produces nothing
+  $->withConnectorError(@.nope)
+    [Diagnostic] Property .nope not found in object
+    [Diagnostic] Method ->withConnectorError(@.nope) declared no error because argument @.nope produced no value
