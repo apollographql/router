@@ -38,7 +38,7 @@ By [@tninesling](https://github.com/tninesling) in <https://github.com/apollogra
 
 ## 🐛 Fixes
 
-### Fix connector composition validation for `->toString`, `->get`, `->contains`, and `->in` with concrete array and object shapes ([PR #10118](https://github.com/apollographql/router/pull/10118))
+### Fix connector composition validation for `->toString`, `->get`, `->contains`, and `->in` with concrete array and object shapes ([PR #9947](https://github.com/apollographql/router/pull/9947))
 
 The shape checks used by several connector selection methods to identify arrays
 and objects were broken: they tested whether a closed empty container *accepted*
@@ -62,7 +62,7 @@ updated display formatting: `List<T>` now appears as `[...T]`, `Dict<T>` as
 `{...T}`, and error shapes as `<type> (err "message")` rather than
 `Error<"message">`.
 
-By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10118>
+By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9947>
 
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
 
