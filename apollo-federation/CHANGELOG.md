@@ -38,32 +38,6 @@ By [@tninesling](https://github.com/tninesling) in <https://github.com/apollogra
 
 ## 🐛 Fixes
 
-### Fix connector composition validation for `->toString`, `->get`, `->contains`, and `->in` with concrete array and object shapes ([PR #9947](https://github.com/apollographql/router/pull/9947))
-
-The shape checks used by several connector selection methods to identify arrays
-and objects were broken: they tested whether a closed empty container *accepted*
-the input, which was always false for non-empty containers. As a result:
-
-- `->toString` silently skipped its "cannot convert arrays or objects" guard for
-  any non-trivially-shaped object or array. Schemas that compose a
-  `someObject->toString` selection will now correctly receive a composition error
-  directing the user toward `->jsonStringify` or `->joinNotNull`.
-- `->get` fell through to the unknown/error branch for non-empty objects and
-  arrays, producing less precise shape information than intended.
-- `->contains` and `->in` did not recognize non-empty arrays as arrays, falling
-  through to an incorrect error path.
-
-All four methods now use the shape crate's `is_object()` / `is_array()` helpers,
-which correctly identify any object or array regardless of its fields or
-elements.
-
-Additionally, composition error diagnostics that reference shape types have
-updated display formatting: `List<T>` now appears as `[...T]`, `Dict<T>` as
-`{...T}`, and error shapes as `<type> (err "message")` rather than
-`Error<"message">`.
-
-By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9947>
-
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
 
 Connectors validation rejected `->match` results assigned to union- or
@@ -132,6 +106,19 @@ subgraph bullets that would have appeared without dedup. The set of schemas that
 pass or fail validation is unchanged.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
+
+## 🛠 Maintenance
+
+### Composition errors print shape types in the newer `shape` notation ([PR #9947](https://github.com/apollographql/router/pull/9947))
+
+Composition error messages that quote a shape now use the notation introduced by
+`shape` 0.8: `List<T>` prints as `[...T]`, `Dict<T>` as `{...T}`, and a shape
+carrying an error as `<type> (err "message")` rather than `Error<"message">`.
+
+No validation outcome changes. Anything matching on the previous strings, such as
+a test snapshot or a log query, needs updating.
+
+By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9947>
 
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
