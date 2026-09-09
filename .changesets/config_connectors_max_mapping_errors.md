@@ -17,7 +17,16 @@ limits:
 
 As with `http_max_response_size`, a per-source entry under `sources` takes precedence over `all`, and sources are identified by `subgraph_name.source_name`.
 
-Errors past the limit are replaced by a single summary error carrying the `CONNECTORS_TOO_MANY_ERRORS` code and stating how many were dropped, so a truncated list is visible in the response rather than silent. The router also increments the `apollo.router.limits.connector_mapping_errors.exceeded` counter, with a `connector.source` attribute identifying the affected source.
+Errors past the limit are replaced by a single summary error, so a truncated list is visible in the response rather than silent. With `max_mapping_errors: 100` and 250 declared errors, the last entry in `extensions.connectorErrors` is:
+
+```json
+{
+  "message": "150 more mapping errors were declared by this connector but not reported, out of 250 total, because the configured `limits.connector.max_mapping_errors` is 100",
+  "extensions": { "code": "CONNECTORS_TOO_MANY_ERRORS" }
+}
+```
+
+Truncation is also reported as telemetry. The router increments the `apollo.router.limits.connector_mapping_errors.exceeded` counter, with a `connector.source` attribute identifying the affected source.
 
 The default is no limit: every declared error is reported, matching how the router passes through subgraph errors. The limit applies only to errors a mapping declares with `->withError`; mapping *problems* — the mapping language's own diagnostics — are never sent to clients and are unaffected.
 
