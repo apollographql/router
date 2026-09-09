@@ -18,4 +18,18 @@ input_file: apollo-federation/src/connectors/validation/test_data/with_error.gra
             66:23..66:32,
         ],
     },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.scalarConnectorError` contains an invalid mapping for field `status`: Method ->withConnectorError($(42)) requires a string message or an object with a `message`, got an integer",
+        locations: [
+            99:42..99:47,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.misspelledMessageKey` contains an invalid mapping for field `status`: Method ->withConnectorError( { messge: \"typo\" } ) requires a string message or an object with a `message`, got an object with no `message`, only `messge`",
+        locations: [
+            111:42..111:60,
+        ],
+    },
 ]

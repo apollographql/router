@@ -88,6 +88,57 @@ type Query {
         status: code->withError(@.nonexistent)
         """
     )
+
+    # Caught: a literal number can never be a valid error argument.
+    scalarConnectorError: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withConnectorError($(42))
+        """
+    )
+
+    # Caught: a closed object literal with no `message`, which is the
+    # misspelled-key mistake as composition sees it.
+    misspelledMessageKey: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withConnectorError({ messge: "typo" })
+        """
+    )
+
+    # NOT caught, and a real limit rather than a correct one: the field shape
+    # of a `??` expression is a union, and the validator's per-field arm only
+    # matches a bare error shape, so a mistake inside the right-hand operand
+    # never surfaces here. That matters because `x ?? $(default)->withConnectorError(...)`
+    # is the idiomatic form. The runtime diagnostic is the backstop for it.
+    misspelledMessageKeyBehindCoalescing: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withConnectorError({ messge: "typo" })
+        """
+    )
+
+    # NOT caught, and correctly so: the argument comes from the API response,
+    # whose shape is unknown, so composition must not refuse it. The runtime
+    # check is what reports this one.
+    connectorErrorFromUnknownShape: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withConnectorError(whatever)
+        """
+    )
 }
 
 type T {

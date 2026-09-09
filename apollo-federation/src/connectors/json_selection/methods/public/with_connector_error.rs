@@ -308,7 +308,80 @@ fn with_connector_error_shape(
         return arg_shape;
     }
 
+    if let Some(got) = definitely_not_an_error(&arg_shape) {
+        return Shape::error(
+            format!(
+                "Method ->{}{} requires a string message or an object with a `message`, got {got}",
+                method_name.as_ref(),
+                method_args
+                    .map(|method_args| method_args.pretty_print_with_indentation(true, 0))
+                    .unwrap_or_default(),
+            ),
+            arg.shape_location(context.source_id()),
+        );
+    }
+
     input_shape
+}
+
+/// Describes an argument shape that cannot possibly be a valid error at
+/// runtime, or `None` when it might be.
+///
+/// Deliberately one-sided. Composition refusing a schema that would have worked
+/// is far worse than a mapping problem an author reads at request time, so
+/// anything not knowably wrong is left to the runtime check: `Unknown`, a
+/// `Name` reference, and unions all pass, which covers most shapes derived from
+/// `$response`. What this catches is the mistake someone makes while writing
+/// the mapping, where the argument is a literal or something equally definite.
+fn definitely_not_an_error(shape: &Shape) -> Option<String> {
+    match shape.case() {
+        ShapeCase::Bool(_) => Some("a boolean".to_string()),
+        ShapeCase::Int(_) => Some("an integer".to_string()),
+        ShapeCase::Float => Some("a number".to_string()),
+        ShapeCase::Null => Some("null".to_string()),
+        ShapeCase::Array { .. } => Some("an array".to_string()),
+
+        ShapeCase::Object { fields, rest } => {
+            // An open object may still gain a `message` at runtime, so only a
+            // closed one can be judged here.
+            if !matches!(rest.case(), ShapeCase::None) {
+                return None;
+            }
+            match fields.get("message") {
+                None => {
+                    let keys = fields
+                        .keys()
+                        .map(|key| format!("`{key}`"))
+                        .collect::<Vec<_>>();
+                    Some(match keys.len() {
+                        0 => "an empty object".to_string(),
+                        _ => format!("an object with no `message`, only {}", keys.join(", ")),
+                    })
+                }
+                Some(message) => match message.case() {
+                    ShapeCase::Bool(_) => {
+                        Some("an object whose `message` is a boolean".to_string())
+                    }
+                    ShapeCase::Int(_) => {
+                        Some("an object whose `message` is an integer".to_string())
+                    }
+                    ShapeCase::Float => Some("an object whose `message` is a number".to_string()),
+                    ShapeCase::Null => Some("an object whose `message` is null".to_string()),
+                    ShapeCase::Array { .. } => {
+                        Some("an object whose `message` is an array".to_string())
+                    }
+                    ShapeCase::Object { .. } => {
+                        Some("an object whose `message` is an object".to_string())
+                    }
+                    _ => None,
+                },
+            }
+        }
+
+        // String is valid. Unknown, Name, One, All, None and Error are all
+        // cases where the runtime value is not knowable here.
+        _ => None,
+    }
 }
 
 #[cfg(test)]
