@@ -127,6 +127,19 @@ type Query {
         """
     )
 
+    # NOT caught either, and this one predates the type check above: an arity
+    # error is the oldest validation this method has, and it is invisible behind
+    # `??` for the same reason. The gap is the validator's, not the check's.
+    arityErrorBehindCoalescing: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withError()
+        """
+    )
+
     # NOT caught, and correctly so: the argument comes from the API response,
     # whose shape is unknown, so composition must not refuse it. The runtime
     # check is what reports this one.
