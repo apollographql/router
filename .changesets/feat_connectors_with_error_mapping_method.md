@@ -16,7 +16,7 @@ Connector mappings can now report a problem without failing the field. `->withEr
 )
 ```
 
-Any number of arguments is allowed, and they may be of any type. String arguments are interpolated as written, every other value is serialized as `->jsonStringify` would serialize it, and the parts are joined with single spaces into one message. Use `??` to supply a fallback where a path may be missing, since an argument that produces no value short-circuits the method rather than recording a partial message.
+Any number of arguments is allowed, and they may be of any type. String arguments are interpolated as written, every other value is serialized as `->jsonStringify` would serialize it, and the parts are joined with single spaces into one message. Use `??` to supply a fallback where a path may be missing, since an argument that produces no value costs the message rather than contributing a placeholder to it. It costs only the message: the value the method was annotating flows through either way, so a diagnostic can never delete the field it describes.
 
 Errors declared this way are reported in the response's `extensions`, under a `connectorErrors` array, with the author's `code` and `extensions` and a `path` naming the field they were declared at. Given an API response of `{ "id": "1", "stock_code": "C" }` — a code matching no arm of the `->match` above — the client receives the value the API sent *and* the author's account of why it is suspect:
 

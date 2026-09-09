@@ -40,26 +40,41 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// @->withError("Unrecognized type code:", @.type_code, "in", @.id)
 /// ```
 ///
-/// If every argument produces a value, the input flows through unchanged, so
-/// the tail applies to it exactly as if the method were absent. If any argument
-/// produces no value the method produces none either, short-circuiting without
-/// recording the author's message, the way every other method in the language
-/// propagates an absent argument. Two errors are reported for each argument
-/// that fails: the one from evaluating it, saying why it produced nothing, and
-/// a distinct one from this method, saying that the message it was asked to
-/// record never happened. That second error carries the syntax of the call and
-/// of the argument that failed, so a discarded diagnostic can be traced back to
-/// the expression meant to produce it. Every argument is evaluated either way,
-/// so an author who broke more than one hears about all of them.
+/// The input flows through unchanged whatever the arguments do, so the tail
+/// applies to it exactly as if the method were absent. A failed argument costs
+/// the message and nothing else: this method exists to record something without
+/// interrupting the value, and a diagnostic that deletes the field it describes
+/// is the one outcome it must never produce. The value's fate depends only on
+/// the value.
 ///
-/// An author who wants the message reported even when a path may be missing
-/// says so with `??`, which supplies a value where there would have been none:
+/// Two errors are reported for each argument that fails: the one from
+/// evaluating it, saying why it produced nothing, and a distinct one from this
+/// method, saying that the message it was asked to record never happened. That
+/// second error carries the syntax of the call and of the argument that failed,
+/// so a discarded diagnostic can be traced back to the expression meant to
+/// produce it. Every argument is evaluated either way, so an author who broke
+/// more than one hears about all of them.
+///
+/// The input is a different matter, and the two traps are worth keeping apart.
+/// A method never runs on an absent input, so `@.missing->withError("...")`
+/// records nothing at all: there is no value for the tail to apply to, and the
+/// chain stops before this method is reached. Annotating something that may not
+/// be there means supplying a value first, which is what makes `??` the idiom
+/// for the case this method was built for:
+///
+/// ```text
+/// requiredField: $response.requiredField ?? $("<missing>")->withError("...")
+/// ```
+///
+/// An author who wants the message reported even when a path *inside the
+/// arguments* may be missing uses `??` too, for the different purpose of
+/// supplying a value where there would have been none:
 ///
 /// ```text
 /// @->withError("Unrecognized type code:", @.type_code ?? "<absent>")
 /// ```
 ///
-/// That spells the absence out in the message text instead of losing the whole
+/// That spells the absence out in the message text instead of losing the
 /// message to it.
 ///
 /// # The structured form
@@ -146,13 +161,12 @@ fn with_error_method(
         match value_opt {
             Some(value) => values.push(value),
 
-            // An absent argument makes the whole method absent, the way it
-            // does for every other method. arg_errors (already collected)
-            // say why the argument produced nothing, and the error added
-            // here says what that cost: the message the author asked for
-            // was never recorded. Without it, a mapping author reading the
-            // problems sees only a failed path and has no reason to connect
-            // it to their missing diagnostic.
+            // An absent argument costs the message and nothing else. The
+            // arg_errors already collected say why the argument produced
+            // nothing, and the error added here says what that cost: the
+            // message the author asked for was never recorded. Without it, a
+            // mapping author reading the problems sees only a failed path and
+            // has no reason to connect it to their missing diagnostic.
             None => {
                 can_record_message = false;
                 errors.push(ApplyToError::new(
@@ -171,7 +185,15 @@ fn with_error_method(
     }
 
     if !can_record_message {
-        return (None, errors);
+        // A failed argument costs the message, never the value. This method's
+        // whole premise is recording something without interrupting what flows
+        // through it, and returning None here interrupts it: the dispatcher
+        // skips the tail of the chain when a method produces nothing, so
+        // `balance: $.amount ?? $("<missing>")->withError("no amount in:", @.nope)`
+        // would lose the default it had just resolved. The value's fate depends
+        // only on the value; whether each argument evaluates is a fact about
+        // the diagnostic.
+        return (Some(data.clone()), errors);
     }
 
     let args_range = method_args.and_then(Ranged::range);
@@ -221,7 +243,8 @@ fn with_error_method(
                         arg.range(),
                         spec,
                     ));
-                    return (None, errors);
+                    // Costs the message, not the value. See above.
+                    return (Some(data.clone()), errors);
                 }
             },
         }
@@ -324,7 +347,8 @@ fn structured_error(
     }
 
     if malformed {
-        return (None, errors);
+        // Costs the message, not the value, exactly as a failed argument does.
+        return (Some(data.clone()), errors);
     }
 
     errors.push(ApplyToError::declared(
@@ -474,17 +498,16 @@ mod tests {
         );
     }
 
-    /// An absent argument makes the whole method absent, the way it does for
-    /// every other method, rather than contributing a placeholder to the
-    /// message. The author's message is not recorded, and both halves of why
-    /// are reported: the argument's own failure, and the fact that it cost the
-    /// message.
+    /// An absent argument costs the message and nothing else. It contributes no
+    /// placeholder, and both halves of why are reported: the argument's own
+    /// failure, and the fact that it cost the message. What it must not cost is
+    /// the value, which flows through as if the method were absent.
     #[test]
-    fn with_error_should_short_circuit_when_an_argument_produces_no_value() {
+    fn a_failed_argument_costs_the_message_and_not_the_value() {
         let (value, errors) =
             selection!(r#"$->withError("missing:", @.nope)"#).apply_to(&json!({ "id": 1 }));
 
-        assert_eq!(value, None);
+        assert_eq!(value, Some(json!({ "id": 1 })));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![
@@ -497,12 +520,36 @@ mod tests {
         );
     }
 
-    /// The escape hatch for the short-circuit above, and the reason it is not a
-    /// trap: `??` supplies a value for an argument that would otherwise produce
-    /// none, so an author who *wants* the message even when a path is missing
-    /// says so, and gets the absence spelled out in the text rather than losing
-    /// the whole message. `??` also swallows the failed path's own error, since
-    /// the fallback counts as a successful evaluation.
+    /// The shape this method exists for, and the one the poisoning damaged
+    /// worst: resolve a field with a default and say why. If a broken argument
+    /// to the diagnostic could delete the value, the default would be destroyed
+    /// by the very thing reporting on it, and the field would be absent instead
+    /// of present-and-explained.
+    #[test]
+    fn a_defaulted_field_survives_a_diagnostic_whose_argument_fails() {
+        let (value, errors) = selection!(
+            r#"balance: $.amount ?? $("<missing>")->withError("no amount for:", $.nope)"#
+        )
+        .apply_to(&json!({ "id": "acct-1" }));
+
+        assert_eq!(value, Some(json!({ "balance": "<missing>" })));
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![
+                "Property .nope not found in object",
+                concat!(
+                    r#"Method ->withError("no amount for:", $.nope) recorded no message "#,
+                    "because argument $.nope produced no value",
+                ),
+            ],
+        );
+    }
+
+    /// How an author keeps the message when a path inside the arguments may be
+    /// missing: `??` supplies a value for an argument that would otherwise
+    /// produce none, so the absence is spelled out in the text rather than
+    /// costing the message. `??` also swallows the failed path's own error,
+    /// since the fallback counts as a successful evaluation.
     #[test]
     fn with_error_should_accept_a_coalesced_argument_in_place_of_a_missing_one() {
         let (value, errors) = selection!(r#"$->withError("missing:", @.nope ?? "<absent>")"#)
@@ -543,7 +590,7 @@ mod tests {
         let (value, errors) = selection!(r#"$->withError("missing:", @.nope, "and", @.also_nope)"#)
             .apply_to(&json!({ "id": 1 }));
 
-        assert_eq!(value, None);
+        assert_eq!(value, Some(json!({ "id": 1 })));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![
@@ -745,13 +792,13 @@ mod tests {
 
     /// A structured error whose `message` is not a string is malformed, and a
     /// malformed declared error is discarded rather than handed to a client
-    /// half-formed — the same trade the method already makes for an argument
-    /// that produced no value.
+    /// half-formed. Discarded means the message, not the value: this is the
+    /// same trade the method makes for an argument that produced no value.
     #[test]
     fn with_error_should_reject_a_structured_error_whose_message_is_not_a_string() {
         let (value, errors) = selection!(r#"$->withError({ message: 42 })"#).apply_to(&json!("v"));
 
-        assert_eq!(value, None);
+        assert_eq!(value, Some(json!("v")));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![concat!(
@@ -773,7 +820,7 @@ mod tests {
         let (value, errors) =
             selection!(r#"$->withError({ message: "m", extensions: "nope" })"#).apply_to(&json!(1));
 
-        assert_eq!(value, None);
+        assert_eq!(value, Some(json!(1)));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![concat!(
