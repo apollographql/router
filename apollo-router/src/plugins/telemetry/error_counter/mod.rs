@@ -55,20 +55,24 @@ pub(crate) async fn count_subgraph_errors(
 
 /// Count the errors a connector mapping declared with `->withError`.
 ///
-/// These are reported to clients in `extensions.connectorErrors` rather than in
-/// `errors` — the fields they describe resolved, and the GraphQL spec reserves
-/// `errors` for response positions absent from `data` — but they are errors the
-/// schema author raised on purpose, so they count like any other.
+/// These land in `apollo.router.operations.errors` like every other error the
+/// router counts. Being reported in `extensions.connectorErrors` rather than in
+/// `errors` changes where a client reads them, not whether they are counted.
 ///
-/// Counted at the connector layer, and not from the reported extension, for the
-/// same reason subgraph errors are counted at the subgraph layer: so that
-/// client-facing redaction cannot suppress a metric. `include_subgraph_errors`
-/// decides what a client sees, and it is applied later, when the response is
-/// built; what leaves the process as telemetry is decided by
-/// `telemetry.apollo.errors.subgraph`, which `count_operation_errors` honours.
+/// Counted at the connector rather than from the reported extension, so that
+/// `include_subgraph_errors` withholding an error from a client cannot also
+/// suppress its metric. What leaves as telemetry is still decided by
+/// `telemetry.apollo.errors.subgraph`, which [`count_operation_errors`] honours.
 ///
-/// This is the only place they are counted. They leave the `errors` array at the
-/// fetch service, so no later layer sees them to count again.
+/// Counted once per declared error, not once per delivered copy. An entity
+/// fetch's errors are rebuilt one per client position by
+/// `FetchNode::response_at_path`, which reuses each error's `apollo_id` so the
+/// copies are not counted again. Declared errors inherit that existing rule.
+///
+/// Counted here and nowhere else, because the fetch service lifts them out of
+/// the `errors` array before a later layer can see them. That is what makes it
+/// safe not to write `COUNTED_ERRORS` back, and it is pinned by
+/// `declared_errors_are_protected_from_double_counting_by_the_lift_not_the_dedup_set`.
 pub(crate) fn count_connector_errors(
     response: &crate::services::connector::request_service::Response,
     errors_config: &ErrorsConfiguration,

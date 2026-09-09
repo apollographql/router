@@ -197,6 +197,103 @@ async fn test_count_connector_errors_counts_declared_errors() {
     .await;
 }
 
+/// What keeps a declared error from being counted twice, and what does not.
+///
+/// [`count_operation_errors`] skips errors whose `apollo_id` is already in the
+/// context's `COUNTED_ERRORS` set, and every other counting layer writes its
+/// errors back into that set afterwards. `count_connector_errors` does not, so
+/// the dedup set offers a declared error no protection at all: this test counts
+/// one at the connector and then hands the very same error to
+/// [`count_operation_errors`] again, and it is counted a second time.
+///
+/// That is safe today for a structural reason rather than a defensive one. A
+/// declared error rides in the connector subgraph response's `errors` array
+/// only as far as the fetch service, where `ConnectorDeclaredErrors::take_marked`
+/// lifts it out immediately after `FetchNode::response_at_path`. No later layer
+/// ever sees it in `errors`, so no later layer counts it.
+///
+/// The test exists to make that dependency executable. If declared errors are
+/// ever left in `errors` past the fetch service (a declared error at a null
+/// position is an ordinary execution error and could legally stay there), the
+/// lift stops protecting them and `count_connector_errors` must start writing
+/// `COUNTED_ERRORS` back. Read this before deleting it: a failure here means
+/// the travel path changed, not that the assertion went stale.
+#[tokio::test]
+async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_dedup_set() {
+    async {
+        let config = ErrorsConfiguration {
+            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            ..Default::default()
+        };
+
+        let context = Context::default();
+        let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+        let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+        let _ = context.insert(OPERATION_KIND, "query".to_string());
+        let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+        let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+        let mut declared = RuntimeError::new(
+            "balance unavailable",
+            &ResponseKey::RootField {
+                name: "account".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$").unwrap()),
+            },
+        )
+        .with_code("CONNECTORS_MAPPING_ERROR");
+        declared.subgraph_name = Some("accounts".into());
+        declared.path = "account/balance".to_string();
+
+        count_connector_errors(
+            &connector::request_service::Response {
+                context: context.clone(),
+                subgraph_name: "accounts".to_string(),
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: http::Response::builder()
+                        .status(200)
+                        .body(())
+                        .unwrap()
+                        .into_parts()
+                        .0,
+                })),
+                mapped_response: MappedResponse::Data {
+                    data: json!({ "account": { "balance": 0 } }),
+                    key: ResponseKey::RootField {
+                        name: "account".to_string(),
+                        inputs: Default::default(),
+                        selection: Arc::new(JSONSelection::parse("$").unwrap()),
+                    },
+                    problems: vec![],
+                    errors: vec![declared.clone()],
+                },
+            },
+            &config,
+        );
+
+        // Nothing was recorded as counted, which is the direct answer to "does
+        // this need to refresh the context the way `count_subgraph_errors`
+        // does": no, because nothing downstream will ask.
+        assert_eq!(
+            unwrap_from_context::<HashSet<Uuid>>(&context, COUNTED_ERRORS),
+            HashSet::new(),
+        );
+
+        // And so the dedup set does not stop a second count. Only the fetch
+        // service lift does.
+        let same_error: graphql::Error = declared.into();
+        count_operation_errors(std::iter::once(&same_error), &context, &config);
+
+        assert_counter!(
+            "apollo.router.graphql_error",
+            2,
+            code = "CONNECTORS_MAPPING_ERROR"
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
 /// A connector response that *failed* declares nothing: the one error
 /// explaining the failure is counted at the execution layer, where every other
 /// connector error is, so counting it here too would double count it.
