@@ -540,6 +540,7 @@ mod tests {
 
     use crate::Context;
     use crate::graphql;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
     use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
     use crate::plugins::connectors::handle_responses::MappedResponse;
@@ -884,29 +885,43 @@ mod tests {
     /// With a limit configured, the excess is replaced by one summary error, so
     /// a client can tell the list was shortened rather than silently receiving
     /// a partial picture.
-    #[test]
-    fn mapping_errors_are_truncated_to_the_configured_limit() {
-        let (mut mapped, connector) = mapped_with_declared_errors(250);
+    #[tokio::test]
+    async fn mapping_errors_are_truncated_to_the_configured_limit() {
+        async {
+            let (mut mapped, connector) = mapped_with_declared_errors(250);
 
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|e| e.insert(ConnectorMappingErrorLimit(100)));
+            let context = Context::new();
+            context
+                .extensions()
+                .with_lock(|e| e.insert(ConnectorMappingErrorLimit(100)));
 
-        truncate_mapping_errors(&mut mapped, &context, &connector);
+            truncate_mapping_errors(&mut mapped, &context, &connector);
 
-        let MappedResponse::Data { errors, .. } = &mapped else {
-            panic!("expected data, got: {mapped:?}");
-        };
-        // 100 kept, plus the summary.
-        assert_eq!(errors.len(), 101);
-        let overflow = errors.last().unwrap();
-        assert_eq!(overflow.code(), TOO_MANY_MAPPING_ERRORS_CODE);
-        assert!(
-            overflow.message.starts_with("150 more mapping errors"),
-            "unexpected overflow message: {}",
-            overflow.message,
-        );
+            let MappedResponse::Data { errors, .. } = &mapped else {
+                panic!("expected data, got: {mapped:?}");
+            };
+            // 100 kept, plus the summary.
+            assert_eq!(errors.len(), 101);
+            let overflow = errors.last().unwrap();
+            assert_eq!(overflow.code(), TOO_MANY_MAPPING_ERRORS_CODE);
+            assert!(
+                overflow.message.starts_with("150 more mapping errors"),
+                "unexpected overflow message: {}",
+                overflow.message,
+            );
+
+            // The truncation itself is only half of what this path does. The
+            // counter is how an operator learns a limit is biting at all, so a
+            // test that checks only `errors.len()` would let it stop being
+            // emitted without anything noticing.
+            assert_counter!(
+                "apollo.router.limits.connector_mapping_errors.exceeded",
+                1,
+                "connector.source" = connector.source_config_key()
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     /// A response at or under the limit is untouched — no summary error is

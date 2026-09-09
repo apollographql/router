@@ -562,13 +562,14 @@ pub(super) fn map_response(
         ProblemLocation::Selection,
     ));
 
-    // Every declared error is reported. The count is deliberately not capped:
-    // nothing else in the router truncates a response's errors (a subgraph
-    // returning thousands has them all passed through), and the feature exists
-    // so an author can record every defect they find — handing a client "and
-    // 400 more" would defeat that. The element count is already bounded
-    // upstream by the `http_max_response_size` connector limit, which is where
-    // an operator worried about response size sets a policy.
+    // Every declared error the mapping produced is built here. Bounding what a
+    // client receives is not this layer's job and is not done here: that is
+    // `truncate_mapping_errors` in the router's connectors plugin, reading
+    // `limits.connector.max_mapping_errors`, which defaults to no limit. Note
+    // that it caps per connector response, and an entity fetch's errors are
+    // rebuilt afterwards by `FetchNode::response_at_path`, once per client
+    // position the entity landed at, so the count a client sees can exceed the
+    // configured limit.
     let errors = declared
         .iter()
         .map(|error| declared_error_to_runtime_error(error, &key, connector))
