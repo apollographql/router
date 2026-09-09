@@ -108,8 +108,10 @@ fn with_connector_error_method(
             None,
             vec![ApplyToError::new(
                 format!(
-                    "Method ->{} requires exactly one argument, got {}",
+                    "Method ->{}{} requires exactly one argument, a string message or \
+                     an object with a `message`, got {}",
                     method_name.as_ref(),
+                    printed_args(),
                     args.len(),
                 ),
                 input_path.to_vec(),
@@ -152,9 +154,26 @@ fn with_connector_error_method(
             let message = match fields.get("message") {
                 Some(JSON::String(message)) => message.as_str().to_string(),
                 other => {
+                    // When `message` is absent rather than mistyped, say what
+                    // the object does have. The overwhelmingly likely cause is
+                    // a misspelled key, and "got nothing" leaves an author
+                    // hunting for their own typo, which is the hardest kind to
+                    // see. Naming the keys present ends the search.
+                    let present = if other.is_none() {
+                        let keys = fields
+                            .keys()
+                            .map(|key| format!("`{}`", key.as_str()))
+                            .collect::<Vec<_>>();
+                        match keys.len() {
+                            0 => "; this object is empty".to_string(),
+                            _ => format!("; this object has {}", keys.join(", ")),
+                        }
+                    } else {
+                        String::new()
+                    };
                     errors.push(ApplyToError::new(
                         format!(
-                            "Method ->{}{} declared no error because `message` must be a string, got {}",
+                            "Method ->{}{} declared no error because `message` must be a string, got {}{present}",
                             method_name.as_ref(),
                             printed_args(),
                             json_type_name(other),
@@ -197,7 +216,9 @@ fn with_connector_error_method(
                 if key != "message" && key != "extensions" {
                     errors.push(ApplyToError::new(
                         format!(
-                            "Method ->{}{} ignored unknown field `{key}`; a connector error carries only `message` and `extensions`",
+                            "Method ->{}{} ignored unknown field `{key}`; a connector error carries \
+                             only `message` and `extensions`, so an author-supplied field belongs \
+                             inside `extensions`, as in `extensions: {{ {key}: ... }}`",
                             method_name.as_ref(),
                             printed_args(),
                         ),
@@ -270,8 +291,12 @@ fn with_connector_error_shape(
     let [arg] = args else {
         return Shape::error(
             format!(
-                "Method ->{} requires exactly one argument, got {}",
+                "Method ->{}{} requires exactly one argument, a string message or \
+                 an object with a `message`, got {}",
                 method_name.as_ref(),
+                method_args
+                    .map(|method_args| method_args.pretty_print_with_indentation(true, 0))
+                    .unwrap_or_default(),
                 args.len(),
             ),
             method_name.shape_location(context.source_id()),
@@ -370,6 +395,46 @@ mod tests {
             "unexpected message: {}",
             errors[0].message(),
         );
+        assert!(
+            errors[0].message().contains("this object has `unknown`"),
+            "the diagnostic must name the keys that are present: {}",
+            errors[0].message(),
+        );
+    }
+
+    /// The mistake this diagnostic exists for. An author who misspells
+    /// `message` gets an object that is structurally fine and semantically
+    /// empty, and "got nothing" would send them hunting for a typo in their own
+    /// text, which is the hardest kind to see. Naming the key that is actually
+    /// there ends the search immediately.
+    #[test]
+    fn a_misspelled_message_key_is_named_in_the_diagnostic() {
+        let (value, errors) =
+            selection!(r#"$->withConnectorError({ messge: "Balance unavailable" })"#)
+                .apply_to(&json!("v"));
+
+        assert_eq!(value, Some(json!("v")));
+        assert_eq!(
+            errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
+            vec![concat!(
+                r#"Method ->withConnectorError( { messge: "Balance unavailable" } ) declared no "#,
+                "error because `message` must be a string, got nothing; this object has `messge`",
+            )],
+        );
+    }
+
+    /// An empty object has no keys to name, so the diagnostic says that rather
+    /// than trailing off after "has".
+    #[test]
+    fn an_empty_object_argument_says_it_is_empty() {
+        let (value, errors) = selection!("$->withConnectorError({})").apply_to(&json!("v"));
+
+        assert_eq!(value, Some(json!("v")));
+        assert!(
+            errors[0].message().contains("this object is empty"),
+            "unexpected message: {}",
+            errors[0].message(),
+        );
     }
 
     /// A malformed error is discarded rather than handed to a client
@@ -452,7 +517,9 @@ mod tests {
             vec![
                 concat!(
                     r#"Method ->withConnectorError( { message: "m", code: "OOPS" } ) ignored unknown field "#,
-                    "`code`; a connector error carries only `message` and `extensions`",
+                    "`code`; a connector error carries only `message` and `extensions`, so an ",
+                    "author-supplied field belongs inside `extensions`, as in ",
+                    "`extensions: { code: ... }`",
                 ),
                 "m",
             ],
@@ -636,15 +703,24 @@ mod tests {
         assert_eq!(value, None);
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
-            vec!["Method ->withConnectorError requires exactly one argument, got 0"],
+            vec![concat!(
+                "Method ->withConnectorError requires exactly one argument, ",
+                "a string message or an object with a `message`, got 0",
+            )],
         );
 
+        // The call is printed here as it is everywhere else, because this is
+        // also the message an author meets in a composition failure, with no
+        // surrounding context to tell them which call went wrong.
         let (value, errors) =
             selection!(r#"$->withConnectorError("a", "b")"#).apply_to(&json!("value"));
         assert_eq!(value, None);
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
-            vec!["Method ->withConnectorError requires exactly one argument, got 2"],
+            vec![concat!(
+                r#"Method ->withConnectorError("a", "b") requires exactly one argument, "#,
+                "a string message or an object with a `message`, got 2",
+            )],
         );
     }
 }
