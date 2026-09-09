@@ -15,25 +15,32 @@ use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(
-    WithGraphQLErrorMethod,
-    with_graphql_error_method,
-    with_graphql_error_shape
+    WithConnectorErrorMethod,
+    with_connector_error_method,
+    with_connector_error_shape
 );
-/// Returns its input unmodified, but declares a GraphQL error about it,
-/// addressed to the client.
+/// Returns its input unmodified, but declares an error about it, addressed to
+/// the client and reported under `extensions.connectorErrors`.
 ///
 /// The sibling of [`->withError`](super::WithErrorMethod), and the difference
 /// between them is only who reads the result. `->withError` records a
 /// diagnostic for the mapping author, visible in the debugger and in telemetry.
-/// `->withGraphQLError` declares an error the schema author intends a client to
+/// `->withConnectorError` declares an error the schema author intends a client to
 /// see. Writing it is the statement that this text is fit to leave the router.
 ///
 /// ```text
-/// balance: $response.balance ?? $(null)->withGraphQLError("Balance unavailable")
+/// balance: $response.balance ?? $(null)->withConnectorError("Balance unavailable")
 /// ```
 ///
 /// The field still resolves. That combination, a value in `data` and an error
 /// about it, is the whole point: the author chose a default and recorded why.
+/// It is also why these are not reported in `errors`. The GraphQL spec allows
+/// an execution error only at a response position that is absent from `data`
+/// or null, so an error about a value that is present and fine has nowhere in
+/// `errors` to go. The router reports them at
+/// `result.extensions.connectorErrors` instead, which is where this method's
+/// name comes from: what an author writes and what a client reads are the same
+/// word.
 ///
 /// # The argument
 ///
@@ -44,14 +51,14 @@ impl_arrow_method!(
 /// * an **object**, `{ message, extensions? }`, taken as written.
 ///
 /// ```text
-/// requiredField: $response.requiredField ?? $("<missing>")->withGraphQLError({
+/// requiredField: $response.requiredField ?? $("<missing>")->withConnectorError({
 ///   message: "Field 'requiredField' was not found"
 ///   extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
 /// })
 /// ```
 ///
 /// Everything else is an author mistake and is reported as one rather than
-/// coerced. An object with no `message` is not a GraphQL error; a `message`
+/// coerced. An object with no `message` declares nothing; a `message`
 /// that is not a string, or `extensions` that are not an object, would reach a
 /// client malformed; and a bare number or array would reach one as a message
 /// reading `42`. Unlike `->withError`, which serializes any value into a
@@ -62,7 +69,7 @@ impl_arrow_method!(
 /// because this method passes its input through:
 ///
 /// ```text
-/// @->withGraphQLError("Code is unrecognized")->withGraphQLError("Amount is negative")
+/// @->withConnectorError("Code is unrecognized")->withConnectorError("Amount is negative")
 /// ```
 ///
 /// # Failure
@@ -72,7 +79,7 @@ impl_arrow_method!(
 /// it must not delete that value when its own argument misses, and this method
 /// is reached through `??` more often than not, where deleting the value would
 /// destroy the very default the author supplied.
-fn with_graphql_error_method(
+fn with_connector_error_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -190,7 +197,7 @@ fn with_graphql_error_method(
                 if key != "message" && key != "extensions" {
                     errors.push(ApplyToError::new(
                         format!(
-                            "Method ->{}{} ignored unknown field `{key}`; a GraphQL error carries only `message` and `extensions`",
+                            "Method ->{}{} ignored unknown field `{key}`; a connector error carries only `message` and `extensions`",
                             method_name.as_ref(),
                             printed_args(),
                         ),
@@ -251,7 +258,7 @@ fn json_type_name(value: Option<&JSON>) -> &'static str {
 // The output shape is the input shape: this method is an identity function on
 // the value. The argument's shape is still computed so mistakes inside it
 // (unknown fields, mistyped paths) surface at validation time.
-fn with_graphql_error_shape(
+fn with_connector_error_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -295,7 +302,7 @@ mod tests {
     #[test]
     fn a_string_argument_is_the_message() {
         let (value, errors) =
-            selection!(r#"$->withGraphQLError("Balance unavailable")"#).apply_to(&json!(null));
+            selection!(r#"$->withConnectorError("Balance unavailable")"#).apply_to(&json!(null));
 
         assert_eq!(value, Some(json!(null)));
         assert_eq!(errors.len(), 1);
@@ -310,7 +317,7 @@ mod tests {
     #[test]
     fn an_object_argument_carries_a_message_and_extensions() {
         let (value, errors) = selection!(
-            r#"$->withGraphQLError({
+            r#"$->withConnectorError({
                 message: "Field 'balance' was not found"
                 extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
             })"#
@@ -332,7 +339,7 @@ mod tests {
     #[test]
     fn extensions_are_optional() {
         let (value, errors) =
-            selection!(r#"$->withGraphQLError({ message: "plain" })"#).apply_to(&json!(1));
+            selection!(r#"$->withConnectorError({ message: "plain" })"#).apply_to(&json!(1));
 
         assert_eq!(value, Some(json!(1)));
         assert_eq!(errors.len(), 1);
@@ -349,7 +356,7 @@ mod tests {
     #[test]
     fn an_object_without_a_message_is_an_author_error() {
         let (value, errors) =
-            selection!(r#"$->withGraphQLError({ unknown: @ })"#).apply_to(&json!("v"));
+            selection!(r#"$->withConnectorError({ unknown: @ })"#).apply_to(&json!("v"));
 
         assert_eq!(value, Some(json!("v")), "the value survives a bad argument");
         assert!(
@@ -371,13 +378,13 @@ mod tests {
     #[test]
     fn a_non_string_message_is_rejected() {
         let (value, errors) =
-            selection!(r#"$->withGraphQLError({ message: 42 })"#).apply_to(&json!("v"));
+            selection!(r#"$->withConnectorError({ message: 42 })"#).apply_to(&json!("v"));
 
         assert_eq!(value, Some(json!("v")));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![concat!(
-                "Method ->withGraphQLError( { message: 42 } ) declared no error ",
+                "Method ->withConnectorError( { message: 42 } ) declared no error ",
                 "because `message` must be a string, got a number",
             )],
         );
@@ -393,14 +400,14 @@ mod tests {
     #[test]
     fn non_object_extensions_are_rejected() {
         let (value, errors) =
-            selection!(r#"$->withGraphQLError({ message: "m", extensions: "nope" })"#)
+            selection!(r#"$->withConnectorError({ message: "m", extensions: "nope" })"#)
                 .apply_to(&json!(1));
 
         assert_eq!(value, Some(json!(1)));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![concat!(
-                r#"Method ->withGraphQLError( { message: "m", extensions: "nope" } ) declared no error "#,
+                r#"Method ->withConnectorError( { message: "m", extensions: "nope" } ) declared no error "#,
                 "because `extensions` must be an object, got a string",
             )],
         );
@@ -412,7 +419,7 @@ mod tests {
     /// chose.
     #[test]
     fn a_bare_scalar_is_rejected() {
-        let (value, errors) = selection!(r#"$->withGraphQLError(42)"#).apply_to(&json!("v"));
+        let (value, errors) = selection!(r#"$->withConnectorError(42)"#).apply_to(&json!("v"));
 
         assert_eq!(value, Some(json!("v")));
         assert!(
@@ -435,16 +442,17 @@ mod tests {
     /// declared and the value still flows through.
     #[test]
     fn unknown_fields_are_reported_but_do_not_cost_the_error() {
-        let (value, errors) = selection!(r#"$->withGraphQLError({ message: "m", code: "OOPS" })"#)
-            .apply_to(&json!(1));
+        let (value, errors) =
+            selection!(r#"$->withConnectorError({ message: "m", code: "OOPS" })"#)
+                .apply_to(&json!(1));
 
         assert_eq!(value, Some(json!(1)));
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![
                 concat!(
-                    r#"Method ->withGraphQLError( { message: "m", code: "OOPS" } ) ignored unknown field "#,
-                    "`code`; a GraphQL error carries only `message` and `extensions`",
+                    r#"Method ->withConnectorError( { message: "m", code: "OOPS" } ) ignored unknown field "#,
+                    "`code`; a connector error carries only `message` and `extensions`",
                 ),
                 "m",
             ],
@@ -461,7 +469,7 @@ mod tests {
     #[test]
     fn a_failed_argument_costs_the_error_and_not_the_value() {
         let (value, errors) =
-            selection!(r#"balance: $.amount ?? $(null)->withGraphQLError(@.nope)"#)
+            selection!(r#"balance: $.amount ?? $(null)->withConnectorError(@.nope)"#)
                 .apply_to(&json!({ "id": "acct-1" }));
 
         assert_eq!(value, Some(json!({ "balance": null })));
@@ -478,7 +486,7 @@ mod tests {
     #[test]
     fn several_errors_about_one_value_are_several_calls() {
         let (value, errors) = selection!(
-            r#"$->withGraphQLError("Code is unrecognized")->withGraphQLError("Amount is negative")"#
+            r#"$->withConnectorError("Code is unrecognized")->withConnectorError("Amount is negative")"#
         )
         .apply_to(&json!("v"));
 
@@ -502,7 +510,7 @@ mod tests {
     #[test]
     fn a_defaulted_field_should_record_a_coded_error_only_when_it_defaults() {
         let selection = selection!(
-            r#"requiredField: value ?? $("<missing>")->withGraphQLError({
+            r#"requiredField: value ?? $("<missing>")->withConnectorError({
                 message: "Field 'requiredField' was not found"
                 extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
             })"#
@@ -534,7 +542,7 @@ mod tests {
     /// errors of every operand it stepped over, which is right for the "path
     /// produced nothing" diagnostics that coalescing exists to absorb but wrong
     /// for an error the author deliberately declared. Without the carve-out,
-    /// `?? $(null)->withGraphQLError(...)` silently does nothing, which is the
+    /// `?? $(null)->withConnectorError(...)` silently does nothing, which is the
     /// worst possible outcome for an error-reporting feature: it looks correct
     /// and reports nothing.
     #[test]
@@ -544,8 +552,8 @@ mod tests {
         // The value is null either way; the question is whether the error
         // survives. Both spellings must record it.
         for selection in [
-            r#"f: $.field ?? $(null)->withGraphQLError("boom")"#,
-            r#"f: $.field ?! $(null)->withGraphQLError("boom")"#,
+            r#"f: $.field ?? $(null)->withConnectorError("boom")"#,
+            r#"f: $.field ?! $(null)->withConnectorError("boom")"#,
         ] {
             let (value, errors) = selection!(selection).apply_to(&data);
             assert_eq!(value, Some(json!({ "f": null })), "for `{selection}`");
@@ -563,7 +571,7 @@ mod tests {
     #[test]
     fn a_default_should_not_report_the_failed_path_as_well() {
         let (value, errors) =
-            selection!(r#"f: $.field ?? $("<missing>")->withGraphQLError("boom")"#)
+            selection!(r#"f: $.field ?? $("<missing>")->withConnectorError("boom")"#)
                 .apply_to(&json!({ "other": 1 }));
 
         assert_eq!(value, Some(json!({ "f": "<missing>" })));
@@ -578,7 +586,7 @@ mod tests {
     /// value is unrelated to that.
     #[test]
     fn a_declared_error_survives_a_later_operand_succeeding() {
-        let (value, errors) = selection!(r#"f: $.a->withGraphQLError("saw a") ?? "fallback""#)
+        let (value, errors) = selection!(r#"f: $.a->withConnectorError("saw a") ?? "fallback""#)
             .apply_to(&json!({ "a": null }));
 
         assert_eq!(value, Some(json!({ "f": "fallback" })));
@@ -596,7 +604,7 @@ mod tests {
     #[test]
     fn an_error_can_redact_its_detail_from_config() {
         let selection = selection!(
-            r#"$->withGraphQLError({
+            r#"$->withConnectorError({
                 message: $config.verboseErrors->match([true, $.detail], [@, "An error occurred"])
                 extensions: { code: "INTERNAL_SERVER_ERROR" }
             })"#
@@ -624,19 +632,19 @@ mod tests {
     /// function reports them as well, so neither should survive composition.
     #[test]
     fn a_call_with_the_wrong_number_of_arguments_is_reported() {
-        let (value, errors) = selection!("$->withGraphQLError").apply_to(&json!("value"));
+        let (value, errors) = selection!("$->withConnectorError").apply_to(&json!("value"));
         assert_eq!(value, None);
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
-            vec!["Method ->withGraphQLError requires exactly one argument, got 0"],
+            vec!["Method ->withConnectorError requires exactly one argument, got 0"],
         );
 
         let (value, errors) =
-            selection!(r#"$->withGraphQLError("a", "b")"#).apply_to(&json!("value"));
+            selection!(r#"$->withConnectorError("a", "b")"#).apply_to(&json!("value"));
         assert_eq!(value, None);
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
-            vec!["Method ->withGraphQLError requires exactly one argument, got 2"],
+            vec!["Method ->withConnectorError requires exactly one argument, got 2"],
         );
     }
 }

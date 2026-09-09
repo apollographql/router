@@ -417,12 +417,12 @@ pub fn handle_mapping_only_response(
 /// [`InputPath`](crate::connectors::json_selection::immutable::InputPath):
 /// where the mapping was reading in the *source* JSON, interleaved with
 /// `->method` markers for the methods it passed through. In a mapping like
-/// `balance: amount->withGraphQLError(...)` that path says `amount` — the API's
+/// `balance: amount->withConnectorError(...)` that path says `amount` — the API's
 /// — while the response path is `balance`. The two coincide only when the
 /// mapping happens to be a rename-free passthrough.
 ///
 /// The `->method` markers are dropped: they describe the mapping's internals,
-/// and the customer feedback's objection to a path reading `["->withGraphQLError"]`
+/// and the customer feedback's objection to a path reading `["->withConnectorError"]`
 /// applies just as well here.
 fn selection_path(error: &ApplyToError) -> String {
     error
@@ -437,7 +437,7 @@ fn selection_path(error: &ApplyToError) -> String {
         .join(".")
 }
 
-/// Turn an error the schema author declared with `->withGraphQLError` into the
+/// Turn an error the schema author declared with `->withConnectorError` into the
 /// client-facing report it was written to be.
 ///
 /// The result is a [`RuntimeError`] because that is the type the connectors
@@ -459,7 +459,7 @@ fn selection_path(error: &ApplyToError) -> String {
 ///
 /// This deliberately does not use `ApplyToError::path`, which records where the
 /// mapping was *reading* in the API's JSON. The two diverge under any rename:
-/// `balance: amount->withGraphQLError(...)` reads `amount` and writes `balance`, and
+/// `balance: amount->withConnectorError(...)` reads `amount` and writes `balance`, and
 /// `acct: { bal: amount->... }` reads `amount` and writes `acct.bal`. The read
 /// path is still useful for debugging a mapping, so it is preserved under
 /// `extensions.connector.selectionPath`.
@@ -549,7 +549,7 @@ pub(super) fn map_response(
     // availability is decided by `ArrowMethod::is_public`, and every method's
     // *behavior* is version-invariant — the rstest cases across V0_2..V0_5 in
     // the methods directory exist to assert exactly that. Gating this would
-    // make `->withGraphQLError` mean two different things depending on a
+    // make `->withConnectorError` mean two different things depending on a
     // connector's `@link` URL, for a method that has never shipped and so has
     // no earlier behavior to preserve. Writing it is itself the opt-in.
     let declared = apply_to_errors
@@ -700,12 +700,12 @@ pub enum MappedResponse {
         data: Value,
         key: ResponseKey,
         problems: Vec<Problem>,
-        /// Errors the mapping author declared with `->withGraphQLError`, to be
+        /// Errors the mapping author declared with `->withConnectorError`, to be
         /// reported to the client alongside this data.
         ///
         /// Distinct from `problems`, which never leave the router: these are
         /// addressed to the client, and the field resolves normally in spite
-        /// of them — that combination is the whole point of `->withGraphQLError`, and
+        /// of them — that combination is the whole point of `->withConnectorError`, and
         /// is why they cannot ride along in the `Error` variant instead.
         ///
         /// They are deliberately *not* GraphQL errors. [The spec][spec] says a
@@ -722,7 +722,7 @@ pub enum MappedResponse {
 }
 
 impl MappedResponse {
-    /// Removes the errors the mapping author declared with `->withGraphQLError`, so
+    /// Removes the errors the mapping author declared with `->withConnectorError`, so
     /// the caller can report them out of band.
     ///
     /// They must leave before [`Self::add_to_data`] runs: that function builds
@@ -739,7 +739,7 @@ impl MappedResponse {
     /// array. How data is added depends on the `ResponseKey`: it's either a
     /// property directly on the map, or stored in the `_entities` array.
     ///
-    /// Errors declared with `->withGraphQLError` are not added: they are not GraphQL
+    /// Errors declared with `->withConnectorError` are not added: they are not GraphQL
     /// errors, and [`Self::take_declared_errors`] is how they are collected.
     pub fn add_to_data(
         self,
@@ -1286,7 +1286,7 @@ mod tests {
         }
     }
 
-    /// The whole point of `->withGraphQLError`, asserted where it actually has to
+    /// The whole point of `->withConnectorError`, asserted where it actually has to
     /// hold: the field resolves with its default *and* the error is reported,
     /// carrying the author's code and structured fields. Asserted through the
     /// pair of functions that build the client-facing response — the declared
@@ -1299,7 +1299,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
-            r#"balance: amount ?? $("<missing>")->withGraphQLError({
+            r#"balance: amount ?? $("<missing>")->withConnectorError({
                 message: "Field 'amount' was not found"
                 extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
             })"#,
@@ -1343,7 +1343,7 @@ mod tests {
         // The path names the GraphQL field the error is about, through the
         // mapping's *output* — `balance`, the field written, not `amount`, the
         // field read. This is the acceptance criterion the original feedback
-        // raised about a path reading `["->withGraphQLError"]`.
+        // raised about a path reading `["->withConnectorError"]`.
         assert_eq!(errors[0].path, "account/balance");
     }
 
@@ -1357,7 +1357,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
-            r#"balance: amount ?? $("<missing>")->withGraphQLError("Field 'amount' was not found")"#,
+            r#"balance: amount ?? $("<missing>")->withConnectorError("Field 'amount' was not found")"#,
         );
 
         let mut mapped = map_response(
@@ -1393,32 +1393,32 @@ mod tests {
         let cases: &[(&str, Value, &str)] = &[
             // A plain rename.
             (
-                r#"balance: amount->withGraphQLError("x")"#,
+                r#"balance: amount->withConnectorError("x")"#,
                 json!({ "amount": 1 }),
                 "account/balance",
             ),
             // Nesting: the path is the full route through the output object,
             // which shares no segment with the input path (`amount`).
             (
-                r#"acct: { bal: amount->withGraphQLError("x") }"#,
+                r#"acct: { bal: amount->withConnectorError("x") }"#,
                 json!({ "amount": 1 }),
                 "account/acct/bal",
             ),
             // A deep read collapsing to a shallow write.
             (
-                r#"bal: a.b.c->withGraphQLError("x")"#,
+                r#"bal: a.b.c->withConnectorError("x")"#,
                 json!({ "a": { "b": { "c": 1 } } }),
                 "account/bal",
             ),
             // ->map is index-preserving, so the element is named.
             (
-                r#"rows: items->map(@.code->withGraphQLError("x"))"#,
+                r#"rows: items->map(@.code->withConnectorError("x"))"#,
                 json!({ "items": [{ "code": 1 }] }),
                 "account/rows/0",
             ),
             // Auto-mapping a subselection over an array, down to the field.
             (
-                r#"rows: items { c: code->withGraphQLError("x") }"#,
+                r#"rows: items { c: code->withConnectorError("x") }"#,
                 json!({ "items": [{ "code": 1 }] }),
                 "account/rows/0/c",
             ),
@@ -1447,7 +1447,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "account",
-            r#"rows: items->filter(@.keep->withGraphQLError("checking"))"#,
+            r#"rows: items->filter(@.keep->withConnectorError("checking"))"#,
         );
 
         let mut mapped = map_response(
@@ -1497,7 +1497,7 @@ mod tests {
         assert_eq!(mapped.take_declared_errors().len(), 0);
     }
 
-    /// `->withGraphQLError` behaves the same at every spec version, like every other
+    /// `->withConnectorError` behaves the same at every spec version, like every other
     /// mapping method. Nothing about a method's behavior is version-dependent —
     /// the rstest cases spanning V0_2..V0_5 throughout the methods directory
     /// exist to assert that — so this is written the same way, to catch anyone
@@ -1512,7 +1512,7 @@ mod tests {
         let connector = make_connector(None, spec);
         let key = root_field_key_with_selection(
             "account",
-            r#"balance: amount ?? $("<missing>")->withGraphQLError("Field 'amount' was not found")"#,
+            r#"balance: amount ?? $("<missing>")->withConnectorError("Field 'amount' was not found")"#,
         );
 
         let mut mapped = map_response(
@@ -1546,7 +1546,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "rows",
-            r#"$.rows->map(@.code->withGraphQLError("bad code"))"#,
+            r#"$.rows->map(@.code->withConnectorError("bad code"))"#,
         );
 
         let row_count = 500;
@@ -1584,7 +1584,7 @@ mod tests {
         let connector = make_connector(None, ConnectSpec::V0_5);
         let key = root_field_key_with_selection(
             "rows",
-            r#"$.rows->map(@.code->withGraphQLError("bad code"))"#,
+            r#"$.rows->map(@.code->withConnectorError("bad code"))"#,
         );
 
         let mut mapped = map_response(

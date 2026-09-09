@@ -73,5 +73,5 @@ pub(crate) use arithmetic::MulMethod;
 pub(crate) use arithmetic::SubMethod;
 mod with_error;
 pub(crate) use with_error::WithErrorMethod;
-mod with_graphql_error;
-pub(crate) use with_graphql_error::WithGraphQLErrorMethod;
+mod with_connector_error;
+pub(crate) use with_connector_error::WithConnectorErrorMethod;

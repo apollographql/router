@@ -31,7 +31,7 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// The diagnostic is addressed to the **mapping author**: it reaches the
 /// connectors debugger and telemetry, and never a client. An error a schema
 /// author intends a client to read is declared with
-/// [`->withGraphQLError`](super::WithGraphQLErrorMethod) instead, which is a
+/// [`->withConnectorError`](super::WithConnectorErrorMethod) instead, which is a
 /// separate method because it is a separate audience, not a separate spelling.
 ///
 /// # The argument

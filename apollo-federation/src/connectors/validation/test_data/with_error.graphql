@@ -22,7 +22,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code ?? $("<missing>")->withGraphQLError({
+        status: code ?? $("<missing>")->withConnectorError({
             message: "Field 'code' was not found"
             extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
         })
@@ -35,7 +35,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code ?? $("<missing>")->withGraphQLError({
+        status: code ?? $("<missing>")->withConnectorError({
             message: $config.verboseErrors->match([true, $.detail], [@, "An error occurred"])
             extensions: { code: "INTERNAL_SERVER_ERROR" }
         })
@@ -73,7 +73,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code ?? $("<missing>")->withGraphQLError("Field 'code' was not found")
+        status: code ?? $("<missing>")->withConnectorError("Field 'code' was not found")
         """
     )
 

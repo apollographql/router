@@ -113,7 +113,7 @@ This object provides fine-grained control over error propagation.
 
 ## Connector mapping errors
 
-A connector response mapping can report an error without failing the field, using the [`->withGraphQLError` method](/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field). Those errors are written by the author of the connector's subgraph schema and can interpolate data from the API's response, so they are governed by this configuration too, under the name of the subgraph the connector belongs to.
+A connector response mapping can report an error without failing the field, using the [`->withConnectorError` method](/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field). Those errors are written by the author of the connector's subgraph schema and can interpolate data from the API's response, so they are governed by this configuration too, under the name of the subgraph the connector belongs to.
 
 They are reported in the response's `extensions.connectorErrors` rather than in `errors`, so the rules apply slightly differently:
 
