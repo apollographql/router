@@ -76,6 +76,10 @@ pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
     /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
+    // Startup and `router config upgrade` both use `Major` now, so nothing outside tests
+    // constructs this. Kept so `upgrade_configuration`'s version-prefix filtering (used by the
+    // migration file naming convention) stays independently testable.
+    #[allow(dead_code)]
     Minor(i64),
 }
 
@@ -123,9 +127,9 @@ pub(crate) fn upgrade_configuration(
     // YAML actions (e.g. composite keys built from two dynamic map keys).
     // These run after the YAML migrations so any preceding renames (e.g.
     // `preview_connectors` → `connectors`) are already in place. Unlike the
-    // major-version-only YAML migrations, this is a within-2.x rename, so it
-    // must also run in `UpgradeMode::Minor` (the startup validation path) —
-    // not just `UpgradeMode::Major` (the `router config upgrade` CLI).
+    // YAML migrations above, which `UpgradeMode` filters by version prefix,
+    // this fixes a within-2.x rename and so runs unconditionally: it must
+    // still apply when the caller passes `UpgradeMode::Minor`.
     let (migrated_connectors_subgraphs, subgraphs_with_unpropagated_config) =
         migrate_connectors_subgraphs_to_sources(&mut config);
     if migrated_connectors_subgraphs {

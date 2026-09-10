@@ -726,6 +726,73 @@ headers:
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
+// AC2 / spike finding: `0023-batching.yaml` renames `experimental_batching` to `batching`, and
+// it's a major migration. Startup used to run only minor migrations (those prefixed with the
+// current major version), so `experimental_batching` was left unrecognized and the whole document
+// was rejected outright as an unknown top-level key.
+#[test]
+fn startup_applies_major_migration() {
+    let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\n";
+    let config =
+        validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+            .expect("major migration should be applied automatically at startup");
+    assert!(
+        config.batching.enabled,
+        "batching should reflect the migrated `batching.enabled`, not its compiled-in default"
+    );
+}
+
+#[test]
+fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+    let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\n";
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+        .expect("major migration should be applied automatically at startup");
+
+    assert!(
+        crate::test_harness::tracing_test::logs_contain("router config upgrade"),
+        "warning should point the operator at `router config upgrade`"
+    );
+    assert!(
+        crate::test_harness::tracing_test::logs_contain(
+            "refer to the upgraded configuration, not the file on disk"
+        ),
+        "warning should explain that diagnostic line numbers now refer to the migrated document"
+    );
+}
+
+// AC5: once a document has been migrated, it must never fall back to the un-migrated original —
+// a migrated document that still fails validation has to stop startup outright.
+#[test]
+fn startup_rejects_configuration_still_invalid_after_migration() {
+    let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\nthis_key_does_not_exist_anywhere: true\n";
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+        .expect_err(
+            "a migrated document that still fails validation must stop startup, not fall back to the un-migrated document",
+        );
+}
+
+// AC1: a configuration that needs no migration is parsed directly, so schema-validation
+// diagnostics point at line numbers in the operator's own file. This is the same input and
+// expected output as `unknown_fields_at_root`, run through `Mode::Upgrade` (the startup path)
+// instead of `Mode::NoUpgrade`, to confirm going through the migration check doesn't reformat a
+// document that didn't need migrating.
+#[test]
+fn startup_no_migration_needed_diagnostics_match_original_file() {
+    let error = validate_yaml_configuration(
+        "\nunknown:\n  foo: true\n  ",
+        Expansion::default().unwrap(),
+        Mode::Upgrade,
+    )
+    .expect_err("should have resulted in an error");
+    assert_eq!(
+        error.to_string(),
+        "configuration had errors: \n1. at line 2\n\n  \n\
+         ┌ unknown:\n|   foo: true\n\
+         └-----> Additional properties are not allowed ('unknown' was unexpected)\n\n"
+    );
+}
+
 /// Sample YAML files that have minor migrations from the 2.x release cycle
 #[derive(RustEmbed)]
 #[folder = "src/configuration/testdata/migrations/minor"]

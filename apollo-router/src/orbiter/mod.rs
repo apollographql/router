@@ -315,7 +315,6 @@ mod test {
     use serde_json::json;
 
     use crate::Configuration;
-    use crate::configuration::ConfigurationError;
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
@@ -361,13 +360,12 @@ mod test {
 
     #[test]
     fn test_visit_config_that_needed_upgrade() {
-        let result: ConfigurationError =
-            Configuration::from_str("supergraph:\n  preview_defer_support: true")
-                .expect_err("expected an error");
-        // Note: Can't implement PartialEq on ConfigurationError, so...
-        let err_message = "configuration had errors";
-        let err_error = "\n1. at line 2\n\n  supergraph:\n┌   preview_defer_support: true\n└-----> Additional properties are not allowed ('preview_defer_support' was unexpected)\n\n".to_string();
-        matches!(result, ConfigurationError::InvalidConfiguration {message, error} if err_message == message && err_error == error);
+        // `supergraph.preview_defer_support` was renamed to `supergraph.defer_support` ahead of
+        // defer's GA release. Startup now runs this migration automatically, so the legacy key
+        // is accepted and its value carries over to the current one.
+        let config = Configuration::from_str("supergraph:\n  preview_defer_support: true")
+            .expect("legacy config should be migrated and accepted at startup");
+        assert!(config.supergraph.defer_support);
     }
 
     #[test]

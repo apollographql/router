@@ -1,5 +1,6 @@
 //! Configuration schema generation and validation
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -107,31 +108,43 @@ pub(crate) fn validate_yaml_configuration(
         }
     });
 
-    if migration == Mode::Upgrade {
-        let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
-            .parse()
-            .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
+    // Text used to resolve the line numbers in schema-validation diagnostics below. Starts out as
+    // the operator's own file; replaced with the migrated document's own text once a migration
+    // actually changes something, so line numbers describe the text that was actually validated.
+    let mut diagnostic_source: Cow<str> = Cow::Borrowed(raw_yaml);
 
-        let upgraded =
-            upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
-        let expanded_yaml = expansion.expand(&upgraded)?;
-        if validator.is_valid(&expanded_yaml) {
-            yaml = upgraded;
-        } else {
+    if migration == Mode::Upgrade {
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Major)?;
+        if upgraded != yaml {
+            let migrated_yaml = serde_yaml::to_string(&upgraded).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: format!("failed to serialize migrated configuration: {error}"),
+                }
+            })?;
             tracing::warn!(
-                "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
-            )
+                "Configuration was upgraded automatically to match the current schema. Line numbers in any errors below refer to the upgraded configuration, not the file on disk. Run `router config upgrade` to write the upgraded configuration to a file so the two match again."
+            );
+            // Reparse the migrated document from its own serialized text rather than reusing
+            // `upgraded` directly, so `diagnostic_source` below is the same text this value
+            // was parsed from and its line numbers line up with the errors reported against it.
+            yaml = serde_yaml::from_str(&migrated_yaml).map_err(|error| {
+                ConfigurationError::InvalidConfiguration {
+                    message: "failed to parse migrated configuration",
+                    error: error.to_string(),
+                }
+            })?;
+            diagnostic_source = Cow::Owned(migrated_yaml);
         }
     }
 
     let expanded_yaml = expansion.expand(&yaml)?;
-    let parsed_yaml = super::yaml::parse(raw_yaml)?;
+    let parsed_yaml = super::yaml::parse(&diagnostic_source)?;
     {
         let mut errors_it = validator.iter_errors(&expanded_yaml).peekable();
         if errors_it.peek().is_some() {
             // Validation failed, translate the errors into something nice for the user
             // We have to reparse the yaml to get the line number information for each error.
-            let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
+            let yaml_split_by_lines = diagnostic_source.split('\n').collect::<Vec<_>>();
 
             let mut errors = String::new();
 
