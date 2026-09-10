@@ -173,8 +173,8 @@ pub(crate) fn upgrade_configuration(
     }
 
     if !effective_descriptions.is_empty() && log_warnings {
-        tracing::error!(
-            "router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n",
+        tracing::warn!(
+            "Configuration migrations applied: \n\n{}\n\n",
             effective_descriptions
                 .iter()
                 .enumerate()

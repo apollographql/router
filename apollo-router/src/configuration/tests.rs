@@ -757,6 +757,17 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
         crate::test_harness::tracing_test::logs_contain("router config upgrade"),
         "warning should point the operator at `router config upgrade`"
     );
+    crate::test_harness::tracing_test::logs_assert(|lines| {
+        if lines
+            .iter()
+            .any(|line| line.contains("WARN") && line.contains("Configuration migrations applied:"))
+        {
+            Ok(())
+        } else {
+            Err("successful migrations should be reported as a warning".to_string())
+        }
+    })
+    .unwrap();
     assert!(
         crate::test_harness::tracing_test::logs_contain(
             "refer to the upgraded configuration, not the file on disk"
