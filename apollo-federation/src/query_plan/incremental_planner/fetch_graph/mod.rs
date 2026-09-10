@@ -734,10 +734,10 @@ impl FetchGraph {
         }
         let mut buckets: Vec<Bucket> = Vec::new();
         for n in mergeable {
-            let signatures = self.graph[n]
-                .selection_builder
-                .field_signatures()
-                .unwrap_or_default();
+            let Some(signatures) = self.graph[n].selection_builder.field_signatures() else {
+                // Internal signature conflict within this node; skip merging it.
+                continue;
+            };
             let input_conditions = self.input_condition_fingerprints(n);
             let FetchGroupKind::Entity { merge_at } = &self.graph[n].kind else {
                 continue;
