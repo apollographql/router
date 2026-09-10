@@ -791,8 +791,9 @@ fn startup_rejects_configuration_still_invalid_after_migration() {
 fn startup_reports_duplicate_keys_in_a_document_that_also_migrates() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let old_config = "experimental_batching:\n  enabled: true\nsupergraph:\n  listen: 127.0.0.1:4000\nsupergraph:\n  listen: 127.0.0.1:5000\n";
-    let error = validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
-        .expect_err("duplicated keys must be rejected even when the document also migrates");
+    let error =
+        validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+            .expect_err("duplicated keys must be rejected even when the document also migrates");
     assert!(
         error
             .to_string()
