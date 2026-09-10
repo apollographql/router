@@ -108,13 +108,10 @@ pub(crate) fn validate_yaml_configuration(
         }
     });
 
-    // Text used to resolve the line numbers in schema-validation diagnostics below. Starts out as
-    // the operator's own file; replaced with the migrated document's own text once a migration
-    // actually changes something, so line numbers describe the text that was actually validated.
+    // Keep diagnostic snippets and line numbers tied to the document being validated.
     let mut diagnostic_source: Cow<str> = Cow::Borrowed(raw_yaml);
 
-    // Duplicate keys exist only in the operator's own text — serializing the migrated document
-    // collapses them — so reject them here, before a migration can replace the text below.
+    // Reject duplicate keys before serialization can collapse them.
     let parsed_raw_yaml = super::yaml::parse(raw_yaml)?;
 
     if migration == Mode::Upgrade {
@@ -128,9 +125,6 @@ pub(crate) fn validate_yaml_configuration(
             tracing::warn!(
                 "Configuration was upgraded automatically to match the current schema. Line numbers in any errors below refer to the upgraded configuration, not the file on disk. Run `router config upgrade` to write the upgraded configuration to a file so the two match again."
             );
-            // Reparse the migrated document from its own serialized text rather than reusing
-            // `upgraded` directly, so `diagnostic_source` below is the same text this value
-            // was parsed from and its line numbers line up with the errors reported against it.
             yaml = serde_yaml::from_str(&migrated_yaml).map_err(|error| {
                 ConfigurationError::MigrationFailure {
                     error: format!("failed to parse migrated configuration: {error}"),
