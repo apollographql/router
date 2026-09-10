@@ -304,9 +304,11 @@ After you generate the schema, configure your text editor. Here are the instruct
 
 New releases of the router might introduce breaking changes to the [YAML config file's](/graphos/routing/configuration/yaml) expected format, usually to extend existing functionality or improve usability.
 
-At startup and reload, the router applies available configuration migrations before validation. When a migration changes the configuration, the router warns you to update the file on disk. Validation errors then show line numbers and snippets from the migrated configuration. A configuration that still fails validation prevents startup or rejects the reload.
+At startup and reload, the router automatically applies migrations for the current major version, then validates the result. When a migration changes the configuration, the router warns you to update the file on disk. Any validation errors that follow show line numbers and snippets from the migrated configuration, not your original file.
 
-Use `router config upgrade` to print the upgraded configuration. Review the output and save it to your configuration file:
+**If you run a new version of your router with a configuration file that needs a breaking change from an earlier major version, it emits a warning on startup and terminates.**
+
+If you encounter this warning, use `router config upgrade` to print the upgraded configuration. Review the output and save it to your configuration file:
 
 ```bash
 ./router config upgrade <path_to_config.yaml>

@@ -106,7 +106,12 @@ pub(crate) fn validate_yaml_configuration(
     let parsed_raw_yaml = super::yaml::parse(raw_yaml)?;
 
     if migration == Mode::Upgrade {
-        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Major)?;
+        let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
+            .parse()
+            .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
+
+        let upgraded =
+            upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
         if upgraded != yaml {
             let migrated_yaml = serde_yaml::to_string(&upgraded).map_err(|error| {
                 ConfigurationError::MigrationFailure {

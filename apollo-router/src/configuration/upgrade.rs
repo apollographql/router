@@ -76,7 +76,6 @@ pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
     /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
-    #[allow(dead_code)]
     Minor(i64),
 }
 
@@ -123,7 +122,10 @@ pub(crate) fn upgrade_configuration(
     // Rust-side migrations for transformations that cannot be expressed as
     // YAML actions (e.g. composite keys built from two dynamic map keys).
     // These run after the YAML migrations so any preceding renames (e.g.
-    // `preview_connectors` → `connectors`) are already in place.
+    // `preview_connectors` → `connectors`) are already in place. Unlike the
+    // major-version-only YAML migrations, this is a within-2.x rename, so it
+    // must also run in `UpgradeMode::Minor` (the startup validation path) —
+    // not just `UpgradeMode::Major` (the `router config upgrade` CLI).
     let (migrated_connectors_subgraphs, subgraphs_with_unpropagated_config) =
         migrate_connectors_subgraphs_to_sources(&mut config);
     if migrated_connectors_subgraphs {
@@ -173,8 +175,8 @@ pub(crate) fn upgrade_configuration(
     }
 
     if !effective_descriptions.is_empty() && log_warnings {
-        tracing::warn!(
-            "Configuration migrations applied: \n\n{}\n\n",
+        tracing::error!(
+            "router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n",
             effective_descriptions
                 .iter()
                 .enumerate()

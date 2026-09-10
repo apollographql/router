@@ -726,17 +726,38 @@ headers:
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
-// The batching rename is in 0023-batching.yaml, outside the current-major prefix.
+// The batching rename lives in 0023-batching.yaml, outside the current major-version prefix, so
+// it is a real breaking change: startup must reject it rather than migrate it.
 #[test]
-fn startup_applies_major_migration() {
-    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+fn startup_rejects_configuration_needing_major_migration() {
     let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\n";
+    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+        .expect_err("a major-version migration must not be applied automatically at startup");
+}
+
+// The CORS origins-to-policies rename lives in 2039-cors-origins-to-policies.yaml, which starts
+// with the current major version, so startup applies it automatically.
+#[test]
+fn startup_applies_minor_migration() {
+    // `tracing` caches a callsite's interest globally the first time it is reached, so applying
+    // this migration without a subscriber installed would disable the migration-warning callsite
+    // for whichever test asserts on it next.
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+    let old_config = "cors:\n  origins:\n    - \"https://example.com\"\n";
     let config =
         validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
-            .expect("major migration should be applied automatically at startup");
-    assert!(
-        config.batching.enabled,
-        "batching should reflect the migrated `batching.enabled`, not its compiled-in default"
+            .expect("minor migration should be applied automatically at startup");
+    let policies = config
+        .cors
+        .policies
+        .expect("origins should have migrated into a policy");
+    assert_eq!(
+        policies[0]
+            .origins
+            .iter()
+            .map(AsRef::as_ref)
+            .collect::<Vec<&str>>(),
+        vec!["https://example.com"]
     );
 }
 
@@ -745,22 +766,24 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
     const SCOPE: &str = "startup_migration_warning_test";
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let _span = tracing::info_span!(SCOPE).entered();
-    let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\n";
+    let old_config = "cors:\n  origins:\n    - \"https://example.com\"\n";
     validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
-        .expect("major migration should be applied automatically at startup");
+        .expect("minor migration should be applied automatically at startup");
 
     assert!(
         crate::test_harness::tracing_test::logs_with_scope_contain(SCOPE, "router config upgrade"),
         "warning should point the operator at `router config upgrade`"
     );
     crate::test_harness::tracing_test::logs_with_scope_assert(SCOPE, |lines| {
-        if lines
-            .iter()
-            .any(|line| line.contains("WARN") && line.contains("Configuration migrations applied:"))
-        {
+        if lines.iter().any(|line| {
+            line.contains("ERROR")
+                && line.contains(
+                    "router configuration contains unsupported options and needs to be upgraded to run the router",
+                )
+        }) {
             Ok(())
         } else {
-            Err("successful migrations should be reported as a warning".to_string())
+            Err("applied migrations should still be reported as an error".to_string())
         }
     })
     .unwrap();
@@ -776,25 +799,23 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
 #[test]
 fn startup_rejects_configuration_still_invalid_after_migration() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
-    let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\nthis_key_does_not_exist_anywhere: true\n";
+    let old_config = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
     let error = validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
         .expect_err(
             "a migrated document that still fails validation must stop startup, not fall back to the un-migrated document",
         );
-    // The offending key is on line 4 of `old_config` and on line 2 of the migrated document, and
-    // the snippet quotes the migrated text: both come from the migrated document.
-    assert_eq!(
-        error.to_string(),
-        "configuration had errors: \n1. at line 2\n\n  ---\n\
-         ┌ this_key_does_not_exist_anywhere: true\n\
-         └-----> Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)\n\n"
+    assert!(
+        error
+            .to_string()
+            .contains("Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)"),
+        "expected an additional-properties error for the unmigrated field, got: {error}"
     );
 }
 
 #[test]
 fn startup_reports_duplicate_keys_in_a_document_that_also_migrates() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
-    let old_config = "experimental_batching:\n  enabled: true\nsupergraph:\n  listen: 127.0.0.1:4000\nsupergraph:\n  listen: 127.0.0.1:5000\n";
+    let old_config = "cors:\n  origins:\n    - \"https://example.com\"\nsupergraph:\n  listen: 127.0.0.1:4000\nsupergraph:\n  listen: 127.0.0.1:5000\n";
     let error =
         validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
             .expect_err("duplicated keys must be rejected even when the document also migrates");

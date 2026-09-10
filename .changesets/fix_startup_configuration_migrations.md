@@ -1,5 +1,7 @@
-### Apply configuration migrations at startup and reload
+### Configuration that still fails validation after a startup migration no longer runs
 
-The router now applies major-version migrations at startup and reload, including renaming `experimental_batching` to `batching`. When a migration changes the configuration, run `router config upgrade` and save the reviewed output to update your file on disk. Validation errors refer to the migrated configuration's line numbers and snippets. Configuration that remains invalid after migration prevents startup or rejects the reload.
+When a startup migration changed a configuration file but the result still failed validation, the router previously fell back to running on the original, un-migrated file. It now reports the validation error instead, so the router never starts on configuration you were already warned to stop using.
+
+When a startup migration changes the configuration, the router now also warns that any validation error line numbers and snippets refer to the migrated document, not the file on disk. Running `router config upgrade` and saving its output keeps the two in sync.
 
 By [@BrynCooke](https://github.com/BrynCooke)

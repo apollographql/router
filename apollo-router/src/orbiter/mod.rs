@@ -315,6 +315,7 @@ mod test {
     use serde_json::json;
 
     use crate::Configuration;
+    use crate::configuration::ConfigurationError;
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
@@ -360,10 +361,22 @@ mod test {
 
     #[test]
     fn test_visit_config_that_needed_upgrade() {
-        // Use false to distinguish the migrated value from defer_support's default of true.
-        let config = Configuration::from_str("supergraph:\n  preview_defer_support: false")
-            .expect("legacy config should be migrated and accepted at startup");
-        assert!(!config.supergraph.defer_support);
+        // preview_defer_support moved to defer_support in 0004-defer_support_ga.yaml, a
+        // major-version migration, so startup must reject it rather than migrate it.
+        let result = Configuration::from_str("supergraph:\n  preview_defer_support: true")
+            .expect_err("major migration should not be applied at startup");
+        match result {
+            ConfigurationError::InvalidConfiguration { message, error } => {
+                assert_eq!(message, "configuration had errors");
+                assert!(
+                    error.contains(
+                        "Additional properties are not allowed ('preview_defer_support' was unexpected)"
+                    ),
+                    "expected an additional-properties error for the unmigrated field, got: {error}"
+                );
+            }
+            other => panic!("expected InvalidConfiguration, got {other:?}"),
+        }
     }
 
     #[test]
