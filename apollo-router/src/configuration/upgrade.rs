@@ -123,10 +123,7 @@ pub(crate) fn upgrade_configuration(
     // Rust-side migrations for transformations that cannot be expressed as
     // YAML actions (e.g. composite keys built from two dynamic map keys).
     // These run after the YAML migrations so any preceding renames (e.g.
-    // `preview_connectors` → `connectors`) are already in place. Unlike the
-    // YAML migrations above, which `UpgradeMode` filters by version prefix,
-    // this fixes a within-2.x rename and so runs unconditionally: it must
-    // still apply when the caller passes `UpgradeMode::Minor`.
+    // `preview_connectors` → `connectors`) are already in place.
     let (migrated_connectors_subgraphs, subgraphs_with_unpropagated_config) =
         migrate_connectors_subgraphs_to_sources(&mut config);
     if migrated_connectors_subgraphs {
