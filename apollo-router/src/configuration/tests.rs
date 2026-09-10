@@ -771,10 +771,18 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
 fn startup_rejects_configuration_still_invalid_after_migration() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\nthis_key_does_not_exist_anywhere: true\n";
-    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+    let error = validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
         .expect_err(
             "a migrated document that still fails validation must stop startup, not fall back to the un-migrated document",
         );
+    // The offending key is on line 4 of `old_config` and on line 2 of the migrated document, and
+    // the snippet quotes the migrated text: both come from the migrated document.
+    assert_eq!(
+        error.to_string(),
+        "configuration had errors: \n1. at line 2\n\n  ---\n\
+         ┌ this_key_does_not_exist_anywhere: true\n\
+         └-----> Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)\n\n"
+    );
 }
 
 // Duplicate keys exist only in the operator's own text: serializing the migrated document
