@@ -743,21 +743,20 @@ fn startup_applies_major_migration() {
     );
 }
 
-// Every sibling test that migrates a document installs the same guard: `tracing` caches a
-// callsite's interest globally the first time it is reached, so a test reaching this warning with
-// no subscriber installed leaves it disabled for whichever test runs next and asserts on it.
 #[test]
 fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
+    const SCOPE: &str = "startup_migration_warning_test";
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+    let _span = tracing::info_span!(SCOPE).entered();
     let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\n";
     validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
         .expect("major migration should be applied automatically at startup");
 
     assert!(
-        crate::test_harness::tracing_test::logs_contain("router config upgrade"),
+        crate::test_harness::tracing_test::logs_with_scope_contain(SCOPE, "router config upgrade"),
         "warning should point the operator at `router config upgrade`"
     );
-    crate::test_harness::tracing_test::logs_assert(|lines| {
+    crate::test_harness::tracing_test::logs_with_scope_assert(SCOPE, |lines| {
         if lines
             .iter()
             .any(|line| line.contains("WARN") && line.contains("Configuration migrations applied:"))
@@ -769,7 +768,8 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
     })
     .unwrap();
     assert!(
-        crate::test_harness::tracing_test::logs_contain(
+        crate::test_harness::tracing_test::logs_with_scope_contain(
+            SCOPE,
             "refer to the upgraded configuration, not the file on disk"
         ),
         "warning should explain that diagnostic line numbers now refer to the migrated document"
