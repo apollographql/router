@@ -401,6 +401,45 @@ where
 }
 
 #[inline]
+/// Emit a `subgraph.request` log event with the standard attribute set, shared by the HTTP
+/// subgraph-request path and the WebSocket subscription path so the two log shapes stay in sync.
+/// The caller supplies the already-formatted `headers` and `body` strings (the two paths format
+/// them differently — and `headers` is masked per the request's masking rules before being passed
+/// in) plus the human-readable `message`.
+pub(crate) fn log_subgraph_request_event(
+    level: EventLevel,
+    service_name: &str,
+    headers: String,
+    method: &http::Method,
+    version: http::Version,
+    body: String,
+    message: &str,
+) {
+    let attributes = vec![
+        KeyValue::new(
+            opentelemetry::Key::from_static_str("http.request.headers"),
+            opentelemetry::Value::String(headers.into()),
+        ),
+        KeyValue::new(
+            opentelemetry::Key::from_static_str("http.request.method"),
+            opentelemetry::Value::String(format!("{method}").into()),
+        ),
+        KeyValue::new(
+            opentelemetry::Key::from_static_str("http.request.version"),
+            opentelemetry::Value::String(format!("{version:?}").into()),
+        ),
+        KeyValue::new(
+            opentelemetry::Key::from_static_str("http.request.body"),
+            opentelemetry::Value::String(body.into()),
+        ),
+        KeyValue::new(
+            opentelemetry::Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service_name.to_string().into()),
+        ),
+    ];
+    log_event(level, "subgraph.request", attributes, message);
+}
+
 pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>, message: &str) {
     let span = Span::current();
     #[cfg(test)]

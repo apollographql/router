@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
-assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryover.graphql
 ---
@@ -349,6 +348,13 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            List(
+                Named(
+                    "T",
+                ),
+            ),
+        ),
         label: Label(
             "one.json http: GET /t",
         ),
@@ -756,6 +762,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "T",
+            ),
+        ),
         label: Label(
             "one.json http: GET /t/{$args.id}",
         ),
@@ -938,6 +949,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/carryov
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "R",
+            ),
+        ),
         label: Label(
             "one.json http: GET /t/{$this.id}/r",
         ),

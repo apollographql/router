@@ -409,6 +409,27 @@ mod tests {
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
+    /// `->withError` has to be reachable from a connector schema, and the
+    /// `is_public()` gate that decides so cannot be observed from
+    /// apollo-federation's own tests: `ArrowMethod::lookup` resolves every
+    /// method under `cfg!(test)`, public or not. Here apollo-federation is a
+    /// dependency compiled without `--test`, so the gate is live and demoting
+    /// `->withError` back to the `future` namespace fails this test.
+    #[test]
+    fn with_error_is_available_to_connector_schemas() {
+        let selection =
+            JSONSelection::parse("id status: code->withError('unrecognized type code')").unwrap();
+
+        let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
+
+        // The value flows through untouched: ->withError records, never rewrites.
+        assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
+        assert_eq!(
+            errors.iter().map(|error| error.message()).collect_vec(),
+            vec!["unrecognized type code"],
+        );
+    }
+
     #[test]
     fn from_runtime_error_transfers_span_event_emitted_flag() {
         let response_key = ResponseKey::RootField {
@@ -466,6 +487,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -581,6 +603,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -697,6 +720,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -824,6 +848,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -955,6 +980,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1240,6 +1266,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1338,6 +1365,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings,
+            output_type: None,
             label: Label::from("test label"),
         });
 
@@ -1446,6 +1474,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         })
     }
@@ -1586,6 +1615,7 @@ mod tests {
                 source_extensions: None,
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1716,6 +1746,7 @@ mod tests {
                 source_extensions: None,
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1821,6 +1852,7 @@ mod tests {
                 ),
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
+            output_type: None,
             label: "test label".into(),
         });
 

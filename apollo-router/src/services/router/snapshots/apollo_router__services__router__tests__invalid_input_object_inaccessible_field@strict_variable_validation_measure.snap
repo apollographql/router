@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/services/router/tests.rs
+expression: response
+---
+{
+  "errors": [
+    {
+      "message": "unknown field input value at `$input.internalNotes` found for GraphQL type `RegisterPartnerInput!`",
+      "extensions": {
+        "name": "input",
+        "code": "VALIDATION_INVALID_TYPE_VARIABLE"
+      }
+    }
+  ]
+}

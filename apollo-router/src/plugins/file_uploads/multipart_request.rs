@@ -68,6 +68,29 @@ impl Drop for MultipartRequestState {
     }
 }
 
+/// The budget for multer's `whole_stream` limit, which is the only limit that bounds the bytes
+/// the parser buffers outside of field content: the preamble, per-part header blocks, boundary
+/// delimiters and transport padding. multer's per-field limits count content bytes only, so
+/// without this those regions are unbounded and a single request can exhaust router memory.
+///
+/// The budget is the content the other limits already permit, plus `max_overhead_size`. multer
+/// cannot tell a framing byte from a content byte, so the two cannot be limited separately. See
+/// `max_overhead_size` in config.rs for what this does and does not guarantee.
+///
+/// The arithmetic saturates. `max_files * max_file_size` overflows `u64` for limits operators
+/// really write, because `max_file_size` is often set in gigabytes.
+///
+/// A saturated budget is `u64::MAX`, which is not a sentinel for "no limit". multer tests
+/// `bytes_pulled > limit`, so the test never passes and the limit stops working. Only an absurd
+/// configuration saturates. The unit tests below pin both halves: `large.router.yaml`-scale limits
+/// must not saturate, and extreme ones must degrade to no limit rather than wrap to a tiny budget.
+fn whole_stream_size_limit(limits: &MultipartRequestLimits, operations_size_limit: u64) -> u64 {
+    operations_size_limit
+        .saturating_add(MAP_SIZE_LIMIT)
+        .saturating_add((limits.max_files as u64).saturating_mul(limits.max_file_size.as_u64()))
+        .saturating_add(limits.max_overhead_size.as_u64())
+}
+
 impl MultipartRequest {
     pub(super) fn new(
         request_body: RouterBody,
@@ -80,6 +103,7 @@ impl MultipartRequest {
             boundary,
             Constraints::new().size_limit(
                 SizeLimit::new()
+                    .whole_stream(whole_stream_size_limit(&limits, operations_size_limit))
                     .for_field("map", MAP_SIZE_LIMIT)
                     .for_field("operations", operations_size_limit),
             ),
@@ -275,5 +299,59 @@ where
             Poll::Ready(None) => self.poll_next_field(cx),
             _ => field_result,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytesize::ByteSize;
+
+    use super::*;
+    use crate::plugins::limits::RouterLimitsConfig;
+
+    /// The value the router passes as `operations_size_limit` for a default configuration.
+    fn default_operations_size_limit() -> u64 {
+        RouterLimitsConfig::default().http_max_request_bytes as u64
+    }
+
+    #[test]
+    fn whole_stream_budget_sums_the_configured_limits() {
+        let limits = MultipartRequestLimits::default();
+
+        assert_eq!(
+            whole_stream_size_limit(&limits, default_operations_size_limit()),
+            // http_max_request_bytes + map cap + max_files * max_file_size + max_overhead_size
+            default_operations_size_limit() + MAP_SIZE_LIMIT + 5 * 1_000_000 + 2_000_000,
+        );
+    }
+
+    /// An absurd configuration must degrade to "effectively unlimited" rather than panicking in
+    /// debug or wrapping around to a tiny budget in release. `u64::MAX` is not a sentinel in multer
+    /// — it is just a threshold `bytes_pulled > limit` can never cross — so this is a documented
+    /// loss of enforcement, not a special case.
+    #[test]
+    fn whole_stream_budget_saturates_instead_of_overflowing() {
+        let limits = MultipartRequestLimits {
+            max_files: usize::MAX,
+            max_file_size: ByteSize::b(u64::MAX),
+            ..MultipartRequestLimits::default()
+        };
+
+        assert_eq!(whole_stream_size_limit(&limits, u64::MAX), u64::MAX);
+    }
+
+    /// A large-but-real configuration must not saturate, or the limit silently stops applying.
+    #[test]
+    fn whole_stream_budget_does_not_saturate_for_realistic_large_limits() {
+        // Matches tests/fixtures/file_upload/large.router.yaml.
+        let limits = MultipartRequestLimits {
+            max_files: 10,
+            max_file_size: ByteSize::gb(15),
+            ..MultipartRequestLimits::default()
+        };
+
+        let budget = whole_stream_size_limit(&limits, default_operations_size_limit());
+        assert!(budget < u64::MAX);
+        assert!(budget > 150_000_000_000);
     }
 }

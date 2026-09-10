@@ -334,7 +334,7 @@ impl CachingConditionResolver for TopLevelConditionResolver {
     }
 
     fn resolve_without_cache(
-        &self,
+        &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
@@ -348,6 +348,7 @@ impl CachingConditionResolver for TopLevelConditionResolver {
             excluded_destinations,
             excluded_conditions,
             extra_conditions,
+            &mut self.condition_resolver_cache,
         )
     }
 }

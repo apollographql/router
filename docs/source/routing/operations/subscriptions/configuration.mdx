@@ -305,6 +305,26 @@ This example subscription only emits three events and then directly closes the c
 
 For more information on this multipart HTTP subscription protocol, see [this article](/router/executing-operations/subscription-multipart-protocol/).
 
+## Network path considerations for client connections
+
+Configure every proxy, CDN, gateway, and firewall between the client and Router to enable long-lived streaming responses. Subscription replies aren't one-time HTTP responses. Router holds the connection open and pushes events back as a multipart stream over the same HTTP request the client opened. Any hop that buffers responses, enforces a short idle or response timeout, or silently breaks the response path closes the connection before the client receives subscription events.
+
+Every hop in that path needs three things:
+
+- Streaming, unbuffered responses
+- Idle, read, or response timeouts long enough to cover the longest subscription you support
+- A symmetric path between Router and the client
+
+A reverse proxy that buffers the full response before forwarding it (the default for many proxies) holds subscription events instead of streaming them. When the proxy's response timeout fires, the proxy closes the connection, and the client sees a 504 with no payload. Configure each proxy in the path to forward chunked responses without buffering. To verify, run the [`curl` walkthrough](#trying-subscriptions-with-curl) against Router through the same network path and confirm that response chunks arrive incrementally rather than in one batch when the connection closes.
+
+A common timeout issue is the idle timeout, but any equivalent read, response, or connection-drain timeout on each hop has the same effect. Defaults vary widely by provider (often a minute or less, but some platforms default higher), so check each hop's documentation rather than relying on a global rule. Set every relevant timeout to be longer than the longest subscription you support. If you've set [`max_lifetime`](#limit-subscription-lifetime), use that value as the lowest value.
+
+When a corporate firewall, VPC security group, or asymmetric routing policy disrupts the path between Router and the client, Router accepts the subscription request, but the response stream might not return to the client. The diagnostic looks identical to a buffering or timeout failure (504 at the client with no router-side metric event). Include path-asymmetry checks in your investigation when you can't identify more common causes.
+
+Use the [`apollo.router.operations.subscriptions.terminated.client`](#tracking-subgraph-connection-failures-and-closures) metric as the primary diagnostic split. When the metric fires for the failing subscription (with `reason=heartbeat_delivery_failed` or `client_disconnect`), Router has observed the disconnect itself. The failure is at the router-to-client boundary or on the client. When the metric doesn't fire and the client still sees a 504, an intermediary might have closed the connection without Router seeing it. Check the proxy, gateway, and firewall logs first.
+
+If 504s persist after you have configured every hop for streaming and made sure the timeouts cover the expected lifetime, the metric tells you what side of the router boundary to investigate next.
+
 ## Subscription deduplication
 
 **By default, the router deduplicates identical subscriptions.** This can dramatically reduce load on both your router and your subgraphs, because the router doesn't need to open a new connection if an existing connection is already handling the exact same subscription.
@@ -484,6 +504,49 @@ If [subscription deduplication](#subscription-deduplication) is enabled (the def
 subscription are closed when the lifetime expires, not just the first client to reach the limit.                                  
                                                                                                                              
 </Note>
+
+### Reconnect on subgraph connection drop
+
+By default, if the WebSocket connection between the router and a subgraph drops unexpectedly, the subscription ends and the client receives no further events. You can configure Apollo Router to automatically reconnect to the subgraph and resume forwarding events using `max_reconnect_attempts` and `reconnect_delay`. These are part of the per-subgraph passthrough WebSocket configuration: set them under `all` to apply to every subgraph, or under a specific entry in `subgraphs` to override per subgraph.
+
+```yaml title="router.yaml"
+subscription:
+  enabled: true
+  mode:
+    passthrough:
+      all:
+        #highlight-start
+        max_reconnect_attempts: 5   # retry up to 5 times on connection drop. Default: 0 (no reconnection)
+        reconnect_delay: 2s         # wait between each attempt. Default: 1s
+        #highlight-end
+      subgraphs:
+        # Override for a single subgraph
+        products:
+          max_reconnect_attempts: 10
+          reconnect_delay: 500ms
+```
+
+When the subgraph WebSocket connection drops and reconnection is configured, the router re-establishes the connection and re-sends the original subscription request transparently, client subscriptions remain open during the reconnect window and resume receiving events once the connection is restored. Each reconnect attempt increments the `apollo.router.operations.subscriptions.reconnect` counter (labeled with `subgraph.name`). If all retry attempts are exhausted, the router forwards the final transport error to the client (so a failed subscription is distinguishable from a normal completion), terminates the subscription, and increments the `apollo.router.operations.subscriptions.terminated.subgraph` metric.
+
+When `max_reconnect_attempts > 0`, intermediate closures that are recovered by a successful reconnect do not increment `apollo.router.operations.subscriptions.terminated.subgraph` — only the final closure that ends the subscription does. Existing dashboards or alerts on that metric should be reviewed when enabling reconnection.
+
+Reconnection only applies to WebSocket passthrough mode. Callback-mode subscriptions are unaffected.
+
+<Note>
+
+Reconnection re-establishes the _subgraph_ WebSocket connection. Client connections are not interrupted during a reconnect window, but any events that the subgraph would have emitted while the connection was down are lost.
+
+</Note>
+
+#### Retry budget
+
+`max_reconnect_attempts` is a **per-disconnect budget, not a lifetime total**. When a reconnected connection stays open long enough to be considered stable and then drops again, the budget refreshes and the subscription gets a fresh set of attempts. This means a long-lived subscription against a subgraph that periodically drops a healthy connection can be reconnected to more than `max_reconnect_attempts` times over its lifetime. Only rapid flapping — a subgraph that drops faster than the stability window on each attempt — exhausts the budget and ends the subscription. If you need a hard ceiling on how long a subscription can run, use `max_lifetime`.
+
+The stability threshold is `5 × reconnect_delay`, clamped to between 500 ms and 60 seconds. For example, with the default `reconnect_delay: 1s`, a connection must stay open at least 5 seconds to be considered stable and reset the budget. With `reconnect_delay: 10s`, the threshold rises to 50 seconds. Beyond `reconnect_delay: 12s` the threshold is capped at 60 seconds, so a large reconnect delay never demands an impractically long stable period before the budget can refresh. A subgraph that accepts the handshake but drops the connection more quickly than this threshold is treated as flapping and continues to consume the current budget.
+
+#### Authentication and reconnection
+
+When reconnecting, the router reuses the `connectionParams` (including any propagated `Authorization` token) captured when the subscription **first started** — it does not re-run header propagation per attempt. If your subgraph requires short-lived, per-connection credentials, a reconnect made after the original token has expired may be rejected by the subgraph, and the subscription will end once attempts are exhausted. Request signing such as [AWS SigV4](#websocket-auth-support) is re-applied on each reconnect, so signed requests always use freshly resolved credentials.
 
 ### WebSocket auth support
 

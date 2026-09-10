@@ -37,7 +37,7 @@ impl ParsedLinkSpec {
                 );
                 let version_string = segments.next()?.strip_prefix('v')?;
                 let parsed_version =
-                    semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
+                    semver::Version::parse(format!("{}.0", version_string).as_str()).ok()?;
 
                 let imported_as = link_directive
                     .specified_argument_by_name(LINK_AS_ARGUMENT)
@@ -73,7 +73,7 @@ impl ParsedLinkSpec {
         );
         let version_string = segments.next()?.strip_prefix('v')?;
         let parsed_version =
-            semver::Version::parse(format!("{}.0", &version_string).as_str()).ok()?;
+            semver::Version::parse(format!("{}.0", version_string).as_str()).ok()?;
 
         let imported_as = args
             .iter()

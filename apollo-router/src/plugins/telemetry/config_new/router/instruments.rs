@@ -131,11 +131,8 @@ impl Instrumented for RouterInstruments {
         if let Some(router_overhead) = &self.router_overhead {
             router_overhead.on_request(request);
         }
-        if let Some(subscriptions_terminated_counter) = &self.subscriptions_terminated {
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(subscriptions_terminated_counter.clone()));
+        if let Some(subscriptions_terminated) = &self.subscriptions_terminated {
+            subscriptions_terminated.on_request(request);
         }
         self.custom.on_request(request);
     }
@@ -156,6 +153,9 @@ impl Instrumented for RouterInstruments {
         if let Some(router_overhead) = &self.router_overhead {
             router_overhead.on_response(response);
         }
+        if let Some(subscriptions_terminated) = &self.subscriptions_terminated {
+            subscriptions_terminated.on_response(response);
+        }
         self.custom.on_response(response);
     }
 
@@ -174,6 +174,9 @@ impl Instrumented for RouterInstruments {
         }
         if let Some(router_overhead) = &self.router_overhead {
             router_overhead.on_error(error, ctx);
+        }
+        if let Some(subscriptions_terminated) = &self.subscriptions_terminated {
+            subscriptions_terminated.on_error(error, ctx);
         }
         self.custom.on_error(error, ctx);
     }

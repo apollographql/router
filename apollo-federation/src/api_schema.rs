@@ -6,6 +6,7 @@ use apollo_compiler::schema::DirectiveLocation;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::ty;
 
+use crate::compat::coerce_and_validate_schema_values;
 use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::schema::FederationSchema;
@@ -150,6 +151,7 @@ pub(crate) fn to_api_schema(
 
     crate::compat::make_print_schema_compatible(&mut schema);
 
+    coerce_and_validate_schema_values(&mut schema)?;
     ValidFederationSchema::new(schema.validate()?)
 }
 

@@ -111,7 +111,7 @@ impl QueryPlanningParameters<'_> {
     }
 }
 
-pub(crate) struct QueryPlanningTraversal<'a, 'b> {
+pub(crate) struct QueryPlanningTraversal<'a: 'b, 'b> {
     /// The parameters given to query planning.
     parameters: &'a QueryPlanningParameters<'b>,
     /// The root kind of the operation.
@@ -142,7 +142,7 @@ pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     best_plan: Option<BestQueryPlanInfo>,
     /// The cache for condition resolution.
     // PORT_NOTE: This is different from JS version. See `ConditionResolver` trait implementation below.
-    resolver_cache: ConditionResolverCache,
+    resolver_cache: &'a mut ConditionResolverCache,
 }
 
 struct PlanInfo {
@@ -206,6 +206,8 @@ pub(crate) fn convert_type_from_subgraph(
 }
 
 impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
+    // Many arguments is okay for a crate-private constructor function.
+    #[allow(clippy::too_many_arguments)]
     #[cfg_attr(
         feature = "snapshot_tracing",
         tracing::instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new")
@@ -222,6 +224,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         cost_processor: FetchDependencyGraphToCostProcessor,
         non_local_selection_state: Option<&mut non_local_selections_estimation::State>,
         initial_subgraph_constraint: Option<Arc<str>>,
+        resolver_cache: &'a mut ConditionResolverCache,
     ) -> Result<Self, FederationError> {
         Self::new_inner(
             parameters,
@@ -235,6 +238,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             Default::default(),
             Default::default(),
             Default::default(),
+            resolver_cache,
         )
     }
 
@@ -256,6 +260,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         initial_context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
+        resolver_cache: &'a mut ConditionResolverCache,
     ) -> Result<Self, FederationError> {
         let is_top_level = parameters.head_must_be_root;
 
@@ -295,7 +300,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             open_branches: Default::default(),
             closed_branches: Default::default(),
             best_plan: None,
-            resolver_cache: ConditionResolverCache::new(),
+            resolver_cache,
         };
 
         let initial_options = create_initial_options(
@@ -1125,7 +1130,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn resolve_condition_plan(
-        &self,
+        &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
@@ -1171,6 +1176,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),
+            self.resolver_cache,
         )?
         .find_best_plan()?;
         match best_plan_opt {
@@ -1236,17 +1242,17 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
     }
 }
 
-impl CachingConditionResolver for QueryPlanningTraversal<'_, '_> {
+impl<'a: 'b, 'b> CachingConditionResolver for QueryPlanningTraversal<'a, 'b> {
     fn query_graph(&self) -> &QueryGraph {
         &self.parameters.federated_query_graph
     }
 
     fn resolver_cache(&mut self) -> &mut ConditionResolverCache {
-        &mut self.resolver_cache
+        self.resolver_cache
     }
 
     fn resolve_without_cache(
-        &self,
+        &mut self,
         edge: EdgeIndex,
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,

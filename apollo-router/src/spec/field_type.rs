@@ -1,5 +1,3 @@
-use std::iter::once;
-
 use apollo_compiler::Name;
 use apollo_compiler::schema;
 use serde::Deserialize;
@@ -206,10 +204,13 @@ fn validate_input_value(
         _ => {}
     }
     let type_def = schema
-        .supergraph_schema()
+        .api_schema()
         .types
         .get(type_name)
-        // Should never happen in a valid schema
+        // Missing from the API schema: either an invalid schema, or the type is
+        // entirely `@inaccessible`. Either way, treat it like any other invalid value
+        // rather than falling back to the supergraph schema, which would leak
+        // `@inaccessible` structure to the client.
         .ok_or_else(invalid)?;
     match (type_def, value) {
         // Custom scalar: accept any JSON value
@@ -221,6 +222,15 @@ fn validate_input_value(
         (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
         (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
+            // Extract the supergraph type definition so we can distinguish between unknown and inaccessible inputs
+            let supergraph_type_def_fields = schema
+                .supergraph_schema()
+                .types
+                .get(type_name)
+                .ok_or_else(invalid)?
+                .as_input_object()
+                .map(|x| &x.fields);
+
             // Check for extra/unknown fields in obj vs def
             let unknown_field = |field_name| {
                 let path_string = JsonValuePath::ObjectKey {
@@ -228,29 +238,39 @@ fn validate_input_value(
                     parent: path,
                 };
                 InvalidInputValue(format!(
-                    "unknown field {} found for GraphQL type `{def}`",
+                    "unknown field {} found for GraphQL type `{ty}`",
                     fmt_path(&path_string),
                 ))
             };
 
-            let mut unknown_input_fields = obj
+            let unknown_input_fields_iter = obj
                 .keys()
                 .map(|k| k.as_str())
+                // filter to fields which are not present in the API schema
                 .filter(|&k| !def.fields.contains_key(k));
-            if let Some(unknown_input_field) = unknown_input_fields.next() {
-                match strict_variable_validation {
-                    Mode::Enforce => {
-                        return Err(unknown_field(unknown_input_field));
-                    }
-                    Mode::Measure => {
-                        let unknown_fields: Vec<&str> = once(unknown_input_field)
-                            .chain(unknown_input_fields)
-                            .collect();
-                        // NB: warning will be attached to the span via trace id, so you can figure out
-                        //  operation name from parent span
-                        tracing::warn!(variables = ?unknown_fields, "encountered unexpected variable(s)");
-                    }
+
+            let mut unknown_input_fields = Vec::new();
+
+            for input_field in unknown_input_fields_iter {
+                let present_in_supergraph_schema =
+                    supergraph_type_def_fields.is_some_and(|f| f.contains_key(input_field));
+
+                // outright reject fields which are present_in_supergraph_schema and NOT present in API schema - those are @inaccessible
+                if present_in_supergraph_schema {
+                    return Err(unknown_field(input_field));
                 }
+
+                // if not present in supergraph schema, the field is entirely unknown - respect the strict_variable_validation setting
+                match strict_variable_validation {
+                    Mode::Enforce => return Err(unknown_field(input_field)),
+                    Mode::Measure => unknown_input_fields.push(input_field.to_string()),
+                }
+            }
+
+            if !unknown_input_fields.is_empty() {
+                // NB: warning will be attached to the span via trace id, so you can figure out
+                //  operation name from parent span
+                tracing::warn!(variables = ?unknown_input_fields, "encountered unexpected variable(s)");
             }
 
             // Validate all fields present on def

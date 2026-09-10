@@ -48,7 +48,10 @@ fn traverse_json_value<'a>(value: &'a JsonValue, path: &[&str]) -> Option<&'a Js
 // - `None` for null, missing, or unsupported value types
 fn infer_size_from_argument(value: Option<&AstValue>, variables: &Object) -> Option<i32> {
     match value? {
-        AstValue::Int(n) => n.try_to_i32().ok(),
+        // A slicing argument is a count of elements, so it can never be negative. Clamp to a
+        // non-negative lower bound: a negative value would otherwise contribute negative cost
+        // and deflate the estimate below what the operation actually costs.
+        AstValue::Int(n) => n.try_to_i32().ok().map(|n| n.max(0)),
         AstValue::List(items) => Some(items.len() as i32),
         AstValue::Variable(var_name) => infer_size_from_variable(variables.get(var_name.as_str())),
         _ => None,
@@ -59,7 +62,8 @@ fn infer_size_from_argument(value: Option<&AstValue>, variables: &Object) -> Opt
 fn infer_size_from_variable(value: Option<&JsonValue>) -> Option<i32> {
     match value? {
         JsonValue::Array(items) => Some(items.len() as i32),
-        other => other.as_i32(),
+        // Clamp to a non-negative lower bound for the same reason as literal integer arguments.
+        other => other.as_i32().map(|n| n.max(0)),
     }
 }
 
@@ -414,7 +418,8 @@ mod tests {
         #[rstest::rstest]
         #[case::integer_value(json!(42), Some(42))]
         #[case::zero(json!(0), Some(0))]
-        #[case::negative_integer(json!(-5), Some(-5))]
+        // A negative count is clamped to zero so it cannot contribute negative cost.
+        #[case::negative_integer_clamped_to_zero(json!(-5), Some(0))]
         #[case::array_with_items(json!(["a", "b", "c"]), Some(3))]
         #[case::empty_array(json!([]), Some(0))]
         #[case::null_value(json!(null), None)]
@@ -450,7 +455,8 @@ mod tests {
         #[rstest::rstest]
         #[case::integer_10("10", Some(10))]
         #[case::integer_0("0", Some(0))]
-        #[case::negative("-5", Some(-5))]
+        // A negative slicing count is clamped to zero so it cannot contribute negative cost.
+        #[case::negative_clamped_to_zero("-5", Some(0))]
         fn integer_values(#[case] input: &str, #[case] expected: Option<i32>) {
             let value = AstValue::Int(IntValue::new_parsed(input));
             assert_eq!(
@@ -473,6 +479,7 @@ mod tests {
 
         #[rstest::rstest]
         #[case::resolves_to_int("count", json!(5), Some(5))]
+        #[case::resolves_to_negative_int_clamped("count", json!(-10), Some(0))]
         #[case::resolves_to_array("ids", json!(["x", "y", "z"]), Some(3))]
         #[case::resolves_to_empty_array("empty", json!([]), Some(0))]
         #[case::resolves_to_null("nullval", json!(null), None)]

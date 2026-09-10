@@ -73,8 +73,11 @@ use crate::plugins::response_cache::cache_key::hash_query;
 use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeyContext;
 use crate::plugins::response_cache::debugger::CacheKeySource;
+use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::debugger::add_cache_key_to_context;
 use crate::plugins::response_cache::debugger::add_cache_keys_to_context;
+use crate::plugins::response_cache::debugger::add_cdn_invalidation_debug_to_context;
+use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheEntry;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -98,16 +101,31 @@ pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo::response_cache::key";
 /// Context key to enable support of debugger
 pub(crate) const CONTEXT_DEBUG_CACHE_KEYS: &str = "apollo::response_cache::debug_cached_keys";
+/// Context key for CDN invalidation header debug info. Only set (once per response) when
+/// `cdn_invalidation.enabled` is true and `debug` is true; see `CdnInvalidationDebug`.
+pub(crate) const CONTEXT_DEBUG_CDN_INVALIDATION: &str =
+    "apollo::response_cache::debug_cdn_invalidation";
+/// Context key stashing whether *this specific request* asked for cache debug info (config-level
+/// `debug` AND the `CACHE_DEBUG_HEADER_NAME` header), set by a `map_request` step in
+/// `supergraph_service` so its `map_response` step can read it. Unlike the per-entry
+/// `CONTEXT_DEBUG_CACHE_KEYS` (which only ever contains data when `CacheService`, deeper in the
+/// stack, already decided per-request whether to populate it), CDN header debug info is built
+/// entirely within `supergraph_service`'s own `map_response`, which has no other way to see the
+/// original request's headers — hence stashing this explicitly.
+pub(crate) const CONTEXT_DEBUG_REQUESTED: &str = "apollo::response_cache::debug_requested";
 pub(crate) const CACHE_DEBUG_HEADER_NAME: &str = "apollo-cache-debugging";
 pub(crate) const CACHE_DEBUG_EXTENSIONS_KEY: &str = "apolloCacheDebugging";
 pub(crate) const CACHE_DEBUGGER_VERSION: &str = "1.0";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS: &str = "apolloCacheTags";
 pub(crate) const GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS: &str = "apolloEntityCacheTags";
-/// Used to mark cache tags as internal and should not be exported or displayed to our users
-pub(crate) const INTERNAL_CACHE_TAG_PREFIX: &str = "__apollo_internal::";
 const DEFAULT_LRU_PRIVATE_QUERIES_SIZE: NonZeroUsize = NonZeroUsize::new(2048).unwrap();
 const LRU_PRIVATE_QUERIES_INSTRUMENT_NAME: &str =
     "apollo.router.response_cache.private_queries.lru.size";
+/// Placeholder type name recorded for cache entries backing a whole root-field operation
+/// (rather than an entity fetch), so type-tier invalidation labels always have a type to
+/// interpolate. e.g. a cached `currentUser` root-field response renders as `type-user-Query`,
+/// distinguishing it from an entity cache entry like `type-orga-Organization`.
+const DEFAULT_ROOT_FIELD_TYPE_NAME: &str = "Query";
 
 register_private_plugin!("apollo", "response_cache", ResponseCache);
 
@@ -120,6 +138,7 @@ pub(crate) struct ResponseCache {
     enabled: bool,
     debug: bool,
     include_cache_control_header_on_router_response: bool,
+    cdn_invalidation: CdnInvalidationConfig,
     private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(crate) invalidation: Invalidation,
     supergraph_schema: Arc<Valid<Schema>>,
@@ -198,8 +217,8 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) enabled: bool,
 
-    #[serde(default)]
     /// Enable debug mode for the debugger
+    #[serde(default)]
     debug: bool,
 
     /// Whether to include a Cache-Control header in the supergraph response sent to clients.
@@ -218,6 +237,75 @@ pub(crate) struct Config {
     /// Buffer size for known private queries (default: 2048)
     #[serde(default = "default_lru_private_queries_size")]
     private_queries_buffer_size: NonZeroUsize,
+
+    /// Propagation of aggregated response_cache cache tags to the supergraph response.
+    /// Off by default; opt in to surface cache tags to a CDN for tag-based purging. See
+    /// `CdnInvalidationConfig` for the individual fields.
+    #[serde(default)]
+    pub(crate) cdn_invalidation: CdnInvalidationConfig,
+}
+
+/// Configuration for surfacing invalidation labels to a CDN as a header (for example, Cloudflare)
+/// separated by a delimiting character (by default, ",")
+///
+/// When enabled, the router collects the union of cache tags contributed by each subgraph
+/// (from `apolloCacheTags`, `apolloEntityCacheTags`, and resolved `@cacheTag` directive values)
+/// and emits them as a single configurable header on the supergraph response. The coarser
+/// `subgraph`/`type` labels are always recorded onto the request context (available to
+/// coprocessors or Rhai regardless of this config), but the fine-grained tag values are only
+/// aggregated when `enabled` is `true` — there's no way to read the full label set from context
+/// without also enabling header emission.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+pub(crate) struct CdnInvalidationConfig {
+    /// Whether to emit the configured header on the supergraph response. Defaults to false.
+    pub(crate) enabled: bool,
+
+    /// Name of the invalidation labels header used by CDNs
+    pub(crate) header_name: String,
+
+    /// The delimiter used by the invalidation labels header (eg, `" "`, `","`). Defaults to `","`.
+    pub(crate) header_delimiter: String,
+
+    /// Maximum number of bytes for the joined header value. When the joined value would exceed
+    /// this size, `experimental_on_overflow` decides what to do. Defaults to 16kb.
+    pub(crate) max_bytes: usize,
+
+    /// What to do when the joined header value would exceed `max_bytes`.
+    ///
+    /// This is an experimental configuration option that might be removed in future releases,
+    /// please use caution when deciding to use it. Defaults to `truncate`.
+    pub(crate) experimental_on_overflow: OverflowBehavior,
+}
+
+/// What the router does when the joined `Cache-Tag`/invalidation-labels header value would
+/// exceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum OverflowBehavior {
+    /// Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't
+    /// fit, finest-grained first, so an oversized response still gets a usable, if partial,
+    /// header.
+    #[default]
+    Truncate,
+    /// Omit the header entirely rather than send a partial one. Note: this does not drop the
+    /// `Cache-Control` header, so the response is still cached — this option is only useful
+    /// paired with a CDN-side rule that treats a missing invalidation-labels header as a signal
+    /// to bypass caching for that response (e.g. Cloudflare response rules setting `no-store`
+    /// when the header is absent).
+    Drop,
+}
+
+impl Default for CdnInvalidationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            header_name: "Cache-Tag".to_string(),
+            header_delimiter: ",".to_string(),
+            max_bytes: 16384,
+            experimental_on_overflow: OverflowBehavior::default(),
+        }
+    }
 }
 
 const fn default_lru_private_queries_size() -> NonZeroUsize {
@@ -381,6 +469,7 @@ impl PluginPrivate for ResponseCache {
             include_cache_control_header_on_router_response: init
                 .config
                 .include_cache_control_header_on_router_response,
+            cdn_invalidation: init.config.cdn_invalidation.clone(),
             endpoint_config: init.config.invalidation.clone().map(Arc::new),
             subgraphs: Arc::new(init.config.subgraph),
             private_queries: Arc::new(RwLock::new(LruCache::new(
@@ -402,7 +491,26 @@ impl PluginPrivate for ResponseCache {
         let debug = self.debug;
         let include_cache_control_header_on_router_response =
             self.include_cache_control_header_on_router_response;
+        let cdn_invalidation_config = self.cdn_invalidation.clone();
+
         ServiceBuilder::new()
+            .map_request(move |request: supergraph::Request| {
+                // Stashed so `map_response` below can tell whether *this* request asked for
+                // debug info — unlike the per-entry cache-key debug data (populated deeper in
+                // the stack by `CacheService`, which does see per-request headers directly),
+                // the CDN header debug info is built entirely in this supergraph-level
+                // `map_response`, which otherwise has no access to the original request.
+                let debug_requested = debug
+                    && request
+                        .supergraph_request
+                        .headers()
+                        .get(CACHE_DEBUG_HEADER_NAME)
+                        == Some(&HeaderValue::from_static("true"));
+                let _ = request
+                    .context
+                    .insert(CONTEXT_DEBUG_REQUESTED, debug_requested);
+                request
+            })
             .map_response(move |mut response: supergraph::Response| {
                 if include_cache_control_header_on_router_response
                     && let Some(mut cache_control) = response
@@ -424,20 +532,65 @@ impl PluginPrivate for ResponseCache {
                     let _ = cache_control.update_response_headers(response.response.headers_mut());
                 }
 
-                if debug
-                    && let Some(debug_data) =
-                        response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS)
-                {
-                    return response.map_stream(move |mut body| {
-                        body.extensions.insert(
-                            CACHE_DEBUG_EXTENSIONS_KEY,
-                            serde_json_bytes::json!({
-                                "version": CACHE_DEBUGGER_VERSION,
-                                "data": debug_data.clone()
-                            }),
+                if cdn_invalidation_config.enabled {
+                    let invalidation_labels = InvalidationLabels::get_or_create(&response.context);
+                    let result = invalidation_labels.maybe_emit_header(
+                        response.response.headers_mut(),
+                        &cdn_invalidation_config,
+                    );
+                    let debug_requested = response
+                        .context
+                        .get_json_value(CONTEXT_DEBUG_REQUESTED)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if debug_requested {
+                        let _ = add_cdn_invalidation_debug_to_context(
+                            &response.context,
+                            CdnInvalidationDebug::new(
+                                cdn_invalidation_config.header_name.clone(),
+                                cdn_invalidation_config.max_bytes,
+                                &result,
+                            ),
                         );
-                        body
-                    });
+                    }
+                }
+
+                if debug {
+                    let debug_data = response.context.get_json_value(CONTEXT_DEBUG_CACHE_KEYS);
+                    let cdn_invalidation_debug: Option<CdnInvalidationDebug> = response
+                        .context
+                        .get(CONTEXT_DEBUG_CDN_INVALIDATION)
+                        .ok()
+                        .flatten();
+
+                    if debug_data.is_some() || cdn_invalidation_debug.is_some() {
+                        return response.map_stream(move |mut body| {
+                            let mut payload = Object::new();
+                            payload.insert(
+                                ByteString::from("version".to_string()),
+                                Value::from(CACHE_DEBUGGER_VERSION),
+                            );
+                            // Always present, even when empty: `data` not being an empty array
+                            // would be a shape change for existing consumers of this extension,
+                            // depending only on whether `CacheService` happened to populate any
+                            // per-entry debug info for this particular response.
+                            payload.insert(
+                                ByteString::from("data".to_string()),
+                                debug_data
+                                    .clone()
+                                    .unwrap_or_else(|| Value::Array(Vec::new())),
+                            );
+                            if let Some(cdn_debug) = cdn_invalidation_debug.clone() {
+                                payload.insert(
+                                    ByteString::from("cdnInvalidation".to_string()),
+                                    serde_json_bytes::to_value(&cdn_debug).unwrap_or_default(),
+                                );
+                            }
+                            body.extensions
+                                .insert(CACHE_DEBUG_EXTENSIONS_KEY, Value::Object(payload));
+                            body
+                        });
+                    }
                 }
 
                 response
@@ -490,6 +643,7 @@ impl PluginPrivate for ResponseCache {
                     subgraph_enums: self.subgraph_enums.clone(),
                     lru_size_instrument: self.lru_size_instrument.clone(),
                     indexes,
+                    cdn_invalidation_enabled: self.cdn_invalidation.enabled,
                 });
             tower::util::BoxService::new(inner)
         } else {
@@ -589,6 +743,64 @@ impl ResponseCache {
     where
         Self: Sized,
     {
+        Self::build_for_test(
+            storage,
+            subgraphs,
+            supergraph_schema,
+            truncate_namespace,
+            drop_tx,
+            include_cache_control_header_on_router_response,
+            CdnInvalidationConfig::default(),
+        )
+        .await
+    }
+
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    /// Like `for_test`, but lets the caller configure `cdn_invalidation` instead of always
+    /// disabling it — needed by any test that exercises the CDN `Cache-Tag` header path.
+    pub(crate) async fn for_test_with_cdn_invalidation(
+        storage: Storage,
+        subgraphs: SubgraphConfiguration<Subgraph>,
+        supergraph_schema: Arc<Valid<Schema>>,
+        truncate_namespace: bool,
+        drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
+        cdn_invalidation: CdnInvalidationConfig,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
+        Self::build_for_test(
+            storage,
+            subgraphs,
+            supergraph_schema,
+            truncate_namespace,
+            drop_tx,
+            include_cache_control_header_on_router_response,
+            cdn_invalidation,
+        )
+        .await
+    }
+
+    #[cfg(all(
+        test,
+        any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+    ))]
+    async fn build_for_test(
+        storage: Storage,
+        subgraphs: SubgraphConfiguration<Subgraph>,
+        supergraph_schema: Arc<Valid<Schema>>,
+        truncate_namespace: bool,
+        drop_tx: broadcast::Sender<()>,
+        include_cache_control_header_on_router_response: bool,
+        cdn_invalidation: CdnInvalidationConfig,
+    ) -> Result<Self, BoxError>
+    where
+        Self: Sized,
+    {
         use std::net::IpAddr;
         use std::net::Ipv4Addr;
         use std::net::SocketAddr;
@@ -607,6 +819,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response,
+            cdn_invalidation,
             subgraphs: Arc::new(subgraphs),
             private_queries: Arc::new(RwLock::new(LruCache::new(DEFAULT_LRU_PRIVATE_QUERIES_SIZE))),
             endpoint_config: Some(Arc::new(InvalidationEndpointConfig {
@@ -652,6 +865,7 @@ impl ResponseCache {
             enabled: true,
             debug: true,
             include_cache_control_header_on_router_response: true,
+            cdn_invalidation: CdnInvalidationConfig::default(),
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
@@ -741,6 +955,10 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
     subgraph_enums
 }
 
+/// A `tower::Service` wrapping a single subgraph's service to add response caching: on a
+/// request, checks the cache before calling through to `service`; on a cache miss, stores the
+/// subgraph's response (subject to its `Cache-Control` and this subgraph's TTL/indexing
+/// configuration) for the next request to hit.
 #[derive(Clone)]
 struct CacheService {
     service: subgraph::BoxCloneService,
@@ -757,6 +975,10 @@ struct CacheService {
     /// Active invalidation index modes for this subgraph, resolved from configuration.
     /// Gates which Redis ZSET indexes are maintained on cache inserts.
     indexes: Arc<InvalidationIndexes>,
+    /// Whether `cdn_invalidation` is enabled plugin-wide. Gates whether cache-tag-driven
+    /// `InvalidationLabels` aggregation (the CDN `Cache-Tag` header's content) happens at all —
+    /// independent of `indexes`, which gates the Redis-side ZSET writes instead.
+    cdn_invalidation_enabled: bool,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -941,6 +1163,8 @@ impl CacheService {
             let cache_key_context = CacheKeyContext {
                 key: "-".to_string(),
                 invalidation_keys: vec![],
+                has_tags: false,
+                cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                 kind,
                 hashed_private_id: None,
                 subgraph_name: self.name.clone(),
@@ -959,6 +1183,9 @@ impl CacheService {
         Ok(resp)
     }
 
+    /// Handles a whole root-field-operation subgraph request (as opposed to an entity fetch):
+    /// looks up the cache, calls through to the subgraph on a miss, and stores the response
+    /// (including its invalidation labels) for next time.
     async fn call_service_for_root_fields_operation(
         mut self,
         request: subgraph::Request,
@@ -986,6 +1213,7 @@ impl CacheService {
             &self.subgraph_enums,
             request_cache_control.as_ref(),
             &self.indexes,
+            self.cdn_invalidation_enabled,
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -1000,7 +1228,10 @@ impl CacheService {
         .await?
         {
             ControlFlow::Break(response) => {
-                cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
+                cache_hit.insert(
+                    DEFAULT_ROOT_FIELD_TYPE_NAME.to_string(),
+                    CacheHitMiss { hit: 1, miss: 0 },
+                );
                 let _ = response.context.insert(
                     CacheMetricContextKey::new(response.subgraph_name.clone()),
                     CacheSubgraph(cache_hit),
@@ -1008,8 +1239,16 @@ impl CacheService {
 
                 Ok(response)
             }
-            ControlFlow::Continue((request, mut root_cache_key, mut cache_tags)) => {
-                cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
+            ControlFlow::Continue((
+                request,
+                mut root_cache_key,
+                mut cache_tags,
+                mut cdn_invalidation_tags,
+            )) => {
+                cache_hit.insert(
+                    DEFAULT_ROOT_FIELD_TYPE_NAME.to_string(),
+                    CacheHitMiss { hit: 0, miss: 1 },
+                );
                 let _ = request.context.insert(
                     CacheMetricContextKey::new(request.subgraph_name.clone()),
                     CacheSubgraph(cache_hit),
@@ -1028,19 +1267,55 @@ impl CacheService {
                 let mut cache_control =
                     response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
-                // Support cache tags coming from subgraph response extensions. Gated on the
-                // CacheTag index being active for this subgraph; when disabled, the extension
-                // values are ignored on the cache write path.
-                if self.indexes.is_enabled(IndexMode::CacheTag)
+                // Support cache tags coming from subgraph response extensions.
+                if self
+                    .indexes
+                    .tracks_invalidation_labels(self.cdn_invalidation_enabled)
                     && let Some(Value::Array(extension_tags)) = response
                         .get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
                 {
-                    cache_tags.extend(
-                        extension_tags
-                            .iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| CacheTag::Tag(s.to_string())),
+                    let extension_tag_strings: Vec<String> = extension_tags
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .collect();
+
+                    // Fine-grained tags only ever aggregate onto the live `InvalidationLabels`
+                    // context when `cdn_invalidation_enabled` — matching `CdnInvalidationConfig`'s
+                    // documented contract — even though the outer `if` above also lets the
+                    // Redis `cache_tag` index alone reach this block.
+                    if self.cdn_invalidation_enabled {
+                        InvalidationLabels::add_tags(
+                            &response.context,
+                            extension_tag_strings.clone(),
+                        );
+                    }
+                    InvalidationLabels::add_subgraph(&response.context, &self.name);
+                    InvalidationLabels::add_type(
+                        &response.context,
+                        &self.name,
+                        self.entity_type
+                            .clone()
+                            .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string())
+                            .as_str(),
                     );
+
+                    // Recorded whenever either consumer got us into this block (the outer `if`
+                    // above), not just when `cdn_invalidation_enabled` — this also feeds the
+                    // cache debugger's per-entry tag display, which should show these tags
+                    // whenever the Redis `cache_tag` index is on, independent of CDN
+                    // invalidation. Persisted independently of `cache_tags` below (and thus of
+                    // `IndexMode::CacheTag`) so a later cache hit can rebuild the CDN header
+                    // even when Redis per-tag indexing is off. See
+                    // `CacheMetadata::cdn_invalidation_tags`.
+                    cdn_invalidation_tags.extend(extension_tag_strings.iter().cloned());
+
+                    // `cache_tags` feeds the intermediate result on cache misses which gets ZADDed for redis;
+                    // it's not part of the CDN-invalidation path; each sink below applies its own gate
+                    // independently rather than sharing one.
+                    if self.indexes.is_enabled(IndexMode::CacheTag) {
+                        cache_tags.extend(extension_tag_strings.into_iter().map(CacheTag::Tag));
+                    }
                 }
                 save_original_cache_control(
                     response.id.clone(),
@@ -1073,10 +1348,19 @@ impl CacheService {
                     let cache_key_context = CacheKeyContext {
                         key: root_cache_key.clone(),
                         hashed_private_id: private_id.clone(),
-                        invalidation_keys: cache_tags
-                            .iter()
-                            .filter_map(|t| t.user_value().map(String::from))
-                            .collect(),
+                        invalidation_keys: InvalidationLabels {
+                            tags: cdn_invalidation_tags.iter().cloned().collect(),
+                            types: HashSet::from([(
+                                self.name.clone(),
+                                self.entity_type
+                                    .clone()
+                                    .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME.to_string()),
+                            )]),
+                            subgraphs: HashSet::from([self.name.clone()]),
+                        }
+                        .user_facing_only(),
+                        has_tags: !cdn_invalidation_tags.is_empty(),
+                        cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                         kind: CacheEntryKind::RootFields {
                             root_fields: root_operation_fields,
                         },
@@ -1112,7 +1396,7 @@ impl CacheService {
                         cache_control,
                         root_cache_key,
                         cache_tags,
-                        self.debug,
+                        cdn_invalidation_tags,
                     )
                     .await?;
                 }
@@ -1142,6 +1426,7 @@ impl CacheService {
             self.debug,
             request_cache_control.as_ref(),
             &self.indexes,
+            self.cdn_invalidation_enabled,
         )
         .instrument(tracing::info_span!(
             "response_cache.lookup",
@@ -1163,7 +1448,14 @@ impl CacheService {
                         ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                             hashed_private_id: private_id.clone(),
                             key: cache_entry.key.clone(),
-                            invalidation_keys: ir.cache_tags.iter().filter_map(|t| t.user_value().map(String::from)).collect(),
+                            invalidation_keys: InvalidationLabels {
+                                tags: ir.cdn_invalidation_tags.iter().cloned().collect(),
+                                types: HashSet::from([(self.name.clone(), ir.typename.clone())]),
+                                subgraphs: HashSet::from([self.name.clone()]),
+                            }
+                            .user_facing_only(),
+                            has_tags: !ir.cdn_invalidation_tags.is_empty(),
+                            cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                             kind: CacheEntryKind::Entity {
                                 typename: ir.typename.clone(),
                                 entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -1260,6 +1552,7 @@ impl CacheService {
                     private_id,
                     debug_subgraph_request,
                     self.indexes.clone(),
+                    self.cdn_invalidation_enabled,
                 )
                 .await?;
 
@@ -1280,6 +1573,13 @@ impl CacheService {
     }
 }
 
+/// Looks up the cache for a whole root-field-operation subgraph request. Returns
+/// `ControlFlow::Break` with the cached response on a hit (after merging its stored
+/// invalidation labels into this request's `InvalidationLabels` aggregator), or
+/// `ControlFlow::Continue` with the computed cache key and this-response's cache/CDN tags on a
+/// miss, for the caller to fetch from the subgraph and then store.
+///
+/// `name` is the subgraph name, not an operation or field name.
 #[allow(clippy::too_many_arguments)]
 async fn cache_lookup_root(
     name: String,
@@ -1293,11 +1593,16 @@ async fn cache_lookup_root(
     subgraph_enums: &HashMap<String, String>,
     cache_control: Option<&CacheControl>,
     indexes: &InvalidationIndexes,
-) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<CacheTag>)>, BoxError> {
-    // Skip the schema traversal entirely when the CacheTag index is off for this subgraph.
-    // The traversal walks `@cacheTag` directives to produce per-tag invalidation keys; with the
-    // index disabled, the result would be discarded, so we save the work outright.
-    let invalidation_cache_keys = if indexes.is_enabled(IndexMode::CacheTag) {
+    cdn_invalidation_enabled: bool,
+) -> Result<
+    ControlFlow<subgraph::Response, (subgraph::Request, String, Vec<CacheTag>, Vec<String>)>,
+    BoxError,
+> {
+    // Skip the schema traversal entirely when nothing would consume its result. The traversal
+    // walks `@cacheTag` directives to produce per-tag invalidation keys; two independent
+    // consumers can want them (the Redis per-tag index; the CDN `Cache-Tag` header aggregator)
+    // — only skip the work when neither does.
+    let invalidation_cache_keys = if indexes.tracks_invalidation_labels(cdn_invalidation_enabled) {
         get_invalidation_root_keys_from_schema(&request, subgraph_enums, supergraph_schema)?
     } else {
         HashSet::new()
@@ -1316,14 +1621,42 @@ async fn cache_lookup_root(
         private_id,
         indexes,
     );
-    cache_tags.extend(invalidation_cache_keys.into_iter().map(CacheTag::Tag));
+    // Redis indexing and the CDN header both draw on `invalidation_cache_keys`, but each applies
+    // its own gate independently rather than sharing one — see the comment above where it's
+    // computed.
+    if indexes.is_enabled(IndexMode::CacheTag) {
+        cache_tags.extend(invalidation_cache_keys.iter().cloned().map(CacheTag::Tag));
+    }
+
+    // Persisted independently of `cache_tags` above (and thus of `IndexMode::CacheTag`) so a
+    // later cache hit can rebuild the CDN header even when Redis per-tag indexing is off.
+    // `invalidation_cache_keys` is already empty when neither consumer wants it.
+    let cdn_invalidation_tags: Vec<String> = invalidation_cache_keys.iter().cloned().collect();
+
+    if cdn_invalidation_enabled {
+        InvalidationLabels::add_tags(
+            &request.context,
+            invalidation_cache_keys.into_iter().collect(),
+        );
+    }
+    InvalidationLabels::add_subgraph(&request.context, &name);
+    InvalidationLabels::add_type(
+        &request.context,
+        &name,
+        entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
+    );
 
     Span::current().record("cache.key", key.clone());
 
     if cache_control.is_some_and(|c| c.no_cache()) {
         // skip cache lookup if no-cache is set - we have no means of revalidating entries without
         // just performing the query, so there's no benefit to hitting the cache
-        return Ok(ControlFlow::Continue((request, key, cache_tags)));
+        return Ok(ControlFlow::Continue((
+            request,
+            key,
+            cache_tags,
+            cdn_invalidation_tags,
+        )));
     }
 
     match cache.fetch(&key, &request.subgraph_name).await {
@@ -1334,6 +1667,7 @@ async fn cache_lookup_root(
                 save_original_cache_control(request.id.clone(), &request.context, control.clone());
                 update_cache_control(&request.context, &control);
                 if debug {
+                    let debug_value = value.clone();
                     // TODO: this uses iter() rather than get(request.subgraph_operation_name()) - why?
                     let root_operation_fields: Vec<String> = request
                         .executable_document
@@ -1351,26 +1685,47 @@ async fn cache_lookup_root(
                         })
                         .unwrap_or_default();
 
+                    // `debug_value.invalidation_labels` (reconstructed from storage) only ever
+                    // carries the `tags` tier — `types`/`subgraphs` are never persisted, only
+                    // computed live per-request — so union in this entry's own subgraph/type
+                    // label here to show the full set of strings a customer could purge by.
+                    let stored_tags = debug_value
+                        .invalidation_labels
+                        .map(|labels| labels.tags)
+                        .unwrap_or_default();
+                    let has_tags = !stored_tags.is_empty();
+                    let invalidation_keys = InvalidationLabels {
+                        tags: stored_tags,
+                        types: HashSet::from([(
+                            name.clone(),
+                            entity_type_opt
+                                .unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME)
+                                .to_string(),
+                        )]),
+                        subgraphs: HashSet::from([name.clone()]),
+                    }
+                    .user_facing_only();
+
                     let cache_key_context = CacheKeyContext {
-                        key: value.key.clone(),
+                        key: debug_value.key,
+                        has_tags,
+                        cdn_invalidation_enabled,
                         hashed_private_id: private_id.map(ToString::to_string),
-                        invalidation_keys: value
-                            .cache_tags
-                            .map(external_invalidation_keys)
-                            .unwrap_or_default(),
+                        invalidation_keys,
                         kind: CacheEntryKind::RootFields {
                             root_fields: root_operation_fields,
                         },
                         subgraph_name: request.subgraph_name.clone(),
                         subgraph_request: request.subgraph_request.body().clone(),
                         source: CacheKeySource::Cache,
-                        cache_control: value.control.clone(),
-                        data: serde_json_bytes::json!({"data": value.data.clone()}),
+                        cache_control: debug_value.control.clone(),
+                        data: serde_json_bytes::json!({"data": debug_value.data.clone()}),
                         warnings: Vec::new(),
                         should_store: false,
                         indexes: *indexes,
                     }
                     .update_metadata();
+
                     add_cache_key_to_context(&request.context, cache_key_context)?;
                 }
 
@@ -1378,6 +1733,29 @@ async fn cache_lookup_root(
                     opentelemetry::Key::new("cache.status"),
                     opentelemetry::Value::String("hit".into()),
                 );
+
+                // Surface the cache tags persisted with the entry so the supergraph response
+                // aggregator can reflect this hit. Done before the response builder consumes
+                // the request context.
+                if let Some(hit_labels) = value.invalidation_labels {
+                    // backfill the subgraph and type--the CacheEntry doesn't store those, just the
+                    // previous invalidation labels
+                    InvalidationLabels::merge(&request.context, hit_labels);
+                    InvalidationLabels::add_subgraph(&request.context, &name);
+                    InvalidationLabels::add_type(
+                        &request.context,
+                        &name,
+                        entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
+                    );
+
+                    //record_external_cache_tags_to_context(
+                    //    &request.context,
+                    //    invalidation_labels,
+                    //    &name,
+                    //    entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME),
+                    //);
+                }
+
                 let mut response = subgraph::Response::builder()
                     .data(value.data)
                     .extensions(Object::new())
@@ -1395,7 +1773,12 @@ async fn cache_lookup_root(
                     opentelemetry::Key::new("cache.status"),
                     opentelemetry::Value::String("miss".into()),
                 );
-                Ok(ControlFlow::Continue((request, key, cache_tags)))
+                Ok(ControlFlow::Continue((
+                    request,
+                    key,
+                    cache_tags,
+                    cdn_invalidation_tags,
+                )))
             }
         }
         Err(err) => {
@@ -1408,7 +1791,12 @@ async fn cache_lookup_root(
                 opentelemetry::Key::new("cache.status"),
                 opentelemetry::Value::String("miss".into()),
             );
-            Ok(ControlFlow::Continue((request, key, cache_tags)))
+            Ok(ControlFlow::Continue((
+                request,
+                key,
+                cache_tags,
+                cdn_invalidation_tags,
+            )))
         }
     }
 }
@@ -1427,7 +1815,7 @@ fn get_invalidation_root_keys_from_schema(
 
     impl resolvers::ObjectValue for Root<'_> {
         fn type_name(&self) -> &str {
-            "Query"
+            DEFAULT_ROOT_FIELD_TYPE_NAME
         }
 
         fn resolve_field<'a>(
@@ -1554,6 +1942,7 @@ async fn cache_lookup_entities(
     debug: bool,
     cache_control: Option<&CacheControl>,
     indexes: &InvalidationIndexes,
+    cdn_invalidation_enabled: bool,
 ) -> Result<ControlFlow<subgraph::Response, (subgraph::Request, ResponseCacheResults)>, BoxError> {
     let is_no_cache = cache_control.is_some_and(|c| c.no_cache());
 
@@ -1566,6 +1955,7 @@ async fn cache_lookup_entities(
         private_id,
         debug,
         indexes,
+        cdn_invalidation_enabled,
     )?;
     let keys_len = cache_metadata.len();
 
@@ -1573,6 +1963,7 @@ async fn cache_lookup_entities(
         .iter()
         .map(|k| k.cache_key.as_str())
         .collect::<Vec<&str>>();
+
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
@@ -1608,6 +1999,7 @@ async fn cache_lookup_entities(
             }
         }
     };
+
     let body = request.subgraph_request.body_mut();
 
     let representations = body
@@ -1629,6 +2021,42 @@ async fn cache_lookup_entities(
         !is_no_cache,
     )?;
 
+    // Surface cache tags from every usable hit on the supergraph response aggregator. This
+    // covers both the full-hit short-circuit below and the partial-hit path where the error
+    // branch may rebuild a response from only cached entities.
+    //
+    // `entry.cdn_invalidation_tags` only reflects what's known before fetching (the
+    // schema-derived tag values, plus any `apolloEntityCacheTags` extension values already read
+    // for this request) — it's the same for a hit or a miss, and independent of
+    // `IndexMode::CacheTag` (unlike `entry.cache_tags`, which only carries these when that
+    // index is on). A hit's actually-*stored* tags (including anything recorded from
+    // `apolloEntityCacheTags` when the entity was originally written, on a *previous* request)
+    // live on `entry.cache_entry.invalidation_labels` instead, so that's what gets merged here,
+    // mirroring `cache_lookup_root`'s hit-path handling.
+    for entry in cache_result.iter() {
+        // Fine-grained tags only ever aggregate onto the live `InvalidationLabels` context
+        // when `cdn_invalidation_enabled` — matching `CdnInvalidationConfig`'s documented
+        // contract — even though `entry.cdn_invalidation_tags` itself is populated whenever
+        // either consumer (Redis `cache_tag` index or CDN invalidation) wants it.
+        if cdn_invalidation_enabled && !entry.cdn_invalidation_tags.is_empty() {
+            InvalidationLabels::add_tags(&request.context, entry.cdn_invalidation_tags.clone());
+        }
+
+        // `hit_labels.tags` is the same kind of fine-grained data (persisted from a previous
+        // write's `cdn_invalidation_tags`), so it's gated the same way.
+        if cdn_invalidation_enabled
+            && let Some(hit_labels) = entry
+                .cache_entry
+                .as_ref()
+                .and_then(|cache_entry| cache_entry.invalidation_labels.clone())
+        {
+            InvalidationLabels::merge(&request.context, hit_labels);
+        }
+
+        InvalidationLabels::add_subgraph(&request.context, &name);
+        InvalidationLabels::add_type(&request.context, &name, &entry.typename);
+    }
+
     if !new_representations.is_empty() {
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
@@ -1648,14 +2076,29 @@ async fn cache_lookup_entities(
         if debug {
             let debug_cache_keys_ctx = cache_result.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| {
+                    // `cache_entry.invalidation_labels` (reconstructed from storage) only ever
+                    // carries the `tags` tier — `types`/`subgraphs` are never persisted, only
+                    // computed live per-request — so union in this entry's own subgraph/type
+                    // label here to show the full set of strings a customer could purge by.
+                    let stored_tags = cache_entry
+                        .invalidation_labels
+                        .as_ref()
+                        .map(|labels| labels.tags.clone())
+                        .unwrap_or_default();
+                    let has_tags = !stored_tags.is_empty();
+                    let invalidation_keys = InvalidationLabels {
+                        tags: stored_tags,
+                        types: HashSet::from([(name.clone(), ir.typename.clone())]),
+                        subgraphs: HashSet::from([name.clone()]),
+                    }
+                    .user_facing_only();
+
                     CacheKeyContext {
                         key: ir.key.clone(),
+                        has_tags,
+                        cdn_invalidation_enabled,
                         hashed_private_id: private_id.map(ToString::to_string),
-                        invalidation_keys: cache_entry
-                            .cache_tags
-                            .clone()
-                            .map(external_invalidation_keys)
-                            .unwrap_or_default(),
+                        invalidation_keys,
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
                             entity_key: ir.entity_key.clone().unwrap_or_default(),
@@ -1736,7 +2179,7 @@ async fn cache_store_root_from_response(
     cache_control: CacheControl,
     cache_key: String,
     cache_tags: Vec<CacheTag>,
-    debug: bool,
+    cdn_invalidation_tags: Vec<String>,
 ) -> Result<(), BoxError> {
     if let Some(data) = response.response.body().data.as_ref() {
         let ttl = cache_control
@@ -1750,8 +2193,8 @@ async fn cache_store_root_from_response(
                 data: data.clone(),
                 control: cache_control,
                 cache_tags,
+                cdn_invalidation_tags,
                 expire: ttl,
-                debug,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -1782,6 +2225,7 @@ async fn cache_store_entities_from_response(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
     indexes: Arc<InvalidationIndexes>,
+    cdn_invalidation_enabled: bool,
 ) -> Result<(), BoxError> {
     let mut data = response.response.body_mut().data.take();
 
@@ -1843,6 +2287,7 @@ async fn cache_store_entities_from_response(
             response.context.clone(),
             subgraph_request,
             indexes,
+            cdn_invalidation_enabled,
         )
         .await?;
 
@@ -1879,7 +2324,7 @@ fn extract_cache_key_root(
     indexes: &InvalidationIndexes,
 ) -> (String, Vec<CacheTag>) {
     let _ = subgraph_name; // kept for parity; subgraph context is encoded by the caller
-    let entity_type = entity_type_opt.unwrap_or("Query");
+    let entity_type = entity_type_opt.unwrap_or(DEFAULT_ROOT_FIELD_TYPE_NAME);
 
     let key = PrimaryCacheKeyRoot {
         subgraph_name,
@@ -1893,6 +2338,12 @@ fn extract_cache_key_root(
     .hash();
     // The by-type tag is only emitted when the Type index is active for this subgraph.
     // Operators who only invalidate by cache tag opt out via `indexes.type: false`.
+    // Redis-only: CacheTag::Type entries only ever feed `cache_tags`, which drives Redis's
+    // `ZADD` indexing — the CDN header's own tag sourcing (`cdn_invalidation_tags` and the live
+    // `InvalidationLabels` aggregator) never reads from `cache_tags`, so gating this behind
+    // IndexMode::Type has no effect on Cache-Tag header completeness. Not to be confused with
+    // InvalidationLabels.types/add_type(), the CDN header's own coarse type-tier, which is
+    // unconditional and unrelated to this index.
     let mut cache_tags: Vec<CacheTag> = Vec::new();
     if indexes.is_enabled(IndexMode::Type) {
         cache_tags.push(CacheTag::Type(entity_type.to_string()));
@@ -1904,6 +2355,10 @@ fn extract_cache_key_root(
 struct CacheMetadata {
     cache_key: String,
     cache_tags: Vec<CacheTag>,
+    // Fine-grained tag values for CDN `Cache-Tag` persistence, independent of whether
+    // `cache_tags` above was populated (that one is gated on `IndexMode::CacheTag` alone). See
+    // `Document::cdn_invalidation_tags`.
+    cdn_invalidation_tags: Vec<String>,
     // Only set when debug mode is enabled
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
 }
@@ -1919,6 +2374,7 @@ fn extract_cache_keys(
     private_id: Option<&str>,
     debug: bool,
     indexes: &InvalidationIndexes,
+    cdn_invalidation_enabled: bool,
 ) -> Result<Vec<CacheMetadata>, BoxError> {
     let context = &request.context;
     let authorization = &request.authorization;
@@ -1992,22 +2448,46 @@ fn extract_cache_keys(
         .hash();
 
         // The by-type tag is only emitted when the Type index is active for this subgraph.
+        // Redis-only: CacheTag::Type never reaches the CDN header (its user_value() is None), so
+        // gating this behind IndexMode::Type has no effect on Cache-Tag header completeness. Not
+        // to be confused with InvalidationLabels.types/add_type(), the CDN header's own coarse
+        // type-tier, which is unconditional and unrelated to this index.
         let mut cache_tags: Vec<CacheTag> = Vec::new();
         if indexes.is_enabled(IndexMode::Type) {
             cache_tags.push(CacheTag::Type(typename.to_string()));
         }
 
-        // Schema-resolved `@cacheTag` directive values, gated on the CacheTag index. We skip
-        // the directive traversal entirely when CacheTag is disabled to save the work.
+        // Skip the schema traversal entirely when nothing would consume its result: the Redis
+        // per-tag index and the CDN `Cache-Tag` header aggregator are independent consumers —
+        // mirrors the same gate in `cache_lookup_root`.
+        let invalidation_cache_keys =
+            if indexes.tracks_invalidation_labels(cdn_invalidation_enabled) {
+                get_invalidation_entity_keys_from_schema(
+                    &supergraph_schema,
+                    subgraph_name,
+                    subgraph_enums,
+                    typename,
+                    representation,
+                )?
+            } else {
+                HashSet::new()
+            };
+
+        // `cache_tags` feeds the intermediate result on cache misses which gets ZADDed for redis;
+        // it's not part of the CDN-invalidation path; each sink below applies its own gate
+        // independently rather than sharing one.
         if indexes.is_enabled(IndexMode::CacheTag) {
-            let invalidation_cache_keys = get_invalidation_entity_keys_from_schema(
-                &supergraph_schema,
-                subgraph_name,
-                subgraph_enums,
-                typename,
-                representation,
-            )?;
-            cache_tags.extend(invalidation_cache_keys.into_iter().map(CacheTag::Tag));
+            cache_tags.extend(invalidation_cache_keys.iter().cloned().map(CacheTag::Tag));
+        }
+
+        // Persisted independently of `cache_tags` above (and thus of `IndexMode::CacheTag`) so
+        // a later cache hit can rebuild the CDN header even when Redis per-tag indexing is off.
+        // `invalidation_cache_keys` is already empty when neither consumer wants it (see the
+        // gate this was computed under), so no extra condition is needed here.
+        let cdn_invalidation_tags: Vec<String> = invalidation_cache_keys.iter().cloned().collect();
+
+        if cdn_invalidation_enabled {
+            InvalidationLabels::add_tags(context, invalidation_cache_keys.into_iter().collect());
         }
 
         // Restore the `representation` back whole again
@@ -2015,6 +2495,7 @@ fn extract_cache_keys(
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             cache_tags,
+            cdn_invalidation_tags,
             entity_key: representation_entity_key,
         };
         res.push(cache_key_metadata);
@@ -2399,6 +2880,8 @@ fn get_entity_key_from_selection_set(
 struct IntermediateResult {
     key: String,
     cache_tags: Vec<CacheTag>,
+    // See `CacheMetadata::cdn_invalidation_tags`.
+    cdn_invalidation_tags: Vec<String>,
     typename: String,
     // Only set when debug mode is enabled
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
@@ -2430,8 +2913,8 @@ fn filter_representations(
             CacheMetadata {
                 cache_key: key,
                 cache_tags,
+                cdn_invalidation_tags,
                 entity_key,
-                ..
             },
         ),
         mut cache_entry,
@@ -2478,6 +2961,7 @@ fn filter_representations(
         result.push(IntermediateResult {
             key,
             cache_tags,
+            cdn_invalidation_tags,
             typename,
             cache_entry,
             entity_key,
@@ -2517,8 +3001,8 @@ async fn insert_entities_in_result(
     // Only Some if debug is enabled
     subgraph_request: Option<graphql::Request>,
     indexes: Arc<InvalidationIndexes>,
+    cdn_invalidation_enabled: bool,
 ) -> Result<(Vec<Value>, Vec<Error>), BoxError> {
-    let debug = subgraph_request.is_some();
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2542,6 +3026,7 @@ async fn insert_entities_in_result(
         IntermediateResult {
             mut key,
             mut cache_tags,
+            mut cdn_invalidation_tags,
             typename,
             cache_entry,
             entity_key,
@@ -2590,15 +3075,32 @@ async fn insert_entities_in_result(
                 }
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
-                // Gated on the CacheTag index being active.
-                if indexes.is_enabled(IndexMode::CacheTag)
+                if indexes.tracks_invalidation_labels(cdn_invalidation_enabled)
                     && let Some(Value::Array(keys)) = specific_surrogate_keys
                 {
-                    cache_tags.extend(
-                        keys.iter()
-                            .filter_map(|v| v.as_str())
-                            .map(|s| CacheTag::Tag(s.to_string())),
-                    );
+                    let entity_tags: Vec<String> = keys
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                        .collect();
+
+                    if !entity_tags.is_empty() {
+                        // Recorded whenever either consumer got us into this block (the outer
+                        // `if` above), not just when `cdn_invalidation_enabled` — this also
+                        // feeds the cache debugger's per-entry tag display, which should show
+                        // these tags whenever the Redis `cache_tag` index is on, independent of
+                        // CDN invalidation. See `CacheMetadata::cdn_invalidation_tags` —
+                        // persisted independently of `cache_tags`/`IndexMode::CacheTag` below.
+                        cdn_invalidation_tags.extend(entity_tags.iter().cloned());
+
+                        if cdn_invalidation_enabled {
+                            InvalidationLabels::add_tags(&context, entity_tags.clone());
+                        }
+
+                        if indexes.is_enabled(IndexMode::CacheTag) {
+                            cache_tags.extend(entity_tags.into_iter().map(CacheTag::Tag));
+                        }
+                    }
                 }
 
                 // Prepend the whole-subgraph index entry when active. The by-type and per-tag
@@ -2614,10 +3116,17 @@ async fn insert_entities_in_result(
                         CacheKeyContext {
                             key: key.clone(),
                             hashed_private_id: private_id_for_dbg.clone(),
-                            invalidation_keys: cache_tags
-                                .iter()
-                                .filter_map(|t| t.user_value().map(String::from))
-                                .collect(),
+                            invalidation_keys: InvalidationLabels {
+                                tags: cdn_invalidation_tags.iter().cloned().collect(),
+                                types: HashSet::from([(
+                                    subgraph_name.to_string(),
+                                    typename.clone(),
+                                )]),
+                                subgraphs: HashSet::from([subgraph_name.to_string()]),
+                            }
+                            .user_facing_only(),
+                            has_tags: !cdn_invalidation_tags.is_empty(),
+                            cdn_invalidation_enabled,
                             kind: CacheEntryKind::Entity {
                                 typename: typename.clone(),
                                 entity_key: entity_key.clone().unwrap_or_default(),
@@ -2640,8 +3149,8 @@ async fn insert_entities_in_result(
                         data: value.clone(),
                         key,
                         cache_tags,
+                        cdn_invalidation_tags,
                         expire: ttl,
-                        debug,
                     });
                 }
 
@@ -2674,13 +3183,6 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
-}
-
-fn external_invalidation_keys<I: IntoIterator<Item = String>>(invalidation_keys: I) -> Vec<String> {
-    invalidation_keys
-        .into_iter()
-        .filter(|k| !k.starts_with(INTERNAL_CACHE_TAG_PREFIX))
-        .collect()
 }
 
 fn assemble_response_from_errors(

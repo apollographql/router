@@ -16,3 +16,6 @@ serde_json = "1"
 serde_json_bytes.workspace = true
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.5", features = ["full"] }
+
+[dev-dependencies]
+tower-test = "0.4.0"

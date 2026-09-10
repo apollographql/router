@@ -1,11 +1,14 @@
 /// Functionality to run the `MONITOR` command against Redis, to ensure specific commands are or are
 /// not sent.
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use regex::Regex;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
+use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -29,7 +32,11 @@ struct Command {
 /// in the channel, returning a `MonitorOutput`.
 pub struct Monitor {
     monitor_tasks: JoinSet<()>,
-    collection_tasks: JoinSet<SingleMonitorOutput>,
+    collection_tasks: JoinSet<()>,
+    /// Live, shared view of the commands each collection task has observed so far. Lets callers
+    /// poll for a command (see [`Monitor::wait_for`]) instead of sleeping a fixed duration before
+    /// [`Monitor::collect`].
+    outputs: Vec<Arc<RwLock<SingleMonitorOutput>>>,
 }
 
 impl Monitor {
@@ -37,6 +44,7 @@ impl Monitor {
     pub async fn new(ports: &[&str]) -> Self {
         let mut monitor_tasks = JoinSet::new();
         let mut collection_tasks = JoinSet::new();
+        let mut outputs = Vec::new();
 
         let mut initialized_channels = Vec::new();
 
@@ -54,16 +62,17 @@ impl Monitor {
                 monitor(&port, is_replica, tx, init_tx).await;
             });
 
+            let output = Arc::new(RwLock::new(SingleMonitorOutput {
+                is_replica: false,
+                commands: Vec::new(),
+            }));
+            outputs.push(output.clone());
+
             collection_tasks.spawn(async move {
-                let mut commands = Vec::default();
-                let mut is_replica = false;
                 while let Some((is_rep, command)) = rx.recv().await {
-                    commands.push(command);
-                    is_replica = is_rep;
-                }
-                SingleMonitorOutput {
-                    is_replica,
-                    commands,
+                    let mut output = output.write().await;
+                    output.is_replica = is_rep;
+                    output.commands.push(command);
                 }
             });
         }
@@ -80,7 +89,32 @@ impl Monitor {
         Self {
             monitor_tasks,
             collection_tasks,
+            outputs,
         }
+    }
+
+    /// A snapshot of the commands observed so far, without consuming the monitor. Cloned out of the
+    /// shared per-node buffers, so it's safe to call repeatedly while monitoring continues.
+    pub async fn snapshot(&self) -> MonitorOutput {
+        let mut outputs = Vec::with_capacity(self.outputs.len());
+        for output in &self.outputs {
+            outputs.push(output.read().await.clone());
+        }
+        MonitorOutput(outputs)
+    }
+
+    /// Poll [`Monitor::snapshot`] until `predicate` holds. Panics if `timeout` elapses first. Prefer
+    /// this over a fixed sleep before an assertion: it returns as soon as the awaited command lands
+    /// and fails loudly (rather than racing a fixed margin) if it never does.
+    pub async fn wait_for(&self, timeout: Duration, predicate: impl Fn(&MonitorOutput) -> bool) {
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            if predicate(&self.snapshot().await) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        panic!("Monitor::wait_for timed out after {timeout:?}");
     }
 
     /// End all `monitor_tasks` and collect the results into a `MonitorOutput`.
@@ -88,12 +122,13 @@ impl Monitor {
         // sleep a bit to allow the monitor_tasks to get through any backlog of output
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        // abort monitor tasks and collect all the collection tasks
+        // abort monitor tasks, then drain the collection tasks so every observed command lands in
+        // the shared buffers before we snapshot them
         self.monitor_tasks.abort_all();
         while self.monitor_tasks.join_next().await.is_some() {}
+        while self.collection_tasks.join_next().await.is_some() {}
 
-        let commands_results = self.collection_tasks.join_all().await;
-        MonitorOutput(commands_results)
+        self.snapshot().await
     }
 }
 
@@ -147,6 +182,15 @@ impl MonitorOutput {
         cmd_sent_to_replica && !cmd_sent_to_primary
     }
 
+    /// Whether any monitored node saw `cmd` invoked with `arg` among its arguments. Useful for
+    /// attributing an otherwise-ambiguous command (e.g. a `PING` that container health probes
+    /// also emit) to a specific caller via a sentinel argument.
+    pub fn command_with_arg_sent_to_any(&self, cmd: &str, arg: &str) -> bool {
+        self.0
+            .iter()
+            .any(|output| output.command_with_arg_sent(cmd, arg))
+    }
+
     pub fn num_nodes(&self) -> usize {
         self.0.len()
     }
@@ -161,6 +205,12 @@ struct SingleMonitorOutput {
 impl SingleMonitorOutput {
     fn command_sent(&self, cmd: &str) -> bool {
         self.commands.iter().any(|command| command.command == cmd)
+    }
+
+    fn command_with_arg_sent(&self, cmd: &str, arg: &str) -> bool {
+        self.commands
+            .iter()
+            .any(|command| command.command == cmd && command.args.iter().any(|a| a == arg))
     }
 }
 

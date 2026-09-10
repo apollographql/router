@@ -4,8 +4,6 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
-use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
@@ -344,7 +342,7 @@ where
 
         const DEFAULT_BREAK_MESSAGE: &str = "Internal error";
 
-        let (message, code, extra_extensions) = match body {
+        let (message, code, extensions) = match body {
             Value::String(s) if !s.as_str().is_empty() => (
                 s.as_str().to_owned(),
                 COPROCESSOR_ERROR_EXTENSION.to_string(),
@@ -363,21 +361,14 @@ where
             ),
         };
 
-        let mut runtime_error = RuntimeError::new(&message, &request.key).with_code(code);
-        for (k, v) in extra_extensions {
-            runtime_error = runtime_error.extension(k, v);
-        }
-
-        let res = request_service::Response {
-            context: request.context.clone(),
-            subgraph_name: request.connector.id.subgraph_name.to_string(),
-            transport_result: Err(ConnectorError::TransportFailure(message)),
-            mapped_response: MappedResponse::Error {
-                error: runtime_error,
-                key: request.key,
-                problems: Vec::new(),
-            },
-        };
+        let res = request_service::Response::error_from_request(
+            request.context.clone(),
+            request.connector,
+            request.key,
+            message,
+            code,
+            extensions,
+        );
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
@@ -614,7 +605,7 @@ where
 
 /// Parse structured error from a coprocessor break response body.
 /// Expects a JSON object with an `"errors"` array containing GraphQL-style errors.
-/// Returns `(message, code, extra_extensions)`.
+/// Returns `(message, code, extensions)`.
 fn parse_connector_break_error(
     obj: &serde_json_bytes::Map<ByteString, Value>,
 ) -> (String, String, serde_json_bytes::Map<ByteString, Value>) {
@@ -638,7 +629,7 @@ fn parse_connector_break_error(
         .map(|s| s.to_string())
         .unwrap_or(default_msg);
 
-    let mut extra_extensions = serde_json_bytes::Map::default();
+    let mut extensions = serde_json_bytes::Map::default();
     let code = if let Some(Value::Object(ext)) = first_error.get("extensions") {
         let code = ext
             .get("code")
@@ -646,14 +637,12 @@ fn parse_connector_break_error(
             .map(|s| s.to_string())
             .unwrap_or(default_code);
         for (k, v) in ext.iter() {
-            if k.as_str() != "code" {
-                extra_extensions.insert(k.clone(), v.clone());
-            }
+            extensions.insert(k.clone(), v.clone());
         }
         code
     } else {
         default_code
     };
 
-    (message, code, extra_extensions)
+    (message, code, extensions)
 }

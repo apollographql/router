@@ -144,6 +144,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn match_if_should_return_none_when_condition_argument_evaluates_to_none(
         #[case] spec: ConnectSpec,
     ) {

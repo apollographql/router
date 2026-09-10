@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/tests/mod.rs
-assertion_line: 26
 expression: connectors.by_service_name
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained_filter_v0_4.graphql
 ---
@@ -215,6 +214,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "ThingConnection",
+            ),
+        ),
         label: Label(
             "connectors.v1 http: GET /things",
         ),
@@ -619,6 +623,11 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/chained
             connect_extensions: None,
             connect_is_success: None,
         },
+        output_type: Some(
+            Named(
+                "ThingConnection",
+            ),
+        ),
         label: Label(
             "connectors.v1 http: GET /things",
         ),

@@ -129,6 +129,7 @@ struct DirectiveListInner {
 impl PartialEq for DirectiveListInner {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
+            && self.len() == other.len()
             && self
                 .iter_sorted()
                 .zip(other.iter_sorted())

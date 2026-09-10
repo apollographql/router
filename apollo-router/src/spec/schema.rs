@@ -11,6 +11,7 @@ use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
 use apollo_federation::connectors::expand::expand_connectors;
@@ -94,13 +95,17 @@ impl Schema {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let definitions = result
+        let mut definitions = result
             .map_err(|invalid| {
                 SchemaError::Parse(ParseErrors {
                     errors: invalid.errors,
                 })
             })?
-            .to_schema_validate()
+            .to_schema()
+            .map_err(|errors| SchemaError::Validate(errors.into()))?;
+        coerce_and_validate_schema_values(&mut definitions)?;
+        let definitions = definitions
+            .validate()
             .map_err(|errors| SchemaError::Validate(errors.into()))?;
 
         let mut subgraphs = HashMap::new();

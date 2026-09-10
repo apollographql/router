@@ -4,6 +4,8 @@ subscription:
     passthrough:
       all:
         protocol: graphql_ws
+        max_reconnect_attempts: 5
+        reconnect_delay: 2s
     callback:
       path: /graphql
       public_url: https://example.com/graphql

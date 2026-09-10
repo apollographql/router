@@ -10,11 +10,12 @@ use super::print_sdl;
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests
 // =============================================================================
 
-/// `{}` on inputs with required fields must not appear on the composed supergraph (matches
-/// graphql-js `printSchema` behavior). Valid `{}` on all-optional inputs is kept when all
-/// subgraphs agree; see `misc_drops_empty_object_default_when_only_some_subgraphs_declare_it`.
+/// `{}` on inputs with required fields should appear on the composed supergraph for backward
+/// compatibility (when all subgraph agree), and should not be coerced when computing the API
+/// schema. See `misc_drops_empty_object_default_when_only_some_subgraphs_declare_it` for the case
+/// where only some subgraphs have it.
 #[test]
-fn misc_strips_invalid_empty_object_argument_defaults_on_supergraph() {
+fn misc_keeps_invalid_empty_object_argument_defaults_on_supergraph() {
     let subgraph = ServiceDefinition {
         name: "subgraph",
         type_defs: r#"

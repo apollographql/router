@@ -1,0 +1,35 @@
+{
+    "mocks": [
+        {
+            "request": {
+                "query": "{ containers { id result { __typename ... on MovieResult { sections { ...c } } ... on ArticleResult { sections { ...c } } } } } fragment a on EntityCollectionSection { __typename id } fragment b on GallerySection { __typename id } fragment c on Section { __typename ...a ...b }"
+            },
+            "response": {
+                "data": {
+                    "containers": [
+                        {
+                            "id": "c1",
+                            "result": {
+                                "__typename": "MovieResult",
+                                "sections": [
+                                    {"__typename": "EntityCollectionSection", "id": "ecs1"},
+                                    {"__typename": "GallerySection", "id": "gs1"}
+                                ]
+                            }
+                        },
+                        {
+                            "id": "c2",
+                            "result": {
+                                "__typename": "ArticleResult",
+                                "sections": [
+                                    {"__typename": "EntityCollectionSection", "id": "ecs2"},
+                                    {"__typename": "GallerySection", "id": "gs2"}
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

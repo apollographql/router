@@ -1,3 +1,4 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -4079,4 +4080,131 @@ fn defer_deferred_depends_on_source_with_shared_merge_at_prefix() {
     }
     "###
     );
+}
+
+/// Duplicated `@defer` labels are invalid (rejected by document validation since
+/// apollo-compiler 1.33.0), but the planner must not crash on them if validation is bypassed:
+/// nested duplicates used to stack-overflow (GHSA-gr6h-4wpf-xp52) and sibling duplicates were
+/// silently merged into one deferred block.
+#[test]
+fn defer_test_duplicate_labels_are_invalid_but_must_not_crash_planning() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+            w: Int
+        }
+        "#,
+    );
+
+    let nested = r#"{ t { ... @defer(label: "dup") { ... @defer(label: "dup") { id } } } }"#;
+    let sibling = r#"{ t { ... @defer(label: "dup") { v } ... @defer(label: "dup") { w } } }"#;
+
+    let api_schema = planner.api_schema();
+    for operation in [nested, sibling] {
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "op.graphql")
+            .expect_err("duplicated @defer labels must fail document validation");
+
+        let document = apollo_compiler::validation::Valid::assume_valid(
+            ExecutableDocument::parse(api_schema.schema(), operation, "op.graphql")
+                .expect("operation parses"),
+        );
+        planner
+            .build_query_plan(&document, None, Default::default())
+            .expect("planner must not crash on duplicate labels");
+    }
+}
+
+/// A labeled `@defer` in a fragment spread multiple times is valid (label uniqueness is defined
+/// over the document as written) and must be plannable: one deferred block per spread position,
+/// each carrying the user's label, distinguished by path. Relay generates this pattern.
+#[test]
+fn defer_test_labeled_fragment_spread_multiple_times() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query {
+            a: T
+            b: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            v: Int
+        }
+        "#,
+    );
+
+    let operation = r#"
+        {
+          a { ...ItemFragment }
+          b { ...ItemFragment }
+        }
+
+        fragment ItemFragment on T {
+          ... @defer(label: "ItemFragment") {
+            v
+          }
+        }
+    "#;
+
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect("fragment reuse is valid");
+
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("fragment reuse is plannable");
+    insta::assert_snapshot!(plan);
+}
+
+/// A user label shaped like a generated planning label must not collide with one: user labels
+/// never become planning labels, they are only restored onto the emitted plan.
+#[test]
+fn defer_test_user_label_shaped_like_generated_label() {
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+        type Query { a: T b: T }
+        type T @key(fields: "id") { id: ID! }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") { id: ID! v: Int w: Int }
+        "#,
+    );
+    // User label deliberately shaped like a generated one, next to an unlabeled defer.
+    let operation = r#"
+        {
+          a { ... @defer(label: "qp__0") { v } }
+          b { ... @defer { w } }
+        }
+    "#;
+    let api_schema = planner.api_schema();
+    let document =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "op.graphql")
+            .unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
+    let plan = plan.to_string();
+    // The user's label survives; the unlabeled defer stays unlabeled.
+    assert!(plan.contains(r#"label: "qp__0""#));
+    assert_eq!(plan.matches("label:").count(), 1);
 }

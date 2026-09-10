@@ -345,6 +345,10 @@ to protect against unbounded memory consumption.
 This limit is checked before JSON parsing.
 Both the GraphQL document and associated variables count toward it.
 
+`GET` requests encode the query, variables, and other parameters in the URL's query string instead of a request body. For these requests, the limit applies to the byte length of the encoded query string.
+
+Requests over the limit are rejected with a `413 Payload Too Large` response for `POST` requests, or a `414 URI Too Long` response for `GET` requests.
+
 For [multipart file upload](/graphos/routing/operations/file-upload) requests, this limit applies only to the GraphQL operations field (the query and variables), not to the uploaded file data.
 Limit file data separately with `preview_file_uploads.protocols.multipart.limits.max_file_size`.
 

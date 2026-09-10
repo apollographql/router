@@ -264,9 +264,8 @@ impl Merger {
         }
 
         if self.errors.is_empty() {
-            crate::compat::coerce_schema_values(&mut supergraph);
-
             // TODO: validate here and extend `MergeFailure` to propagate validation errors
+            let _ = crate::compat::coerce_and_validate_schema_values(&mut supergraph);
             let supergraph = Valid::assume_valid(supergraph);
             Ok(MergeSuccess {
                 schema: supergraph,

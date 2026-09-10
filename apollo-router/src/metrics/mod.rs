@@ -875,6 +875,21 @@ macro_rules! parse_attributes {
     ($attrs:expr) => {$attrs};
 }
 
+/// Implement `From<$ty> for opentelemetry::Value` for enums deriving `strum::IntoStaticStr`, so
+/// they can be passed directly as metric-attribute values instead of stringly-typed literals.
+macro_rules! impl_otel_value_from_static_str {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl From<$ty> for opentelemetry::Value {
+                fn from(value: $ty) -> Self {
+                    let s: &'static str = value.into();
+                    s.into()
+                }
+            }
+        )+
+    };
+}
+
 /// Get or create a `u64` monotonic counter metric and add a value to it.
 /// The metric must include a description.
 ///

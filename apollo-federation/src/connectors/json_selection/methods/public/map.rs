@@ -197,6 +197,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn map_should_handle_none_elements_gracefully(#[case] spec: ConnectSpec) {
         // When individual elements in map return None, they become null in the result
         assert_eq!(

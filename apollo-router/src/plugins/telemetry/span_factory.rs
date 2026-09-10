@@ -115,6 +115,45 @@ impl SpanMode {
         }
     }
 
+    /// Create a router span for a request that was rejected by hyper before reaching the axum
+    /// service layer (e.g. 431 / 414). No `http::Request` is available in that case, so this
+    /// variant omits request-derived fields and records only what we know at rejection time.
+    pub(crate) fn create_router_rejection(&self) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                let trace_id = TraceId::maybe_new()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+                info_span!(
+                    ROUTER_SPAN_NAME,
+                    "trace_id" = %trace_id,
+                    "client.name" = ::tracing::field::Empty,
+                    "client.version" = ::tracing::field::Empty,
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "http.response.status_code" = ::tracing::field::Empty,
+                    "apollo_private.duration_ns" = ::tracing::field::Empty,
+                    "apollo_private.http.request_headers" = ::tracing::field::Empty,
+                    "apollo_private.http.response_headers" = ::tracing::field::Empty,
+                )
+            }
+            SpanMode::SpecCompliant => {
+                info_span!(
+                    ROUTER_SPAN_NAME,
+                    "otel.name" = ::tracing::field::Empty,
+                    "otel.kind" = "SERVER",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "http.response.status_code" = ::tracing::field::Empty,
+                    "apollo_router.license" = ::tracing::field::Empty,
+                    "apollo_private.duration_ns" = ::tracing::field::Empty,
+                    "apollo_private.http.request_headers" = ::tracing::field::Empty,
+                    "apollo_private.http.response_headers" = ::tracing::field::Empty,
+                    "apollo_private.request" = true,
+                )
+            }
+        }
+    }
+
     pub(crate) fn create_supergraph(
         &self,
         config: &crate::plugins::telemetry::apollo::Config,

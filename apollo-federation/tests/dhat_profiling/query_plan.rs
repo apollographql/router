@@ -48,8 +48,8 @@ fn valid_query_plan() {
     const MAX_BYTES_QUERY_PLANNER: usize = 843_974; // ~824 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 14_243.
-    const MAX_ALLOCATIONS_QUERY_PLANNER: u64 = 14_955;
+    // Actual number: 17_303.
+    const MAX_ALLOCATIONS_QUERY_PLANNER: u64 = 18_168;
 
     // Number of bytes when the heap size reached its global maximum with a 5% buffer.
     // Actual number: 928_923.
@@ -58,10 +58,10 @@ fn valid_query_plan() {
     const MAX_BYTES_QUERY_PLAN: usize = 975_369; // ~953 KiB
 
     // Total number of allocations with a 5% buffer.
-    // Actual number: 21_438.
+    // Actual number: 24_559.
     //
-    // Planning adds 7_195 allocations (21_438-14_243=7_195).
-    const MAX_ALLOCATIONS_QUERY_PLAN: u64 = 22_510;
+    // Planning adds 7_256 allocations (24_559-17_303=7_256).
+    const MAX_ALLOCATIONS_QUERY_PLAN: u64 = 25_787;
 
     let schema = std::fs::read_to_string(SCHEMA).unwrap();
 
@@ -81,7 +81,6 @@ fn valid_query_plan() {
     println!("QueryPlanner::new: {stats:?}");
     dhat::assert!(stats.max_bytes < MAX_BYTES_QUERY_PLANNER);
     dhat::assert!(stats.total_blocks < MAX_ALLOCATIONS_QUERY_PLANNER);
-
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         api_schema.schema(),
         OPERATION,

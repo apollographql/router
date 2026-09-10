@@ -82,6 +82,12 @@ pub struct Request {
 
     /// unique id for this request
     pub(crate) id: SubgraphRequestId,
+
+    /// Whether this subgraph fetch is part of the deferred portion of an
+    /// `@defer` query plan. Populated by the fetch service from the query
+    /// plan execution walker; used by the `is_deferred` subgraph telemetry
+    /// selector to split primary vs deferred fetch metrics.
+    pub(crate) is_deferred_fetch: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -115,6 +121,7 @@ impl Request {
             authorization: Default::default(),
             executable_document,
             id: SubgraphRequestId::new(),
+            is_deferred_fetch: false,
         }
     }
 
@@ -223,6 +230,7 @@ impl Clone for Request {
             authorization: self.authorization.clone(),
             executable_document: self.executable_document.clone(),
             id: self.id.clone(),
+            is_deferred_fetch: self.is_deferred_fetch,
         }
     }
 }

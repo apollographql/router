@@ -87,5 +87,5 @@ JSONSelection {
             ),
         },
     ),
-    spec: V0_3,
+    spec: V0_4,
 }

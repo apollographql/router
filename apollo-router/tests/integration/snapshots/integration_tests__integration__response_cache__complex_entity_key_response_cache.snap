@@ -8,7 +8,10 @@ expression: body.extensions
     "data": [
       {
         "key": "version:1.2:subgraph:stuff:type:Query:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
-        "invalidationKeys": [],
+        "invalidationKeys": [
+          "subgraph-stuff",
+          "type-stuff-Query"
+        ],
         "indexes": {
           "subgraph": true,
           "type": true,
@@ -69,7 +72,10 @@ expression: body.extensions
       },
       {
         "key": "version:1.2:subgraph:status:type:Status:representation:7c35a77a9a775295a0cf19124ff9df08664a82d92460b35e109bd12c7f636db7:hash:[query-hash]:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
-        "invalidationKeys": [],
+        "invalidationKeys": [
+          "subgraph-status",
+          "type-status-Status"
+        ],
         "indexes": {
           "subgraph": true,
           "type": true,

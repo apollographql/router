@@ -85,6 +85,50 @@ fn field_types_errors_on_merging_list_with_non_list() {
 }
 
 #[test]
+fn field_types_errors_on_merging_nullable_type_and_non_nullable_supertype() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          u: U! @shareable
+        }
+
+        union U = T | S
+
+        type T {
+          f: String! @shareable
+        }
+
+        type S {
+          f: String!
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          u: T @shareable
+        }
+
+        type T {
+          f: String! @shareable
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "FIELD_TYPE_MISMATCH",
+            r#"Type of field "Query.u" is incompatible across subgraphs: it has type "U!" in subgraph "subgraphA" but type "T" in subgraph "subgraphB""#,
+        )],
+    );
+}
+
+#[test]
 fn field_types_merges_nullable_and_non_nullable() {
     let subgraph_a = ServiceDefinition {
         name: "subgraphA",

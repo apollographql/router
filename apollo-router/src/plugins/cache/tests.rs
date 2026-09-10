@@ -21,7 +21,6 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
 use crate::plugins::cache::entity::CacheKeyContext;
 use crate::plugins::cache::entity::CacheKeysContext;
@@ -957,19 +956,26 @@ async fn no_data() {
         .collect(),
     );
 
+    let drain_drivers = std::sync::Arc::new(std::sync::Mutex::new(Vec::<
+        tokio::task::JoinHandle<()>,
+    >::new()));
+    let drain_drivers_clone = drain_drivers.clone();
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
         .extra_private_plugin(entity_cache)
-        .subgraph_hook(|name, service| {
+        .subgraph_hook(move |name, service| {
             if name == "orga" {
-                let mut subgraph = MockSubgraphService::new();
-                subgraph
-                    .expect_call()
-                    .times(1)
-                    .returning(move |_req: subgraph::Request| Err("orga not found".into()));
-                subgraph.boxed()
+                let (mock, mut handle) =
+                    tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+                let driver = tokio::spawn(async move {
+                    while let Some((_req, responder)) = handle.next_request().await {
+                        responder.send_error("orga not found");
+                    }
+                });
+                drain_drivers_clone.lock().unwrap().push(driver);
+                mock.boxed()
             } else {
                 service
             }
@@ -1000,6 +1006,14 @@ async fn no_data() {
     let response = response.next_response().await.unwrap();
 
     insta::assert_json_snapshot!(response);
+
+    for driver in std::sync::Arc::try_unwrap(drain_drivers)
+        .unwrap()
+        .into_inner()
+        .unwrap()
+    {
+        crate::plugin::test::await_mock_driver(driver).await;
+    }
 }
 
 #[tokio::test]

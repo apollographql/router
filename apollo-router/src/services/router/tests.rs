@@ -11,18 +11,21 @@ use http::header::VARY;
 use mime::APPLICATION_JSON;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
+use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Context;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
+use crate::plugin::test::assert_no_mock_calls;
+use crate::plugin::test::await_mock_driver;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::services::router::service::from_supergraph_mock_callback;
+use crate::services::router::service::from_supergraph_mock;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -66,7 +69,7 @@ fn it_leaves_varys_alone_if_there_are_more_than_one() {
 
 #[tokio::test]
 async fn it_extracts_query_and_operation_name() {
-    let query = "query";
+    let query = "query operationName { __typename }";
     let expected_query = query;
     let operation_name = "operationName";
     let expected_operation_name = operation_name;
@@ -75,28 +78,29 @@ async fn it_extracts_query_and_operation_name() {
         .data(json!({"response": "yay"}))
         .build();
 
-    let mut router_service = from_supergraph_mock_callback(move |req| {
-        let example_response = expected_response.clone();
-
-        assert_eq!(
-            req.supergraph_request.body().query.as_deref().unwrap(),
-            expected_query
-        );
-        assert_eq!(
-            req.supergraph_request
-                .body()
-                .operation_name
-                .as_deref()
-                .unwrap(),
-            expected_operation_name
-        );
-
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
+    let (mock, mut handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let driver = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (req, responder) = handle.next_request().await.unwrap();
+            assert_eq!(
+                req.supergraph_request.body().query.as_deref().unwrap(),
+                expected_query
+            );
+            assert_eq!(
+                req.supergraph_request
+                    .body()
+                    .operation_name
+                    .as_deref()
+                    .unwrap(),
+                expected_operation_name
+            );
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                expected_response.clone(),
+                req.context,
+            ));
+        }
+    });
+    let mut router_service = from_supergraph_mock(mock).await;
 
     // get request
     let get_request = supergraph::Request::builder()
@@ -137,13 +141,15 @@ async fn it_extracts_query_and_operation_name() {
         .call(post_request.try_into().unwrap())
         .await
         .unwrap();
+    await_mock_driver(driver).await;
 }
 
 #[tokio::test]
 async fn it_fails_on_empty_query() {
     let expected_error = "Must provide query string.";
 
-    let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
+    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let router_service = from_supergraph_mock(mock).await;
 
     let request = SupergraphRequest::fake_builder()
         .query("".to_string())
@@ -166,13 +172,15 @@ async fn it_fails_on_empty_query() {
 
     assert_eq!(expected_error, actual_error);
     assert!(response.errors[0].extensions.contains_key("code"));
+    assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
 async fn it_fails_on_no_query() {
     let expected_error = "Must provide query string.";
 
-    let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
+    let (mock, handle) = tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+    let router_service = from_supergraph_mock(mock).await;
 
     let request = SupergraphRequest::fake_builder()
         .build()
@@ -193,6 +201,7 @@ async fn it_fails_on_no_query() {
     let actual_error = response.errors[0].message.clone();
     assert_eq!(expected_error, actual_error);
     assert!(response.errors[0].extensions.contains_key("code"));
+    assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test]
@@ -239,6 +248,73 @@ async fn test_http_max_request_bytes() {
     // Send a request just over the limit
     let response = with_config(CANNED_REQUEST_LEN - 1).await.response;
     assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn test_http_max_request_bytes_get() {
+    // Same query/variables as `supergraph::Request::canned_builder()`, but sent via HTTP GET so
+    // the query ends up URL-encoded on the URI instead of in the (empty) body.
+    fn build_get_request() -> router::Request {
+        let canned_query = "
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    upc
+                    name
+                    reviews {
+                        id
+                        product { name }
+                        author { id name }
+                    }
+                }
+            }
+        ";
+        supergraph::Request::fake_builder()
+            .query(canned_query.to_string())
+            .variables(json!({"first": 2}).as_object().cloned().unwrap())
+            .method(Method::GET)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap()
+    }
+
+    async fn with_config(http_max_request_bytes: usize) -> router::Response {
+        let config = serde_json::json!({
+            "limits": {
+                "http_max_request_bytes": http_max_request_bytes
+            }
+        });
+        crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .unwrap()
+            .oneshot(build_get_request())
+            .await
+            .unwrap()
+    }
+
+    let query_len = build_get_request()
+        .router_request
+        .uri()
+        .query()
+        .expect("GET request must have a query string")
+        .len();
+    assert!(
+        query_len > 0,
+        "the canned GET request's encoded query string is unexpectedly empty; \
+         query_len - 1 below would underflow"
+    );
+
+    // Send a request just at (under) the limit
+    let response = with_config(query_len).await.response;
+    assert_eq!(response.status(), http::StatusCode::OK);
+
+    // Send a request just over the limit. This is a URI-length violation, not a body-payload
+    // one, so it's reported as 414 URI Too Long rather than 413 Payload Too Large.
+    let response = with_config(query_len - 1).await.response;
+    assert_eq!(response.status(), http::StatusCode::URI_TOO_LONG);
 }
 
 #[tokio::test]
@@ -766,6 +842,168 @@ async fn invalid_input_enum() {
     let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
 
     insta::assert_json_snapshot!(response);
+}
+
+const INPUT_OBJECT_SCHEMA: &str = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/tag/v0.2")
+    @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) {
+      query: Query
+      mutation: Mutation
+   }
+   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+   directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+   directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+   scalar link__Import
+
+   enum link__Purpose {
+     SECURITY
+     EXECUTION
+   }
+
+   scalar join__FieldSet
+
+   enum join__Graph {
+       USERS @join__graph(name: "users", url: "http://localhost:4001/graphql")
+   }
+   type Query @join__type(graph: USERS) {
+      name: String
+   }
+   type Mutation @join__type(graph: USERS) {
+      registerPartner(input: RegisterPartnerInput!): String @join__field(graph: USERS)
+   }
+
+   input RegisterPartnerInput @join__type(graph: USERS) @tag(name: "partner") {
+    email: String!
+    password: String!
+    internalNotes: String @inaccessible
+  }"#;
+
+// Companion test: services::supergraph::tests::invalid_input_object_unknown_field
+//
+// Regression test: an unknown field on an input-object variable must not leak
+// the composed input type's SDL (join/tag directives, subgraph names) in the
+// error message.
+#[tokio::test]
+#[rstest::rstest]
+async fn invalid_input_object_unknown_field(
+    #[values("measure", "enforce")] strict_variable_validation: &str,
+) -> Result<(), BoxError> {
+    // Set up insta snapshot to support test parameterization
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!(
+        "strict_variable_validation_{}",
+        strict_variable_validation,
+    ));
+    let _guard = settings.bind_to_scope();
+
+    let service = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true,
+            },
+            "supergraph": {
+                "strict_variable_validation": strict_variable_validation
+            }
+        }))?
+        .schema(INPUT_OBJECT_SCHEMA)
+        .build_router()
+        .await?;
+
+    let request = supergraph::Request::fake_builder()
+        .query("mutation($input: RegisterPartnerInput!) { registerPartner(input: $input) }")
+        .variable(
+            "input",
+            serde_json::json!({"email": "a@example.com", "password": "x", "invalidField": "x"}),
+        )
+        .build()?
+        .try_into()?;
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await?
+        .next_response()
+        .await
+        .expect("should have one response")?;
+
+    let response: serde_json::Value = serde_json::from_slice(&response)?;
+
+    insta::assert_json_snapshot!(response);
+    Ok(())
+}
+
+// Companion test: services::supergraph::tests::invalid_input_object_inaccessible_field
+//
+// Regression test: a variable must not be able to set an `@inaccessible` input-object
+// field. Before the fix, this field was still present in the supergraph schema used for
+// coercion, so it was silently accepted (and would have been forwarded) rather than
+// rejected the same way a genuinely unknown field is rejected.
+#[tokio::test]
+#[rstest::rstest]
+async fn invalid_input_object_inaccessible_field(
+    #[values("measure", "enforce")] strict_variable_validation: &str,
+) -> Result<(), BoxError> {
+    // Set up insta snapshot to support test parameterization
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_suffix(format!(
+        "strict_variable_validation_{}",
+        strict_variable_validation,
+    ));
+    let _guard = settings.bind_to_scope();
+
+    let service = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true,
+            },
+            "supergraph": {
+                "strict_variable_validation": strict_variable_validation
+            }
+        }))?
+        .schema(INPUT_OBJECT_SCHEMA)
+        .subgraph_hook(|name, _service| {
+            let name = name.to_string();
+            tower::service_fn(move |_request: subgraph::Request| {
+                let name = name.clone();
+                async move {
+                    panic!(
+                        "subgraph `{name}` must not be called: the `@inaccessible` field should have been rejected during variable coercion"
+                    )
+                }
+            })
+            .boxed()
+        })
+        .build_router()
+        .await?;
+
+    let request = supergraph::Request::fake_builder()
+        .query("mutation($input: RegisterPartnerInput!) { registerPartner(input: $input) }")
+        .variable(
+            "input",
+            serde_json::json!({"email": "a@example.com", "password": "x", "internalNotes": "leaked"}),
+        )
+        .build()?
+        .try_into()?;
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await?
+        .next_response()
+        .await
+        .expect("should have one response")?;
+
+    let response: serde_json::Value = serde_json::from_slice(&response)?;
+
+    insta::assert_json_snapshot!(response);
+    Ok(())
 }
 
 #[tokio::test]

@@ -41,6 +41,7 @@ use crate::plugins::limits;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
+use crate::query_planner::QueryPlanningOutcome;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
@@ -250,6 +251,7 @@ where
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
                             config_mode_hash: self.config_mode_hash.clone(),
+                            source: WarmUpSource::Cache,
                         },
                     )
                     .take(count)
@@ -265,15 +267,15 @@ where
             || (experimental_pql_prewarm.on_reload && previous_cache.is_some());
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
-        let capacity = if should_warm_with_pqs {
-            cache_keys.len()
-                + persisted_queries_operations
-                    .as_ref()
-                    .map(|ops| ops.len())
-                    .unwrap_or(0)
+        let top_n_expected = cache_keys.len();
+        let pq_expected = if should_warm_with_pqs {
+            persisted_queries_operations
+                .as_ref()
+                .map_or(0, |ops| ops.len())
         } else {
-            cache_keys.len()
+            0
         };
+        let capacity = top_n_expected + pq_expected;
 
         if capacity > 0 {
             tracing::info!(
@@ -281,6 +283,12 @@ where
                 capacity
             );
         }
+
+        // Record how many operations warm-up intends to plan, per source, so coverage
+        // (planned / expected) can be computed from the warm-up outcome metric. Emitted even
+        // when zero: "nothing expected from this source" is itself a meaningful signal.
+        record_warmup_expected(top_n_expected, WarmUpSource::Cache);
+        record_warmup_expected(pq_expected, WarmUpSource::PersistedQuery);
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
@@ -294,6 +302,7 @@ where
                     metadata: CacheKeyMetadata::default(),
                     plan_options: PlanOptions::default(),
                     config_mode_hash: self.config_mode_hash.clone(),
+                    source: WarmUpSource::PersistedQuery,
                 });
             }
         }
@@ -311,6 +320,7 @@ where
             metadata,
             plan_options,
             config_mode_hash: _,
+            source,
         } in all_cache_keys
         {
             // NB: warmup tasks have a low priority so that real requests are prioritized
@@ -325,9 +335,12 @@ where
                 {
                     Ok(doc) => break doc,
                     Err(MaybeBackPressureError::PermanentError(_)) => {
+                        // Couldn't even parse the operation — a terminal failure for warm-up.
+                        record_warmup_outcome(source, QueryPlanningOutcome::Error);
                         continue 'all_cache_keys_loop;
                     }
                     Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                        record_warmup_backpressure(source, WarmUpPhase::Parse);
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                         // try again
                     }
@@ -354,6 +367,7 @@ where
                             { previous_cache.lock().await.get(&caching_key).cloned() }
                     {
                         self.cache.insert_in_memory(caching_key, entry).await;
+                        record_warmup_outcome(source, QueryPlanningOutcome::Reused);
                         reused += 1;
                         continue;
                     }
@@ -384,6 +398,7 @@ where
 
                     match res {
                         Ok(QueryPlannerResponse { content, .. }) => {
+                            record_warmup_outcome(source, QueryPlanningOutcome::Success);
                             if let Some(content) = content.clone() {
                                 count += 1;
                                 tokio::spawn(async move {
@@ -395,17 +410,23 @@ where
                         Err(MaybeBackPressureError::PermanentError(error)) => {
                             count += 1;
                             let e = Arc::new(error);
+                            record_warmup_outcome(source, QueryPlanningOutcome::from(e.as_ref()));
                             tokio::spawn(async move {
                                 entry.insert(Err(e)).await;
                             });
                             break;
                         }
                         Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                            record_warmup_backpressure(source, WarmUpPhase::Plan);
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             // try again
                         }
                     }
                 }
+            } else {
+                // Another warm-up operation (a duplicate key, or one from another source) is
+                // already populating this plan, so we don't plan it again — but it's still covered.
+                record_warmup_outcome(source, QueryPlanningOutcome::Reused);
             }
         }
 
@@ -675,7 +696,7 @@ where
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     exceeded_memory_limit_setter.store(true, Ordering::Relaxed);
                                     abort_handle.abort();
-                                        log::warn!("memory limit exceeded planning query: {}", &query);
+                                        log::warn!("memory limit exceeded planning query: {}", query);
                                     }));
                                 task
                             } else {
@@ -770,7 +791,7 @@ where
                                 let memory_limit_bytes = memory_limit.as_u64() as usize;
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     notify_memory_limit_exceeded.notify_waiters();
-                                    log::warn!("memory limit exceeded planning query: {}", &query);
+                                    log::warn!("memory limit exceeded planning query: {}", query);
                                 }));
                                 tokio::task::spawn(planning_task).await
                             } else {
@@ -890,6 +911,64 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
+/// Where an operation being warmed up came from. Used to attribute warm-up metrics.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum WarmUpSource {
+    /// An operation from the persisted-query manifest.
+    PersistedQuery,
+    /// A "hot" operation carried over from the previous in-memory cache.
+    Cache,
+}
+
+/// The phase of warm-up at which a temporary/backpressure error occurred. Used to attribute the
+/// warm-up backpressure metric.
+#[derive(Copy, Clone, Debug, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum WarmUpPhase {
+    Parse,
+    Plan,
+}
+
+impl_otel_value_from_static_str!(WarmUpSource, WarmUpPhase);
+
+/// Record the terminal outcome of warming up a single operation, attributed by source.
+fn record_warmup_outcome(source: WarmUpSource, outcome: QueryPlanningOutcome) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.operations",
+        "Number of operations processed during query planner warm-up, by outcome and source",
+        "{operation}",
+        1,
+        outcome = outcome,
+        source = source
+    );
+}
+
+/// Record that warm-up hit a temporary/backpressure error and retried, attributed by source and
+/// the phase (parse vs. plan) at which it occurred.
+fn record_warmup_backpressure(source: WarmUpSource, phase: WarmUpPhase) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.backpressure",
+        "Number of times query planner warm-up retried after a temporary/backpressure error",
+        "{event}",
+        1,
+        source = source,
+        phase = phase
+    );
+}
+
+/// Record how many operations warm-up intends to plan for a given source. Emitted even when
+/// `expected` is zero so the series always exists and coverage can be computed per source.
+fn record_warmup_expected(expected: usize, source: WarmUpSource) {
+    u64_counter_with_unit!(
+        "apollo.router.query_planning.warmup.operations.expected",
+        "Number of operations the query planner warm-up intended to plan",
+        "{operation}",
+        expected as u64,
+        source = source
+    );
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
@@ -898,6 +977,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode_hash: Arc<ConfigModeHash>,
+    pub(crate) source: WarmUpSource,
 }
 
 struct StructHasher {
@@ -966,6 +1046,7 @@ mod tests {
     use crate::configuration::QueryPlanning;
     use crate::configuration::Supergraph;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -2363,84 +2444,348 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_cache_warmup() {
-        let create_delegate = |call_count| {
-            let mut delegate = MockMyQueryPlanner::new();
-            delegate.expect_clone().times(1).returning(move || {
-                let mut planner = MockMyQueryPlanner::new();
-                planner.expect_sync_call().times(call_count).returning(|_| {
-                    let plan = Arc::new(QueryPlan::fake_new(None, None));
-                    Ok(QueryPlannerResponse::builder()
-                        .content(QueryPlannerContent::Plan { plan })
-                        .build())
-                });
-                planner
-            });
-            delegate
-        };
-
-        let configuration: Configuration = Default::default();
-        let schema = Arc::new(
+    /// The starstuff test schema used by the warm-up tests.
+    fn warmup_test_schema(configuration: &Configuration) -> Arc<Schema> {
+        Arc::new(
             Schema::parse(
                 include_str!("../testdata/starstuff@current.graphql"),
-                &configuration,
+                configuration,
             )
             .unwrap(),
-        );
+        )
+    }
 
-        let create_planner = async |delegate| {
-            CachingQueryPlanner::new(
-                delegate,
-                schema.clone(),
-                Default::default(),
-                &configuration,
-                IndexMap::default(),
-            )
-            .await
-            .unwrap()
-        };
+    async fn new_caching_planner(
+        delegate: MockMyQueryPlanner,
+        schema: Arc<Schema>,
+        configuration: &Configuration,
+    ) -> CachingQueryPlanner<MockMyQueryPlanner> {
+        CachingQueryPlanner::new(
+            delegate,
+            schema,
+            Default::default(),
+            configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap()
+    }
 
-        let create_request = || {
-            let query_str = "query ExampleQuery { me { name } }".to_string();
-            let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
-            let context = Context::new();
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-            query_planner::CachingRequest::new(query_str, None, context, Default::default())
-        };
+    fn example_request(
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> query_planner::CachingRequest {
+        let query_str = "query ExampleQuery { me { name } }".to_string();
+        let doc = Query::parse_document(&query_str, None, schema, configuration).unwrap();
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+        query_planner::CachingRequest::new(query_str, None, context, Default::default())
+    }
 
-        // send query to caching planner. it should save this query plan in its cache
-        let mut planner = create_planner(create_delegate(1)).await;
-        let response = planner.call(create_request()).await.unwrap();
-        assert!(response.content.is_some());
-        assert_eq!(planner.cache.len().await, 1);
+    fn ok_plan_response() -> Result<QueryPlannerResponse, MaybeBackPressureError<QueryPlannerError>>
+    {
+        let plan = Arc::new(QueryPlan::fake_new(None, None));
+        Ok(QueryPlannerResponse::builder()
+            .content(QueryPlannerContent::Plan { plan })
+            .build())
+    }
 
-        // create and warm up a new planner. new planner's delegate should be called once during
-        // the warm-up phase to populate the cache
+    /// A delegate whose planner successfully plans `times` operations.
+    fn delegate_planning_ok(times: usize) -> MockMyQueryPlanner {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(move || {
+            let mut planner = MockMyQueryPlanner::new();
+            planner
+                .expect_sync_call()
+                .times(times)
+                .returning(|_| ok_plan_response());
+            planner
+        });
+        delegate
+    }
+
+    /// A delegate whose planner returns a permanent planner error on its single call.
+    fn delegate_planning_error() -> MockMyQueryPlanner {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            planner.expect_sync_call().times(1).returning(|_| {
+                Err(MaybeBackPressureError::PermanentError(
+                    QueryPlannerError::EmptyPlan("boom".to_string()),
+                ))
+            });
+            planner
+        });
+        delegate
+    }
+
+    /// A delegate whose planner signals backpressure once and then succeeds.
+    fn delegate_backpressure_then_ok() -> MockMyQueryPlanner {
+        let mut delegate = MockMyQueryPlanner::new();
+        delegate.expect_clone().times(1).returning(|| {
+            let mut planner = MockMyQueryPlanner::new();
+            let first_call = AtomicBool::new(true);
+            planner.expect_sync_call().times(2).returning(move |_| {
+                if first_call.swap(false, Ordering::Relaxed) {
+                    Err(MaybeBackPressureError::TemporaryError(
+                        ComputeBackPressureError,
+                    ))
+                } else {
+                    ok_plan_response()
+                }
+            });
+            planner
+        });
+        delegate
+    }
+
+    /// Warm a fresh planner from `previous_cache`, taking the top operation.
+    async fn warm_up_from_cache(
+        planner: &mut CachingQueryPlanner<MockMyQueryPlanner>,
+        previous_cache: InMemoryCachePlanner,
+        schema: Arc<Schema>,
+        configuration: &Configuration,
+    ) {
         let query_analysis_layer =
-            QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
-        let mut new_planner = create_planner(create_delegate(1)).await;
-        new_planner
+            QueryAnalysisLayer::new(schema, Arc::new(configuration.clone())).await;
+        planner
             .warm_up(
                 &query_analysis_layer,
-                &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
-                Some(planner.previous_cache()),
+                &Arc::new(PersistedQueryLayer::new(configuration).await.unwrap()),
+                Some(previous_cache),
                 Some(1),
                 Default::default(),
                 &Default::default(),
             )
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_cache_warmup() {
+        let configuration: Configuration = Default::default();
+        let schema = warmup_test_schema(&configuration);
+
+        // send query to caching planner. it should save this query plan in its cache
+        let mut planner =
+            new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+        let response = planner
+            .call(example_request(&schema, &configuration))
+            .await
+            .unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(planner.cache.len().await, 1);
+
+        // create and warm up a new planner. new planner's delegate should be called once during
+        // the warm-up phase to populate the cache
+        let mut new_planner =
+            new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+        warm_up_from_cache(
+            &mut new_planner,
+            planner.previous_cache(),
+            schema.clone(),
+            &configuration,
+        )
+        .await;
         // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert_eq!(new_planner.cache.len().await, 1);
 
         // create a new delegate that _shouldn't_ be called since the new planner already has the
         // result in its cache
-        new_planner.delegate = create_delegate(0);
-        let response = new_planner.call(create_request()).await.unwrap();
+        new_planner.delegate = delegate_planning_ok(0);
+        let response = new_planner
+            .call(example_request(&schema, &configuration))
+            .await
+            .unwrap();
         assert!(response.content.is_some());
         assert_eq!(new_planner.cache.len().await, 1);
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_success_and_expected_metrics() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = warmup_test_schema(&configuration);
+
+            // Populate a planner's cache with one operation, to be carried over on warm-up.
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner from the previous cache: exactly one cache-sourced operation
+            // is expected.
+            let mut new_planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            warm_up_from_cache(
+                &mut new_planner,
+                planner.previous_cache(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
+
+            // One cache-sourced operation expected, and it was planned successfully.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                1,
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "success",
+                "source" = "cache"
+            );
+            // The persisted-query series is recorded even though nothing was expected from it.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                0,
+                "source" = "persisted_query"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_error_outcome() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = warmup_test_schema(&configuration);
+
+            // Populate a source cache with one operation using a delegate that succeeds.
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner whose delegate returns a permanent planner error.
+            let mut new_planner =
+                new_caching_planner(delegate_planning_error(), schema.clone(), &configuration)
+                    .await;
+            warm_up_from_cache(
+                &mut new_planner,
+                planner.previous_cache(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
+
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "error",
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_backpressure() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = warmup_test_schema(&configuration);
+
+            // Populate a source cache with one operation using a delegate that succeeds.
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner whose delegate signals backpressure once, then succeeds.
+            let mut new_planner = new_caching_planner(
+                delegate_backpressure_then_ok(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
+            warm_up_from_cache(
+                &mut new_planner,
+                planner.previous_cache(),
+                schema.clone(),
+                &configuration,
+            )
+            .await;
+
+            // One retry at the planning phase, and the operation ultimately succeeded.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.backpressure",
+                1,
+                "source" = "cache",
+                "phase" = "plan"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "success",
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_cache_warmup_records_reused_outcome() {
+        async {
+            let configuration: Configuration = Default::default();
+            let schema = warmup_test_schema(&configuration);
+
+            // Populate a source cache with one operation.
+            let mut planner =
+                new_caching_planner(delegate_planning_ok(1), schema.clone(), &configuration).await;
+            planner
+                .call(example_request(&schema, &configuration))
+                .await
+                .unwrap();
+            assert_eq!(planner.cache.len().await, 1);
+
+            // Warm up a fresh planner with plan reuse enabled. The operation's hash is unchanged,
+            // so its plan is carried over from the previous cache and the delegate is never asked
+            // to plan it (`delegate_planning_ok(0)`).
+            let mut new_planner =
+                new_caching_planner(delegate_planning_ok(0), schema.clone(), &configuration).await;
+            let query_analysis_layer =
+                QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+            new_planner
+                .warm_up(
+                    &query_analysis_layer,
+                    &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                    Some(planner.previous_cache()),
+                    Some(1),
+                    true, // experimental_reuse_query_plans
+                    &Default::default(),
+                )
+                .await;
+
+            // The reused operation is counted so coverage (planned / expected) stays at 1.0.
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations",
+                1,
+                "outcome" = "reused",
+                "source" = "cache"
+            );
+            assert_counter!(
+                "apollo.router.query_planning.warmup.operations.expected",
+                1,
+                "source" = "cache"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

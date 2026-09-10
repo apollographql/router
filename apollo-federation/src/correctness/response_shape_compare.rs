@@ -71,33 +71,34 @@ where
     fn allows_any(&self, _defs: &PossibleDefinitions) -> bool;
 }
 
-struct DummyPathConstraint;
-
-impl PathConstraint for DummyPathConstraint {
-    fn under_type_condition(&self, _type_cond: &NormalizedTypeCondition) -> Self {
-        DummyPathConstraint
+/// Conjunction of two path constraints: a runtime type is possible only if both constraints
+/// allow it. This is how an extra oracle (e.g. `SubgraphConstraint`) is layered on top of the
+/// base `SchemaConstraint`.
+impl<A: PathConstraint, B: PathConstraint> PathConstraint for (A, B) {
+    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
+        (
+            self.0.under_type_condition(type_cond),
+            self.1.under_type_condition(type_cond),
+        )
     }
 
-    fn for_field(&self, _representative_field: &Field) -> Result<Self, ComparisonError> {
-        Ok(DummyPathConstraint)
+    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError> {
+        Ok((
+            self.0.for_field(representative_field)?,
+            self.1.for_field(representative_field)?,
+        ))
     }
 
-    fn allows(&self, _ty: &ObjectTypeDefinitionPosition) -> bool {
-        true
+    fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
+        self.0.allows(ty) && self.1.allows(ty)
     }
 
-    fn allows_any(&self, _defs: &PossibleDefinitions) -> bool {
-        true
+    fn allows_any(&self, defs: &PossibleDefinitions) -> bool {
+        // Note: More precise than `self.0.allows_any(defs) && self.1.allows_any(defs)`, since
+        //       some ground type must satisfy both constraints simultaneously.
+        defs.iter()
+            .any(|(type_cond, _)| type_cond.ground_set().iter().any(|ty| self.allows(ty)))
     }
-}
-
-// Check if `this` is a subset of `other`.
-pub fn compare_response_shapes(
-    this: &ResponseShape,
-    other: &ResponseShape,
-) -> Result<(), ComparisonError> {
-    let assumption = Clause::default(); // empty assumption at the top level
-    compare_response_shapes_with_constraint(&DummyPathConstraint, &assumption, this, other)
 }
 
 /// Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
@@ -278,10 +279,11 @@ fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
 ///   individual matching variant. Thus, this function tries to collect/merge all implied variants
 ///   and then compare.
 /// - Note that we may need to case-split over Boolean variables. It happens when there are more
-///   Boolean variables used in the `other`'s variants. This function tries to find the smallest
-///   set of missing Boolean variables to case-split. It starts with the empty set, then tries
-///   increasingly larger sets until a matching subset is found. For each set of variables, it
-///   checks if every possible combination of Boolean values (hypothesis) has a match.
+///   Boolean variables used in the `other`'s variants. Each variant's own variable set is tried
+///   first (fewer hypotheses to check), then the union of all variable sets as a fallback, since
+///   full coverage may require combining variables from different variants. For each set of
+///   variables, it checks if every possible combination of Boolean values (hypothesis) has a
+///   match.
 fn solve_boolean_constraints<T: PathConstraint>(
     path_constraint: &T,
     assumption: &Clause,
@@ -352,17 +354,23 @@ type BooleanVariables = Vec<Name>;
 
 /// Generate sets of hypotheses to case-split over that are applicable to the target `defs`.
 /// - Construct hypotheses based on the variables used in the Boolean conditions in `defs`.
-/// - Excludes the literals in the `assumption` since it's already assumed to be true.
+/// - Excludes the literals in the `base_clause` since it's already assumed to be true.
 /// - If there are variants with no extra Boolean variables, it will generate a no-hypothesis
 ///   group, which contains only one empty clause.
+/// - When there are multiple distinct variable groups, the union of all groups is added as the
+///   last (fallback) group. Individual variants' groups may each be insufficient when full
+///   coverage requires combining variables from different variants (e.g. groups `[v0, v1]` and
+///   `[v0, v2]` jointly covering all cases). The union group is the complete case-split: every
+///   hypothesis fully determines each variant's condition, so it can verify any coverage the
+///   smaller groups miss.
 fn extract_boolean_hypotheses(
-    assumption: &Clause,
+    base_clause: &Clause,
     defs: &PossibleDefinitionsPerTypeCondition,
 ) -> Vec<Vec<Clause>> {
     // Collect sets of variables that can be used to case-split over.
     let mut variable_groups = IndexSet::default();
     for variant in defs.conditional_variants() {
-        let Some(remaining_condition) = variant.boolean_clause().subtract(assumption) else {
+        let Some(remaining_condition) = variant.boolean_clause().subtract(base_clause) else {
             // Skip unsatisfiable variants.
             continue;
         };
@@ -375,6 +383,14 @@ fn extract_boolean_hypotheses(
             .cloned()
             .collect();
         variable_groups.insert(vars);
+    }
+    // Add the union of all variable groups as the fallback group (see doc comment above).
+    // With zero or one group, the union adds nothing new.
+    if variable_groups.len() > 1 {
+        let mut union_vars: BooleanVariables = variable_groups.iter().flatten().cloned().collect();
+        union_vars.sort();
+        union_vars.dedup();
+        variable_groups.insert(union_vars); // no-op if some group already equals the union
     }
     // Generate groups of Boolean hypotheses.
     variable_groups
