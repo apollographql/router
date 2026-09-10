@@ -13,6 +13,7 @@ use super::response_shape::Clause;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_selection_set;
+use super::response_shape_compare::compare_representative_field;
 use crate::FederationError;
 use crate::bail;
 use crate::internal_error;
@@ -264,8 +265,15 @@ fn key_directive_matches(
     // `condition`: the whole condition computed from the fetch query & subgraph schema.
     let mut condition = key_condition.clone();
     condition.merge_with(require_condition)?;
+    // Strip field arguments from both sides before comparing response keys.
+    // The `requires` items on the fetch node lack arguments, while
+    // `@key/@requires` field sets may include them. Stripping here keeps
+    // the comparison scoped to key matching without weakening comparators
+    // elsewhere.
+    let entity_require_shape_stripped = strip_field_arguments(entity_require_shape);
+    let condition_stripped = strip_field_arguments(&condition);
     // Check if `entity_require_shape` is a subset of `condition` in terms of response keys.
-    if !key_only_compare_response_shapes(entity_require_shape, &condition) {
+    if !key_only_compare_response_shapes(&entity_require_shape_stripped, &condition_stripped) {
         return Err(format!(
             "The `requires` item does not match the subgraph schema\n\
              * @key field set: {key_condition}\n\
@@ -550,6 +558,48 @@ pub(crate) fn check_requires(
 //      sku: String! @requires(fields: "data(arg: 42)")
 //   }
 
+/// Remove all field arguments from a response shape, recursively.
+/// Used to normalize `@key`/`@requires` field sets before comparison,
+/// since the fetch node's `requires` items lack arguments while the
+/// schema-derived condition may include them.
+fn strip_field_arguments(shape: &ResponseShape) -> ResponseShape {
+    use super::response_shape::DefinitionVariant;
+    use super::response_shape::PossibleDefinitions;
+    use super::response_shape::PossibleDefinitionsPerTypeCondition;
+    use apollo_compiler::executable::Field;
+
+    fn strip_field(field: &Field) -> Field {
+        Field {
+            arguments: vec![],
+            ..field.clone()
+        }
+    }
+
+    let mut result = ResponseShape::new(shape.default_type_condition().clone());
+    for (key, defs) in shape.iter() {
+        let mut updated_defs = PossibleDefinitions::default();
+        for (type_cond, defs_per_type_cond) in defs.iter() {
+            let updated_key = strip_field(defs_per_type_cond.field_selection_key());
+            let updated_variants: Vec<_> = defs_per_type_cond
+                .conditional_variants()
+                .iter()
+                .map(|variant| {
+                    let updated_field = strip_field(variant.representative_field());
+                    let sub_rs = variant
+                        .sub_selection_response_shape()
+                        .map(strip_field_arguments);
+                    DefinitionVariant::new(variant.boolean_clause().clone(), updated_field, sub_rs)
+                })
+                .collect();
+            let updated_per_type =
+                PossibleDefinitionsPerTypeCondition::new(updated_key, updated_variants);
+            updated_defs.insert(type_cond.clone(), updated_per_type);
+        }
+        result.insert(key.clone(), updated_defs);
+    }
+    result
+}
+
 mod key_only_response_shape_compare {
     use super::super::response_shape::DefinitionVariant;
     use super::super::response_shape::PossibleDefinitionsPerTypeCondition;
@@ -611,11 +661,12 @@ mod key_only_response_shape_compare {
         let first = iter.next()?;
         let mut result_sub = first.sub_selection_response_shape().cloned();
         for variant in iter {
-            // Only compare field names, not arguments or directives. The `requires`
-            // items on the fetch node lack arguments, while `@key/@requires` field
-            // sets may include them. A name-only check is sufficient here since
-            // response keys already matched at the outer level.
-            if variant.representative_field().name != first.representative_field().name {
+            if compare_representative_field(
+                variant.representative_field(),
+                first.representative_field(),
+            )
+            .is_err()
+            {
                 // Unexpected: GraphQL invariant violation
                 return None;
             }
