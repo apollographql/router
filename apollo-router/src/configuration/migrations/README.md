@@ -6,7 +6,7 @@ It uses [proteus](https://github.com/rust-playground/proteus) under the hood, wh
 A migration has the following format:
 
 The filename should begin with a 4 digit numerical prefix. This allows us to apply migrations in a deterministic order.
-`Filename: 0001-name.yaml`. It must start with the current major version of the router. For example for router 2.x it should start with `2001-name.yaml`. If it doesn't start with the right version then it would be considered as a real breaking change and won't be automatically migrated when the router starts.
+Use the current major version as the first digit for new migrations, for example `2001-name.yaml` for router 2.x. Filenames determine migration order. Startup, reload, and `router config upgrade` apply migrations from all version prefixes.
 
 The yaml consists of a description and a number of actions:
 ```yaml
@@ -72,7 +72,7 @@ See [proteus](https://github.com/rust-playground/proteus) for more options.
 
 If a migration is deemed to have changed the configuration then the description of the migration will be output to the user as a warning.
 
-In future we will be able to use these files to support offline migrations.
+Use `router config upgrade` to apply these migrations to a configuration file offline.
 
 # Testing
 Once you have made a new migration place a config file in `testdata/migrations`. It will automatically be picked up by the `upgrade_old_configuration` test.
