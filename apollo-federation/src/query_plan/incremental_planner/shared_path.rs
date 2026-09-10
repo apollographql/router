@@ -44,6 +44,21 @@ struct Node<T> {
     next: Option<Arc<Node<T>>>,
 }
 
+impl<T> Drop for SharedPath<T> {
+    /// Iterative drop to avoid stack overflow on long spines.
+    fn drop(&mut self) {
+        let mut current = self.head.take();
+        while let Some(arc) = current {
+            // If we're the sole owner, unwrap and take the next pointer;
+            // Otherwise another SharedPath shares the tail, so stop.
+            match Arc::try_unwrap(arc) {
+                Ok(node) => current = node.next,
+                Err(_) => break,
+            }
+        }
+    }
+}
+
 impl<T> SharedPath<T> {
     pub fn new() -> Self {
         Self { head: None, len: 0 }
@@ -81,6 +96,9 @@ impl<T> SharedPath<T> {
     }
 
     /// Iterate from root to tip (oldest to newest).
+    ///
+    /// Allocates a Vec of node references (O(n)). Suitable for
+    /// finalization boundaries; avoid calling per-entry in hot loops.
     pub fn iter(&self) -> Iter<'_, T> {
         let mut nodes = Vec::with_capacity(self.len);
         let mut current = &self.head;
