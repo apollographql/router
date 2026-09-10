@@ -308,10 +308,14 @@ pub fn bulb_search<S: BulbSearchSpace>(
         }
         // A path with d decision points can absorb at most d discrepancies
         // (one alternative slice each), so once the budget covers the
-        // deepest stack seen, every combination has been explored. Without
-        // this, a space with alternatives but no complete candidate would
-        // iterate forever: the effort budget stays unarmed until a complete
-        // candidate lands.
+        // deepest stack seen, every reachable combination has been explored.
+        // `deepest_stack` is a dynamic high-water mark: if exploring an
+        // alternative at depth 1 reveals a subtree deeper than anything
+        // seen before, the bound increases and the outer loop continues.
+        // The number of decision points can vary by path (upstream choices
+        // affect downstream structure), but the bound remains safe because
+        // every alternative is visited by some probe before we reach this
+        // check, and any newly discovered depth extends the bound.
         if max_disc >= progress.deepest_stack {
             break;
         }
@@ -434,7 +438,11 @@ impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
         disc: usize,
         bw: usize,
     ) -> Self {
-        let alternatives_existed = scored.len() > bw;
+        // Only flag alternatives when they are actually dropped (disc == 0).
+        // When disc > 0, alt-slice options are included in the exploration
+        // order, so they are visited in this probe. Any unexplored sub-tree
+        // beneath them will be flagged by a descendant frame at disc == 0.
+        let alternatives_existed = disc == 0 && scored.len() > bw;
         let best_end = bw.min(scored.len());
 
         // Alt slices first (indices bw..end of scored), then best slice
@@ -473,10 +481,12 @@ impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
 
     /// Advance to the next option to explore at this decision, returning
     /// the option index and the discrepancy budget for child decisions.
-    /// Alt-slice options whose cost exceeds the incumbent are pruned (they
-    /// spend a discrepancy to enter, so skipping them saves fuel). The best
-    /// slice is never pruned — it is the greedy path and may be the only
-    /// route to a completion.
+    /// Alt-slice options whose cost meets or exceeds the incumbent are
+    /// pruned (they spend a discrepancy to enter, so skipping them saves
+    /// fuel). Best-slice options are not pruned here: before the first
+    /// completion, `best_cost` is `f64::MAX`, and a dead-end option at
+    /// that cost must still be explored so `record_completion` can arm
+    /// the fuel budget.
     fn next_option(&mut self, best_cost: f64) -> Option<(usize, usize)> {
         while self.pos < self.order.len() {
             let (opt_idx, cost) = self.order[self.pos];
@@ -544,6 +554,10 @@ fn bulb_probe<S: BulbSearchSpace>(
 
             match space.advance(candidate) {
                 AdvanceResult::Complete => {
+                    // Only cancellation skips recording. If fuel or time
+                    // ran out we still record the completion we already
+                    // reached, since the work is done and the snapshot
+                    // is cheap.
                     if !progress.cancelled() {
                         record_completion(space, candidate, progress);
                     }
@@ -576,6 +590,14 @@ fn bulb_probe<S: BulbSearchSpace>(
                         checkpoint,
                         disc_budget,
                         beam_width,
+                    );
+
+                    // scored was non-empty and all entries had cost <
+                    // best_cost (score_options prunes the rest), so the
+                    // first next_option call should always find one.
+                    debug_assert!(
+                        frame.pos < frame.order.len(),
+                        "non-empty scored produced an empty exploration order",
                     );
 
                     match frame.next_option(progress.best_cost) {
@@ -639,6 +661,10 @@ fn score_options<S: BulbSearchSpace>(
     for (i, choice) in options.iter().enumerate() {
         space.apply(candidate, decision, choice);
         let cost = space.cost(candidate);
+        // The `has_incumbent` guard is required: before any completion,
+        // `best_cost` is f64::MAX, and an option costing f64::MAX (a
+        // dead end) would fail `cost < best_cost` even though there is
+        // no incumbent to prune against.
         if !has_incumbent || cost < best_cost {
             scored.push((i, cost));
             trace!(
