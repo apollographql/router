@@ -570,10 +570,11 @@ pub(crate) fn check_requires(
 /// since the fetch node's `requires` items lack arguments while the
 /// schema-derived condition may include them.
 fn strip_field_arguments(shape: &ResponseShape) -> ResponseShape {
+    use apollo_compiler::executable::Field;
+
     use super::response_shape::DefinitionVariant;
     use super::response_shape::PossibleDefinitions;
     use super::response_shape::PossibleDefinitionsPerTypeCondition;
-    use apollo_compiler::executable::Field;
 
     fn strip_field(field: &Field) -> Field {
         Field {
