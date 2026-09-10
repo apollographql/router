@@ -22,6 +22,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🐛 Fixes
 
+### Improve test coverage for selection maps ([PR #10127](https://github.com/apollographql/router/pull/10127))
+
+Adds property-based tests and a focused regression test for selection map
+operations. Also corrects insertion to follow the map's existing overwrite
+contract: replacing a selection with the same key preserves its original position.
+
+By [@inanna-apollo](https://github.com/inanna-apollo) in <https://github.com/apollographql/router/pull/10127>
+
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
 
 Connectors validation rejected `->match` results assigned to union- or
