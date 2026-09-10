@@ -186,7 +186,7 @@ fn run_bulb_and_finalize(
         "starting BULB search",
     );
 
-    let (mut result, mut stats) = bulb_search(
+    let (result, mut stats) = bulb_search(
         search_space,
         initial.clone(),
         config.clone(),
@@ -230,11 +230,12 @@ fn run_bulb_and_finalize(
             config,
             parameters.check_for_cooperative_cancellation,
         );
-        if let Some(split_result) = split_result {
-            if split_result.dropped_fields == 0 && split_result.pending.is_empty() {
-                result = split_result;
-                stats = split_stats;
-            }
+        if let Some(split_result) = split_result
+            && split_result.dropped_fields == 0
+            && split_result.pending.is_empty()
+        {
+            result = split_result;
+            stats = split_stats;
         }
     }
 
