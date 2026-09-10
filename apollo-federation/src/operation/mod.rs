@@ -41,7 +41,6 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
-use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -2411,55 +2410,31 @@ pub(crate) struct NormalizedDefer {
     pub(crate) operation: Operation,
     /// True if the operation contains any @defer applications.
     pub(crate) has_defers: bool,
-    /// `@defer(label:)` values assigned by normalization.
-    pub(crate) assigned_defer_labels: IndexSet<String>,
+    /// Client-visible label for each label assigned during normalization: `None` for defers
+    /// that had no label, `Some(original)` for duplicate labels renamed to stay unique during
+    /// planning (a labeled `@defer` in a fragment spread multiple times). Restored on the
+    /// emitted `DeferNode`s.
+    pub(crate) client_labels: IndexMap<String, Option<String>>,
     /// Map of variable conditions to the @defer labels depending on those conditions.
     pub(crate) defer_conditions: IndexMap<Name, IndexSet<String>>,
 }
 
+#[derive(Default)]
 struct DeferNormalizer {
-    used_labels: IndexSet<String>,
-    assigned_labels: IndexSet<String>,
+    /// See [`NormalizedDefer::client_labels`].
+    client_labels: IndexMap<String, Option<String>>,
     conditions: IndexMap<Name, IndexSet<String>>,
-    label_offset: usize,
 }
 
 impl DeferNormalizer {
-    fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
-        let mut digest = Self {
-            used_labels: IndexSet::default(),
-            label_offset: 0,
-            assigned_labels: IndexSet::default(),
-            conditions: IndexMap::default(),
-        };
-        let mut stack = selection_set.into_iter().collect::<Vec<_>>();
-        while let Some(selection) = stack.pop() {
-            if let Selection::InlineFragment(inline) = selection
-                && let Some(args) = inline.inline_fragment.defer_directive_arguments()?
-            {
-                let DeferDirectiveArguments { label, if_: _ } = args;
-                if let Some(label) = label {
-                    // Reject duplicate labels (should've been a validation error)
-                    if digest.used_labels.contains(&label) {
-                        return Err(SingleFederationError::DuplicateDeferLabel { label }.into());
-                    }
-                    digest.used_labels.insert(label);
-                }
-            }
-            stack.extend(selection.selection_set().into_iter().flatten());
-        }
-        Ok(digest)
-    }
-
-    fn get_label(&mut self) -> String {
-        loop {
-            let digest = format!("qp__{}", self.label_offset);
-            self.label_offset += 1;
-            if !self.used_labels.contains(&digest) {
-                self.assigned_labels.insert(digest.clone());
-                return digest;
-            }
-        }
+    /// Returns the planning label for a `@defer` occurrence. Planning requires unique labels,
+    /// but a labeled `@defer` in a fragment spread multiple times occurs repeatedly once
+    /// fragments are expanded, so every occurrence gets a generated label, with the
+    /// client-visible label recorded in `client_labels` for the emitted plan to restore.
+    fn label_for(&mut self, client_label: Option<String>) -> String {
+        let label = format!("qp__{}", self.client_labels.len());
+        self.client_labels.insert(label.clone(), client_label);
+        label
     }
 
     fn register_condition(&mut self, label: String, cond: Name) {
@@ -2516,10 +2491,6 @@ impl InlineFragmentSelection {
             }
         }
 
-        if args_copy.label.is_none() {
-            args_copy.label = Some(normalizer.get_label());
-        }
-
         if remove_defer {
             let directives: DirectiveList = self
                 .inline_fragment
@@ -2530,6 +2501,8 @@ impl InlineFragmentSelection {
                 .collect();
             return Ok(self.with_updated_directives(directives));
         }
+
+        args_copy.label = Some(normalizer.label_for(args_copy.label.take()));
 
         // NOTE: If this is `Some`, it will be a variable.
         if let Some(BooleanOrVariable::Variable(cond)) = args_copy.if_.clone() {
@@ -2687,19 +2660,19 @@ impl Operation {
     /// `.reuse_fragments()`.
     pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
-            let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
+            let mut normalizer = DeferNormalizer::default();
             self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
             Ok(NormalizedDefer {
                 operation: self,
                 has_defers: true,
-                assigned_defer_labels: normalizer.assigned_labels,
+                client_labels: normalizer.client_labels,
                 defer_conditions: normalizer.conditions,
             })
         } else {
             Ok(NormalizedDefer {
                 operation: self,
                 has_defers: false,
-                assigned_defer_labels: IndexSet::default(),
+                client_labels: IndexMap::default(),
                 defer_conditions: IndexMap::default(),
             })
         }
