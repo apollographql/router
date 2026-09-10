@@ -5,4 +5,4 @@ required `APOLLO_KEY` to be set, even when the graph artifact reference pointed 
 registry that doesn't need Apollo authentication at all. `APOLLO_KEY` is now only required when the
 reference resolves to an Apollo-hosted registry (`*.apollographql.com`).
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/TODO
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10204
