@@ -734,10 +734,10 @@ impl FetchGraph {
         }
         let mut buckets: Vec<Bucket> = Vec::new();
         for n in mergeable {
-            let signatures = self.graph[n]
-                .selection_builder
-                .field_signatures()
-                .unwrap_or_default();
+            let Some(signatures) = self.graph[n].selection_builder.field_signatures() else {
+                // Internal signature conflict within this node; skip merging it.
+                continue;
+            };
             let input_conditions = self.input_condition_fingerprints(n);
             let FetchGroupKind::Entity { merge_at } = &self.graph[n].kind else {
                 continue;
@@ -963,6 +963,105 @@ pub(super) fn strip_merge_at_conditions(
             other => other.clone(),
         })
         .collect()
+}
+
+/// Structural containment of selection sets by response shape: every field
+/// of `needed` (by name; `__typename` skipped) appears in `have` with its
+/// sub-selections contained recursively; inline fragments match by type
+/// condition. Conservative — a miss only means the caller falls back to
+/// routing the conditions.
+#[allow(dead_code)]
+fn selection_contains(have: &SelectionSet, needed: &SelectionSet) -> bool {
+    use crate::operation::Selection;
+    needed
+        .selections
+        .values()
+        .all(|needed_sel| match needed_sel {
+            Selection::Field(needed_field) => {
+                if *needed_field.field.name() == crate::operation::TYPENAME_FIELD {
+                    return true;
+                }
+                have.selections.values().any(|have_sel| match have_sel {
+                    Selection::Field(have_field) => {
+                        have_field.field.name() == needed_field.field.name()
+                            && have_field.field.alias.is_none()
+                            && match (&needed_field.selection_set, &have_field.selection_set) {
+                                (Some(needed_sub), Some(have_sub)) => {
+                                    selection_contains(have_sub, needed_sub)
+                                }
+                                (None, _) => true,
+                                (Some(_), None) => false,
+                            }
+                    }
+                    Selection::InlineFragment(_) => false,
+                })
+            }
+            Selection::InlineFragment(needed_frag) => {
+                have.selections.values().any(|have_sel| match have_sel {
+                    Selection::InlineFragment(have_frag) => {
+                        have_frag.inline_fragment.type_condition_position
+                            == needed_frag.inline_fragment.type_condition_position
+                            && selection_contains(
+                                &have_frag.selection_set,
+                                &needed_frag.selection_set,
+                            )
+                    }
+                    Selection::Field(_) => false,
+                })
+            }
+        })
+}
+
+impl std::fmt::Display for FetchGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "FetchGraph ({} nodes, {} edges):",
+            self.graph.node_count(),
+            self.graph.edge_count(),
+        )?;
+        for idx in self.graph.node_indices() {
+            let node = &self.graph[idx];
+            let kind_label = match &node.kind {
+                FetchGroupKind::Root { root_type } => {
+                    format!("root  {}  {}", node.subgraph, root_type)
+                }
+                FetchGroupKind::Entity { merge_at } => {
+                    let path: Vec<String> = merge_at.iter().map(|e| e.to_string()).collect();
+                    format!("entity  {}  merge_at={}", node.subgraph, path.join("/"))
+                }
+                FetchGroupKind::RootHop {
+                    root_type,
+                    merge_at,
+                } => {
+                    let path: Vec<String> = merge_at.iter().map(|e| e.to_string()).collect();
+                    format!(
+                        "root_hop  {}  {}  merge_at={}",
+                        node.subgraph,
+                        root_type,
+                        path.join("/")
+                    )
+                }
+            };
+            let sel_count = node.selection_builder.entries().len();
+            writeln!(
+                f,
+                "  [{}] {}  ({} selections)",
+                idx.index(),
+                kind_label,
+                sel_count
+            )?;
+            for edge in self.graph.edges_directed(idx, Direction::Incoming) {
+                writeln!(
+                    f,
+                    "    <- [{}] ({} inputs)",
+                    edge.source().index(),
+                    edge.weight().inputs.len(),
+                )?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

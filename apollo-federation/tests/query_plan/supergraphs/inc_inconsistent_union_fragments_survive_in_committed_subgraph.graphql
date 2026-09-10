@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 2c44fca1dca09f3611b2c3d037001fdcb2bd607c
+# Composed from subgraphs with hash: 861a79243ac2f8c4bfa3612b92b2ca0b58eb8d03
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -22,11 +22,29 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface I
-  @join__type(graph: SUBGRAPH1)
+type A
+  @join__type(graph: SUBGRAPH3)
 {
-  s: S
+  id: ID!
 }
+
+type Account
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
+{
+  id: ID!
+  actor: ActorType @join__field(graph: SUBGRAPH2)
+  other: ActorType @join__field(graph: SUBGRAPH3)
+}
+
+union ActorType
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+  @join__unionMember(graph: SUBGRAPH2, member: "M")
+  @join__unionMember(graph: SUBGRAPH2, member: "P")
+  @join__unionMember(graph: SUBGRAPH3, member: "A")
+ = M | P | A
 
 input join__ContextArgument {
   name: String!
@@ -44,6 +62,7 @@ scalar join__FieldValue
 enum join__Graph {
   SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
   SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
 }
 
 scalar link__Import
@@ -60,26 +79,22 @@ enum link__Purpose {
   EXECUTION
 }
 
+type M
+  @join__type(graph: SUBGRAPH2)
+{
+  name: String
+}
+
+type P
+  @join__type(graph: SUBGRAPH2)
+{
+  name: String
+}
+
 type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
 {
-  i: I @join__field(graph: SUBGRAPH1)
-}
-
-type S
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
-{
-  x: Int
-  y: Int @join__field(graph: SUBGRAPH2)
-}
-
-type T implements I
-  @join__implements(graph: SUBGRAPH1, interface: "I")
-  @join__type(graph: SUBGRAPH1, key: "id")
-  @join__type(graph: SUBGRAPH2, key: "id")
-{
-  id: ID!
-  s: S
+  account: Account @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2)
 }

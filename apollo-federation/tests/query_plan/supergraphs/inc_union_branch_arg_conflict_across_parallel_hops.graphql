@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 2c44fca1dca09f3611b2c3d037001fdcb2bd607c
+# Composed from subgraphs with hash: 3390f3fc337d489688f221ab402d0a1e3f9ad0ed
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -22,11 +22,32 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface I
+type A
   @join__type(graph: SUBGRAPH1)
 {
-  s: S
+  item: Item
 }
+
+type B
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+{
+  id: ID!
+  item: Item @join__field(graph: SUBGRAPH2)
+}
+
+union Entry
+  @join__type(graph: SUBGRAPH1)
+  @join__unionMember(graph: SUBGRAPH1, member: "A")
+  @join__unionMember(graph: SUBGRAPH1, member: "B")
+ = A | B
+
+union Item
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+  @join__unionMember(graph: SUBGRAPH1, member: "Widget")
+  @join__unionMember(graph: SUBGRAPH2, member: "Widget")
+ = Widget
 
 input join__ContextArgument {
   name: String!
@@ -44,6 +65,7 @@ scalar join__FieldValue
 enum join__Graph {
   SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
   SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
 }
 
 scalar link__Import
@@ -63,23 +85,16 @@ enum link__Purpose {
 type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
 {
-  i: I @join__field(graph: SUBGRAPH1)
+  entry(id: ID!): Entry @join__field(graph: SUBGRAPH1)
 }
 
-type S
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
-{
-  x: Int
-  y: Int @join__field(graph: SUBGRAPH2)
-}
-
-type T implements I
-  @join__implements(graph: SUBGRAPH1, interface: "I")
+type Widget
   @join__type(graph: SUBGRAPH1, key: "id")
   @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
 {
   id: ID!
-  s: S
+  value(scale: Int): String @join__field(graph: SUBGRAPH3)
 }
