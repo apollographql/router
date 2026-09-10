@@ -213,10 +213,10 @@ impl std::fmt::Display for PlanState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "PlanState: {} pending, {} drops, {} splits, effort={}",
+            "PlanState: {} pending, {} splits, {} drops, effort={}",
             self.pending.len(),
-            self.dropped_fields,
             self.splits,
+            self.dropped_fields,
             self.effort,
         )
     }
