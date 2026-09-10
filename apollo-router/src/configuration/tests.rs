@@ -770,7 +770,7 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
     assert!(
         crate::test_harness::tracing_test::logs_with_scope_contain(
             SCOPE,
-            "refer to the upgraded configuration, not the file on disk"
+            "error line numbers refer to the migrated YAML"
         ),
         "warning should explain that diagnostic line numbers now refer to the migrated document"
     );

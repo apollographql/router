@@ -114,7 +114,8 @@ pub(crate) fn validate_yaml_configuration(
                 }
             })?;
             tracing::warn!(
-                "Configuration was upgraded automatically to match the current schema. Line numbers in any errors below refer to the upgraded configuration, not the file on disk. Run `router config upgrade` to write the upgraded configuration to a file so the two match again."
+                "Run `router config upgrade` and save the output to update your file. \
+                 Migrations changed this configuration; error line numbers refer to the migrated YAML."
             );
             yaml = serde_yaml::from_str(&migrated_yaml).map_err(|error| {
                 ConfigurationError::MigrationFailure {
