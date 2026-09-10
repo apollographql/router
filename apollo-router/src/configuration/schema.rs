@@ -48,19 +48,10 @@ pub(crate) enum Mode {
 }
 
 /// Validate config yaml against the generated json schema.
-/// This is a tricky problem, and the solution here is by no means complete.
-/// In the case that validation cannot be performed then it will let serde validate as normal. The
-/// goal is to give a good enough experience until more time can be spent making this better,
 ///
-/// The validation sequence is:
-/// 1. Parse the config into yaml
-/// 2. Create the json schema
-/// 3. Expand env variables
-/// 3. Validate the yaml against the json schema.
-/// 4. Convert the json paths from the error messages into nice error snippets. Makes sure to use the values from the original source document to prevent leaks of secrets etc.
-///
-/// There may still be serde validation issues later.
-///
+/// With `Mode::Upgrade`, apply migrations before expansion and validation. When a migration
+/// changes the document, diagnostic snippets and line numbers refer to the migrated YAML.
+/// Snippets use values from before expansion to avoid exposing expanded secrets.
 pub(crate) fn validate_yaml_configuration(
     raw_yaml: &str,
     expansion: Expansion,
