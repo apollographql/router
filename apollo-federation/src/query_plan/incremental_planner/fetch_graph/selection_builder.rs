@@ -100,10 +100,10 @@ impl SelectionBuilder {
                         if !try_insert(out, key.clone(), field_sel.field.to_string()) {
                             return false;
                         }
-                        if let Some(sub) = &field_sel.selection_set {
-                            if !record_selection_set(out, &key, sub) {
-                                return false;
-                            }
+                        if let Some(sub) = &field_sel.selection_set
+                            && !record_selection_set(out, &key, sub)
+                        {
+                            return false;
                         }
                     }
                     Selection::InlineFragment(frag_sel) => {
@@ -145,10 +145,10 @@ impl SelectionBuilder {
                     OpPathElement::InlineFragment(_) => {}
                 }
             }
-            if let Some(selections) = &entry.selections {
-                if !record_selection_set(&mut out, &prefix, selections) {
-                    return None;
-                }
+            if let Some(selections) = &entry.selections
+                && !record_selection_set(&mut out, &prefix, selections)
+            {
+                return None;
             }
         }
         Some(out)
