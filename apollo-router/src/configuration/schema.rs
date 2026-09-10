@@ -132,9 +132,8 @@ pub(crate) fn validate_yaml_configuration(
             // `upgraded` directly, so `diagnostic_source` below is the same text this value
             // was parsed from and its line numbers line up with the errors reported against it.
             yaml = serde_yaml::from_str(&migrated_yaml).map_err(|error| {
-                ConfigurationError::InvalidConfiguration {
-                    message: "failed to parse migrated configuration",
-                    error: error.to_string(),
+                ConfigurationError::MigrationFailure {
+                    error: format!("failed to parse migrated configuration: {error}"),
                 }
             })?;
             diagnostic_source = Cow::Owned(migrated_yaml);
