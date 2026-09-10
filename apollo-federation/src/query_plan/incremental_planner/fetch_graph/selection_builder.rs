@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn field_signatures_empty_builder_returns_empty() {
         let builder = SelectionBuilder::default();
-        assert!(builder.field_signatures().is_empty());
+        assert!(builder.field_signatures().is_none());
     }
 
     #[test]
@@ -431,7 +431,9 @@ mod tests {
         let path = SharedPath::new().pushed(Arc::new(OpPathElement::Field(name_sel.field.clone())));
         builder.insert(&path, None);
 
-        let signatures = builder.field_signatures();
+        let signatures = builder
+            .field_signatures()
+            .expect("non-empty builder should produce signatures");
         assert_eq!(signatures.len(), 1);
         assert!(signatures.contains_key("/name"));
     }
