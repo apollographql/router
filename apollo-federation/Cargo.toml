@@ -72,7 +72,7 @@ sha1.workspace = true
 similar.workspace = true
 tempfile.workspace = true
 pretty_assertions = "1.4.0"
-rstest = "0.26.0"
+rstest = "0.27.0"
 dhat = "0.3.3"
 test-log = { version = "0.2.16", default-features = false, features = [
   "trace",
