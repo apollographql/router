@@ -76,9 +76,6 @@ pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
     /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
-    // Startup and `router config upgrade` both use `Major` now, so nothing outside tests
-    // constructs this. Kept so `upgrade_configuration`'s version-prefix filtering (used by the
-    // migration file naming convention) stays independently testable.
     #[allow(dead_code)]
     Minor(i64),
 }
