@@ -4,6 +4,7 @@ pub(crate) mod field_routing;
 pub mod shared_path;
 
 use bulb_search::BulbConfig;
+use bulb_search::BulbTermination;
 use bulb_search::bulb_search;
 use fetch_graph::FetchGraph;
 use field_routing::FieldRoutingSearchSpace;
@@ -127,27 +128,40 @@ fn run_bulb_and_finalize(
         parameters.check_for_cooperative_cancellation,
     );
 
+    parameters
+        .statistics
+        .evaluated_plan_count
+        .set(stats.evaluated_plans);
+
+    if matches!(stats.termination, BulbTermination::Cancelled) {
+        return Err(crate::error::SingleFederationError::PlanningCancelled.into());
+    }
+
+    let result = match result {
+        Some(r) => r,
+        None => {
+            if !parameters.disabled_subgraphs.is_empty() {
+                return Err(
+                    crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into(),
+                );
+            }
+            return Err(FederationError::internal(
+                "BULB planner could not find any complete plan",
+            ));
+        }
+    };
+
     debug!(
         pending_remaining = result.pending.len(),
         dropped_fields = result.dropped_fields,
         evaluated_plans = stats.evaluated_plans,
         expansions = stats.expansions,
         effort = stats.effort,
-        timed_out = stats.timed_out,
-        cancelled = stats.cancelled,
+        termination = ?stats.termination,
         fetch_nodes = result.graph.node_count(),
         fetch_edges = result.graph.edge_count(),
         "BULB search complete",
     );
-
-    parameters
-        .statistics
-        .evaluated_plan_count
-        .set(stats.evaluated_plans);
-
-    if stats.cancelled {
-        return Err(crate::error::SingleFederationError::PlanningCancelled.into());
-    }
 
     // An incomplete plan must never be returned: executing it would
     // silently omit response fields.
