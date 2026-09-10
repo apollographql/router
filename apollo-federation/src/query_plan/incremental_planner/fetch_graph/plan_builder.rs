@@ -959,7 +959,7 @@ impl FetchGraph {
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
-            let cleaned = remove_conditions_from_selection_set(selection_set, handled_conditions)?;
+            let cleaned = selection_set.clone();
             if !ctx.skip_validation {
                 cleaned.validate(ctx.variable_definitions)?;
             }

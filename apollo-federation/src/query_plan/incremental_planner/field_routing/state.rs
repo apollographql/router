@@ -227,6 +227,7 @@ impl std::fmt::Display for PlanState {
 }
 
 /// Undo-log entry for one pending-stack mutation.
+#[derive(Clone)]
 enum PendingOp {
     /// An entry was pushed. Undo: pop and drop it.
     Pushed,
@@ -243,6 +244,7 @@ enum PendingOp {
 /// A single `PlanState` is mutated during search; trial branches are
 /// applied, scored, and undone via `checkpoint()` / `rollback()` without
 /// cloning. `snapshot()` saves the best complete candidate.
+#[derive(Clone)]
 pub(crate) struct PlanState {
     /// Lightweight fetch graph tracking groups, dependencies, and selections.
     pub(crate) graph: FetchGraph,
@@ -277,6 +279,11 @@ pub(crate) struct PlanState {
     /// than decision counts. Used by the search's effort budget;
     /// deliberately not restored by `rollback`.
     pub(crate) effort: u64,
+    /// Monotonic count of forced-commit backtracking attempts (see
+    /// `backtrack_forced`). Like `effort`, deliberately not restored by
+    /// `rollback`: the cap must bound total work even when the greedy pass
+    /// (which has no effort budget) keeps hitting doomed forced commits.
+    pub(crate) forced_backtracks: u64,
     /// Interned ids for @requires condition-field aliases, keyed by the
     /// serialized condition selection: identical conditions share an alias
     /// so sibling entity fetches staging the same @requires can merge;
@@ -309,6 +316,7 @@ impl PlanState {
             splits: 0,
             split_repush_enabled: false,
             effort: 0,
+            forced_backtracks: 0,
             condition_alias_ids: BTreeMap::new(),
         }
     }
@@ -345,9 +353,12 @@ impl PlanState {
             pending: self.pending.clone(),
             pending_undo: Vec::new(),
             dropped_fields: self.dropped_fields,
-            condition_alias_ids: self.condition_alias_ids.clone(),
-            effort: self.effort,
             type_explosions: self.type_explosions,
+            splits: self.splits,
+            split_repush_enabled: self.split_repush_enabled,
+            effort: self.effort,
+            forced_backtracks: self.forced_backtracks,
+            condition_alias_ids: self.condition_alias_ids.clone(),
         }
     }
 

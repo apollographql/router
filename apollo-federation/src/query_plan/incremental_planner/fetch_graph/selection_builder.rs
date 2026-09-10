@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::super::shared_path::SharedPath;
+use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::operation::OpPathElement;
 
@@ -73,6 +75,76 @@ impl SelectionBuilder {
             "checkpoint is newer than the builder state; checkpoints must be restored in LIFO order",
         );
         self.entries.truncate(cp.0);
+    }
+
+    /// Absorb all entries from another builder. Used by
+    /// `merge_sibling_entities` to combine selections when merging nodes.
+    pub(super) fn merge_from(&mut self, other: &SelectionBuilder) {
+        self.entries.extend(other.entries.iter().cloned());
+    }
+
+    /// Map from response path to field signature (name, alias, arguments,
+    /// directives). Two builders with different signatures at the same
+    /// response path cannot be merged into one fetch.
+    ///
+    /// Returns `None` if any response path has more than one distinct
+    /// field signature within this builder.
+    pub(super) fn field_signatures(&self) -> Option<HashMap<String, String>> {
+        fn record_selection_set(
+            out: &mut HashMap<String, String>,
+            prefix: &str,
+            selections: &SelectionSet,
+        ) -> bool {
+            for sel in selections.selections.values() {
+                match sel {
+                    Selection::Field(field_sel) => {
+                        let key = format!("{prefix}/{}", field_sel.field.response_name());
+                        if !try_insert(out, key.clone(), field_sel.field.to_string()) {
+                            return false;
+                        }
+                        if let Some(sub) = &field_sel.selection_set
+                            && !record_selection_set(out, &key, sub)
+                        {
+                            return false;
+                        }
+                    }
+                    Selection::InlineFragment(frag_sel) => {
+                        if !record_selection_set(out, prefix, &frag_sel.selection_set) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
+        }
+
+        /// Insert a field signature, returning false if a different
+        /// signature already occupies the same key.
+        fn try_insert(map: &mut HashMap<String, String>, key: String, value: String) -> bool {
+            match map.entry(key) {
+                std::collections::hash_map::Entry::Occupied(e) => *e.get() == value,
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(value);
+                    true
+                }
+            }
+        }
+
+        let mut out = HashMap::new();
+        for entry in &self.entries {
+            let prefix = entry
+                .path
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("/");
+            if let Some(sels) = &entry.selections {
+                if !record_selection_set(&mut out, &prefix, sels) {
+                    return None;
+                }
+            }
+        }
+        Some(out)
     }
 }
 #[cfg(test)]

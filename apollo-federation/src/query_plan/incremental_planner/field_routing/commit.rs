@@ -41,18 +41,7 @@ use crate::query_plan::FetchDataPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 
-const CONDITION_DEPTH_LIMIT: u8 = 32;
-use super::NodeSource;
-use super::context;
-use super::requires::trailing_condition_fragments;
-use super::requires::unconditioned_input_path;
-use super::routing::HopKind;
-use super::routing::RoutingChoice;
 use super::routing::RoutingTarget;
-use super::selection_label;
-use super::state::ContextAnchor;
-use super::state::PendingSelection;
-use super::state::PlanState;
 
 /// Shared inputs of one `commit_choice` invocation, threaded through the
 /// @requires stage.

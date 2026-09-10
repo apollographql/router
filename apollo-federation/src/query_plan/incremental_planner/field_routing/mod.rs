@@ -283,7 +283,7 @@ impl FieldRoutingSearchSpace {
                         self.drop_unresolvable(state, &pending);
                     }
                 }
-                1 => self.commit_single(state, &options[0]),
+                1 => self.commit_forced(state, options, &mut trail),
                 _ => {
                     // A decision point. Before stopping, commit any forced
                     // pendings deeper in the stack so their fetch groups
@@ -526,6 +526,34 @@ fn wrap_in_parent(parent: &Selection, children: &[Selection]) -> Option<Selectio
         }
     })
 }
+
+struct ForcedFrame {
+    pending: Arc<PendingSelection>,
+    options: Arc<Vec<RoutingChoice>>,
+    next_option: usize,
+    checkpoint: PlanCheckpoint,
+}
+
+#[derive(Default)]
+struct ForcedTrail {
+    frames: Vec<ForcedFrame>,
+    doomed: HashSet<(NodeIndex, RoutingSiteKey)>,
+}
+
+fn pending_site(pending: &PendingSelection) -> (NodeIndex, RoutingSiteKey) {
+    let key = match &pending.selection {
+        Selection::Field(f) => RoutingSiteKey::Field(f.field.name().clone()),
+        Selection::InlineFragment(f) => RoutingSiteKey::InlineFragment(
+            f.inline_fragment
+                .type_condition_position
+                .as_ref()
+                .map(|pos| pos.type_name().clone()),
+        ),
+    };
+    (pending.query_graph_node, key)
+}
+
+const FORCED_BACKTRACK_CAP: u64 = 256;
 
 /// Short human-readable label for a selection, for logging.
 pub(super) fn selection_label(selection: &Selection) -> String {
