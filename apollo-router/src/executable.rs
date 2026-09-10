@@ -1119,7 +1119,9 @@ mod tests {
             )
             .await;
 
-            let error_msg = result.expect_err("invalid OCI reference should fail").to_string();
+            let error_msg = result
+                .expect_err("invalid OCI reference should fail")
+                .to_string();
             assert!(
                 error_msg.contains("graph artifact reference"),
                 "expected an OCI reference validation error, got: {error_msg}"

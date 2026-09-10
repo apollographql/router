@@ -185,7 +185,9 @@ fn build_auth(reference: &Reference, apollo_key: Option<&str>) -> RegistryAuth {
         .unwrap_or_else(|| reference.resolve_registry());
 
     // Check if the server registry ends with apollographql.com
-    if is_apollo_registry(server) && let Some(apollo_key) = apollo_key {
+    if is_apollo_registry(server)
+        && let Some(apollo_key) = apollo_key
+    {
         tracing::debug!("using registry authentication");
         return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
     }
