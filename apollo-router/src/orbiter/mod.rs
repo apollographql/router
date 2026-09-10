@@ -360,11 +360,7 @@ mod test {
 
     #[test]
     fn test_visit_config_that_needed_upgrade() {
-        // `supergraph.preview_defer_support` was renamed to `supergraph.defer_support` ahead of
-        // defer's GA release. Startup now runs this migration automatically, so the legacy key
-        // is accepted and its value carries over to the current one.
-        // `defer_support` defaults to true, so the legacy key carries `false` here: true would
-        // pass whether or not the migration ran.
+        // Use false to distinguish the migrated value from defer_support's default of true.
         let config = Configuration::from_str("supergraph:\n  preview_defer_support: false")
             .expect("legacy config should be migrated and accepted at startup");
         assert!(!config.supergraph.defer_support);
