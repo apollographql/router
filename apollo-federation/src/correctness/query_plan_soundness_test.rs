@@ -268,3 +268,81 @@ fn test_requires_external_under_non_external() {
     }
     "###);
 }
+
+#[test]
+fn test_requires_same_response_key_different_arguments() {
+    // Two @requires on the same entity reference the same field (`pre`)
+    // with different argument values. Both produce the response key `pre`
+    // but carry different arguments. The checker must handle this via
+    // scoped argument stripping in key_directive_matches, not by weakening
+    // comparators globally.
+    let schema = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "A", url: "test-template.graphql?subgraph=A")
+  S @join__graph(name: "S", url: "test-template.graphql?subgraph=S")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: S)
+{
+  t: T! @join__field(graph: S)
+}
+
+type T
+  @join__type(graph: A, key: "id")
+  @join__type(graph: S, key: "id")
+{
+  id: ID!
+  val(arg: Int!): Int! @join__field(graph: A, external: true) @join__field(graph: S)
+  needs_val_0: Int! @join__field(graph: A, requires: "val(arg: 0)")
+  needs_val_1: Int! @join__field(graph: A, requires: "val(arg: 1)")
+}
+"#;
+    let op_str = r#"
+        query {
+            t {
+                needs_val_0
+                needs_val_1
+            }
+        }
+    "#;
+    // Both requires produce the same response key `val` with different
+    // arguments. The plan collapses them into a single `val` selection
+    // in the entity fetch (arguments don't affect the response key).
+    insta::assert_snapshot!(plan_response_shape_with_schema(schema, op_str), @r###"
+    {
+      t -----> t {
+        __typename -----> __typename
+        id -----> id
+        val -----> val(arg: 1)
+        needs_val_0 -----> needs_val_0
+        needs_val_1 -----> needs_val_1
+      }
+    }
+    "###);
+}
