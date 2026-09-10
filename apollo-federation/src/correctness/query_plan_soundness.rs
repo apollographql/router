@@ -97,7 +97,13 @@ fn compute_response_shape_for_field_set(
     // Similar to `crate::schema::field_set::parse_field_set` function.
     let field_set =
         FieldSet::parse_and_validate(schema.schema(), parent_type, field_set, "field_set.graphql")?;
-    compute_response_shape_for_selection_set(schema, &field_set.selection_set)
+    let shape = compute_response_shape_for_selection_set(schema, &field_set.selection_set)?;
+    // Field arguments in @key/@requires field sets don't affect the
+    // response key, but the checker's shape model uses them in
+    // field_selection_key equality. Stripping at construction avoids
+    // merge failures when the same field appears with different arguments
+    // across @requires directives, and keeps comparators strict.
+    Ok(strip_field_arguments(&shape))
 }
 
 fn compute_response_shape_for_field_set_with_typename(
@@ -118,7 +124,8 @@ fn compute_response_shape_for_field_set_with_typename(
             )
         })?;
     selection_set.push(typename);
-    compute_response_shape_for_selection_set(schema, &selection_set)
+    let shape = compute_response_shape_for_selection_set(schema, &selection_set)?;
+    Ok(strip_field_arguments(&shape))
 }
 
 /// Used for FetchNode's `requires` field values
@@ -263,17 +270,13 @@ fn key_directive_matches(
         key_directive_application.fields,
     )?;
     // `condition`: the whole condition computed from the fetch query & subgraph schema.
+    // Both key_condition and require_condition already have arguments
+    // stripped (at construction time), so merge and comparison work on
+    // argument-free shapes.
     let mut condition = key_condition.clone();
     condition.merge_with(require_condition)?;
-    // Strip field arguments from both sides before comparing response keys.
-    // The `requires` items on the fetch node lack arguments, while
-    // `@key/@requires` field sets may include them. Stripping here keeps
-    // the comparison scoped to key matching without weakening comparators
-    // elsewhere.
-    let entity_require_shape_stripped = strip_field_arguments(entity_require_shape);
-    let condition_stripped = strip_field_arguments(&condition);
     // Check if `entity_require_shape` is a subset of `condition` in terms of response keys.
-    if !key_only_compare_response_shapes(&entity_require_shape_stripped, &condition_stripped) {
+    if !key_only_compare_response_shapes(entity_require_shape, &condition) {
         return Err(format!(
             "The `requires` item does not match the subgraph schema\n\
              * @key field set: {key_condition}\n\
@@ -282,12 +285,16 @@ fn key_directive_matches(
         .into());
     }
     let final_require_shape = condition.add_boolean_conditions(boolean_clause);
+    // Both sides are stripped so the comparison works on response keys
+    // alone. The state may carry arguments from the actual plan that
+    // the condition (built from @key/@requires field sets) won't have.
+    let state_stripped = strip_field_arguments(state);
     // Note: The response shapes here start at the entity type, not at the query root type.
     compare_response_shapes_in_supergraph(
         context.supergraph_schema(),
         context.subgraphs_by_name(),
         &final_require_shape,
-        state,
+        &state_stripped,
     )
     .map_err(|e| {
         format!(
