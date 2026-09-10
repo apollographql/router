@@ -53,7 +53,7 @@ pub(crate) async fn count_subgraph_errors(
     }
 }
 
-/// Count the errors a connector mapping declared with `->withError`.
+/// Count the errors a connector mapping declared with `->withConnectorError`.
 ///
 /// These land in `apollo.router.operations.error` like every other error the
 /// router counts. Being reported in `extensions.connectorErrors` rather than in

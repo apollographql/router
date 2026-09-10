@@ -1214,7 +1214,7 @@ impl PluginPrivate for Telemetry {
                                 custom_instruments.on_response(response);
                                 apollo_connector_instruments.on_response(response);
                                 custom_events.on_response(response);
-                                // Errors the mapping declared with `->withError`.
+                                // Errors the mapping declared with `->withConnectorError`.
                                 // Counted here, before `include_subgraph_errors`
                                 // decides what the client sees, so that
                                 // client-facing redaction cannot suppress a

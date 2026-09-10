@@ -212,7 +212,7 @@ pub(crate) struct ConnectorLimits {
     pub(crate) http_max_response_size: Option<ByteSize>,
 
     /// Limit how many errors a connector's response mapping may report in the response's
-    /// `extensions.connectorErrors` via `->withError`. A `->withError` inside a `->map`
+    /// `extensions.connectorErrors` via `->withConnectorError`. A `->withConnectorError` inside a `->map`
     /// records one error per element, so a mapping over a large API response can
     /// contribute an error per row. Errors past the limit are replaced by a single
     /// summary error naming how many were dropped. Default: no limit.

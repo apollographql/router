@@ -277,9 +277,9 @@ where
 const TOO_MANY_MAPPING_ERRORS_CODE: &str = "CONNECTORS_TOO_MANY_ERRORS";
 
 /// Enforce `limits.connector.max_mapping_errors` on the errors a response
-/// mapping declared with `->withError`.
+/// mapping declared with `->withConnectorError`.
 ///
-/// A `->withError` inside a `->map` records one error per element, so a mapping
+/// A `->withConnectorError` inside a `->map` records one error per element, so a mapping
 /// over a large API response can contribute an error per row. When an operator
 /// has set a limit, the excess is replaced by one summary error naming how many
 /// were dropped, so the truncation is visible in the response rather than
@@ -331,7 +331,7 @@ fn truncate_mapping_errors(mapped: &mut MappedResponse, context: &Context, conne
 }
 
 /// Build the client-facing form of one error a mapping declared with
-/// `->withError`, or `None` if `include_subgraph_errors` says this subgraph's
+/// `->withConnectorError`, or `None` if `include_subgraph_errors` says this subgraph's
 /// errors must not reach clients.
 ///
 /// The configuration is applied *here*, where the error is built, rather than
@@ -521,6 +521,7 @@ mod tests {
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
     use apollo_compiler::response::JsonValue;
+    use apollo_federation::connectors::ApplyToErrorKind;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -576,7 +577,30 @@ mod tests {
         );
     }
 
-    /// The customer-facing payload of a declared `->withError`: the author's
+    /// The same gate, for the method that actually reaches clients. Worth its
+    /// own test rather than trusting the one above: `->withConnectorError` is
+    /// newer, its `is_public()` is a separate decision, and a connector schema
+    /// that cannot call it is the one failure that would make this whole
+    /// feature unreachable while every apollo-federation test still passed.
+    #[test]
+    fn with_connector_error_is_available_to_connector_schemas() {
+        let selection =
+            JSONSelection::parse("id status: code->withConnectorError('unrecognized type code')")
+                .unwrap();
+
+        let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
+
+        assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
+        assert_eq!(
+            errors.iter().map(|error| error.message()).collect_vec(),
+            vec!["unrecognized type code"],
+        );
+        // And it is the client-facing kind, which is the whole point of the
+        // method being reachable at all.
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Declared);
+    }
+
+    /// The customer-facing payload of a declared `->withConnectorError`: the author's
     /// message, code and structured fields, intact, while the field it
     /// accompanies still resolves.
     ///
@@ -805,7 +829,7 @@ mod tests {
     }
 
     /// Build a `MappedResponse::Data` carrying `count` declared errors, as a
-    /// mapping with a `->withError` inside a `->map` would produce.
+    /// mapping with a `->withConnectorError` inside a `->map` would produce.
     fn mapped_with_declared_errors(count: usize) -> (MappedResponse, Connector) {
         let selection =
             JSONSelection::parse(r#"$.rows->map(@.code->withConnectorError("bad code"))"#).unwrap();

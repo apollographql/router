@@ -1,7 +1,7 @@
-//! Carrying `->withError` errors from a connector response to the client's
+//! Carrying `->withConnectorError` errors from a connector response to the client's
 //! response `extensions`.
 //!
-//! An error a mapping author declares with `->withError` is not a GraphQL
+//! An error a mapping author declares with `->withConnectorError` is not a GraphQL
 //! execution error: [the spec][spec] says a response position at which an
 //! execution error was raised must not be present in `data`, and the field a
 //! declared error describes *is* present — resolving it while recording the
@@ -50,7 +50,7 @@ use crate::Context;
 use crate::graphql;
 
 /// Extension key marking an error in a connector subgraph response as declared
-/// by `->withError` rather than raised by a failure.
+/// by `->withConnectorError` rather than raised by a failure.
 ///
 /// Private, and stripped by [`ConnectorDeclaredErrors::take_marked`] on the way
 /// out. It travels in the error's `extensions` rather than in a field on
@@ -178,7 +178,7 @@ mod tests {
     /// The reported `path` follows the spec's _response path_ shape even
     /// though it rides in `extensions`, where nothing obliges it to: field
     /// segments are strings and list indices are numbers, so it resolves
-    /// against `data` the same way an error's `path` does. A `->withError`
+    /// against `data` the same way an error's `path` does. A `->withConnectorError`
     /// inside a `->map` is the case that produces indices.
     #[test]
     fn a_reported_path_is_a_response_path() {

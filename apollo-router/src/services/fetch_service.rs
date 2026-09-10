@@ -177,7 +177,7 @@ impl FetchService {
                 hoist_orphan_errors,
             );
 
-            // Errors a mapping declared with `->withError` are not execution
+            // Errors a mapping declared with `->withConnectorError` are not execution
             // errors. The fields they describe resolved. So they belong under
             // the response's `extensions`, not in `errors`, and this is where
             // they leave. It happens here rather than earlier because

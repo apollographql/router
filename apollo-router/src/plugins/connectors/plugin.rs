@@ -128,7 +128,7 @@ impl Plugin for Connectors {
                                 })
                                 .flatten();
 
-                            // Errors declared with `->withError` are reported
+                            // Errors declared with `->withConnectorError` are reported
                             // here rather than in `errors`: the fields they
                             // describe resolved, and the GraphQL spec reserves
                             // `errors` for positions absent from `data`. The
