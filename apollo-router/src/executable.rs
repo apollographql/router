@@ -33,6 +33,7 @@ use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::plugins::telemetry::reload::otel::shutdown_installed_tracer_provider;
 use crate::registry::OciConfig;
+use crate::registry::is_apollo_graph_artifact_reference;
 use crate::registry::should_use_ssl;
 use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
@@ -265,11 +266,20 @@ impl Opt {
 
         let use_ssl = should_use_ssl(&validated_reference);
 
+        // `APOLLO_KEY` is only required to authenticate with Apollo's own registry.
+        // A non-Apollo OCI registry should not require a GraphOS account.
+        let apollo_key = if is_apollo_graph_artifact_reference(&validated_reference) {
+            Some(
+                self.apollo_key
+                    .clone()
+                    .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            )
+        } else {
+            self.apollo_key.clone()
+        };
+
         Ok(OciConfig {
-            apollo_key: self
-                .apollo_key
-                .clone()
-                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            apollo_key,
             reference: validated_reference,
             hot_reload: self.hot_reload,
             poll_interval,
@@ -528,7 +538,8 @@ impl Executable {
         // 1. CLI --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
+        // 4. Env APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only). APOLLO_KEY is only
+        //    required here when the reference points at an Apollo-hosted registry.
         // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
@@ -653,6 +664,15 @@ impl Executable {
                     None => SchemaSource::Registry(opt.uplink_config()?),
                     Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
+            }
+            // No APOLLO_KEY anywhere, but a graph artifact reference was given: this
+            // is valid when the reference points at a non-Apollo OCI registry.
+            // `oci_config()` still enforces APOLLO_KEY if the reference turns out to
+            // be Apollo-hosted.
+            (_, None, None, None, None) if opt.graph_artifact_reference.is_some() => {
+                tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+                SchemaSource::OCI(opt.oci_config()?)
             }
             _ => {
                 return Err(anyhow!(
@@ -1058,6 +1078,120 @@ mod tests {
                     || error_msg.contains("--graph-artifact-reference"),
                 "Error should mention the conflicting options"
             );
+        }
+
+        #[tokio::test]
+        async fn test_graph_artifact_reference_without_apollo_key_routes_to_oci_config() {
+            // ROUTER-1983: a --graph-artifact-reference with no APOLLO_KEY/APOLLO_KEY_PATH
+            // anywhere must still be routed to `oci_config()` (which itself decides
+            // whether a key is actually required) rather than falling into the
+            // generic "no schema source configured" error. Use a reference that is
+            // guaranteed to fail *offline* validation so this test makes no network
+            // calls, while still proving which code path was reached.
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: None,
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(":bad".to_string()),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            let result = Executable::inner_start(
+                None,
+                None,
+                None,
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            let error_msg = result.expect_err("invalid OCI reference should fail").to_string();
+            assert!(
+                error_msg.contains("graph artifact reference"),
+                "expected an OCI reference validation error, got: {error_msg}"
+            );
+            assert!(
+                !error_msg.contains("requires a composed supergraph schema"),
+                "should not fall back to the generic no-schema-source error, got: {error_msg}"
+            );
+        }
+    }
+
+    mod oci_config_tests {
+        use tokio::time::Duration;
+
+        use super::super::Opt;
+
+        fn base_opt(graph_artifact_reference: String, apollo_key: Option<String>) -> Opt {
+            Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key,
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(graph_artifact_reference),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            }
+        }
+
+        #[test]
+        fn does_not_require_apollo_key_for_non_apollo_registry() {
+            let opt = base_opt("ghcr.io/my-org/my-graph:latest".to_string(), None);
+
+            let oci_config = opt
+                .oci_config()
+                .expect("non-Apollo registry should not require APOLLO_KEY");
+            assert_eq!(oci_config.apollo_key, None);
+        }
+
+        #[test]
+        fn passes_through_apollo_key_when_present_for_non_apollo_registry() {
+            let opt = base_opt(
+                "ghcr.io/my-org/my-graph:latest".to_string(),
+                Some("test-key".to_string()),
+            );
+
+            let oci_config = opt.oci_config().expect("should succeed");
+            assert_eq!(oci_config.apollo_key, Some("test-key".to_string()));
+        }
+
+        #[test]
+        fn requires_apollo_key_for_apollo_registry() {
+            let opt = base_opt(
+                "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                None,
+            );
+
+            let err = opt
+                .oci_config()
+                .expect_err("Apollo registry should require APOLLO_KEY");
+            assert!(err.to_string().contains("APOLLO_KEY"));
         }
     }
 
