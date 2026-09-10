@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use petgraph::Direction;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
@@ -23,6 +24,7 @@ use super::shared_path::SharedPath;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -75,6 +77,11 @@ pub(crate) struct FetchNode {
     /// (non-deferred) response. Fetch nodes with a defer_ref are partitioned
     /// into deferred blocks during plan generation.
     pub(crate) defer_ref: Option<String>,
+    /// @fromContext rewrite paths that rename entity data keys to
+    /// `$contextualArgument_N_M` variable names.
+    pub(crate) context_rewrites: Vec<FetchDataKeyRenamer>,
+    /// @fromContext variable definitions added to the subgraph operation.
+    pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
 }
 
 impl FetchNode {
@@ -84,11 +91,12 @@ impl FetchNode {
             kind,
             selection_builder: SelectionBuilder::default(),
             defer_ref: None,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
         }
     }
 
     /// Get the root type if this is a root fetch group.
-    #[allow(dead_code)]
     pub(crate) fn root_type(&self) -> Option<&CompositeTypeDefinitionPosition> {
         match &self.kind {
             FetchGroupKind::Root { root_type } | FetchGroupKind::RootHop { root_type, .. } => {
@@ -129,6 +137,13 @@ enum FetchGraphOp {
     /// A node's depth was raised by an edge insertion. Undo: restore the
     /// previous depth and stage counts.
     RaiseDepth { node_index: NodeIndex, prev: u32 },
+    /// @fromContext rewrites/variables were appended to a node. Undo:
+    /// truncate both vecs to their prior lengths.
+    AddContext {
+        node_index: NodeIndex,
+        prev_rewrites: usize,
+        prev_variables: usize,
+    },
     /// A node claimed the entity_groups slot for its key. Undo: remove the
     /// entry. Always logged directly after the node's AddNode, so LIFO
     /// undo clears the slot before removing the node.
@@ -270,6 +285,15 @@ impl FetchGraph {
                     self.bump_stage_count(prev, 1);
                     self.depth[node_index.index()] = prev;
                 }
+                FetchGraphOp::AddContext {
+                    node_index,
+                    prev_rewrites,
+                    prev_variables,
+                } => {
+                    let fetch_node = &mut self.graph[node_index];
+                    fetch_node.context_rewrites.truncate(prev_rewrites);
+                    fetch_node.context_variables.truncate(prev_variables);
+                }
                 FetchGraphOp::RegisterEntityGroup { key } => {
                     self.entity_groups.remove(&key);
                 }
@@ -338,6 +362,8 @@ impl FetchGraph {
                 kind: FetchGroupKind::Root { root_type },
                 selection_builder: SelectionBuilder::default(),
                 defer_ref,
+                context_rewrites: Vec::new(),
+                context_variables: Vec::new(),
             },
             Some(root_key),
         )
@@ -356,6 +382,8 @@ impl FetchGraph {
                 kind: FetchGroupKind::Entity { merge_at },
                 selection_builder: SelectionBuilder::default(),
                 defer_ref,
+                context_rewrites: Vec::new(),
+                context_variables: Vec::new(),
             },
             None,
         )
@@ -403,16 +431,6 @@ impl FetchGraph {
             self.entity_groups.remove(&key);
         }
         self.add_entity_group_with_defer(subgraph, key.1, key.2)
-    }
-
-    /// Get or create the entity fetch group for (subgraph, merge_at).
-    #[allow(dead_code)]
-    pub(crate) fn get_or_create_entity_group(
-        &mut self,
-        subgraph: &Arc<str>,
-        merge_at: Vec<FetchDataPathElement>,
-    ) -> NodeIndex {
-        self.get_or_create_entity_group_with_defer(subgraph, merge_at, None)
     }
 
     /// Whether a directed edge from `parent` to `child` exists.
@@ -550,8 +568,42 @@ impl FetchGraph {
         self.graph[node].selection_builder.insert(path, selections);
     }
 
+    /// Append a @fromContext rewrite and variable definition to a node,
+    /// deduplicating by renamer identity / variable name.
+    pub(crate) fn add_context(
+        &mut self,
+        node: NodeIndex,
+        renamer: FetchDataKeyRenamer,
+        context_id: Name,
+        context_type: Node<apollo_compiler::ast::Type>,
+    ) {
+        let fetch_node = &mut self.graph[node];
+        let prev_rewrites = fetch_node.context_rewrites.len();
+        let prev_variables = fetch_node.context_variables.len();
+        if !fetch_node.context_rewrites.contains(&renamer) {
+            fetch_node.context_rewrites.push(renamer);
+        }
+        if !fetch_node
+            .context_variables
+            .iter()
+            .any(|(n, _)| *n == context_id)
+        {
+            fetch_node
+                .context_variables
+                .push((context_id, context_type));
+        }
+        if fetch_node.context_rewrites.len() != prev_rewrites
+            || fetch_node.context_variables.len() != prev_variables
+        {
+            self.undo_log.push(FetchGraphOp::AddContext {
+                node_index: node,
+                prev_rewrites,
+                prev_variables,
+            });
+        }
+    }
+
     /// Get a reference to the node weight.
-    #[allow(dead_code)]
     pub(crate) fn node(&self, node: NodeIndex) -> &FetchNode {
         &self.graph[node]
     }
