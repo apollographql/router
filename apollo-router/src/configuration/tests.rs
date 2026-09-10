@@ -726,10 +726,7 @@ headers:
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
-// AC2 / spike finding: `0023-batching.yaml` renames `experimental_batching` to `batching`, and
-// it's a major migration. Startup used to run only minor migrations (those prefixed with the
-// current major version), so `experimental_batching` was left unrecognized and the whole document
-// was rejected outright as an unknown top-level key.
+// The batching rename is in 0023-batching.yaml, outside the current-major prefix.
 #[test]
 fn startup_applies_major_migration() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
@@ -776,8 +773,6 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
     );
 }
 
-// AC5: once a document has been migrated, it must never fall back to the un-migrated original —
-// a migrated document that still fails validation has to stop startup outright.
 #[test]
 fn startup_rejects_configuration_still_invalid_after_migration() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
@@ -796,8 +791,6 @@ fn startup_rejects_configuration_still_invalid_after_migration() {
     );
 }
 
-// Duplicate keys exist only in the operator's own text: serializing the migrated document
-// collapses them, so a migration must not stop the router reporting them.
 #[test]
 fn startup_reports_duplicate_keys_in_a_document_that_also_migrates() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
@@ -813,11 +806,6 @@ fn startup_reports_duplicate_keys_in_a_document_that_also_migrates() {
     );
 }
 
-// AC1: a configuration that needs no migration is parsed directly, so schema-validation
-// diagnostics point at line numbers in the operator's own file. This is the same input and
-// expected output as `unknown_fields_at_root`, run through `Mode::Upgrade` (the startup path)
-// instead of `Mode::NoUpgrade`, to confirm going through the migration check doesn't reformat a
-// document that didn't need migrating.
 #[test]
 fn startup_no_migration_needed_diagnostics_match_original_file() {
     let error = validate_yaml_configuration(
