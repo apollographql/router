@@ -408,7 +408,9 @@ mod tests {
     #[test]
     fn field_signatures_empty_builder_returns_empty() {
         let builder = SelectionBuilder::default();
-        let sigs = builder.field_signatures().expect("no conflict possible with zero entries");
+        let sigs = builder
+            .field_signatures()
+            .expect("no conflict possible with zero entries");
         assert!(sigs.is_empty());
     }
 
