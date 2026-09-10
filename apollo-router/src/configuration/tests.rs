@@ -732,6 +732,7 @@ headers:
 // was rejected outright as an unknown top-level key.
 #[test]
 fn startup_applies_major_migration() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\n";
     let config =
         validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
@@ -742,6 +743,9 @@ fn startup_applies_major_migration() {
     );
 }
 
+// Every sibling test that migrates a document installs the same guard: `tracing` caches a
+// callsite's interest globally the first time it is reached, so a test reaching this warning with
+// no subscriber installed leaves it disabled for whichever test runs next and asserts on it.
 #[test]
 fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
@@ -765,6 +769,7 @@ fn startup_migration_warns_about_upgrade_command_and_migrated_diagnostics() {
 // a migrated document that still fails validation has to stop startup outright.
 #[test]
 fn startup_rejects_configuration_still_invalid_after_migration() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let old_config = "experimental_batching:\n  enabled: true\n  mode: batch_http_link\nthis_key_does_not_exist_anywhere: true\n";
     validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
         .expect_err(
@@ -776,6 +781,7 @@ fn startup_rejects_configuration_still_invalid_after_migration() {
 // collapses them, so a migration must not stop the router reporting them.
 #[test]
 fn startup_reports_duplicate_keys_in_a_document_that_also_migrates() {
+    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let old_config = "experimental_batching:\n  enabled: true\nsupergraph:\n  listen: 127.0.0.1:4000\nsupergraph:\n  listen: 127.0.0.1:5000\n";
     let error = validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
         .expect_err("duplicated keys must be rejected even when the document also migrates");
