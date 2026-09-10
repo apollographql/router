@@ -106,6 +106,7 @@ fred = { version = "10.1.0", features = [
 # "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
 socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
+globset = "0.4.16"
 graphql_client = "0.16.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
 # transitive dependency and to allow Renovate to manage future version bumps.
@@ -369,7 +370,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.26.0"
+rstest = "0.27.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
