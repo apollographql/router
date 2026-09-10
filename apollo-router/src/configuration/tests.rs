@@ -772,6 +772,21 @@ fn startup_rejects_configuration_still_invalid_after_migration() {
         );
 }
 
+// Duplicate keys exist only in the operator's own text: serializing the migrated document
+// collapses them, so a migration must not stop the router reporting them.
+#[test]
+fn startup_reports_duplicate_keys_in_a_document_that_also_migrates() {
+    let old_config = "experimental_batching:\n  enabled: true\nsupergraph:\n  listen: 127.0.0.1:4000\nsupergraph:\n  listen: 127.0.0.1:5000\n";
+    let error = validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
+        .expect_err("duplicated keys must be rejected even when the document also migrates");
+    assert!(
+        error
+            .to_string()
+            .contains("duplicated keys detected in your yaml configuration"),
+        "expected a duplicated-keys error, got: {error}"
+    );
+}
+
 // AC1: a configuration that needs no migration is parsed directly, so schema-validation
 // diagnostics point at line numbers in the operator's own file. This is the same input and
 // expected output as `unknown_fields_at_root`, run through `Mode::Upgrade` (the startup path)

@@ -113,6 +113,10 @@ pub(crate) fn validate_yaml_configuration(
     // actually changes something, so line numbers describe the text that was actually validated.
     let mut diagnostic_source: Cow<str> = Cow::Borrowed(raw_yaml);
 
+    // Duplicate keys exist only in the operator's own text — serializing the migrated document
+    // collapses them — so reject them here, before a migration can replace the text below.
+    let parsed_raw_yaml = super::yaml::parse(raw_yaml)?;
+
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Major)?;
         if upgraded != yaml {
@@ -138,7 +142,10 @@ pub(crate) fn validate_yaml_configuration(
     }
 
     let expanded_yaml = expansion.expand(&yaml)?;
-    let parsed_yaml = super::yaml::parse(&diagnostic_source)?;
+    let parsed_yaml = match &diagnostic_source {
+        Cow::Borrowed(_) => parsed_raw_yaml,
+        Cow::Owned(migrated_yaml) => super::yaml::parse(migrated_yaml)?,
+    };
     {
         let mut errors_it = validator.iter_errors(&expanded_yaml).peekable();
         if errors_it.peek().is_some() {
