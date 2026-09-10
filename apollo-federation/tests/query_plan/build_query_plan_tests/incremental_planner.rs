@@ -1077,3 +1077,119 @@ fn inc_fuel_zero_still_finds_complete_plan_for_keyless_child() {
         "plan must route through the key hop to reach `leaf`: {plan_str}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Diamond-shaped key dependency
+// ---------------------------------------------------------------------------
+
+// D's compound key requires fields split across B and C. Neither subgraph
+// alone can satisfy D's key, so the planner fans out to both in parallel
+// and converges at D once both halves are available.
+//
+//       A          @key(fields: "id")
+//      / \
+//     B   C        B provides `code`, C provides `region`
+//      \ /
+//       D          @key(fields: "code region"), owns `details`
+//
+#[test]
+fn inc_diamond_shaped_compound_key_dependency() {
+    let planner = planner!(
+        config = incremental_config(),
+        A: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! }
+        "#,
+        B: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            code: String @shareable
+          }
+        "#,
+        C: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            region: String @shareable
+          }
+        "#,
+        D: r#"
+          type T @key(fields: "code region") {
+            code: String @shareable
+            region: String @shareable
+            details: String
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              details
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "A") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t") {
+            Fetch(service: "C") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  region
+                }
+              }
+            },
+          },
+          Flatten(path: "t") {
+            Fetch(service: "B") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  code
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "D") {
+            {
+              ... on T {
+                __typename
+                code
+                region
+              }
+            } =>
+            {
+              ... on T {
+                details
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
