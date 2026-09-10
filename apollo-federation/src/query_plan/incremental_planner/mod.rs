@@ -188,8 +188,8 @@ fn run_bulb_and_finalize(
 
     let (result, stats) = bulb_search(
         search_space,
-        initial,
-        config,
+        initial.clone(),
+        config.clone(),
         parameters.check_for_cooperative_cancellation,
     );
 
@@ -202,18 +202,32 @@ fn run_bulb_and_finalize(
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
     }
 
-    let mut result = match result {
-        Some(r) => r,
-        None => {
-            if !parameters.disabled_subgraphs.is_empty() {
-                return Err(
-                    crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into(),
-                );
-            }
-            return Err(FederationError::internal(
-                "BULB planner could not find any complete plan",
-            ));
+    // When the first search does not find a complete plan (None, or a
+    // plan with dropped/pending fields), retry with split-repush enabled.
+    // Keyless value types split across subgraphs can only be planned when
+    // the planner is allowed to re-push unroutable selections at the
+    // nearest entity ancestor.
+    let first_complete =
+        matches!(&result, Some(r) if r.dropped_fields == 0 && r.pending.is_empty());
+    let (mut result, stats) = if !first_complete
+        && !matches!(
+            stats.termination,
+            BulbTermination::TimedOut | BulbTermination::Cancelled
+        ) {
+        let mut split_initial = initial;
+        split_initial.split_repush_enabled = true;
+        let (split_result, split_stats) = bulb_search(
+            search_space,
+            split_initial,
+            config,
+            parameters.check_for_cooperative_cancellation,
+        );
+        match split_result {
+            Some(sr) if sr.dropped_fields == 0 && sr.pending.is_empty() => (sr, split_stats),
+            _ => unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?,
         }
+    } else {
+        unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?
     };
 
     debug!(
@@ -276,6 +290,27 @@ fn run_bulb_and_finalize(
     Ok(BulbPlan { plan, cost })
 }
 
+/// Unwrap an `Option<PlanState>`, returning an appropriate error when
+/// no plan was found.
+fn unwrap_plan(
+    result: Option<PlanState>,
+    stats: bulb_search::BulbStats,
+    has_disabled_subgraphs: bool,
+) -> Result<(PlanState, bulb_search::BulbStats), FederationError> {
+    match result {
+        Some(r) => Ok((r, stats)),
+        None => {
+            if has_disabled_subgraphs {
+                Err(crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+            } else {
+                Err(FederationError::internal(
+                    "BULB planner could not find any complete plan",
+                ))
+            }
+        }
+    }
+}
+
 /// One pending entry per top-level selection, anchored at the operation
 /// root and reversed so the first selection is popped first.
 fn root_pending_selections(
@@ -299,6 +334,8 @@ fn root_pending_selections(
             parent_types: Default::default(),
             context_anchor: Default::default(),
             best_effort: false,
+            split_parent: None,
+            split_avoid: None,
         })
         .collect()
 }

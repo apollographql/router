@@ -18,8 +18,10 @@ use crate::error::FederationError;
 use crate::operation::Field;
 use crate::operation::FieldSelection;
 use crate::operation::HasSelectionKey;
+use crate::operation::InlineFragmentSelection;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::query_graph::ContextCondition;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
@@ -34,6 +36,7 @@ use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::HopKind;
 use super::routing::RoutingChoice;
+use super::routing::RoutingTarget;
 use super::selection_label;
 use super::state::ContextAnchor;
 use super::state::PendingSelection;
@@ -71,8 +74,6 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
-        use super::routing::RoutingTarget;
-
         if matches!(choice.target, RoutingTarget::TypeExplosion) {
             return if self.try_explode_interface_field(state, pending)? {
                 Ok(())
@@ -932,7 +933,22 @@ impl FieldRoutingSearchSpace {
             pending.context_anchor.clone()
         };
 
-        for sub_sel in sub_ss.selections.values().rev().cloned() {
+        // Proactive split: if some children have no edge at the committed
+        // target but do at an alternative, split them off now.
+        let split_off = self.split_for_other_subgraph(pending, target_qg_node, sub_ss)?;
+        if let Some(split_children) = &split_off {
+            self.push_split_duplicate(state, pending, sub_ss, split_children)?;
+        }
+
+        // Children remember their dispatch parent so a stranded descendant
+        // can re-push a wrapped remainder at an ancestor with alternatives
+        // (see `try_split_repush`).
+        let child_split_parent = Some(Arc::new(pending.clone()));
+        for sub_sel in sub_ss.selections.values().rev() {
+            let Some(sub_sel) = remaining_after_split(sub_sel, split_off.as_deref().unwrap_or(&[]))
+            else {
+                continue;
+            };
             state.push_pending(
                 pending
                     .fork(sub_sel)
@@ -942,7 +958,8 @@ impl FieldRoutingSearchSpace {
                     .with_provides_anchor(child_provides_anchor)
                     .with_defer(child_defer_ref.clone())
                     .with_parent_types(child_parent_types.clone())
-                    .with_context_anchor(child_context_anchor.clone()),
+                    .with_context_anchor(child_context_anchor.clone())
+                    .with_split_parent(child_split_parent.clone()),
             );
         }
         Ok(())
@@ -986,5 +1003,264 @@ impl FieldRoutingSearchSpace {
             // Outside it, fragments carry any anchor along unchanged.
             (false, false) => pending.provides_anchor,
         })
+    }
+
+    /// One-level lookahead split for keyless value types: if some children
+    /// of the committed field have no direct edge at the target but DO at
+    /// an alternative routing target, split them off into a duplicate
+    /// pending that takes the alternative route.
+    fn split_for_other_subgraph(
+        &self,
+        pending: &PendingSelection,
+        target_qg_node: NodeIndex,
+        sub_ss: &SelectionSet,
+    ) -> Result<Option<Vec<Selection>>, FederationError> {
+        let Selection::Field(_) = &pending.selection else {
+            return Ok(None);
+        };
+        let options = self.routing_options(pending)?;
+        let mut alt_targets: Vec<NodeIndex> = Vec::new();
+        for opt in options.iter() {
+            let RoutingTarget::SubgraphEdge { edge_index, .. } = &opt.target else {
+                continue;
+            };
+            let (_, alt_target) = self
+                .cached_query_graph
+                .query_graph
+                .edge_endpoints(*edge_index)?;
+            if alt_target != target_qg_node && !alt_targets.contains(&alt_target) {
+                alt_targets.push(alt_target);
+            }
+        }
+        if alt_targets.is_empty() {
+            return Ok(None);
+        }
+        let (stranded_fields, recoverable) =
+            self.classify_split_children(target_qg_node, &alt_targets, sub_ss)?;
+        if recoverable.is_empty() || stranded_fields == sub_ss.selections.len() {
+            return Ok(None);
+        }
+        let anything_remains = sub_ss
+            .selections
+            .values()
+            .any(|sel| remaining_after_split(sel, &recoverable).is_some());
+        if !anything_remains {
+            return Ok(None);
+        }
+        Ok(Some(recoverable))
+    }
+
+    /// Partition children into stranded (no route at target) and recoverable
+    /// (reachable at an alternative target).
+    fn classify_split_children(
+        &self,
+        target_qg_node: NodeIndex,
+        alt_targets: &[NodeIndex],
+        sub_ss: &SelectionSet,
+    ) -> Result<(usize, Vec<Selection>), FederationError> {
+        let mut stranded_fields = 0usize;
+        let mut recoverable: Vec<Selection> = Vec::new();
+        for sel in sub_ss.selections.values() {
+            match sel {
+                Selection::Field(child) => {
+                    if *child.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
+                    if self
+                        .cached_query_graph
+                        .edge_for_field(target_qg_node, &child.field)
+                        .is_some()
+                    {
+                        continue;
+                    }
+                    if self.field_stranded_at(target_qg_node, &child.field)? {
+                        stranded_fields += 1;
+                    }
+                    if alt_targets.iter().any(|&alt| {
+                        self.cached_query_graph
+                            .edge_for_field(alt, &child.field)
+                            .is_some()
+                    }) {
+                        recoverable.push(sel.clone());
+                    }
+                }
+                Selection::InlineFragment(frag_sel) => {
+                    if let Some(wrapped) =
+                        self.split_fragment_children(target_qg_node, alt_targets, frag_sel)?
+                    {
+                        recoverable.push(wrapped);
+                    }
+                }
+            }
+        }
+        Ok((stranded_fields, recoverable))
+    }
+
+    /// Whether `field` has neither a direct edge nor any key-hop option at `node`.
+    fn field_stranded_at(&self, node: NodeIndex, field: &Field) -> Result<bool, FederationError> {
+        if self
+            .cached_query_graph
+            .edge_for_field(node, field)
+            .is_some()
+        {
+            return Ok(false);
+        }
+        let key = super::RoutingSiteKey::Field(field.name().clone());
+        let hops = self.cached_key_hops(node, None, key, |key_target| {
+            self.cached_query_graph.edge_for_field(key_target, field)
+        })?;
+        Ok(hops.is_empty())
+    }
+
+    /// The stranded-but-recoverable subset of an inline fragment's children,
+    /// wrapped back in the same fragment. Recurses through nested fragments.
+    fn split_fragment_children(
+        &self,
+        node: NodeIndex,
+        alt_targets: &[NodeIndex],
+        frag_sel: &InlineFragmentSelection,
+    ) -> Result<Option<Selection>, FederationError> {
+        let advance = |n: NodeIndex| -> Result<NodeIndex, FederationError> {
+            match self
+                .cached_query_graph
+                .edge_for_inline_fragment(n, &frag_sel.inline_fragment)
+            {
+                Some(edge) => Ok(self.cached_query_graph.query_graph.edge_endpoints(edge)?.1),
+                None => Ok(n),
+            }
+        };
+        let this_node = advance(node)?;
+        let alt_nodes: Vec<NodeIndex> = alt_targets
+            .iter()
+            .map(|&alt| advance(alt))
+            .collect::<Result<_, _>>()?;
+
+        let mut recovered: Vec<Selection> = Vec::new();
+        for sel in frag_sel.selection_set.selections.values() {
+            match sel {
+                Selection::Field(child) => {
+                    if *child.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
+                    if self
+                        .cached_query_graph
+                        .edge_for_field(this_node, &child.field)
+                        .is_some()
+                    {
+                        continue;
+                    }
+                    if alt_nodes.iter().any(|&alt| {
+                        alt != this_node
+                            && self
+                                .cached_query_graph
+                                .edge_for_field(alt, &child.field)
+                                .is_some()
+                    }) {
+                        recovered.push(sel.clone());
+                    }
+                }
+                Selection::InlineFragment(inner) => {
+                    if let Some(wrapped) =
+                        self.split_fragment_children(this_node, &alt_nodes, inner)?
+                    {
+                        recovered.push(wrapped);
+                    }
+                }
+            }
+        }
+        if recovered.is_empty() {
+            return Ok(None);
+        }
+        let mut map = crate::operation::SelectionMap::new();
+        for sel in recovered {
+            map.insert(sel);
+        }
+        Ok(Some(Selection::InlineFragment(Arc::new(
+            InlineFragmentSelection {
+                inline_fragment: frag_sel.inline_fragment.clone(),
+                selection_set: SelectionSet {
+                    schema: frag_sel.selection_set.schema.clone(),
+                    type_position: frag_sel.selection_set.type_position.clone(),
+                    selections: Arc::new(map),
+                },
+            },
+        ))))
+    }
+
+    /// Create a duplicate pending of the parent field carrying only the
+    /// split-off children and push it onto the pending stack.
+    fn push_split_duplicate(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        sub_ss: &SelectionSet,
+        split_children: &[Selection],
+    ) -> Result<(), FederationError> {
+        let Selection::Field(parent_field) = &pending.selection else {
+            return Err(FederationError::internal(
+                "split_for_other_subgraph returned Some for a non-field selection",
+            ));
+        };
+        let mut split_map = crate::operation::SelectionMap::new();
+        for sel in split_children {
+            split_map.insert(sel.clone());
+        }
+        let split_ss = SelectionSet {
+            schema: sub_ss.schema.clone(),
+            type_position: sub_ss.type_position.clone(),
+            selections: Arc::new(split_map),
+        };
+        let duplicate = Selection::Field(Arc::new(FieldSelection {
+            field: parent_field.field.clone(),
+            selection_set: Some(split_ss),
+        }));
+        tracing::trace!(
+            field = %parent_field.field.field_position,
+            split_children = split_children.len(),
+            "re-pushing field for another subgraph to cover stranded children",
+        );
+        state.push_pending(pending.fork(duplicate));
+        Ok(())
+    }
+}
+
+/// What remains of `sel` after removing the split-off subset sharing its
+/// selection key. Fields move whole; fragments move child-by-child.
+/// `None` means the selection moved entirely.
+fn remaining_after_split(sel: &Selection, split: &[Selection]) -> Option<Selection> {
+    let Some(moved) = split.iter().find(|s| s.key() == sel.key()) else {
+        return Some(sel.clone());
+    };
+    match (sel, moved) {
+        (Selection::InlineFragment(orig), Selection::InlineFragment(moved_frag)) => {
+            let moved_children: Vec<Selection> = moved_frag
+                .selection_set
+                .selections
+                .values()
+                .cloned()
+                .collect();
+            let mut kept = crate::operation::SelectionMap::new();
+            let mut kept_any = false;
+            for child in orig.selection_set.selections.values() {
+                if let Some(remaining) = remaining_after_split(child, &moved_children) {
+                    kept.insert(remaining);
+                    kept_any = true;
+                }
+            }
+            if !kept_any {
+                return None;
+            }
+            Some(Selection::InlineFragment(Arc::new(
+                InlineFragmentSelection {
+                    inline_fragment: orig.inline_fragment.clone(),
+                    selection_set: SelectionSet {
+                        schema: orig.selection_set.schema.clone(),
+                        type_position: orig.selection_set.type_position.clone(),
+                        selections: Arc::new(kept),
+                    },
+                },
+            )))
+        }
+        _ => None,
     }
 }
