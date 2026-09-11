@@ -19,7 +19,6 @@ use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
 use apollo_configuration::expansion::MapVariables;
 use apollo_configuration::provenance::Injection;
-use rust_embed::RustEmbed;
 use serde_json::Value;
 use serde_json::json;
 
@@ -58,17 +57,6 @@ fn router_options() -> ParseYamlOptions {
     ParseYamlOptions::default().schema(schema)
 }
 
-#[derive(RustEmbed)]
-#[folder = "src/configuration/testdata/compat"]
-struct CompatCorpus;
-
-fn fixture(name: &str) -> String {
-    let asset = CompatCorpus::get(name).unwrap_or_else(|| panic!("missing compat fixture {name}"));
-    std::str::from_utf8(&asset.data)
-        .expect("fixture must be utf8")
-        .to_string()
-}
-
 /// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
 #[derive(Clone, Copy)]
 enum Migration {
@@ -88,40 +76,40 @@ enum Migration {
 /// independently of the file name.
 struct Case {
     name: &'static str,
-    file: &'static str,
+    text: &'static str,
     migration: Migration,
 }
 
 const CASES: &[Case] = &[
     Case {
         name: "minimal supergraph listener",
-        file: "current_minimal.yaml",
+        text: include_str!("testdata/compat/current_minimal.yaml"),
         migration: Migration::None,
     },
     Case {
         name: "cors policies, apq, persisted queries, batching, limits, health check, \
                subscription, a hidden built-in plugin and a custom plugin",
-        file: "current_featureful.yaml",
+        text: include_str!("testdata/compat/current_featureful.yaml"),
         migration: Migration::None,
     },
     Case {
         name: "cors.origins migrates into cors.policies",
-        file: "needs_minor_migration_cors_origins.yaml",
+        text: include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
         migration: Migration::Minor,
     },
     Case {
         name: "flat headers.all.request migrates under an operations key",
-        file: "needs_minor_migration_headers_flat_list.yaml",
+        text: include_str!("testdata/compat/needs_minor_migration_headers_flat_list.yaml"),
         migration: Migration::Minor,
     },
     Case {
         name: "flat subscription.deduplication migrates under deduplication.all",
-        file: "needs_minor_migration_subscription_dedup.yaml",
+        text: include_str!("testdata/compat/needs_minor_migration_subscription_dedup.yaml"),
         migration: Migration::Minor,
     },
     Case {
         name: "experimental_batching renamed to batching (breaking; needs `router config upgrade`)",
-        file: "needs_major_migration_batching.yaml",
+        text: include_str!("testdata/compat/needs_major_migration_batching.yaml"),
         migration: Migration::Major,
     },
 ];
@@ -131,14 +119,14 @@ const CASES: &[Case] = &[
 /// migration is pre-upgraded first, standing in for an operator running `router config upgrade`
 /// before startup would otherwise reject the file.
 fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
-    let text = fixture(case.file);
+    let text = case.text;
     match case.migration {
         Migration::None | Migration::Minor => {
-            validate_yaml_configuration(&text, Expansion::builder().build(), Mode::Upgrade)
+            validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
                 .map_err(|error| error.to_string())
         }
         Migration::Major => {
-            let raw: Value = serde_yaml::from_str(&text).map_err(|error| error.to_string())?;
+            let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
             let upgraded = upgrade_configuration(&raw, false, UpgradeMode::Major)
                 .map_err(|error| error.to_string())?;
             let upgraded_yaml =
@@ -160,18 +148,18 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
 /// mirrors what ROUTER-2104's loader will actually do: migrate, then hand the result to the
 /// shared parser, rather than expecting the shared crate to know router's migration history.
 fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
-    let text = fixture(case.file);
+    let text = case.text;
     let text = match case.migration {
-        Migration::None => text,
+        Migration::None => text.to_string(),
         Migration::Minor => {
-            let raw: Value = serde_yaml::from_str(&text).map_err(|error| error.to_string())?;
+            let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
             let migrated =
                 upgrade_configuration(&raw, false, UpgradeMode::Minor(current_major_version()))
                     .map_err(|error| error.to_string())?;
             serde_yaml::to_string(&migrated).map_err(|error| error.to_string())?
         }
         Migration::Major => {
-            let raw: Value = serde_yaml::from_str(&text).map_err(|error| error.to_string())?;
+            let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
             let migrated = upgrade_configuration(&raw, false, UpgradeMode::Major)
                 .map_err(|error| error.to_string())?;
             serde_yaml::to_string(&migrated).map_err(|error| error.to_string())?
@@ -269,11 +257,11 @@ fn effective_settings_agree_for_the_shared_corpus() {
 /// router's own patched root schema (see `router_options`).
 #[test]
 fn unknown_top_level_key_is_rejected_by_both_parsers() {
-    let text = fixture("unknown_top_level_key.yaml");
-    validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
+    let text = include_str!("testdata/compat/unknown_top_level_key.yaml");
+    validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
         .expect_err("router's own pipeline should reject the unknown key");
     router_options()
-        .parse::<Configuration>(&text)
+        .parse::<Configuration>(text)
         .expect_err("the shared parser should reject the unknown key too");
 }
 
@@ -282,11 +270,11 @@ fn unknown_top_level_key_is_rejected_by_both_parsers() {
 /// own runtime unknown-plugin check would even run.
 #[test]
 fn unknown_plugin_name_is_rejected_by_both_parsers() {
-    let text = fixture("unknown_plugin_name.yaml");
-    validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
+    let text = include_str!("testdata/compat/unknown_plugin_name.yaml");
+    validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
         .expect_err("router's own pipeline should reject the unregistered plugin name");
     router_options()
-        .parse::<Configuration>(&text)
+        .parse::<Configuration>(text)
         .expect_err("the shared parser should reject it too");
 }
 
@@ -301,10 +289,10 @@ fn unknown_plugin_name_is_rejected_by_both_parsers() {
 /// current message text.
 #[test]
 fn duplicate_top_level_keys_is_rejected_by_both_with_different_messages() {
-    let text = fixture("duplicate_keys.yaml");
+    let text = include_str!("testdata/compat/duplicate_keys.yaml");
 
     let router_error =
-        validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
+        validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
             .expect_err("router's own pipeline rejects duplicate keys before validation");
     assert!(
         router_error.to_string().contains("duplicated keys"),
@@ -312,7 +300,7 @@ fn duplicate_top_level_keys_is_rejected_by_both_with_different_messages() {
     );
 
     let shared_error = router_options()
-        .parse::<Configuration>(&text)
+        .parse::<Configuration>(text)
         .expect_err("the shared parser also rejects the duplicated key, via serde_yaml itself");
     assert!(
         format!("{shared_error}").contains("duplicate entry"),
@@ -406,9 +394,9 @@ fn minor_migration_warns_with_upgrade_command_and_migrated_line_numbers() {
     const SCOPE: &str = "compatibility_migration_warning_test";
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
     let _span = tracing::info_span!(SCOPE).entered();
-    let text = fixture("needs_minor_migration_cors_origins.yaml");
+    let text = include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml");
 
-    validate_yaml_configuration(&text, Expansion::builder().build(), Mode::Upgrade)
+    validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
         .expect("a within-major migration is applied automatically at startup and reload");
 
     assert!(
@@ -432,9 +420,9 @@ fn minor_migration_warns_with_upgrade_command_and_migrated_line_numbers() {
 /// this module's.
 #[test]
 fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
-    let previous_text = fixture("current_minimal.yaml");
+    let previous_text = include_str!("testdata/compat/current_minimal.yaml");
     let previous =
-        validate_yaml_configuration(&previous_text, Expansion::builder().build(), Mode::Upgrade)
+        validate_yaml_configuration(previous_text, Expansion::builder().build(), Mode::Upgrade)
             .expect("the previous configuration is valid");
 
     let invalid_reload_text = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
@@ -463,24 +451,21 @@ fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
 /// `apollo-router/src/configuration`.
 #[test]
 fn a_previous_configuration_is_unaffected_by_parsing_its_replacement() {
-    let previous_text = fixture("current_minimal.yaml");
-    let next_text = fixture("current_minimal_v2.yaml");
+    let previous_text = include_str!("testdata/compat/current_minimal.yaml");
+    let next_text = include_str!("testdata/compat/current_minimal_v2.yaml");
 
-    let router_previous = validate_yaml_configuration(
-        &previous_text,
-        Expansion::builder().build(),
-        Mode::NoUpgrade,
-    )
-    .expect("router's own pipeline accepts the previous configuration");
+    let router_previous =
+        validate_yaml_configuration(previous_text, Expansion::builder().build(), Mode::NoUpgrade)
+            .expect("router's own pipeline accepts the previous configuration");
     let shared_previous = router_options()
-        .parse::<Configuration>(&previous_text)
+        .parse::<Configuration>(previous_text)
         .expect("the shared parser accepts the previous configuration");
 
     let router_next =
-        validate_yaml_configuration(&next_text, Expansion::builder().build(), Mode::NoUpgrade)
+        validate_yaml_configuration(next_text, Expansion::builder().build(), Mode::NoUpgrade)
             .expect("router's own pipeline accepts the replacement configuration");
     let shared_next = router_options()
-        .parse::<Configuration>(&next_text)
+        .parse::<Configuration>(next_text)
         .expect("the shared parser accepts the replacement configuration");
 
     // Parsing the replacement must not have changed what the earlier parse produced.
@@ -543,11 +528,11 @@ fn plugins_from_typed_configs(typed: TypedApolloPlugins) -> (HealthCheck, Subscr
 /// mentions them, on both sides, because both call the same `Configuration::deserialize`.
 #[test]
 fn mandatory_plugin_defaults_are_present_without_being_configured() {
-    let text = fixture("current_minimal.yaml");
-    let router = validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
+    let text = include_str!("testdata/compat/current_minimal.yaml");
+    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
         .expect("router's own pipeline accepts this");
     let shared = router_options()
-        .parse::<Configuration>(&text)
+        .parse::<Configuration>(text)
         .expect("the shared parser accepts this");
 
     for plugin in ["limits", "health_check"] {
@@ -611,10 +596,10 @@ fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
 /// (`typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing`, above).
 #[test]
 fn unmigrated_flat_subscription_dedup_fails_at_plugin_init_not_at_parse() {
-    let text = fixture("needs_minor_migration_subscription_dedup.yaml");
+    let text = include_str!("testdata/compat/needs_minor_migration_subscription_dedup.yaml");
 
     let shared = router_options()
-        .parse::<Configuration>(&text)
+        .parse::<Configuration>(text)
         .expect("Configuration-level parsing accepts the unmigrated flat shape");
     let raw_subscription = shared
         .apollo_plugins
