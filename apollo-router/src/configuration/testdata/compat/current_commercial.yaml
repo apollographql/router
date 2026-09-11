@@ -1,0 +1,51 @@
+# Sets every JSONPath selector `license_enforcement.rs`'s `configuration_restrictions` matches,
+# so the effective-settings comparison reaches configuration a self-hosted licence gates.
+# Values are synthetic: no fixture here resolves or authenticates against anything.
+apq:
+  router:
+    cache:
+      redis:
+        urls:
+          - redis://redis.example.internal:6379
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://issuer.example.internal/.well-known/jwks.json
+authorization:
+  directives:
+    enabled: true
+batching:
+  enabled: true
+  mode: batch_http_link
+coprocessor:
+  url: http://coprocessor.example.internal:8081
+demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 30
+      max: 256
+limits:
+  router:
+    max_depth: 100
+    max_height: 100
+    max_root_fields: 20
+    max_aliases: 30
+persisted_queries:
+  enabled: true
+plugins:
+  experimental.restricted:
+    enabled: true
+response_cache:
+  enabled: true
+  subgraph: {}
+subscription:
+  enabled: true
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        urls:
+          - redis://redis.example.internal:6379

@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
@@ -23,6 +24,9 @@ use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseEnforcementReport;
+use crate::uplink::license_enforcement::LicenseState;
 
 // Configuration's Deserialize implementation already runs its cross-field validation.
 impl apollo_configuration::Validate for Configuration {}
@@ -86,6 +90,19 @@ const CASES: &[Case] = &[
     Case {
         name: "documented persisted-query safelist configuration",
         text: include_str!("../../../examples/persisted-queries/safelist_pq_require_id.yaml"),
+        migration: Migration::None,
+    },
+    Case {
+        name: "commercial configuration: every licence-restricted path \
+               (authentication, authorization, batching, coprocessor, demand control, \
+               persisted queries, subscriptions, the restricted plugin, response and \
+               query-plan caching in Redis, and all four operation limits)",
+        text: include_str!("testdata/compat/current_commercial.yaml"),
+        migration: Migration::None,
+    },
+    Case {
+        name: "enhanced_client_awareness and experimental_diagnostics top-level keys",
+        text: include_str!("testdata/compat/current_client_awareness_and_diagnostics.yaml"),
         migration: Migration::None,
     },
     Case {
@@ -155,6 +172,14 @@ fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
 }
 
 /// The JSON pointer to the first leaf where `a` and `b` disagree, or `None` if they match.
+///
+/// Every comparison in this module walks two `serde_json::to_value(&Configuration)` results
+/// through this function instead of writing `assert_eq!(router_config, shared_config)`.
+/// `Configuration`'s hand-written `PartialEq` (`apollo-router/src/configuration/mod.rs`) compares
+/// only `validated_yaml`, a `#[serde(skip)]` field this module's own adapter sets on the shared
+/// side to make configuration-usage telemetry testable. `==` would therefore compare a value the
+/// test harness just populated, passing almost trivially while reading like a deep equality
+/// check. Do not replace this walk with `==`.
 fn first_difference(a: &Value, b: &Value) -> Option<String> {
     fn walk(a: &Value, b: &Value, path: &mut String) -> Option<String> {
         match (a, b) {
@@ -397,8 +422,48 @@ fn configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml() 
     );
 }
 
-/// Parses settings and supplies `validated_yaml` for configuration-usage selectors.
-/// Configure `options` and `expansion` with equivalent external inputs.
+/// `raw_yaml` holds the router yaml exactly as read, before migration or env expansion, and
+/// diagnostics derive line numbers from it. It is `#[serde(skip)]`, like `validated_yaml`, and
+/// `Configuration::deserialize` hardcodes it to `None` -- so a bare call through the shared parser
+/// can never set it. The gap is the same one
+/// `configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml` documents for
+/// `validated_yaml`, and the adapter closes it the same way: by setting the field itself, from the
+/// exact text handed to the parser.
+#[test]
+fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
+    let text = include_str!("testdata/compat/current_minimal.yaml");
+
+    let bare_shared: Configuration = router_options()
+        .parse(text)
+        .expect("the shared parser accepts this");
+    assert!(
+        bare_shared.raw_yaml.is_none(),
+        "Configuration::deserialize always sets raw_yaml to None, with no text to populate it from"
+    );
+
+    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect("router's own pipeline accepts this");
+    let adapted_shared =
+        parse_via_apollo_configuration(text, &router_options(), &Expansion::builder().build())
+            .expect("the adapter accepts this");
+
+    assert_eq!(
+        router.raw_yaml.as_deref(),
+        Some(text),
+        "router keeps the exact pre-expansion text"
+    );
+    assert_eq!(
+        router.raw_yaml.as_deref(),
+        adapted_shared.raw_yaml.as_deref(),
+        "the adapter must reproduce the same raw_yaml router itself would have set"
+    );
+}
+
+/// Parses settings and supplies `validated_yaml` and `raw_yaml`, the two `#[serde(skip)]` fields
+/// `Configuration::deserialize` always leaves as `None`. Router's own `validate_yaml_configuration`
+/// sets both after the same `Deserialize` call runs; this adapter does the same, from the same
+/// pre-expansion `text` router itself would have set `raw_yaml` from. Configure `options` and
+/// `expansion` with equivalent external inputs.
 fn parse_via_apollo_configuration(
     text: &str,
     options: &ParseYamlOptions,
@@ -410,6 +475,7 @@ fn parse_via_apollo_configuration(
         .parse(text)
         .map_err(|error| format!("{:?}", miette::Report::new(error)))?;
     config.validated_yaml = Some(expanded);
+    config.raw_yaml = Some(Arc::from(text));
     Ok(config)
 }
 
@@ -1025,4 +1091,63 @@ fn licence_restricted_configuration_paths_agree_between_parsers_via_validated_ya
             assert_eq!(shared_hit, Some(expected), "[{path}] shared side");
         }
     }
+}
+
+/// The previous case shows that both parsers' `validated_yaml` agrees at three restriction
+/// paths. This case runs the actual licence check those paths feed --
+/// `LicenseEnforcementReport::build`, `pub(crate)` in `uplink::license_enforcement` and callable
+/// directly with a `LicenseState` built in memory, the way `license_enforcement`'s own
+/// `test_restricted_features_via_config_unlicensed` builds its license state: no `APOLLO_KEY`,
+/// `APOLLO_GRAPH_REF`, or other credential is read.
+///
+/// A `Configuration` from each parser is checked against the same `LicenseState::Unlicensed`
+/// verdict. Agreement matters here specifically because `validate_configuration` reads
+/// `validated_yaml`, which `first_difference`'s comparisons never see -- a divergence at this
+/// layer would silently change which features a licence permits, rather than only which JSON
+/// field disagrees.
+#[test]
+fn licence_verdict_agrees_between_parsers_for_commercial_configuration() {
+    let text = include_str!("testdata/compat/current_commercial.yaml");
+    let schema_sdl = include_str!("../uplink/testdata/oss.graphql");
+    let license = Arc::new(LicenseState::Unlicensed);
+
+    let router_config =
+        validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
+            .expect("router's own pipeline accepts the commercial fixture");
+    let shared_config =
+        parse_via_apollo_configuration(text, &router_options(), &Expansion::builder().build())
+            .expect("the adapter accepts the commercial fixture");
+
+    let router_schema = Schema::parse(schema_sdl, &router_config)
+        .expect("the schema parses against router's configuration");
+    let shared_schema = Schema::parse(schema_sdl, &shared_config)
+        .expect("the schema parses against the shared configuration");
+
+    let router_report =
+        LicenseEnforcementReport::build(&router_config, &router_schema, license.clone());
+    let shared_report = LicenseEnforcementReport::build(&shared_config, &shared_schema, license);
+
+    assert!(
+        router_report.uses_restricted_features(),
+        "the commercial fixture sets restricted paths, so router's report must flag them"
+    );
+    assert!(
+        shared_report.uses_restricted_features(),
+        "the commercial fixture sets restricted paths, so the shared report must flag them too"
+    );
+
+    let mut router_features = router_report.restricted_features_in_use();
+    router_features.sort();
+    let mut shared_features = shared_report.restricted_features_in_use();
+    shared_features.sort();
+    assert_eq!(
+        router_features, shared_features,
+        "both parsers must name the same restricted features"
+    );
+
+    assert_eq!(
+        router_report.enforce().is_err(),
+        shared_report.enforce().is_err(),
+        "both parsers must reach the same licence verdict for an unlicensed router"
+    );
 }
