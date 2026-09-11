@@ -23,6 +23,7 @@ use tower::ServiceExt;
 use wiremock::ResponseTemplate;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
@@ -66,6 +67,52 @@ async fn test_reload_config_valid() -> Result<(), BoxError> {
     router.touch_config().await;
     router.assert_reloaded().await;
     router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_migrated_reload_warns_and_invalid_replacement_preserves_introspection()
+-> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder().config("{}").build().await;
+    router.start().await;
+    router.assert_started().await;
+
+    router
+        .update_config(
+            r#"
+supergraph:
+  introspection: true
+cors:
+  origins:
+    - https://example.com
+"#,
+        )
+        .await;
+    router.assert_reloaded().await;
+    router.assert_log_contained("router config upgrade");
+    router.assert_log_contained("error line numbers refer to the migrated YAML");
+
+    router
+        .update_config(
+            r#"
+supergraph:
+  introspection: false
+cors:
+  origins:
+    - https://example.org
+this_key_does_not_exist_anywhere: true
+"#,
+        )
+        .await;
+    router
+        .wait_for_log_message("Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)")
+        .await;
+    let (_, response) = router.execute_query(Query::introspection()).await;
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await?;
+    assert!(body.get("errors").is_none(), "{body}");
+    assert!(body["data"].is_object(), "{body}");
     router.graceful_shutdown().await;
     Ok(())
 }

@@ -1,0 +1,5 @@
+headers:
+  all:
+    request:
+      - propagate:
+          named: x-request-id

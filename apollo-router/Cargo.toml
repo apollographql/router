@@ -300,6 +300,7 @@ tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], opti
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
 [dev-dependencies]
+apollo-configuration = "0.6.2"
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 ctor = "1.0.0"
 ecdsa = { version = "0.17.0", features = ["algorithm", "pem", "pkcs8"] }
@@ -316,6 +317,7 @@ insta.workspace = true
 maplit = "1.0.2"
 brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }
+miette = "7"
 mockall = "0.15.0"
 num-traits = "0.2.19"
 once_cell.workspace = true
