@@ -2277,7 +2277,7 @@ expression: "&schema"
     },
     "ConnectorCacheConfiguration": {
       "additionalProperties": false,
-      "description": "Per connector source configuration for response caching",
+      "description": "Configuration for connector response caching: global defaults plus per-source overrides",
       "properties": {
         "all": {
           "allOf": [
