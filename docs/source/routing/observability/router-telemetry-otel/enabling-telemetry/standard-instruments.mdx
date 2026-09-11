@@ -307,6 +307,8 @@ telemetry:
   - `subgraph.name`: The name of the subgraph that closed the connection.
 - `apollo.router.operations.subscriptions.reconnect` - Number of subgraph WebSocket reconnect attempts. Incremented once per attempt when `max_reconnect_attempts > 0` is configured and the connection drops unexpectedly. Counts only attempts that actually issue a handshake — a closing signal received during the reconnect delay or during the handshake itself short-circuits without incrementing. Attributes:
   - `subgraph.name`: The name of the subgraph being reconnected to.
+- `apollo.router.operations.subscriptions.events_sent` - A histogram of payloads written to each client's multipart subscription response stream. It records one value when the stream ends, including zero for streams that sent no payloads. Error-only termination notices count; heartbeats and empty close signals are excluded. Writing a payload to the stream does not confirm that the client received it. Attributes:
+  - `reason`: The termination reason: `server_close`, `subgraph_error`, `client_disconnect`, `heartbeat_delivery_failed`, `schema_reload`, `config_reload`, or `max_lifetime`. This instrument emits `reason` independently of the attribute configuration for `apollo.router.operations.subscriptions.terminated.client`.
 
 ## Batching
 
