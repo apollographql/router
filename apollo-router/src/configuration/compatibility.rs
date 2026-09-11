@@ -268,6 +268,32 @@ fn unknown_plugin_name_is_rejected_by_both_parsers() {
         .expect_err("the shared parser should reject it too");
 }
 
+/// Router normalizes `plugins: null` to an empty map before schema validation.
+/// The shared parser validates the null value and rejects it.
+#[test]
+fn null_plugins_requires_router_normalization() {
+    let text = "plugins: null\n";
+    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect("router accepts null plugin settings");
+    assert!(
+        router
+            .plugins
+            .plugins
+            .as_ref()
+            .is_none_or(|plugins| plugins.is_empty())
+    );
+    let error = router_options()
+        .parse::<Configuration>(text)
+        .expect_err("the shared parser requires an object for plugins");
+    let messages = miette::Diagnostic::related(&error)
+        .into_iter()
+        .flatten()
+        .map(|diagnostic| diagnostic.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(messages.contains("is not of type \"object\""), "{messages}");
+}
+
 /// Duplicate-key diagnostics differ: router reports "duplicated keys", while the shared
 /// parser reports serde_yaml's "duplicate entry" error.
 #[test]
