@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 3050b958b5044a5d9f545710654a6ac5585bc487
+# Composed from subgraphs with hash: 9e0359271208fa96d3c473f39a1f06b4eafc4b8f
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -54,6 +54,14 @@ enum link__Purpose {
   EXECUTION
 }
 
+type Profile
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: Int
+  detail: String @join__field(graph: B)
+}
+
 type Query
   @join__type(graph: A)
   @join__type(graph: B)
@@ -66,6 +74,5 @@ type User
   @join__type(graph: B, key: "id")
 {
   id: ID!
-  name: String @join__field(graph: A)
-  email: String @join__field(graph: B)
+  profile: Profile
 }

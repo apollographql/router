@@ -1,9 +1,10 @@
-# Composed from subgraphs with hash: 3050b958b5044a5d9f545710654a6ac5585bc487
+# Composed from subgraphs with hash: 2f9005c5afe6c19b8651084b9fc57441252417b8
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
 {
   query: Query
+  mutation: Mutation
 }
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
@@ -37,7 +38,6 @@ scalar join__FieldValue
 
 enum join__Graph {
   A @join__graph(name: "a", url: "none")
-  B @join__graph(name: "b", url: "none")
 }
 
 scalar link__Import
@@ -54,18 +54,15 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Query
+type Mutation
   @join__type(graph: A)
-  @join__type(graph: B)
 {
-  user: User @join__field(graph: A)
+  m1: Int
+  m2: Int
 }
 
-type User
-  @join__type(graph: A, key: "id")
-  @join__type(graph: B, key: "id")
+type Query
+  @join__type(graph: A)
 {
-  id: ID!
-  name: String @join__field(graph: A)
-  email: String @join__field(graph: B)
+  q: Int
 }
