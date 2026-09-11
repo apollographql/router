@@ -2438,7 +2438,6 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use serde_json::Value;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::json;
     use tower::Service;
@@ -2446,7 +2445,6 @@ mod tests {
     use tower::ServiceExt;
 
     use super::CustomTraceIdPropagator;
-    use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
@@ -2474,7 +2472,6 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
-    use crate::services::supergraph;
 
     // Serializes tests that call `plugin.activate()`. `Telemetry::activate()`
     // -> `Activation::commit()` performs two process-wide writes:
@@ -2498,9 +2495,10 @@ mod tests {
     static TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
         once_cell::sync::Lazy::new(Default::default);
 
+    // TODO(@goto-bus-stop): this could perhaps use insta's redaction features instead?
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
-            let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(&$plugin).await;
             let regexp = regex::Regex::new(
                 r#"process_executable_name="(?P<process>[^"]+)",?|service_name="(?P<service>[^"]+)",?"#,
             )
@@ -2513,29 +2511,7 @@ mod tests {
         }};
     }
 
-    async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
-        let telemetry_config = full_config
-            .as_object()
-            .expect("must be an object")
-            .get("telemetry")
-            .expect("telemetry must be a root key");
-        let init = PluginInit::fake_builder()
-            .config(telemetry_config.clone())
-            .full_config(full_config)
-            .build()
-            .with_deserialized_config()
-            .expect("unable to deserialize telemetry config");
-
-        crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(init)
-            .await
-            .expect("unable to create telemetry plugin")
-    }
-
-    async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
+    async fn get_prometheus_metrics(plugin: &Telemetry) -> String {
         let web_endpoint = plugin
             .web_endpoints()
             .into_iter()
@@ -2560,7 +2536,7 @@ mod tests {
             .join("\n")
     }
 
-    async fn make_supergraph_request(plugin: &dyn DynPlugin) {
+    async fn make_supergraph_request(plugin: &Telemetry) {
         let (mock_service, mut handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
         let driver = tokio::spawn(async move {
@@ -2574,8 +2550,9 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mut supergraph_service =
-            instrumented_supergraph_service(plugin, mock_service.boxed_clone());
+        let mut supergraph_service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_service);
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2619,32 +2596,41 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_serialization() {
-        create_plugin_with_config(include_str!("testdata/config.router.yaml"))
+        PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!("testdata/config.router.yaml"))
+            .build()
             .with_metrics()
-            .await;
+            .await
+            .expect("test harness");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_enabled_features() {
         // Explicitly enabled except response caching because entity caching and response caching are mutually exclusive
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_enabled.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_enabled.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature enabled when explicitly enabled"
         );
 
         // Explicitly enabled
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_enabled_response_cache.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_enabled_response_cache.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             features.response_cache,
             "Telemetry plugin should consider response cache feature enabled when explicitly enabled"
@@ -2655,12 +2641,15 @@ mod tests {
         );
 
         // Explicitly disabled
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_explicitly_disabled.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_explicitly_disabled.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when explicitly disabled"
@@ -2671,12 +2660,15 @@ mod tests {
         );
 
         // Default Values
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_defaults.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_defaults.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when all values are defaulted"
@@ -2687,71 +2679,45 @@ mod tests {
         );
 
         // APQ enabled when default enabled with redis config defined
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature enabled when top-level enabled flag is defaulted and redis config is defined"
         );
 
         // APQ disabled when default enabled with redis config NOT defined
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when redis cache is not enabled"
         );
     }
 
-    // TODO(@goto-bus-stop): usage sites should use the PluginTestHarness instead
-    fn unwrap_telemetry_plugin(plugin: &dyn DynPlugin) -> &Telemetry {
-        plugin
-            .as_any()
-            .downcast_ref::<Telemetry>()
-            .expect("telemetry plugin")
-    }
-
-    fn enabled_features(plugin: &dyn DynPlugin) -> &EnabledFeatures {
-        &unwrap_telemetry_plugin(plugin).enabled_features
-    }
-
-    // TODO(@goto-bus-stop): usage sites should use the PluginTestHarness instead
-    fn instrumented_router_service(
-        plugin: &dyn DynPlugin,
-        service: router::BoxCloneService,
-    ) -> router::BoxCloneService {
-        ServiceBuilder::new()
-            .layer(unwrap_telemetry_plugin(plugin).instrument_router_layer())
-            .service(service)
-            .boxed_clone()
-    }
-
-    // TODO(@goto-bus-stop): usage sites should use the PluginTestHarness instead
-    fn instrumented_supergraph_service(
-        plugin: &dyn DynPlugin,
-        service: supergraph::BoxCloneService,
-    ) -> supergraph::BoxCloneService {
-        ServiceBuilder::new()
-            .layer(unwrap_telemetry_plugin(plugin).instrument_supergraph_layer())
-            .service(service)
-            .boxed_clone()
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_metrics_ok() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
-            make_supergraph_request(plugin.as_ref()).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
+            make_supergraph_request(&plugin).await;
 
             assert_counter!(
                 "http.request",
@@ -2770,9 +2736,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_metrics_bad_request() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
@@ -2792,10 +2760,9 @@ mod tests {
                         .unwrap(),
                 );
             });
-            let mut bad_request_supergraph_service = instrumented_supergraph_service(
-                plugin.as_ref(),
-                mock_bad_request_service.boxed_clone(),
-            );
+            let mut bad_request_supergraph_service = ServiceBuilder::new()
+                .layer(plugin.instrument_supergraph_layer())
+                .service(mock_bad_request_service);
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2825,9 +2792,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_router_instruments() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_instruments.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<RouterRequest, RouterResponse>();
@@ -2845,10 +2814,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_router_service = instrumented_router_service(
-                plugin.as_ref(),
-                mock_bad_request_service.boxed_clone(),
-            );
+            let mut bad_request_router_service = ServiceBuilder::new()
+                .layer(plugin.instrument_router_layer())
+                .service(mock_bad_request_service);
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2908,10 +2876,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_router_instruments_with_requirement_level() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/custom_instruments_level.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/custom_instruments_level.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<RouterRequest, RouterResponse>();
@@ -2929,10 +2900,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_router_service = instrumented_router_service(
-                plugin.as_ref(),
-                mock_bad_request_service.boxed_clone(),
-            );
+            let mut bad_request_router_service = ServiceBuilder::new()
+                .layer(plugin.instrument_router_layer())
+                .service(mock_bad_request_service);
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -3004,9 +2974,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_supergraph_instruments() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_instruments.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
@@ -3024,10 +2996,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_supergraph_service = instrumented_supergraph_service(
-                plugin.as_ref(),
-                mock_bad_request_service.boxed_clone(),
-            );
+            let mut bad_request_supergraph_service = ServiceBuilder::new()
+                .layer(plugin.instrument_supergraph_layer())
+                .service(mock_bad_request_service);
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -3335,11 +3306,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/config.field_instrumentation_sampler.router.yaml"
-        ))
-        .with_metrics()
-        .await;
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/config.field_instrumentation_sampler.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
 
         let ftv1_counter = Arc::new(AtomicUsize::new(0));
         let ftv1_counter_cloned = ftv1_counter.clone();
@@ -3367,8 +3341,9 @@ mod tests {
                 );
             }
         });
-        let mut request_supergraph_service =
-            instrumented_supergraph_service(plugin.as_ref(), mock_request_service.boxed_clone());
+        let mut request_supergraph_service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_request_service);
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3537,8 +3512,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_wrong_endpoint() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/prometheus.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let mut web_endpoint = plugin
                 .web_endpoints()
@@ -3573,12 +3551,15 @@ mod tests {
     async fn it_test_prometheus_metrics() {
         let _guard = TEST.lock().await;
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/prometheus.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3589,14 +3570,17 @@ mod tests {
     async fn it_test_prometheus_metrics_custom_buckets() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_custom_buckets.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_custom_buckets.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3607,12 +3591,15 @@ mod tests {
     async fn it_test_prometheus_metrics_custom_buckets_for_specific_metrics() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
             assert_prometheus_metrics!(plugin);
         }
@@ -3624,11 +3611,14 @@ mod tests {
     async fn it_test_prometheus_metrics_custom_view_drop() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_custom_view_drop.router.yaml"
-            ))
-            .await;
-            make_supergraph_request(plugin.as_ref()).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_custom_view_drop.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3643,16 +3633,19 @@ mod tests {
     async fn it_test_prometheus_metrics_with_cardinality_limit_config() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_cardinality_limit.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_cardinality_limit.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
 
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3663,12 +3656,15 @@ mod tests {
     async fn it_test_prometheus_metrics_units_are_included() {
         let _guard = TEST.lock().await;
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/prometheus.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram_with_unit!("apollo.test.histo1", "no unit", "{request}", 1u64);
             f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3848,7 +3844,7 @@ mod tests {
         pub(crate) strategy: &'static str,
     }
 
-    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
+    async fn make_failed_demand_control_request(plugin: &Telemetry, cost_details: CostContext) {
         let (mock_service, mut handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
         let driver = tokio::spawn(async move {
@@ -3899,7 +3895,9 @@ mod tests {
             );
         });
 
-        let mut service = instrumented_supergraph_service(plugin, mock_service.boxed_clone());
+        let mut service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_service);
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()
@@ -3917,12 +3915,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_delta_filter() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_delta_filter.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/demand_control_delta_filter.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             make_failed_demand_control_request(
-                plugin.as_ref(),
+                &plugin,
                 CostContext {
                     estimated: 10.0,
                     actual: 8.0,
@@ -3941,12 +3942,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_result_filter() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_result_filter.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/demand_control_result_filter.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             make_failed_demand_control_request(
-                plugin.as_ref(),
+                &plugin,
                 CostContext {
                     estimated: 10.0,
                     actual: 0.0,
@@ -3965,12 +3969,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_result_attributes() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_result_attribute.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/demand_control_result_attribute.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             make_failed_demand_control_request(
-                plugin.as_ref(),
+                &plugin,
                 CostContext {
                     estimated: 10.0,
                     actual: 0.0,
