@@ -10,8 +10,8 @@ Connector mappings can now report a problem without failing the field. Both meth
   selection: """
   id
   availability: stock_code->match(
-    ["A", $("IN_STOCK")],
-    ["B", $("BACKORDERED")],
+    ["A", "IN_STOCK"],
+    ["B", "BACKORDERED"],
     [@, @->withError("Unrecognized stock code")]
   )
   """
@@ -40,7 +40,7 @@ Several errors about one value are several calls. Both methods pass their input 
 To build a message out of prose and data, build the string:
 
 ```
-@->withError($->echo(["Unrecognized stock code:", @.stock_code])->joinNotNull(" "))
+@->withError(["Unrecognized stock code:", @.stock_code]->joinNotNull(" "))
 ```
 
 A failed argument costs the message, never the value. If the argument produces nothing, the field still resolves with the value it had and two problems are reported: why the argument produced nothing, and that the message was never recorded. This matters most for `x ?? $(default)->withConnectorError(...)`, where deleting the value would destroy the default the author supplied. Use `??` inside the argument to spell an absence out in the text instead of losing the message to it.

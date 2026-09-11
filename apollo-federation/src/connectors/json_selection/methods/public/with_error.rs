@@ -23,7 +23,7 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 ///
 /// ```text
 /// status: type_code->match(
-///     ["2", $("VAN")],
+///     ["2", "VAN"],
 ///     [@, @->withError("Unrecognized type code")]
 /// )
 /// ```
@@ -58,7 +58,7 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// primitive the language already has for it:
 ///
 /// ```text
-/// @->withError($->echo(["Unrecognized type code:", @.type_code])->joinNotNull(" "))
+/// @->withError(["Unrecognized type code:", @.type_code]->joinNotNull(" "))
 /// ```
 ///
 /// # Failure
@@ -82,7 +82,7 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// says so with `??`, which supplies a value where there would have been none:
 ///
 /// ```text
-/// @->withError($->echo(["type code:", @.type_code ?? "<absent>"])->joinNotNull(" "))
+/// @->withError(["type code:", @.type_code ?? "<absent>"]->joinNotNull(" "))
 /// ```
 ///
 /// That spells the absence out in the message text instead of losing the
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn a_message_can_be_built_from_parts_with_join_not_null() {
         let (value, errors) = selection!(
-            r#"$->withError($->echo(["Unrecognized type code:", @.type_code])->joinNotNull(" ")) { id }"#
+            r#"$->withError(["Unrecognized type code:", @.type_code]->joinNotNull(" ")) { id }"#
         )
         .apply_to(&json!({ "id": "acct-1", "type_code": 7 }));
 
