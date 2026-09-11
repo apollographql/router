@@ -49,11 +49,14 @@ impl<T> Drop for SharedPath<T> {
     fn drop(&mut self) {
         let mut current = self.head.take();
         while let Some(arc) = current {
-            // If we're the sole owner, unwrap and take the next pointer;
-            // Otherwise another SharedPath shares the tail, so stop.
-            match Arc::try_unwrap(arc) {
-                Ok(node) => current = node.next,
-                Err(_) => break,
+            // into_inner rather than try_unwrap: under concurrent drops,
+            // try_unwrap's loser could still end up the last owner and take
+            // Node's recursive drop. into_inner guarantees exactly one
+            // caller wins the value, so a None here means someone else owns
+            // the tail and will continue the iterative teardown.
+            match Arc::into_inner(arc) {
+                Some(mut node) => current = node.next.take(),
+                None => break,
             }
         }
     }
@@ -192,6 +195,53 @@ mod tests {
         assert!(parent.is_empty());
         assert_eq!(parent.len(), 0);
         assert_eq!(parent.last(), None);
+    }
+
+    #[test]
+    fn drop_of_long_spine_does_not_overflow_stack() {
+        let mut path = SharedPath::new();
+        for i in 0..1_000_000u32 {
+            path = path.pushed(i);
+        }
+        drop(path);
+    }
+
+    /// Two owners of one long spine dropping simultaneously. If the loser
+    /// of the head-ownership race takes the derived recursive drop instead
+    /// of handing off the iterative teardown, the dropping thread's small
+    /// stack overflows and aborts the process. The race window is
+    /// instruction-scale, so this spin-aligns the two drops and retries;
+    /// each spine is long enough that a single recursive teardown
+    /// overflows the 64KiB thread stack.
+    #[test]
+    fn concurrent_drop_of_shared_spine_does_not_overflow_stack() {
+        use std::sync::atomic::AtomicUsize;
+        use std::sync::atomic::Ordering;
+
+        for _ in 0..512 {
+            let mut path = SharedPath::new();
+            for i in 0..20_000u32 {
+                path = path.pushed(i);
+            }
+            let clone = path.clone();
+            let ready = Arc::new(AtomicUsize::new(0));
+            let spawn_dropper = |p: SharedPath<u32>, ready: Arc<AtomicUsize>| {
+                std::thread::Builder::new()
+                    .stack_size(64 * 1024)
+                    .spawn(move || {
+                        ready.fetch_add(1, Ordering::SeqCst);
+                        while ready.load(Ordering::SeqCst) < 2 {
+                            std::hint::spin_loop();
+                        }
+                        drop(p);
+                    })
+                    .expect("spawn dropper")
+            };
+            let t1 = spawn_dropper(path, Arc::clone(&ready));
+            let t2 = spawn_dropper(clone, ready);
+            t1.join().expect("first dropper");
+            t2.join().expect("second dropper");
+        }
     }
 
     #[test]
