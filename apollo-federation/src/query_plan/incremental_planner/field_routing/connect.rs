@@ -11,6 +11,7 @@ use shape::ShapeCase;
 use tracing::trace;
 
 use super::super::fetch_graph::InputContribution;
+use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
@@ -120,11 +121,13 @@ impl FieldRoutingSearchSpace {
                 let inputs = choice
                     .key_conditions
                     .iter()
-                    .map(|key_conditions| InputContribution {
+                    .map(|key_conditions| InputContribution::Key {
                         source_type_name: source.type_pos.type_name().clone(),
                         conditions: key_conditions.clone(),
-                        rewrite_info: None,
-                        condition_alias_rewrites: Vec::new(),
+                        rewrite_info: InputRewriteInfo {
+                            dest_type: source.type_pos.clone(),
+                            dest_subgraph: source_subgraph.clone(),
+                        },
                     })
                     .collect();
                 state
