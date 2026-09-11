@@ -460,8 +460,8 @@ fn a_previous_configuration_is_unaffected_by_parsing_its_replacement() {
 }
 
 /// Registered built-in plugins (`health_check`, `subscription`), a hidden/preview built-in
-/// plugin (`response_cache`, gated behind `HIDDEN_FROM_CONFIG_JSON_SCHEMA` -- the mechanism this
-/// codebase uses for plugins whose availability depends on the caller's license) and a custom,
+/// plugin (`response_cache`, kept out of the generated schema's `properties` and matched through
+/// its `patternProperties` instead by `HIDDEN_FROM_CONFIG_JSON_SCHEMA`) and a custom,
 /// non-Apollo-prefixed plugin (`apollo_testing.my_test_plugin`, registered only in this crate's
 /// own test binary by `plugins/test/mod.rs`) all parse through `current_featureful.yaml` in the
 /// main corpus loop above, using router's own generated schema, which builds these plugin
