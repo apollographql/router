@@ -241,6 +241,36 @@ impl Service<router::Request> for InvalidationService {
                                         .collect::<Vec<&'static str>>()
                                         .join(", "),
                                 );
+                                // Reject a request that names nothing before authorizing it.
+                                // Authorization below is stated as "every name this request
+                                // targets accepts the presented key", which an empty name set
+                                // satisfies vacuously — a `cache_tag` request carrying
+                                // `"subgraphs": []` would authorize against no configuration at
+                                // all. Such a request also has nothing to invalidate, so it is a
+                                // malformed request rather than an authorization decision.
+                                if let Some(empty) = body
+                                    .iter()
+                                    .find(|req| !req.is_connector() && req.subgraph_names().is_empty())
+                                {
+                                    Span::current()
+                                        .record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                    return router::Response::error_builder()
+                                        .status_code(StatusCode::BAD_REQUEST)
+                                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+                                        .error(
+                                            graphql::Error::builder()
+                                                .message(format!(
+                                                    "Invalid invalidation request: a {} request must name at least one subgraph or connector source",
+                                                    empty.kind()
+                                                ))
+                                                .extension_code(
+                                                    StatusCode::BAD_REQUEST.to_string(),
+                                                )
+                                                .build(),
+                                        )
+                                        .context(req.context)
+                                        .build();
+                                }
                                 let shared_key_is_valid = body.iter().all(|req| {
                                     if req.is_connector() {
                                         validate_connector_shared_key(
@@ -264,7 +294,8 @@ impl Service<router::Request> for InvalidationService {
                                                 ..
                                             }
                                         );
-                                        req.subgraph_names().iter().all(|name| {
+                                        let names = req.subgraph_names();
+                                        !names.is_empty() && names.iter().all(|name| {
                                             if use_connector_key {
                                                 validate_connector_shared_key_by_source(
                                                     &connector_config,
@@ -513,8 +544,12 @@ pub(crate) fn effective_invalidation_indexes(
 ///
 /// Connector-targeted requests resolve their indexes from the connector configuration;
 /// subgraph-targeted ones from the subgraph configuration. `cache_tag` names may belong to
-/// either scope (`sources` is folded into `subgraphs` at parse time), so a name is only
-/// rejected when **both** configurations disable the cache-tag index for it.
+/// either scope (`sources` is folded into `subgraphs` at parse time), so a name is rejected
+/// only when neither configuration enables the cache-tag index *for that request's scope*: the
+/// connector side vouches for a name when the name has its own connector `invalidation` block,
+/// or when the `all` connector block has one and the request is itself connector-scoped. An
+/// unconfigured connector block, or a connector-wide `all` block under a `subgraphs`-scoped
+/// request, does not un-reject the request.
 ///
 /// Names are visited in sorted order so the error message is deterministic across repeated
 /// calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered
@@ -900,6 +935,108 @@ indexes:
         assert_eq!(
             find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
             Some(("graph.api".to_string(), "type"))
+        );
+    }
+
+    /// A `subgraphs`-scoped cache_tag request must not be permitted by connector configuration.
+    /// The `all` connector block below enables the cache_tag index, but it says nothing about the
+    /// subgraph scope the request targets, so the subgraph block's decision stands.
+    #[test]
+    fn find_disabled_mode_rejection_subgraph_scope_not_vouched_for_by_connector_all() {
+        let cfg = subgraph_config(
+            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
+            None,
+        );
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("users".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Subgraph,
+            subgraphs,
+            cache_tag: "homepage".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            Some(("users".to_string(), "cache_tag"))
+        );
+    }
+
+    /// The same request, connector-scoped, is permitted by the same `all` connector block: this
+    /// is the positive case for the scope check the rejection above exercises.
+    #[test]
+    fn find_disabled_mode_rejection_connector_scope_allowed_by_connector_all() {
+        let cfg = subgraph_config(
+            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
+            None,
+        );
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("graph.api".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Connector,
+            subgraphs,
+            cache_tag: "homepage".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            None
+        );
+    }
+
+    /// A per-source connector `invalidation` block vouches for its own name whatever the
+    /// request's scope, since the name is that connector source.
+    #[test]
+    fn find_disabled_mode_rejection_per_source_connector_config_allows_cache_tag() {
+        let cfg = subgraph_config(
+            Some(indexes_with(&[IndexMode::Subgraph, IndexMode::Type])),
+            None,
+        );
+        let mut sources = HashMap::new();
+        sources.insert(
+            "graph.api".to_string(),
+            ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    indexes: InvalidationIndexes::default(),
+                }),
+                ..Default::default()
+            },
+        );
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource::default(),
+            sources,
+        };
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("graph.api".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Connector,
+            subgraphs,
+            cache_tag: "homepage".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            None
         );
     }
 
