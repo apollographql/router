@@ -187,15 +187,14 @@ pub(crate) struct Merger {
 
 impl Merger {
     pub(crate) fn new(
-        mut subgraphs: Vec<Subgraph<Validated>>,
+        subgraphs: Vec<Subgraph<Validated>>,
         options: CompositionOptions,
     ) -> Result<Self, FederationError> {
         let names: Vec<String> = subgraphs.iter().map(|s| s.name.clone()).collect();
+        // The hints each subgraph raised on its way to `Validated` are *not* seeded into the error
+        // reporter here: `compose` reports them itself, so that they survive a failure between
+        // validation and merging. Seeding them here as well reported each one twice.
         let mut error_reporter = ErrorReporter::new(names.clone());
-        // Seed the error reporter with hints from subgraphs, so merge hints are appended to the end
-        for subgraph in subgraphs.iter_mut() {
-            error_reporter.add_hints(subgraph.take_hints());
-        }
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
         let Some(join_spec) =
@@ -754,7 +753,7 @@ impl Merger {
         // _assert_ that `Schema.validate()` doesn't throw as a sanity check.
         let supergraph_schema = merged
             .validate_or_return_self()
-            .map_err(|(_partial_schema, err)| Self::convert_to_merge_errors(err))?;
+            .map_err(|(_partial_schema, err)| CompositionError::from_federation_error(err))?;
 
         // Lastly, we validate that the API schema of the supergraph can be successfully computed,
         // which currently will surface issues around misuses of `@inaccessible` (there should be
@@ -770,18 +769,6 @@ impl Merger {
         )?;
 
         Ok(supergraph_schema)
-    }
-
-    /// Convert a FederationError into a Vec<CompositionError> for merge errors.
-    fn convert_to_merge_errors(error: FederationError) -> Vec<CompositionError> {
-        error
-            .into_errors()
-            .into_iter()
-            .map(|e| CompositionError::MergeError {
-                error: e,
-                locations: Vec::new(),
-            })
-            .collect()
     }
 
     /// Push non-internal errors as merge errors, but bubble up the first internal error.

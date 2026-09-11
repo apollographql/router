@@ -645,7 +645,11 @@ fn link_spec_purpose_import_uses_imported_name() {
     )
     .unwrap();
 
-    let validated = a.expand_links().unwrap().assume_validated();
+    let validated = a
+        .expand_links()
+        .unwrap()
+        .validate()
+        .expect("expanded subgraph is valid");
     assert_snapshot!(validated.schema_string());
 }
 

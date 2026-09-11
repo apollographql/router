@@ -4,7 +4,6 @@ use std::ops::Deref;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
-use line_col::LineColLookup;
 use shape::Shape;
 
 mod strings;
@@ -12,11 +11,10 @@ mod strings;
 pub(super) use strings::subslice_location;
 
 use crate::connectors::spec::ConnectLink;
+use crate::schema::FederationSchema;
 
 pub(crate) struct SchemaInfo<'schema> {
-    pub(crate) schema: &'schema Schema,
-    len: usize,
-    lookup: LineColLookup<'schema>,
+    federation_schema: &'schema FederationSchema,
     pub(crate) connect_link: ConnectLink,
     /// A lookup map for the Shapes computed from GraphQL types.
     pub(crate) shape_lookup: IndexMap<String, Shape>,
@@ -24,29 +22,24 @@ pub(crate) struct SchemaInfo<'schema> {
 
 impl<'schema> SchemaInfo<'schema> {
     pub(crate) fn new(
-        schema: &'schema Schema,
-        src: &'schema str,
+        federation_schema: &'schema FederationSchema,
         connect_link: ConnectLink,
     ) -> Self {
         Self {
-            schema,
-            len: src.len(),
-            lookup: LineColLookup::new(src),
+            federation_schema,
             connect_link,
-            shape_lookup: shape::graphql::shapes_for_schema(schema),
+            shape_lookup: shape::graphql::shapes_for_schema(federation_schema.schema()),
         }
     }
 
-    /// Get the 1-based line and column values for an offset into this schema.
+    /// The schema plus the federation metadata computed during link expansion: link metadata,
+    /// referencers, and subgraph metadata.
     ///
-    /// # Returns
-    /// The line and column, or `None` if the offset is not within the schema.
-    pub(crate) fn line_col(&self, offset: usize) -> Option<(usize, usize)> {
-        if offset > self.len {
-            None
-        } else {
-            Some(self.lookup.get(offset))
-        }
+    /// Prefer this over the raw [`Schema`] — it resolves federation directive names through their
+    /// `@link` imports, so renames and aliases are handled.
+    #[inline]
+    pub(crate) fn federation_schema(&self) -> &'schema FederationSchema {
+        self.federation_schema
     }
 
     #[inline]
@@ -64,14 +57,19 @@ impl Deref for SchemaInfo<'_> {
     type Target = Schema;
 
     fn deref(&self) -> &Self::Target {
-        self.schema
+        self.federation_schema.schema()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::parser::LineColumn;
+
     use super::*;
 
+    /// Locations now come from the schema's own [`SourceMap`], so they agree with every other
+    /// message this module produces. This pins the offset-to-line/column mapping that
+    /// `subslice_location` depends on.
     #[test]
     fn line_col_lookup() {
         let src = r#"
@@ -81,12 +79,20 @@ mod tests {
             }
         "#;
         let schema = Schema::parse(src, "testSchema").unwrap();
+        let file = schema
+            .sources
+            .values()
+            .find(|file| file.path() == std::path::Path::new("testSchema"))
+            .unwrap();
 
-        let schema_info =
-            SchemaInfo::new(&schema, src, ConnectLink::new(&schema).unwrap().unwrap());
-
-        assert_eq!(schema_info.line_col(0), Some((1, 1)));
-        assert_eq!(schema_info.line_col(4), Some((2, 4)));
-        assert_eq!(schema_info.line_col(200), None);
+        assert_eq!(
+            file.get_line_column(0),
+            Some(LineColumn { line: 1, column: 1 })
+        );
+        assert_eq!(
+            file.get_line_column(4),
+            Some(LineColumn { line: 2, column: 4 })
+        );
+        assert_eq!(file.get_line_column(200), None);
     }
 }

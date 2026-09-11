@@ -462,11 +462,11 @@ impl Display for SubgraphError {
 }
 
 pub mod test_utils {
-
     use super::SubgraphError;
     use super::typestate::Expanded;
     use super::typestate::Subgraph;
     use super::typestate::Validated;
+    use crate::composition::CompositionFailure;
 
     pub enum BuildOption {
         AsIs,
@@ -476,7 +476,7 @@ pub mod test_utils {
     pub fn build_inner(
         schema_str: &str,
         build_option: BuildOption,
-    ) -> Result<Subgraph<Validated>, SubgraphError> {
+    ) -> Result<Subgraph<Validated>, CompositionFailure> {
         let name = "S";
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
@@ -485,10 +485,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        Ok(subgraph
-            .expand_links()?
-            .normalize_root_types()?
-            .assume_validated())
+        subgraph.expand_links()?.normalize_root_types()?.validate()
     }
 
     pub fn build_inner_expanded(
@@ -503,7 +500,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph.expand_links_without_validation()
+        subgraph.expand_links()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
@@ -520,7 +517,17 @@ pub mod test_utils {
     ) -> Vec<(String, String)> {
         build_inner(schema, build_option)
             .expect_err("subgraph error was expected")
-            .format_errors()
+            .errors
+            .iter()
+            // `CompositionError`'s `Display` is already `[{subgraph}] {error}`, matching what
+            // `SubgraphError::format_errors` produced.
+            .map(|error| {
+                (
+                    error.code().definition().code().to_string(),
+                    error.to_string(),
+                )
+            })
+            .collect()
     }
 
     /// Build subgraph expecting errors, assuming fed 2.
@@ -630,7 +637,7 @@ pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, F
         typestate::Subgraph::new("S", "http://S", initial_schema.clone(), Default::default());
     let expanded_subgraph = initial_subgraph
         .map_err(|e| e.into_federation_error())?
-        .expand_links_without_validation()
+        .expand_links()
         .map_err(|e| e.into_federation_error())?;
 
     // Build string of missing directives and types from initial to expanded

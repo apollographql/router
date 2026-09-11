@@ -40,7 +40,6 @@ hashbrown = "0.17.0"
 heck.workspace = true
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.15.0"
-line-col = "0.2.1"
 levenshtein = "1"
 multimap = "0.10.0"
 multi_try = "0.3.0"
@@ -86,6 +85,10 @@ name = "main"
 [[test]]
 name = "connectors_validation_profiling"
 path = "tests/dhat_profiling/connectors_validation.rs"
+
+[[test]]
+name = "subgraph_expansion_profiling"
+path = "tests/dhat_profiling/subgraph_expansion.rs"
 
 [[test]]
 name = "supergraph_creation_profiling"
