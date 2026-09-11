@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -42,7 +41,8 @@ expression: "&schema"
       "properties": {
         "access_key_id": {
           "description": "The ID for this access key.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "assume_role": {
           "anyOf": [
@@ -61,7 +61,8 @@ expression: "&schema"
         },
         "secret_access_key": {
           "description": "The secret key used to sign requests.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "service_name": {
           "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
@@ -2145,7 +2146,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 5,
@@ -2184,7 +2186,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -5927,7 +5930,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "metadata": {
           "additionalProperties": true,
@@ -8067,7 +8071,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8133,7 +8138,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -8364,7 +8370,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8427,7 +8434,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -10341,7 +10349,8 @@ expression: "&schema"
         "shared_key": {
           "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         }
       },
       "type": "object"
@@ -12385,7 +12394,8 @@ expression: "&schema"
         "key": {
           "description": "key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -12411,7 +12421,8 @@ expression: "&schema"
         "key": {
           "description": "server key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
