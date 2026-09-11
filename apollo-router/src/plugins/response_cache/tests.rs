@@ -5678,9 +5678,14 @@ async fn connector_root_field_cache_miss_then_hit() {
     );
 }
 
-/// A REST response with NO Cache-Control header must be cached using the configured TTL, and the
-/// client must see a max-age header rather than no-store. This is the documented, deliberate
-/// divergence from the subgraph behavior (where a headerless response is not stored).
+/// A REST response with NO Cache-Control header must be cached using the configured TTL — the
+/// documented, deliberate divergence from the subgraph path, where such a response is not stored.
+///
+/// The divergence stops at the router, though: the client-facing `Cache-Control` header must say
+/// `no-store`, because an origin that sent no `Cache-Control` has not licensed the router to tell
+/// the client, or a CDN in front of it, how long the payload may be held. A subgraph in the same
+/// situation sends `no-store` too (`cache_control.rs`). So this test pins both halves: stored and
+/// served by the router, not advertised downstream.
 #[tokio::test]
 async fn connector_root_field_no_cache_control_header_uses_config_ttl() {
     let mock_server = MockServer::start().await;
@@ -5712,12 +5717,12 @@ async fn connector_root_field_no_cache_control_header_uses_config_ttl() {
         .unwrap()
         .to_string();
     assert!(
-        cache_control_header.contains("max-age="),
-        "client cache-control should carry the config TTL, got: {cache_control_header}"
+        cache_control_header.contains("no-store"),
+        "a configured fallback TTL must not be advertised to the client, got: {cache_control_header}"
     );
     assert!(
-        !cache_control_header.contains("no-store"),
-        "headerless upstream response must not become no-store, got: {cache_control_header}"
+        !cache_control_header.contains("max-age="),
+        "client cache-control must not carry the config TTL, got: {cache_control_header}"
     );
 
     // Wait for the async cache insert to complete (fails the test if nothing is storable)
@@ -5733,6 +5738,20 @@ async fn connector_root_field_no_cache_control_header_uses_config_ttl() {
     let service = create_connector_cache_service(&uri, &namespace, None).await;
     let request = make_connector_cache_request("query { users { id name } }");
     let response = service.oneshot(request).await.unwrap();
+    // The stored entry carries the configured TTL, so the hit is the second place the router
+    // could leak it downstream. It must not.
+    let hit_cache_control = response
+        .response
+        .headers()
+        .get(CACHE_CONTROL)
+        .expect("response should carry a cache-control header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        hit_cache_control.contains("no-store") && !hit_cache_control.contains("max-age="),
+        "a cache hit replaying a configured TTL must not advertise it, got: {hit_cache_control}"
+    );
     let body = connector_response_body(response).await;
     assert!(
         body.get("data").is_some(),

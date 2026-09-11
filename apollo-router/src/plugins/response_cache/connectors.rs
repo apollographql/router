@@ -847,7 +847,10 @@ impl ConnectorCacheService {
             };
 
             if let Some(cc) = cache_control {
-                update_cache_control(&request.context, &cc);
+                // `client_facing`: a stored entry whose TTL came from configuration rather than
+                // from the origin contributes `no-store` downstream, on a hit exactly as on the
+                // response that stored it.
+                update_cache_control(&request.context, &cc.client_facing());
             }
 
             Ok(response)
@@ -1109,7 +1112,9 @@ impl ConnectorCacheService {
             });
         }
 
-        update_cache_control(context, &merged_cache_control);
+        // See the `client_facing` note above: the merged value may carry a configured fallback
+        // TTL from a cached entry, which must not reach the client-facing header.
+        update_cache_control(context, &merged_cache_control.client_facing());
 
         Ok(())
     }
@@ -1456,7 +1461,7 @@ impl ConnectorRequestCacheService {
                     opentelemetry::Key::new("cache.status"),
                     opentelemetry::Value::String("hit".into()),
                 );
-                update_cache_control(&request.context, &entry.control);
+                update_cache_control(&request.context, &entry.control.client_facing());
 
                 // Store cache hit metric in context for telemetry
                 let mut cache_hit = HashMap::new();
@@ -1680,11 +1685,12 @@ impl ConnectorRequestCacheService {
         if let Some(cache_control) = connector_response_cache_control(&response, self.connector_ttl)
         {
             // Merge into the request-wide aggregate used for the client-facing Cache-Control
-            // header ...
-            update_cache_control(&context, &cache_control);
-            // ... and record it under this connector's identity, so store decisions (root and
-            // entity paths) only ever consult cache-control from THIS connector's own upstream
-            // responses, never from unrelated fetches in the same client request.
+            // header — `client_facing` is `no-store` when the TTL came from configuration rather
+            // than from the origin, so the router never advertises a TTL nobody asked for ...
+            update_cache_control(&context, &cache_control.client_facing());
+            // ... and record the full value under this connector's identity, so store decisions
+            // (root and entity paths) only ever consult cache-control from THIS connector's own
+            // upstream responses, never from unrelated fetches in the same client request.
             record_connector_cache_control(&context, &connector_synthetic_name, &cache_control);
         }
 
@@ -1750,9 +1756,20 @@ fn get_connector_cache_control(
 ///
 /// Returns `None` when there was no HTTP response (transport error, mapping-only, cache hit).
 ///
-/// Deliberate divergence from the subgraph path (documented in the response-caching docs): a
-/// response with **no** `Cache-Control` header is cacheable with the configured TTL, instead of
-/// being treated as no-store. A *present but unparseable* header still falls back to no-store.
+/// Deliberate divergence from the subgraph path (documented in the response-caching docs): for
+/// the router's **own storage**, a response with no `Cache-Control` header is cacheable with the
+/// configured TTL instead of being treated as no-store — that fallback is the point of
+/// configuring a connector TTL for REST origins that say nothing about caching.
+///
+/// That divergence stops at the router. Such a value is marked by
+/// [`CacheControl::from_config_ttl`], so whenever it reaches the request-wide aggregate behind
+/// the client-facing `Cache-Control` header — on this response or on a later cache hit that
+/// replays the stored value — `CacheControl::client_facing` collapses it to `no-store`, matching
+/// what a subgraph sends in the same situation. An origin that never sent `Cache-Control` has
+/// not licensed the router to tell the client, or a CDN in front of it, how long to hold the
+/// payload.
+///
+/// A *present but unparseable* header falls back to no-store outright.
 fn connector_response_cache_control(
     response: &connector::request_service::Response,
     connector_ttl: Duration,
@@ -1771,8 +1788,9 @@ fn connector_response_cache_control(
             .unwrap_or_else(|_| CacheControl::default_no_store())
             .with_default_ttl(Some(connector_ttl))
     } else {
-        // No Cache-Control header at all: use the configured TTL as the fallback.
-        CacheControl::default().with_default_ttl(Some(connector_ttl))
+        // No Cache-Control header at all: the configured TTL is the fallback for the router's
+        // own storage, but nothing is promised downstream.
+        CacheControl::from_config_ttl(Some(connector_ttl))
     };
     Some(cache_control)
 }
