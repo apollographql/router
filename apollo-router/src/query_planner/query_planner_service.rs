@@ -531,7 +531,9 @@ impl QueryPlannerService {
                             paths,
                             errors: self.authorization_config.error_config(),
                         };
-                        unauthorized.log_unauthorized_paths();
+                        if !compute_job_type.is_warmup() {
+                            unauthorized.log_unauthorized_paths();
+                        }
                         unauthorized.update_response_with_unauthorized_path_errors(&mut response);
                     }
 
@@ -1331,5 +1333,86 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    async fn plan_unauthorized_operation(compute_job_type: ComputeJobType) -> QueryPlannerContent {
+        let configuration: Arc<Configuration> = Arc::default();
+        let schema = Schema::parse(
+            include_str!("../../tests/fixtures/directives/policy/policy_basic_schema.graphql"),
+            &configuration,
+        )
+        .unwrap();
+        let planner = QueryPlannerService::new(schema.into(), configuration.clone())
+            .await
+            .unwrap();
+
+        let query = "{ private { id } }";
+        let doc = Query::parse_document(query, None, &planner.schema(), &configuration).unwrap();
+
+        planner
+            .get(
+                QueryKey {
+                    original_query: query.to_string(),
+                    filtered_query: query.to_string(),
+                    operation_name: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                },
+                doc,
+                compute_job_type,
+                Default::default(),
+            )
+            .await
+            .expect("filtering an unauthorized operation returns a null response, not an error")
+    }
+
+    /// Events logged while planning, in a buffer owned by a single test.
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl LogBuffer {
+        fn contains(&self, value: &str) -> bool {
+            String::from_utf8(self.0.lock().unwrap().clone())
+                .expect("logs are valid UTF-8")
+                .contains(value)
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+        type Writer = tracing_subscriber::fmt::writer::MutexGuardWriter<'a, Vec<u8>>;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.0.as_ref().make_writer()
+        }
+    }
+
+    async fn plan_unauthorized_operation_capturing_logs(
+        compute_job_type: ComputeJobType,
+    ) -> (QueryPlannerContent, LogBuffer) {
+        use tracing_futures::WithSubscriber;
+
+        let logs = LogBuffer::default();
+        let content = plan_unauthorized_operation(compute_job_type)
+            .with_subscriber(tracing_subscriber::fmt().with_writer(logs.clone()).finish())
+            .await;
+        (content, logs)
+    }
+
+    #[test(tokio::test)]
+    async fn warm_up_does_not_log_a_filtered_out_operation_as_an_authorization_error() {
+        let (result, logs) =
+            plan_unauthorized_operation_capturing_logs(ComputeJobType::QueryPlanningWarmup).await;
+
+        assert!(matches!(result, QueryPlannerContent::Response { .. }));
+        assert!(!logs.contains("Authorization error"));
+    }
+
+    #[test(tokio::test)]
+    async fn a_real_unauthorized_request_still_logs_an_authorization_error() {
+        let (result, logs) =
+            plan_unauthorized_operation_capturing_logs(ComputeJobType::QueryPlanning).await;
+
+        assert!(matches!(result, QueryPlannerContent::Response { .. }));
+        assert!(logs.contains("Authorization error"));
     }
 }
