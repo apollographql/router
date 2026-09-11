@@ -78,6 +78,16 @@ const CASES: &[Case] = &[
     },
     FEATUREFUL_CASE,
     Case {
+        name: "batching integration configuration",
+        text: include_str!("../../tests/fixtures/batching/all_enabled.router.yaml"),
+        migration: Migration::None,
+    },
+    Case {
+        name: "documented persisted-query safelist configuration",
+        text: include_str!("../../../examples/persisted-queries/safelist_pq_require_id.yaml"),
+        migration: Migration::None,
+    },
+    Case {
         name: "cors.origins migrates into cors.policies",
         text: include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
         migration: Migration::Minor,
@@ -240,6 +250,25 @@ fn effective_settings_agree_for_the_shared_corpus() {
                 shared_json.pointer(&path).unwrap_or(&Value::Null),
             );
         }
+    }
+}
+
+#[test]
+fn schema_derived_boolean_values_agree_between_parsers() {
+    let schema = serde_json::to_value(generate_config_schema()).unwrap();
+    let default = schema["properties"]["experimental_type_conditioned_fetching"]["default"]
+        .as_bool()
+        .expect("the schema declares a boolean default");
+    for enabled in [default, !default] {
+        let text = format!("experimental_type_conditioned_fetching: {enabled}\n");
+        let router =
+            validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
+                .expect("schema-derived input is valid");
+        let shared = router_options()
+            .parse::<Configuration>(&text)
+            .expect("schema-derived input is valid");
+        assert_eq!(router.experimental_type_conditioned_fetching, enabled);
+        assert_eq!(shared.experimental_type_conditioned_fetching, enabled);
     }
 }
 
