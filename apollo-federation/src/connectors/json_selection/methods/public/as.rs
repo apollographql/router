@@ -1,5 +1,5 @@
+use apollo_shape::Shape;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -275,9 +275,9 @@ fn as_shape(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
+    use apollo_shape::Shape;
+    use apollo_shape::location::SourceId;
     use serde_json_bytes::json;
-    use shape::Shape;
-    use shape::location::SourceId;
 
     use crate::connectors::ApplyToError;
     use crate::connectors::ConnectSpec;

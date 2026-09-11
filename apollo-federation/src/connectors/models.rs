@@ -16,9 +16,9 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
+use apollo_shape::Shape;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
-use shape::Shape;
 
 pub use self::headers::Header;
 pub(crate) use self::headers::HeaderParseError;
@@ -1010,7 +1010,7 @@ mod tests {
     // `Shape::one([normal_shape, error_shape], [])` pattern is the foundation
     // downstream consumers (entity-key checker, type walker) can build on.
     mod output_shape {
-        use shape::ShapeCase;
+        use apollo_shape::ShapeCase;
 
         use super::*;
         use crate::connectors::JSONSelection;

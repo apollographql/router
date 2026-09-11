@@ -13,9 +13,9 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
 use itertools::Itertools;
-use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::Connector;
 use crate::connectors::Namespace;
@@ -402,7 +402,7 @@ mod tests {
     /// Test case: __typename field is itself a union of string literals
     #[test]
     fn test_extract_typename_union_of_strings() {
-        use shape::Shape;
+        use apollo_shape::Shape;
 
         // Build shape: { __typename: One(["TypeA", "TypeB"]), id: String }
         let typename_union = Shape::one(
@@ -434,7 +434,7 @@ mod tests {
     /// Test case: Nested __typename values should NOT be extracted
     #[test]
     fn test_does_not_extract_nested_typename() {
-        use shape::Shape;
+        use apollo_shape::Shape;
 
         // Build shape: { id: String, author: { __typename: "User", id: String } }
         let nested_object = Shape::closed_record(
@@ -470,7 +470,7 @@ mod tests {
     /// have two different concrete types at once.
     #[test]
     fn test_does_not_extract_conflicting_typename_intersection() {
-        use shape::Shape;
+        use apollo_shape::Shape;
 
         // Build shape: { __typename: All<"Cat", "Dog">, id: String }
         // This represents an impossible object with conflicting typenames
@@ -508,7 +508,7 @@ mod tests {
     /// conflicting intersections - only the valid ones should be extracted.
     #[test]
     fn test_extracts_only_valid_typename_from_mixed_union() {
-        use shape::Shape;
+        use apollo_shape::Shape;
 
         // Valid object: { __typename: "Cat", id: String }
         let valid_cat = Shape::closed_record(

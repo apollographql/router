@@ -215,6 +215,7 @@ dependencies = [
  "apollo-compiler",
  "apollo-federation",
  "apollo-parser",
+ "apollo-shape",
  "clap",
  "derive_more",
  "dhat",
@@ -247,7 +248,6 @@ dependencies = [
  "serde_json",
  "serde_json_bytes",
  "sha1 0.10.6",
- "shape",
  "similar 3.2.0",
  "strum 0.28.0",
  "strum_macros 0.28.0",
@@ -478,6 +478,17 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "apollo-shape"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26e74e0ee7687c709e6e7735366fd443340d84b3622331facd165bfb001fc8b2"
+dependencies = [
+ "apollo-compiler",
+ "indexmap 2.14.2",
+ "shape",
 ]
 
 [[package]]
@@ -2308,7 +2319,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2552,7 +2563,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3616,7 +3627,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -4624,7 +4635,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6398,7 +6409,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -6791,11 +6802,10 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.8.3"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f760e846df748dda86464a7b53022f7d91c27a04fa97913e9fd731bada8d3c3"
+checksum = "53ef86b89d8115c8155fd1072471ed345dfc68ad18fa6d905c21c0292efd9bf1"
 dependencies = [
- "apollo-compiler",
  "indexmap 2.14.2",
  "serde_json",
  "serde_json_bytes",
@@ -7210,10 +7220,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -8406,7 +8416,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

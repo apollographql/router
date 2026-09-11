@@ -1,5 +1,5 @@
+use apollo_shape::Shape;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
 
 use super::ApplyToError;
 use super::MethodArgs;

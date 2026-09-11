@@ -31,8 +31,8 @@
 
 use std::sync::Arc;
 
-use shape::Shape;
-use shape::location::SourceId;
+use apollo_shape::Shape;
+use apollo_shape::location::SourceId;
 
 use super::JSONSelection;
 use super::SelectionTrie;

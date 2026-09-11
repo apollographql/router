@@ -15,12 +15,12 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
+use apollo_shape::ShapeVisitor;
 use hashbrown::HashSet;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use shape::Shape;
-use shape::ShapeCase;
-use shape::ShapeVisitor;
 
 use self::keys::EntityKeyChecker;
 use self::keys::field_set_error;

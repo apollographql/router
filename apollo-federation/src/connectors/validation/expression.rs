@@ -11,13 +11,13 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
+use apollo_shape::graphql::shape_for_arguments;
+use apollo_shape::graphql::source_file;
+use apollo_shape::location::Location;
+use apollo_shape::name::NameCase;
 use itertools::Itertools;
-use shape::Shape;
-use shape::ShapeCase;
-use shape::graphql::shape_for_arguments;
-use shape::location::Location;
-use shape::location::SourceId;
-use shape::name::NameCase;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
@@ -86,7 +86,7 @@ impl<'schema> Context<'schema> {
                 parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Args, shape_for_arguments(schema, field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -145,7 +145,7 @@ impl<'schema> Context<'schema> {
                 parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Args, shape_for_arguments(schema, field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -597,14 +597,14 @@ fn transform_locations<'a>(
 ) -> Vec<Range<LineColumn>> {
     let mut locations: Vec<_> = locations
         .into_iter()
-        .filter_map(|location| match &location.source_id {
-            SourceId::GraphQL(file_id) => context
-                .schema
-                .sources
-                .get(file_id)
-                .and_then(|source| source.get_line_column_range(location.span.clone())),
-            SourceId::Other(_) => {
-                // Right now, this always refers to the JSONSelection location
+        .filter_map(|location| {
+            // Since apollo-shape 0.1.0, a GraphQL location is a `SourceId::Other`
+            // of the form `graphql:<path>` rather than its own variant, so it is
+            // `source_file` that tells one apart from the `JSONSelection` ids we
+            // mint ourselves: it returns `None` for anything it did not produce.
+            if let Some(source) = source_file(context.schema, &location.source_id) {
+                source.get_line_column_range(location.span.clone())
+            } else {
                 subslice_location(
                     context.node,
                     location.span.start + expression.location.start

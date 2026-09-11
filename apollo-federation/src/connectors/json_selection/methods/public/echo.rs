@@ -1,5 +1,5 @@
+use apollo_shape::Shape;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;

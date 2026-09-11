@@ -1,6 +1,6 @@
+use apollo_shape::Shape;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
 
 use crate::connectors::ApplyToError;
 use crate::connectors::json_selection::immutable::InputPath;

@@ -14,7 +14,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.argIsObject`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<{ val: Unknown }, null>`",
+        message: "In `GET` in `@connect(http:)` on `Query.argIsObject`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<{ val: One<String, null> }, null>`",
         locations: [
             36:1..38:2,
             14:22..14:27,

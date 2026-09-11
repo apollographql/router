@@ -10,7 +10,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 #[cfg(test)]
 use apollo_compiler::schema::ObjectType;
-use shape::Shape;
+use apollo_shape::Shape;
 
 /// A [`SchemaTypeRef`] is a `Copy`able reference to a named type within a
 /// [`Schema`]. Because [`SchemaTypeRef`] holds a `&'schema Schema` reference to

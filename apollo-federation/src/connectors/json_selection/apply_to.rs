@@ -5,13 +5,13 @@ use std::hash::Hash;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
+use apollo_shape::location::Location;
+use apollo_shape::location::SourceId;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 use serde_json_bytes::json;
-use shape::Shape;
-use shape::ShapeCase;
-use shape::location::Location;
-use shape::location::SourceId;
 
 use super::Ref;
 use super::helpers::json_merge;
@@ -1102,7 +1102,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         let mut iter = pending_messages.into_iter();
                         let first = iter.next().unwrap_or_default();
                         return iter.fold(Shape::error(first, tail_location), |acc, msg| {
-                            acc.with_error(shape::Error { message: msg })
+                            acc.with_error(apollo_shape::Error { message: msg })
                         });
                     }
 
@@ -4650,8 +4650,8 @@ mod tests {
     mod spread {
         use serde_json_bytes::Value as JSON;
         use serde_json_bytes::json;
-        use shape::Shape;
-        use shape::location::SourceId;
+        use apollo_shape::Shape;
+        use apollo_shape::location::SourceId;
 
         use crate::connectors::ConnectSpec;
         use crate::connectors::json_selection::ShapeContext;

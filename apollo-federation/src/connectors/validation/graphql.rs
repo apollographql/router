@@ -4,8 +4,8 @@ use std::ops::Deref;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
+use apollo_shape::Shape;
 use line_col::LineColLookup;
-use shape::Shape;
 
 mod strings;
 
@@ -33,7 +33,7 @@ impl<'schema> SchemaInfo<'schema> {
             len: src.len(),
             lookup: LineColLookup::new(src),
             connect_link,
-            shape_lookup: shape::graphql::shapes_for_schema(schema),
+            shape_lookup: apollo_shape::graphql::shapes_for_schema(schema),
         }
     }
 

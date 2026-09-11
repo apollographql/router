@@ -4,8 +4,8 @@ use std::sync::LazyLock;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use apollo_shape::Shape;
 use itertools::Itertools;
-use shape::Shape;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 

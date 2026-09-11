@@ -10,11 +10,11 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::ExtendedType;
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
+use apollo_shape::graphql::source_file;
+use apollo_shape::location::Location;
 use itertools::Itertools;
-use shape::Shape;
-use shape::ShapeCase;
-use shape::location::Location;
-use shape::location::SourceId;
 
 use self::variables::VariableResolver;
 use super::Code;
@@ -559,13 +559,13 @@ impl<'schema> SelectionValidator<'schema> {
     ) -> Vec<Range<LineColumn>> {
         shape_locations
             .into_iter()
-            .filter_map(|location| match &location.source_id {
-                SourceId::GraphQL(file_id) => self
-                    .schema
-                    .sources
-                    .get(file_id)
-                    .and_then(|source| source.get_line_column_range(location.span.clone())),
-                SourceId::Other(_) => {
+            .filter_map(|location| {
+                // GraphQL locations are `graphql:<path>` `SourceId::Other` values
+                // since apollo-shape 0.1.0; `source_file` returns `None` for the
+                // JSONSelection ids, which is how the two are told apart here.
+                if let Some(source) = source_file(self.schema, &location.source_id) {
+                    source.get_line_column_range(location.span.clone())
+                } else {
                     // JSONSelection location - convert to range in the selection string
                     subslice_location(self.node, location.span.clone(), self.schema)
                 }

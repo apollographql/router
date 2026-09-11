@@ -9,7 +9,15 @@ pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
 fn valid_large_body() {
     const SCHEMA: &str = "src/connectors/validation/test_data/valid_large_body.graphql";
 
-    const MAX_BYTES: usize = 275_000;
+    // Bumped from 275_000 with apollo-shape 0.2.0, which gives GraphQL types the
+    // shapes their schemas describe: a built-in scalar field is now a concrete
+    // shape rather than a shared `Unknown`, a nullable one is a two-member `One`,
+    // and nested lists keep every level. Peak live bytes grew 15.7% (269,550 ->
+    // 311,925) while total allocation churn moved 1.1% (3,923,053 -> 3,966,885),
+    // so this is more shape held live at once rather than more allocation
+    // traffic. Note also that 275_000 sat only 2% above the measured peak,
+    // tighter than the ~10% this file asks for; 345_000 restores that margin.
+    const MAX_BYTES: usize = 345_000;
     // Bumped from 27_000 once the fused-trie consumption infrastructure
     // landed: `compute_output_shape` now records into a `SelectionTrie`
     // baton on every recursive step, which roughly doubles allocation

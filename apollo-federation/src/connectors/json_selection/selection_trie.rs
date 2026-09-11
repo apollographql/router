@@ -6,8 +6,8 @@ use std::ops::Range;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use shape::name::Name;
-use shape::name::NameCase;
+use apollo_shape::name::Name;
+use apollo_shape::name::NameCase;
 
 use super::Ref;
 use super::helpers::quote_if_necessary;
@@ -130,11 +130,11 @@ impl SelectionTrie {
             .set_leaf()
     }
 
-    /// Walk a [`shape::name::Name`] chain into this trie, creating subtrie
+    /// Walk a [`apollo_shape::name::Name`] chain into this trie, creating subtrie
     /// entries for each path-component segment of the name. Used by
     /// `compute_output_shape` to record consumption byproducts: every shape
     /// produced during the recursion exposes the input paths it came from
-    /// via its [`shape::Name`] metadata, and feeding those names through this
+    /// via its [`apollo_shape::Name`] metadata, and feeding those names through this
     /// method accumulates them into a single per-namespace consumption trie.
     ///
     /// Mapping from [`NameCase`] segments to trie keys:
