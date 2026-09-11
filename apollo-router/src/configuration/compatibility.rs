@@ -179,15 +179,7 @@ fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
         .map_err(|error| format!("{:?}", miette::Report::new(error)))
 }
 
-/// The JSON pointer to the first leaf where `a` and `b` disagree, or `None` if they match.
-///
-/// Every comparison in this module walks two `serde_json::to_value(&Configuration)` results
-/// through this function instead of writing `assert_eq!(router_config, shared_config)`.
-/// `Configuration`'s hand-written `PartialEq` (`apollo-router/src/configuration/mod.rs`) compares
-/// only `validated_yaml`, a `#[serde(skip)]` field this module's own adapter sets on the shared
-/// side to make configuration-usage telemetry testable. `==` would therefore compare a value the
-/// test harness just populated, passing almost trivially while reading like a deep equality
-/// check. Do not replace this walk with `==`.
+/// Returns a JSON pointer to the first difference, or `None` when the values match.
 fn first_difference(a: &Value, b: &Value) -> Option<String> {
     fn walk(a: &Value, b: &Value, path: &mut String) -> Option<String> {
         match (a, b) {
@@ -257,6 +249,7 @@ fn difference_paths_resolve_object_keys_and_array_entries() {
 /// Serializes both parsers' results and describes the first path where they disagree, or `None`
 /// when they match. Callers prefix the description with whatever identifies the input.
 fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Option<String> {
+    // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
     let router_json = serde_json::to_value(router).expect("Configuration serializes");
     let shared_json = serde_json::to_value(shared).expect("Configuration serializes");
     let path = first_difference(&router_json, &shared_json)?;
