@@ -9,6 +9,7 @@ snapshot_kind: text
       - value: 1
         attributes:
           opt.apollo.dev: true
+          opt.apollo.graph_artifact_reference: true
           opt.apollo.graph_ref: true
           opt.apollo.key: true
           opt.apollo.license: true

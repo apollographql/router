@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use oci_client::client::ImageLayer;
@@ -22,8 +22,10 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::LICENSE_SIX_MONTHS_SECS;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::mint_license_jwt;
 
 /// Helper function to create a query for the count field
 fn query_count_field() -> Query {
@@ -37,6 +39,7 @@ fn query_count_field() -> Query {
 }
 
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
+const ENTITLEMENT_MEDIA_TYPE: &str = "application/vnd.apollographql.entitlement.v1+jwt";
 const ARTIFACT_REFERENCE_404: &str =
     "localhost/testrepo@sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const MIN_CONFIG: &str = include_str!("fixtures/minimal-oci.router.yaml");
@@ -103,19 +106,39 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
     // Mock blob
     let blob_digest = schema_layer.sha256_digest();
 
+    // Create license layer, so the router's LicenseSource::OCI path (which
+    // shares this same graph artifact reference with the schema) can fetch a
+    // valid entitlement, rather than retrying an always-failing fetch forever.
+    let license_layer = ImageLayer {
+        data: mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS).into(),
+        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let license_blob_digest = license_layer.sha256_digest();
+
     // Mock manifest
     let oci_manifest = OciManifest::Image(OciImageManifest {
         schema_version: 2,
         media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
         config: Default::default(),
-        layers: vec![OciDescriptor {
-            media_type: schema_layer.media_type.clone(),
-            digest: blob_digest.clone(),
-            size: schema_layer.data.len().try_into().unwrap(),
-            urls: None,
-            annotations: None,
-            artifact_type: None,
-        }],
+        layers: vec![
+            OciDescriptor {
+                media_type: schema_layer.media_type.clone(),
+                digest: blob_digest.clone(),
+                size: schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+            OciDescriptor {
+                media_type: license_layer.media_type.clone(),
+                digest: license_blob_digest.clone(),
+                size: license_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+        ],
         subject: None,
         artifact_type: None,
         annotations: None,
@@ -140,6 +163,20 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
         .mount(&mock_server)
         .await;
 
+    // Set up license blob endpoint
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            graph_id, license_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(license_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
     // Set up manifest endpoint
     Mock::given(method("GET"))
         .and(path(format!(
@@ -158,20 +195,32 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
     (mock_server, artifact_reference)
 }
 
-/// Helper function to set up a mock OCI registry server with tag-based references
-/// Uses request counting to simulate tag updates after initial requests
-/// If `tag_changes` is false, the tag will always return the initial digest
-/// If `return_404_after_first` is true, subsequent calls after the first will return 404
+/// Helper function to set up a mock OCI registry server with tag-based references.
+/// The tag manifest endpoint (both HEAD and GET) serves the initial digest/manifest
+/// until explicitly told otherwise by the caller.
+///
+/// Returns two caller-armed `Arc<AtomicBool>` switches rather than gating on a raw
+/// request count: this same graph artifact reference is polled concurrently by
+/// both the schema stream and the license stream, so "the Nth request" doesn't
+/// deterministically correspond to either stream's Nth poll — whichever stream's
+/// request lands on a given count is arbitrary. Both switches must therefore be
+/// flipped by the caller only once it's confirmed (e.g. via `assert_started`) that
+/// both streams have already completed an initial successful fetch:
+///
+/// - `serve_updated`: once armed via `.store(true, ..)`, the tag manifest switches
+///   (atomically, for both HEAD and GET) from the initial digest/manifest to the
+///   updated one.
+/// - `enable_404`: once armed via `.store(true, ..)`, the tag manifest endpoint
+///   returns 404 for every subsequent request.
 async fn setup_mock_oci_server_with_tag(
     initial_schema: &str,
     updated_schema: &str,
-    tag_changes: bool,
-    return_404_after_first: bool,
-) -> (MockServer, String, Arc<AtomicUsize>) {
+) -> (MockServer, String, Arc<AtomicBool>, Arc<AtomicBool>) {
     let mock_server = MockServer::start().await;
     let graph_id = "test-repo";
     let tag = "latest";
-    let request_count = Arc::new(AtomicUsize::new(0));
+    let enable_404 = Arc::new(AtomicBool::new(false));
+    let serve_updated = Arc::new(AtomicBool::new(false));
 
     // Create initial schema layer
     let initial_schema_layer = ImageLayer {
@@ -189,19 +238,42 @@ async fn setup_mock_oci_server_with_tag(
     };
     let updated_blob_digest = updated_schema_layer.sha256_digest();
 
+    // Create license layer, so the router's LicenseSource::OCI path (which
+    // shares this same graph artifact reference with the schema) can fetch a
+    // valid entitlement, rather than retrying an always-failing fetch forever.
+    // The same layer is reused across the initial and updated manifests: only
+    // the schema is expected to change across a hot reload here.
+    let license_layer = ImageLayer {
+        data: mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS).into(),
+        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let license_blob_digest = license_layer.sha256_digest();
+    let license_layer_descriptor = OciDescriptor {
+        media_type: license_layer.media_type.clone(),
+        digest: license_blob_digest.clone(),
+        size: license_layer.data.len().try_into().unwrap(),
+        urls: None,
+        annotations: None,
+        artifact_type: None,
+    };
+
     // Create initial manifest
     let initial_oci_manifest = OciManifest::Image(OciImageManifest {
         schema_version: 2,
         media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
         config: Default::default(),
-        layers: vec![OciDescriptor {
-            media_type: initial_schema_layer.media_type.clone(),
-            digest: initial_blob_digest.clone(),
-            size: initial_schema_layer.data.len().try_into().unwrap(),
-            urls: None,
-            annotations: None,
-            artifact_type: None,
-        }],
+        layers: vec![
+            OciDescriptor {
+                media_type: initial_schema_layer.media_type.clone(),
+                digest: initial_blob_digest.clone(),
+                size: initial_schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+            license_layer_descriptor.clone(),
+        ],
         subject: None,
         artifact_type: None,
         annotations: None,
@@ -213,14 +285,17 @@ async fn setup_mock_oci_server_with_tag(
         schema_version: 2,
         media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
         config: Default::default(),
-        layers: vec![OciDescriptor {
-            media_type: updated_schema_layer.media_type.clone(),
-            digest: updated_blob_digest.clone(),
-            size: updated_schema_layer.data.len().try_into().unwrap(),
-            urls: None,
-            annotations: None,
-            artifact_type: None,
-        }],
+        layers: vec![
+            OciDescriptor {
+                media_type: updated_schema_layer.media_type.clone(),
+                digest: updated_blob_digest.clone(),
+                size: updated_schema_layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            },
+            license_layer_descriptor.clone(),
+        ],
         subject: None,
         artifact_type: None,
         annotations: None,
@@ -262,6 +337,20 @@ async fn setup_mock_oci_server_with_tag(
         .mount(&mock_server)
         .await;
 
+    // Blob - license (shared by both the initial and updated manifests)
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            graph_id, license_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(license_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
     // Manifest - initial
     Mock::given(method("GET"))
         .and(path(format!(
@@ -292,39 +381,40 @@ async fn setup_mock_oci_server_with_tag(
         .mount(&mock_server)
         .await;
 
-    // Tag - HEAD returns initial, then next call will return updated (if tag_changes is true)
-    // or 404 (if return_404_after_first is true)
+    // Tag - HEAD returns the initial digest until `serve_updated` is armed by
+    // the caller, then the updated digest; returns 404 once `enable_404` has
+    // been armed by the caller.
     let tag_path = format!("/v2/{}/manifests/{}", graph_id, tag);
-    let head_count = Arc::new(AtomicUsize::new(0));
     Mock::given(method("HEAD"))
         .and(path(tag_path.clone()))
         .respond_with({
-            let head_count = head_count.clone();
+            let enable_404 = enable_404.clone();
+            let serve_updated = serve_updated.clone();
             let initial_digest = initial_manifest_digest.clone();
             let updated_digest = updated_manifest_digest.clone();
             move |_req: &wiremock::Request| {
-                let count = head_count.fetch_add(1, Ordering::SeqCst);
-                if return_404_after_first && count > 0 {
+                if enable_404.load(Ordering::SeqCst) {
                     ResponseTemplate::new(404)
-                } else if count == 0 || !tag_changes {
-                    ResponseTemplate::new(200)
-                        .append_header("docker-content-digest", initial_digest.as_str())
-                } else {
+                } else if serve_updated.load(Ordering::SeqCst) {
                     ResponseTemplate::new(200)
                         .append_header("docker-content-digest", updated_digest.as_str())
+                } else {
+                    ResponseTemplate::new(200)
+                        .append_header("docker-content-digest", initial_digest.as_str())
                 }
             }
         })
         .mount(&mock_server)
         .await;
 
-    // Tag - GET returns initial, then next call will return updated (if tag_changes is true)
-    // or 404 (if return_404_after_first is true)
-    let get_count = Arc::new(AtomicUsize::new(0));
+    // Tag - GET returns the initial manifest until `serve_updated` is armed
+    // by the caller, then the updated manifest; returns 404 once
+    // `enable_404` has been armed by the caller.
     Mock::given(method("GET"))
         .and(path(tag_path.clone()))
         .respond_with({
-            let get_count = get_count.clone();
+            let enable_404 = enable_404.clone();
+            let serve_updated = serve_updated.clone();
             let initial_digest = initial_manifest_digest.clone();
             let updated_digest = updated_manifest_digest.clone();
             let initial_manifest_bytes =
@@ -332,19 +422,18 @@ async fn setup_mock_oci_server_with_tag(
             let updated_manifest_bytes =
                 Arc::new(serde_json::to_vec(&updated_oci_manifest).unwrap());
             move |_req: &wiremock::Request| {
-                let count = get_count.fetch_add(1, Ordering::SeqCst);
-                if return_404_after_first && count > 0 {
+                if enable_404.load(Ordering::SeqCst) {
                     ResponseTemplate::new(404)
-                } else if count == 0 || !tag_changes {
-                    ResponseTemplate::new(200)
-                        .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
-                        .append_header("docker-content-digest", initial_digest.as_str())
-                        .set_body_bytes(initial_manifest_bytes.as_ref().clone())
-                } else {
+                } else if serve_updated.load(Ordering::SeqCst) {
                     ResponseTemplate::new(200)
                         .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
                         .append_header("docker-content-digest", updated_digest.as_str())
                         .set_body_bytes(updated_manifest_bytes.as_ref().clone())
+                } else {
+                    ResponseTemplate::new(200)
+                        .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                        .append_header("docker-content-digest", initial_digest.as_str())
+                        .set_body_bytes(initial_manifest_bytes.as_ref().clone())
                 }
             }
         })
@@ -352,7 +441,7 @@ async fn setup_mock_oci_server_with_tag(
         .await;
 
     let artifact_reference = format!("{}/{}:{}", mock_server.address(), graph_id, tag);
-    (mock_server, artifact_reference, request_count)
+    (mock_server, artifact_reference, enable_404, serve_updated)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -415,8 +504,8 @@ async fn test_router_oci_tag_hot_reload() -> Result<(), BoxError> {
     let initial_schema = include_str!("fixtures/oci_initial_schema.graphql");
     let updated_schema = include_str!("fixtures/oci_updated_schema.graphql");
 
-    let (_mock_server, artifact_reference, _request_count) =
-        setup_mock_oci_server_with_tag(initial_schema, updated_schema, true, false).await;
+    let (_mock_server, artifact_reference, _enable_404, serve_updated) =
+        setup_mock_oci_server_with_tag(initial_schema, updated_schema).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -439,6 +528,14 @@ async fn test_router_oci_tag_hot_reload() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
     router.execute_default_query().await;
+
+    // Only now arm the switch to the updated schema, i.e. once both the
+    // schema stream and the license stream (which poll this same graph
+    // artifact reference concurrently) have each already completed an
+    // initial successful fetch. Arming this any earlier would race the two
+    // streams' first polls against each other, since which stream's request
+    // lands on a given HEAD/GET call is not deterministic.
+    serve_updated.store(true, Ordering::SeqCst);
 
     // Wait for hot-reload, verify router can execute query
     router.assert_reloaded().await;
@@ -484,8 +581,8 @@ async fn test_router_oci_tag_hot_reload_no_change() -> Result<(), BoxError> {
     let initial_schema = include_str!("fixtures/oci_initial_schema.graphql");
     let updated_schema = include_str!("fixtures/oci_updated_schema.graphql");
 
-    let (_mock_server, artifact_reference, _request_count) =
-        setup_mock_oci_server_with_tag(initial_schema, updated_schema, false, false).await;
+    let (_mock_server, artifact_reference, _enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(initial_schema, updated_schema).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -527,8 +624,8 @@ async fn test_router_oci_tag_404_after_first() -> Result<(), BoxError> {
     let initial_schema = include_str!("fixtures/oci_initial_schema.graphql");
     let updated_schema = include_str!("fixtures/oci_updated_schema.graphql");
 
-    let (_mock_server, artifact_reference, _request_count) =
-        setup_mock_oci_server_with_tag(initial_schema, updated_schema, false, true).await;
+    let (_mock_server, artifact_reference, enable_404, _serve_updated) =
+        setup_mock_oci_server_with_tag(initial_schema, updated_schema).await;
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
     let mut router = IntegrationTest::builder()
@@ -552,7 +649,14 @@ async fn test_router_oci_tag_404_after_first() -> Result<(), BoxError> {
     router.assert_started().await;
     router.execute_default_query().await;
 
-    // Wait for the second poll to return a 404, then verify a query against the old schema still works
+    // Only now arm the 404, i.e. once both the schema stream and the license
+    // stream (which poll this same graph artifact reference concurrently)
+    // have each already completed an initial successful fetch. Arming this
+    // any earlier would race the two streams' first polls against each
+    // other over a shared request counter.
+    enable_404.store(true, Ordering::SeqCst);
+
+    // Wait for the next poll to return a 404, then verify a query against the old schema still works
     router
         .wait_for_log_message("error fetching manifest digest from oci registry")
         .await;
