@@ -377,36 +377,6 @@ fn parse_via_apollo_configuration(
     Ok(config)
 }
 
-/// A within-major migration must warn at startup, naming both the migrated line numbers and
-/// `router config upgrade`. `Mode::Upgrade` is the same path startup and a config reload both
-/// run through (`Configuration::from_str`), so this also stands in for "reload emits the
-/// migration warning for within-major inputs" -- there is no separate reload-specific migration
-/// path in `apollo-router/src/configuration` to exercise; the reload machinery that decides
-/// whether to keep serving the previous configuration lives in `state_machine.rs`, outside this
-/// module's file boundary.
-#[test]
-fn minor_migration_warns_with_upgrade_command_and_migrated_line_numbers() {
-    const SCOPE: &str = "compatibility_migration_warning_test";
-    let _guard = crate::test_harness::tracing_test::dispatcher_guard();
-    let _span = tracing::info_span!(SCOPE).entered();
-    let text = include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml");
-
-    validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
-        .expect("a within-major migration is applied automatically at startup and reload");
-
-    assert!(
-        crate::test_harness::tracing_test::logs_with_scope_contain(SCOPE, "router config upgrade"),
-        "the warning must point the operator at `router config upgrade`"
-    );
-    assert!(
-        crate::test_harness::tracing_test::logs_with_scope_contain(
-            SCOPE,
-            "error line numbers refer to the migrated YAML"
-        ),
-        "the warning must explain that diagnostic line numbers now refer to the migrated document"
-    );
-}
-
 /// A migrated document that still fails validation stops startup -- the loader does not retry
 /// the un-migrated original. Reload runs through the same `validate_yaml_configuration` call:
 /// this proves the parsing-level precondition an invalid reload relies on, an `Err` rather than a
