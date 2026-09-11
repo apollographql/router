@@ -514,6 +514,632 @@ where
     }
 }
 
+/// Layer type for [Telemetry::instrument_router_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentRouterLayer {
+    config: Arc<config::Conf>,
+    supergraph_schema_id: Arc<String>,
+    enabled_features: EnabledFeatures,
+    field_level_instrumentation_ratio: f64,
+    metrics_sender: apollo_exporter::Sender,
+    static_router_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl InstrumentRouterLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        supergraph_schema_id: Arc<String>,
+        enabled_features: EnabledFeatures,
+        field_level_instrumentation_ratio: f64,
+        metrics_sender: apollo_exporter::Sender,
+        static_router_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            supergraph_schema_id,
+            enabled_features,
+            field_level_instrumentation_ratio,
+            metrics_sender,
+            static_router_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentRouterLayer
+where
+    S: tower::Service<router::Request, Response = router::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = router::BoxCloneService;
+
+    fn layer(&self, service: S) -> Self::Service {
+        let supergraph_schema_id = self.supergraph_schema_id.clone();
+        let config_later = self.config.clone();
+        let config_request = self.config.clone();
+        let config_checkpoint = self.config.clone();
+        let enabled_features = self.enabled_features.clone();
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let metrics_sender = self.metrics_sender.clone();
+        let static_router_instruments = self.static_router_instruments.clone();
+
+        let spans = &self.config.instrumentation.spans;
+        let router_attributes = &spans.router.attributes.attributes;
+
+        let client_name_key = router_attributes
+            .client_name
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_NAME_KEY));
+
+        let client_version_key = router_attributes
+            .client_version
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_VERSION_KEY));
+
+        ServiceBuilder::new()
+            .map_response(move |response: router::Response| {
+                // The current span *should* be the request span as we are outside the instrument block.
+                let span = Span::current();
+                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
+                    && span_name == ROUTER_SPAN_NAME
+                {
+                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
+                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
+                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
+
+                    if let Ok(Some(operation_kind)) = &operation_kind {
+                        span.record("graphql.operation.type", operation_kind);
+                    }
+                    if let Ok(Some(operation_name)) = &operation_name {
+                        span.record("graphql.operation.name", operation_name);
+                    }
+                    match (&operation_kind, &operation_name) {
+                        (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
+                            OTEL_NAME.into(),
+                            format!("{kind} {name}").into(),
+                        ),
+                        (Ok(Some(kind)), _) => {
+                            span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
+                        }
+                        _ => span
+                            .set_span_dyn_attribute(OTEL_NAME.into(), "GraphQL Operation".into()),
+                    };
+                }
+
+                response
+            })
+            .layer(InstrumentLayer::new(move |request: &router::Request| {
+                // When running through axum, the TraceLayer holds a "router" span guard
+                // across the entire synchronous call chain, so Span::current() already
+                // returns it here — reuse it rather than creating a duplicate SERVER span.
+                // In tests that bypass axum, there is no active span, so we create one to
+                // match the behavior users actually see.
+                let current = Span::current();
+                if current
+                    .metadata()
+                    .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
+                {
+                    current
+                } else {
+                    span_factory::create_router(&request.router_request)
+                }
+            }))
+            .checkpoint_async(move |req: router::Request| {
+                let config_checkpoint = config_checkpoint.clone();
+                async move {
+                    let library_name_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_name_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    let library_version_valid = req
+                        .router_request
+                        .headers()
+                        .get(&config_checkpoint.apollo.library_version_header)
+                        .and_then(|v| v.to_str().ok())
+                        .is_none_or(is_valid_client_library_value);
+                    if !library_name_valid || !library_version_valid {
+                        if !library_name_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library name header value"
+                            );
+                        }
+                        if !library_version_valid {
+                            ::tracing::warn!(
+                                "Rejecting request: invalid client library version header value"
+                            );
+                        }
+                        Ok(ControlFlow::Break(
+                            router::Response::error_builder()
+                                .status_code(StatusCode::BAD_REQUEST)
+                                .context(req.context)
+                                .build()?,
+                        ))
+                    } else {
+                        Ok(ControlFlow::Continue(req))
+                    }
+                }
+            })
+            .map_future_with_request_data(
+                move |request: &router::Request| {
+                    let _ = request.context.insert(
+                        SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY,
+                        supergraph_schema_id.clone(),
+                    );
+
+                    let client_name = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.client_name_header)
+                        .and_then(|h| h.to_str().ok());
+                    let client_version = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.client_version_header)
+                        .and_then(|h| h.to_str().ok());
+
+                    if let Some(name) = client_name {
+                        let _ = request.context.insert(CLIENT_NAME, name.to_owned());
+                    }
+
+                    if let Some(version) = client_version {
+                        let _ = request.context.insert(CLIENT_VERSION, version.to_owned());
+                    }
+
+                    let library_name = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.library_name_header)
+                        .and_then(|h| h.to_str().ok());
+                    let library_version = request
+                        .router_request
+                        .headers()
+                        .get(&config_request.apollo.library_version_header)
+                        .and_then(|h| h.to_str().ok());
+
+                    if let Some(name) = library_name {
+                        let _ = request.context.insert(CLIENT_LIBRARY_NAME, name.to_owned());
+                    }
+
+                    if let Some(version) = library_version {
+                        let _ = request
+                            .context
+                            .insert(CLIENT_LIBRARY_VERSION, version.to_owned());
+                    }
+
+                    let mut custom_attributes = config_request
+                        .instrumentation
+                        .spans
+                        .router
+                        .attributes
+                        .on_request(request);
+
+                    custom_attributes.push(KeyValue::new(
+                        Key::from_static_str("apollo_private.http.request_headers"),
+                        filter_headers(
+                            request.router_request.headers(),
+                            &config_request.apollo.send_headers,
+                            &request.context,
+                        ),
+                    ));
+
+                    // Create and store router overhead tracker in context
+                    request.context.extensions().with_lock(|lock| {
+                        lock.insert(router_overhead::RouterOverheadTracker::new());
+                    });
+
+                    let custom_instruments: RouterInstruments = config_request
+                        .instrumentation
+                        .instruments
+                        .new_router_instruments(static_router_instruments.clone());
+                    custom_instruments.on_request(request);
+
+                    let mut custom_events: RouterEvents =
+                        config_request.instrumentation.events.new_router_events();
+                    custom_events.on_request(request);
+
+                    (
+                        custom_attributes,
+                        custom_instruments,
+                        custom_events,
+                        request.context.clone(),
+                    )
+                },
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
+                    Vec<KeyValue>,
+                    RouterInstruments,
+                    RouterEvents,
+                    Context,
+                ),
+                      fut| {
+                    let start = Instant::now();
+                    let config = config_later.clone();
+                    let sender = metrics_sender.clone();
+                    let enabled_features = enabled_features.clone();
+                    let client_name_key = client_name_key.clone();
+                    let client_version_key = client_version_key.clone();
+
+                    Telemetry::plugin_metrics(&config);
+
+                    async move {
+                        if let Some(http_server_response_body_size) =
+                            &custom_instruments.http_server_response_body_size
+                        {
+                            let CustomHistogramInner {
+                                histogram,
+                                attributes,
+                                ..
+                            } = &*http_server_response_body_size.inner.lock();
+                            // Clone the histogram (which uses an Arc internally) and store
+                            // in ResponseBodySizeRecording so that we can later record the
+                            // final byte count after the body stream is fully sent.
+                            if let Some(histogram) = &histogram {
+                                let recording = ResponseBodySizeRecording::new(
+                                    histogram.clone(),
+                                    attributes.clone(),
+                                );
+                                ctx.extensions().with_lock(|lock| lock.insert(recording));
+                            }
+                        }
+
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_attributes);
+                        let response: Result<router::Response, BoxError> = fut.await;
+
+                        // Client name and version must be picked up after awaiting
+                        // the inner service future, because router service plugins
+                        // (e.g. rhai) may modify these values in the shared context
+                        // during request processing. With buffered service layers,
+                        // that processing is deferred until the future is polled.
+                        let get_from_context =
+                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
+                        let client_name = get_from_context(&ctx, CLIENT_NAME);
+                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
+
+                        if let Some(key) = client_name_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_name.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
+
+                        if let Some(key) = client_version_key {
+                            span.set_span_dyn_attribute(
+                                key,
+                                opentelemetry::Value::String(
+                                    client_version.unwrap_or_default().into(),
+                                ),
+                            );
+                        }
+
+                        span.record(
+                            APOLLO_PRIVATE_DURATION_NS,
+                            start.elapsed().as_nanos() as i64,
+                        );
+
+                        let expose_trace_id = &config.exporters.tracing.response_trace_id;
+                        if let Ok(response) = &response {
+                            span.set_span_dyn_attributes(
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_response(response),
+                            );
+                            custom_instruments.on_response(response);
+                            custom_events.on_response(response);
+
+                            let mut headers: HashMap<String, Vec<String>> =
+                                HashMap::with_capacity(2);
+                            if expose_trace_id.enabled {
+                                let header_name = expose_trace_id
+                                    .header_name
+                                    .as_ref()
+                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
+
+                                if let Some(value) = response.response.headers().get(header_name) {
+                                    headers.insert(
+                                        header_name.to_string(),
+                                        vec![value.to_str().unwrap_or_default().to_string()],
+                                    );
+                                }
+                            }
+                            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
+                                headers.insert(
+                                    CACHE_CONTROL.to_string(),
+                                    vec![value.to_str().unwrap_or_default().to_string()],
+                                );
+                            }
+                            if !headers.is_empty() {
+                                let response_headers =
+                                    serde_json::to_string(&headers).unwrap_or_default();
+                                span.record(
+                                    "apollo_private.http.response_headers",
+                                    &response_headers,
+                                );
+                            }
+
+                            if response.context.extensions().with_lock(|lock| {
+                                lock.get::<Arc<UsageReporting>>()
+                                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
+                                    .unwrap_or(false)
+                            }) {
+                                Telemetry::update_apollo_metrics(
+                                    &response.context,
+                                    field_level_instrumentation_ratio,
+                                    sender,
+                                    true,
+                                    start.elapsed(),
+                                    // the query is invalid, we did not parse the operation kind
+                                    OperationKind::Query,
+                                    None,
+                                    Default::default(),
+                                    enabled_features.clone(),
+                                );
+                            }
+
+                            if response.response.status() >= StatusCode::BAD_REQUEST {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            } else {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+                            }
+                        } else if let Err(err) = &response {
+                            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                            span.set_span_dyn_attributes(
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_error(err, &ctx),
+                            );
+                            custom_instruments.on_error(err, &ctx);
+                            custom_events.on_error(err, &ctx);
+                        }
+
+                        if let Ok(resp) = response {
+                            Ok(count_router_errors(resp, &config.apollo.errors).await)
+                        } else {
+                            response
+                        }
+                    }
+                },
+            )
+            .service(service)
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [Telemetry::instrument_supergraph_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentSupergraphLayer {
+    config: Arc<config::Conf>,
+    metrics_sender: apollo_exporter::Sender,
+    enabled_features: EnabledFeatures,
+    field_level_instrumentation_ratio: f64,
+    static_supergraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_graphql_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl InstrumentSupergraphLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        metrics_sender: apollo_exporter::Sender,
+        enabled_features: EnabledFeatures,
+        field_level_instrumentation_ratio: f64,
+        static_supergraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_graphql_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            metrics_sender,
+            enabled_features,
+            field_level_instrumentation_ratio,
+            static_supergraph_instruments,
+            static_graphql_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentSupergraphLayer
+where
+    S: tower::Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = supergraph::BoxCloneService;
+
+    fn layer(&self, service: S) -> Self::Service {
+        let metrics_sender = self.metrics_sender.clone();
+        let config = self.config.clone();
+        let config_instrument = self.config.clone();
+        let config_map_res_first = config.clone();
+        let config_map_res = config.clone();
+        let enabled_features = self.enabled_features.clone();
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let static_supergraph_instruments = self.static_supergraph_instruments.clone();
+        let static_graphql_instruments = self.static_graphql_instruments.clone();
+        ServiceBuilder::new()
+            .instrument(move |supergraph_req: &SupergraphRequest| {
+                span_factory::create_supergraph(
+                    &config_instrument.apollo,
+                    supergraph_req,
+                    field_level_instrumentation_ratio,
+                )
+            })
+            .map_response(move |mut resp: SupergraphResponse| {
+                let config = config_map_res_first.clone();
+                if let Some(usage_reporting) = resp
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+                {
+                    // Record the operation signature on the router span
+                    Span::current().record(
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
+                        usage_reporting.get_stats_report_key().as_str(),
+                    );
+                }
+                // To expose trace_id or not
+                let expose_trace_id_header =
+                    config.exporters.tracing.response_trace_id.enabled.then(|| {
+                        config
+                            .exporters
+                            .tracing
+                            .response_trace_id
+                            .header_name
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
+                    });
+
+                // Append the trace ID with the right format, based on the config
+                let format_id = |trace_id: TraceId| {
+                    let id = match config.exporters.tracing.response_trace_id.format {
+                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
+                            format!("{trace_id:032x}")
+                        }
+                        TraceIdFormat::Decimal => {
+                            format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
+                        }
+                        TraceIdFormat::Datadog => trace_id.to_datadog(),
+                        TraceIdFormat::Uuid => Uuid::from_bytes(trace_id.to_bytes()).to_string(),
+                    };
+
+                    HeaderValue::from_str(&id).ok()
+                };
+                if let (Some(header_name), Some(trace_id)) =
+                    (expose_trace_id_header, trace_id().and_then(format_id))
+                {
+                    resp.response.headers_mut().append(header_name, trace_id);
+                }
+
+                resp
+            })
+            .map_future_with_request_data(
+                move |req: &SupergraphRequest| {
+                    let custom_attributes = config
+                        .instrumentation
+                        .spans
+                        .supergraph
+                        .attributes
+                        .on_request(req);
+                    Telemetry::populate_context(field_level_instrumentation_ratio, req);
+                    let custom_instruments = config
+                        .instrumentation
+                        .instruments
+                        .new_supergraph_instruments(static_supergraph_instruments.clone());
+                    custom_instruments.on_request(req);
+                    let custom_graphql_instruments: GraphQLInstruments = config
+                        .instrumentation
+                        .instruments
+                        .new_graphql_instruments(static_graphql_instruments.clone());
+                    custom_graphql_instruments.on_request(req);
+
+                    let mut supergraph_events =
+                        config.instrumentation.events.new_supergraph_events();
+                    supergraph_events.on_request(req);
+
+                    (
+                        req.context.clone(),
+                        custom_instruments,
+                        custom_attributes,
+                        supergraph_events,
+                        custom_graphql_instruments,
+                    )
+                },
+                move |(
+                    ctx,
+                    custom_instruments,
+                    mut custom_attributes,
+                    mut supergraph_events,
+                    custom_graphql_instruments,
+                ): (
+                    Context,
+                    SupergraphInstruments,
+                    Vec<KeyValue>,
+                    SupergraphEvents,
+                    GraphQLInstruments,
+                ),
+                      fut| {
+                    let config = config_map_res.clone();
+                    let sender = metrics_sender.clone();
+                    let enabled_features = enabled_features.clone();
+                    let start = Instant::now();
+
+                    async move {
+                        let span = Span::current();
+                        let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+
+                        add_query_attributes(&ctx, &mut custom_attributes);
+                        add_cost_attributes(&ctx, &mut custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
+                        match &result {
+                            Ok(resp) => {
+                                span.set_span_dyn_attributes(
+                                    config
+                                        .instrumentation
+                                        .spans
+                                        .supergraph
+                                        .attributes
+                                        .on_response(resp),
+                                );
+                                custom_instruments.on_response(resp);
+                                supergraph_events.on_response(resp);
+                                custom_graphql_instruments.on_response(resp);
+                            }
+                            Err(err) => {
+                                span.set_span_dyn_attributes(
+                                    config
+                                        .instrumentation
+                                        .spans
+                                        .supergraph
+                                        .attributes
+                                        .on_error(err, &ctx),
+                                );
+                                custom_instruments.on_error(err, &ctx);
+                                supergraph_events.on_error(err, &ctx);
+                                custom_graphql_instruments.on_error(err, &ctx);
+                            }
+                        }
+
+                        if let Ok(resp) = result {
+                            result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
+                        }
+
+                        result = Telemetry::update_otel_metrics(
+                            config.clone(),
+                            ctx.clone(),
+                            result,
+                            custom_instruments,
+                            supergraph_events,
+                            custom_graphql_instruments,
+                        )
+                        .await;
+                        Telemetry::update_metrics_on_response_events(
+                            &ctx,
+                            config,
+                            field_level_instrumentation_ratio,
+                            sender,
+                            start,
+                            result,
+                            enabled_features,
+                        )
+                    }
+                },
+            )
+            .service(service)
+            .boxed_clone()
+    }
+}
+
 /// Layer type for [Telemetry::instrument_subgraph_layer].
 #[derive(Clone)]
 pub(crate) struct InstrumentSubgraphLayer {
@@ -730,6 +1356,47 @@ impl Telemetry {
     pub(crate) fn subgraph_ftv1_layer(&self) -> SubgraphFtv1Layer {
         SubgraphFtv1Layer::new()
     }
+
+    /// Returns a layer that instruments the router service with Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_router_layer(&self) -> InstrumentRouterLayer {
+        let static_router_instruments = self
+            .builtin_instruments
+            .read()
+            .router_custom_instruments
+            .clone();
+        InstrumentRouterLayer::new(
+            self.config.clone(),
+            self.supergraph_schema_id.clone(),
+            self.enabled_features.clone(),
+            self.field_level_instrumentation_ratio,
+            self.apollo_metrics_sender.clone(),
+            static_router_instruments,
+        )
+    }
+
+    /// Returns a layer that instruments the supergraph service with Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_supergraph_layer(&self) -> InstrumentSupergraphLayer {
+        let static_supergraph_instruments = self
+            .builtin_instruments
+            .read()
+            .supergraph_custom_instruments
+            .clone();
+        let static_graphql_instruments = self
+            .builtin_instruments
+            .read()
+            .graphql_custom_instruments
+            .clone();
+        InstrumentSupergraphLayer::new(
+            self.config.clone(),
+            self.apollo_metrics_sender.clone(),
+            self.enabled_features.clone(),
+            self.field_level_instrumentation_ratio,
+            static_supergraph_instruments,
+            static_graphql_instruments,
+        )
+    }
 }
 
 #[async_trait::async_trait]
@@ -787,563 +1454,6 @@ impl PluginPrivate for Telemetry {
             enabled_features,
             config: Arc::new(config),
         })
-    }
-
-    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
-        let supergraph_schema_id = self.supergraph_schema_id.clone();
-        let config_later = self.config.clone();
-        let config_request = self.config.clone();
-        let config_checkpoint = self.config.clone();
-        let enabled_features = self.enabled_features.clone();
-        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let metrics_sender = self.apollo_metrics_sender.clone();
-        let static_router_instruments = self
-            .builtin_instruments
-            .read()
-            .router_custom_instruments
-            .clone();
-
-        let spans = &self.config.instrumentation.spans;
-        let router_attributes = &spans.router.attributes.attributes;
-
-        let client_name_key = router_attributes
-            .client_name
-            .as_ref()
-            .and_then(|a| a.key(CLIENT_NAME_KEY));
-
-        let client_version_key = router_attributes
-            .client_version
-            .as_ref()
-            .and_then(|a| a.key(CLIENT_VERSION_KEY));
-
-        ServiceBuilder::new()
-            .map_response(move |response: router::Response| {
-                // The current span *should* be the request span as we are outside the instrument block.
-                let span = Span::current();
-                if let Some(span_name) = span.metadata().map(|metadata| metadata.name())
-                    && span_name == ROUTER_SPAN_NAME
-                {
-                    //https://opentelemetry.io/docs/specs/otel/trace/semantic_conventions/instrumentation/graphql/
-                    let operation_kind = response.context.get::<_, String>(OPERATION_KIND);
-                    let operation_name = response.context.get::<_, String>(OPERATION_NAME);
-
-                    if let Ok(Some(operation_kind)) = &operation_kind {
-                        span.record("graphql.operation.type", operation_kind);
-                    }
-                    if let Ok(Some(operation_name)) = &operation_name {
-                        span.record("graphql.operation.name", operation_name);
-                    }
-                    match (&operation_kind, &operation_name) {
-                        (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                            OTEL_NAME.into(),
-                            format!("{kind} {name}").into(),
-                        ),
-                        (Ok(Some(kind)), _) => {
-                            span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
-                        }
-                        _ => span
-                            .set_span_dyn_attribute(OTEL_NAME.into(), "GraphQL Operation".into()),
-                    };
-                }
-
-                response
-            })
-            .layer(InstrumentLayer::new(move |request: &router::Request| {
-                // When running through axum, the TraceLayer holds a "router" span guard
-                // across the entire synchronous call chain, so Span::current() already
-                // returns it here — reuse it rather than creating a duplicate SERVER span.
-                // In tests that bypass axum, there is no active span, so we create one to
-                // match the behavior users actually see.
-                let current = Span::current();
-                if current
-                    .metadata()
-                    .is_some_and(|m| m.name() == ROUTER_SPAN_NAME)
-                {
-                    current
-                } else {
-                    span_factory::create_router(&request.router_request)
-                }
-            }))
-            .checkpoint_async(move |req: router::Request| {
-                let config_checkpoint = config_checkpoint.clone();
-                async move {
-                    let library_name_valid = req
-                        .router_request
-                        .headers()
-                        .get(&config_checkpoint.apollo.library_name_header)
-                        .and_then(|v| v.to_str().ok())
-                        .is_none_or(is_valid_client_library_value);
-                    let library_version_valid = req
-                        .router_request
-                        .headers()
-                        .get(&config_checkpoint.apollo.library_version_header)
-                        .and_then(|v| v.to_str().ok())
-                        .is_none_or(is_valid_client_library_value);
-                    if !library_name_valid || !library_version_valid {
-                        if !library_name_valid {
-                            ::tracing::warn!(
-                                "Rejecting request: invalid client library name header value"
-                            );
-                        }
-                        if !library_version_valid {
-                            ::tracing::warn!(
-                                "Rejecting request: invalid client library version header value"
-                            );
-                        }
-                        Ok(ControlFlow::Break(
-                            router::Response::error_builder()
-                                .status_code(StatusCode::BAD_REQUEST)
-                                .context(req.context)
-                                .build()?,
-                        ))
-                    } else {
-                        Ok(ControlFlow::Continue(req))
-                    }
-                }
-            })
-            .map_future_with_request_data(
-                move |request: &router::Request| {
-                    let _ = request.context.insert(
-                        SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY,
-                        supergraph_schema_id.clone(),
-                    );
-
-                    let client_name = request
-                        .router_request
-                        .headers()
-                        .get(&config_request.apollo.client_name_header)
-                        .and_then(|h| h.to_str().ok());
-                    let client_version = request
-                        .router_request
-                        .headers()
-                        .get(&config_request.apollo.client_version_header)
-                        .and_then(|h| h.to_str().ok());
-
-                    if let Some(name) = client_name {
-                        let _ = request.context.insert(CLIENT_NAME, name.to_owned());
-                    }
-
-                    if let Some(version) = client_version {
-                        let _ = request.context.insert(CLIENT_VERSION, version.to_owned());
-                    }
-
-                    let library_name = request
-                        .router_request
-                        .headers()
-                        .get(&config_request.apollo.library_name_header)
-                        .and_then(|h| h.to_str().ok());
-                    let library_version = request
-                        .router_request
-                        .headers()
-                        .get(&config_request.apollo.library_version_header)
-                        .and_then(|h| h.to_str().ok());
-
-                    if let Some(name) = library_name {
-                        let _ = request.context.insert(CLIENT_LIBRARY_NAME, name.to_owned());
-                    }
-
-                    if let Some(version) = library_version {
-                        let _ = request
-                            .context
-                            .insert(CLIENT_LIBRARY_VERSION, version.to_owned());
-                    }
-
-                    let mut custom_attributes = config_request
-                        .instrumentation
-                        .spans
-                        .router
-                        .attributes
-                        .on_request(request);
-
-                    custom_attributes.push(KeyValue::new(
-                        Key::from_static_str("apollo_private.http.request_headers"),
-                        filter_headers(
-                            request.router_request.headers(),
-                            &config_request.apollo.send_headers,
-                            &request.context,
-                        ),
-                    ));
-
-                    // Create and store router overhead tracker in context
-                    request.context.extensions().with_lock(|lock| {
-                        lock.insert(router_overhead::RouterOverheadTracker::new());
-                    });
-
-                    let custom_instruments: RouterInstruments = config_request
-                        .instrumentation
-                        .instruments
-                        .new_router_instruments(static_router_instruments.clone());
-                    custom_instruments.on_request(request);
-
-                    let mut custom_events: RouterEvents =
-                        config_request.instrumentation.events.new_router_events();
-                    custom_events.on_request(request);
-
-                    (
-                        custom_attributes,
-                        custom_instruments,
-                        custom_events,
-                        request.context.clone(),
-                    )
-                },
-                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
-                    Vec<KeyValue>,
-                    RouterInstruments,
-                    RouterEvents,
-                    Context,
-                ),
-                      fut| {
-                    let start = Instant::now();
-                    let config = config_later.clone();
-                    let sender = metrics_sender.clone();
-                    let enabled_features = enabled_features.clone();
-                    let client_name_key = client_name_key.clone();
-                    let client_version_key = client_version_key.clone();
-
-                    Self::plugin_metrics(&config);
-
-                    async move {
-                        if let Some(http_server_response_body_size) =
-                            &custom_instruments.http_server_response_body_size
-                        {
-                            let CustomHistogramInner {
-                                histogram,
-                                attributes,
-                                ..
-                            } = &*http_server_response_body_size.inner.lock();
-                            // Clone the histogram (which uses an Arc internally) and store
-                            // in ResponseBodySizeRecording so that we can later record the
-                            // final byte count after the body stream is fully sent.
-                            if let Some(histogram) = &histogram {
-                                let recording = ResponseBodySizeRecording::new(
-                                    histogram.clone(),
-                                    attributes.clone(),
-                                );
-                                ctx.extensions().with_lock(|lock| lock.insert(recording));
-                            }
-                        }
-
-                        let span = Span::current();
-                        span.set_span_dyn_attributes(custom_attributes);
-                        let response: Result<router::Response, BoxError> = fut.await;
-
-                        // Client name and version must be picked up after awaiting
-                        // the inner service future, because router service plugins
-                        // (e.g. rhai) may modify these values in the shared context
-                        // during request processing. With buffered service layers,
-                        // that processing is deferred until the future is polled.
-                        let get_from_context =
-                            |ctx: &Context, key| ctx.get::<&str, String>(key).ok().flatten();
-                        let client_name = get_from_context(&ctx, CLIENT_NAME);
-                        let client_version = get_from_context(&ctx, CLIENT_VERSION);
-
-                        if let Some(key) = client_name_key {
-                            span.set_span_dyn_attribute(
-                                key,
-                                opentelemetry::Value::String(
-                                    client_name.unwrap_or_default().into(),
-                                ),
-                            );
-                        }
-
-                        if let Some(key) = client_version_key {
-                            span.set_span_dyn_attribute(
-                                key,
-                                opentelemetry::Value::String(
-                                    client_version.unwrap_or_default().into(),
-                                ),
-                            );
-                        }
-
-                        span.record(
-                            APOLLO_PRIVATE_DURATION_NS,
-                            start.elapsed().as_nanos() as i64,
-                        );
-
-                        let expose_trace_id = &config.exporters.tracing.response_trace_id;
-                        if let Ok(response) = &response {
-                            span.set_span_dyn_attributes(
-                                config
-                                    .instrumentation
-                                    .spans
-                                    .router
-                                    .attributes
-                                    .on_response(response),
-                            );
-                            custom_instruments.on_response(response);
-                            custom_events.on_response(response);
-
-                            let mut headers: HashMap<String, Vec<String>> =
-                                HashMap::with_capacity(2);
-                            if expose_trace_id.enabled {
-                                let header_name = expose_trace_id
-                                    .header_name
-                                    .as_ref()
-                                    .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
-
-                                if let Some(value) = response.response.headers().get(header_name) {
-                                    headers.insert(
-                                        header_name.to_string(),
-                                        vec![value.to_str().unwrap_or_default().to_string()],
-                                    );
-                                }
-                            }
-                            if let Some(value) = response.response.headers().get(&CACHE_CONTROL) {
-                                headers.insert(
-                                    CACHE_CONTROL.to_string(),
-                                    vec![value.to_str().unwrap_or_default().to_string()],
-                                );
-                            }
-                            if !headers.is_empty() {
-                                let response_headers =
-                                    serde_json::to_string(&headers).unwrap_or_default();
-                                span.record(
-                                    "apollo_private.http.response_headers",
-                                    &response_headers,
-                                );
-                            }
-
-                            if response.context.extensions().with_lock(|lock| {
-                                lock.get::<Arc<UsageReporting>>()
-                                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
-                                    .unwrap_or(false)
-                            }) {
-                                Self::update_apollo_metrics(
-                                    &response.context,
-                                    field_level_instrumentation_ratio,
-                                    sender,
-                                    true,
-                                    start.elapsed(),
-                                    // the query is invalid, we did not parse the operation kind
-                                    OperationKind::Query,
-                                    None,
-                                    Default::default(),
-                                    enabled_features.clone(),
-                                );
-                            }
-
-                            if response.response.status() >= StatusCode::BAD_REQUEST {
-                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            } else {
-                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                            }
-                        } else if let Err(err) = &response {
-                            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                            span.set_span_dyn_attributes(
-                                config
-                                    .instrumentation
-                                    .spans
-                                    .router
-                                    .attributes
-                                    .on_error(err, &ctx),
-                            );
-                            custom_instruments.on_error(err, &ctx);
-                            custom_events.on_error(err, &ctx);
-                        }
-
-                        if let Ok(resp) = response {
-                            Ok(count_router_errors(resp, &config.apollo.errors).await)
-                        } else {
-                            response
-                        }
-                    }
-                },
-            )
-            .service(service)
-            .boxed_clone()
-    }
-
-    fn supergraph_service(
-        &self,
-        service: supergraph::BoxCloneService,
-    ) -> supergraph::BoxCloneService {
-        let metrics_sender = self.apollo_metrics_sender.clone();
-        let config = self.config.clone();
-        let config_instrument = self.config.clone();
-        let config_map_res_first = config.clone();
-        let config_map_res = config.clone();
-        let enabled_features = self.enabled_features.clone();
-        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let static_supergraph_instruments = self
-            .builtin_instruments
-            .read()
-            .supergraph_custom_instruments
-            .clone();
-        let static_graphql_instruments = self
-            .builtin_instruments
-            .read()
-            .graphql_custom_instruments
-            .clone();
-        ServiceBuilder::new()
-            .instrument(move |supergraph_req: &SupergraphRequest| {
-                span_factory::create_supergraph(
-                    &config_instrument.apollo,
-                    supergraph_req,
-                    field_level_instrumentation_ratio,
-                )
-            })
-            .map_response(move |mut resp: SupergraphResponse| {
-                let config = config_map_res_first.clone();
-                if let Some(usage_reporting) = resp
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
-                {
-                    // Record the operation signature on the router span
-                    Span::current().record(
-                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.get_stats_report_key().as_str(),
-                    );
-                }
-                // To expose trace_id or not
-                let expose_trace_id_header =
-                    config.exporters.tracing.response_trace_id.enabled.then(|| {
-                        config
-                            .exporters
-                            .tracing
-                            .response_trace_id
-                            .header_name
-                            .clone()
-                            .unwrap_or_else(|| DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME.clone())
-                    });
-
-                // Append the trace ID with the right format, based on the config
-                let format_id = |trace_id: TraceId| {
-                    let id = match config.exporters.tracing.response_trace_id.format {
-                        TraceIdFormat::Hexadecimal | TraceIdFormat::OpenTelemetry => {
-                            format!("{trace_id:032x}")
-                        }
-                        TraceIdFormat::Decimal => {
-                            format!("{}", u128::from_be_bytes(trace_id.to_bytes()))
-                        }
-                        TraceIdFormat::Datadog => trace_id.to_datadog(),
-                        TraceIdFormat::Uuid => Uuid::from_bytes(trace_id.to_bytes()).to_string(),
-                    };
-
-                    HeaderValue::from_str(&id).ok()
-                };
-                if let (Some(header_name), Some(trace_id)) =
-                    (expose_trace_id_header, trace_id().and_then(format_id))
-                {
-                    resp.response.headers_mut().append(header_name, trace_id);
-                }
-
-                resp
-            })
-            .map_future_with_request_data(
-                move |req: &SupergraphRequest| {
-                    let custom_attributes = config
-                        .instrumentation
-                        .spans
-                        .supergraph
-                        .attributes
-                        .on_request(req);
-                    Self::populate_context(field_level_instrumentation_ratio, req);
-                    let custom_instruments = config
-                        .instrumentation
-                        .instruments
-                        .new_supergraph_instruments(static_supergraph_instruments.clone());
-                    custom_instruments.on_request(req);
-                    let custom_graphql_instruments: GraphQLInstruments = config
-                        .instrumentation
-                        .instruments
-                        .new_graphql_instruments(static_graphql_instruments.clone());
-                    custom_graphql_instruments.on_request(req);
-
-                    let mut supergraph_events =
-                        config.instrumentation.events.new_supergraph_events();
-                    supergraph_events.on_request(req);
-
-                    (
-                        req.context.clone(),
-                        custom_instruments,
-                        custom_attributes,
-                        supergraph_events,
-                        custom_graphql_instruments,
-                    )
-                },
-                move |(
-                    ctx,
-                    custom_instruments,
-                    mut custom_attributes,
-                    mut supergraph_events,
-                    custom_graphql_instruments,
-                ): (
-                    Context,
-                    SupergraphInstruments,
-                    Vec<KeyValue>,
-                    SupergraphEvents,
-                    GraphQLInstruments,
-                ),
-                      fut| {
-                    let config = config_map_res.clone();
-                    let sender = metrics_sender.clone();
-                    let enabled_features = enabled_features.clone();
-                    let start = Instant::now();
-
-                    async move {
-                        let span = Span::current();
-                        let mut result: Result<SupergraphResponse, BoxError> = fut.await;
-
-                        add_query_attributes(&ctx, &mut custom_attributes);
-                        add_cost_attributes(&ctx, &mut custom_attributes);
-                        span.set_span_dyn_attributes(custom_attributes);
-                        match &result {
-                            Ok(resp) => {
-                                span.set_span_dyn_attributes(
-                                    config
-                                        .instrumentation
-                                        .spans
-                                        .supergraph
-                                        .attributes
-                                        .on_response(resp),
-                                );
-                                custom_instruments.on_response(resp);
-                                supergraph_events.on_response(resp);
-                                custom_graphql_instruments.on_response(resp);
-                            }
-                            Err(err) => {
-                                span.set_span_dyn_attributes(
-                                    config
-                                        .instrumentation
-                                        .spans
-                                        .supergraph
-                                        .attributes
-                                        .on_error(err, &ctx),
-                                );
-                                custom_instruments.on_error(err, &ctx);
-                                supergraph_events.on_error(err, &ctx);
-                                custom_graphql_instruments.on_error(err, &ctx);
-                            }
-                        }
-
-                        if let Ok(resp) = result {
-                            result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
-                        }
-
-                        result = Self::update_otel_metrics(
-                            config.clone(),
-                            ctx.clone(),
-                            result,
-                            custom_instruments,
-                            supergraph_events,
-                            custom_graphql_instruments,
-                        )
-                        .await;
-                        Self::update_metrics_on_response_events(
-                            &ctx,
-                            config,
-                            field_level_instrumentation_ratio,
-                            sender,
-                            start,
-                            result,
-                            enabled_features,
-                        )
-                    }
-                },
-            )
-            .service(service)
-            .boxed_clone()
     }
 
     fn connector_request_service(

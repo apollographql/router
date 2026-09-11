@@ -465,6 +465,7 @@ fn build_supergraph_service(
             &plugins,
             IncludeSubgraphErrors::redact_subgraph_errors_layer,
         )
+        .apply_plugin_layer(&plugins, Telemetry::instrument_supergraph_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.supergraph_service(service)
         })
@@ -498,6 +499,7 @@ pub(crate) fn build_router_service(
         .layer(StaticPageLayer::new(configuration))
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
         .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)
