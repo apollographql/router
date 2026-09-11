@@ -80,18 +80,20 @@ struct Case {
     migration: Migration,
 }
 
+const FEATUREFUL_CASE: Case = Case {
+    name: "cors policies, apq, persisted queries, batching, limits, health check, \
+           subscription, a hidden built-in plugin and a custom plugin",
+    text: include_str!("testdata/compat/current_featureful.yaml"),
+    migration: Migration::None,
+};
+
 const CASES: &[Case] = &[
     Case {
         name: "minimal supergraph listener",
         text: include_str!("testdata/compat/current_minimal.yaml"),
         migration: Migration::None,
     },
-    Case {
-        name: "cors policies, apq, persisted queries, batching, limits, health check, \
-               subscription, a hidden built-in plugin and a custom plugin",
-        text: include_str!("testdata/compat/current_featureful.yaml"),
-        migration: Migration::None,
-    },
+    FEATUREFUL_CASE,
     Case {
         name: "cors.origins migrates into cors.policies",
         text: include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
@@ -552,7 +554,7 @@ fn mandatory_plugin_defaults_are_present_without_being_configured() {
 /// deserialize (see `TypedApolloPlugins`'s doc comment).
 #[test]
 fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
-    let case = &CASES[1]; // "current_featureful.yaml"
+    let case = &FEATUREFUL_CASE;
     let router = router_effective_settings(case).expect("the featureful fixture is valid");
     let shared = shared_effective_settings(case).expect("the featureful fixture is valid");
 
