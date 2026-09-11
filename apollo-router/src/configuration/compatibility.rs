@@ -1,16 +1,5 @@
-//! Compares the router's own configuration loader against the shared `apollo-configuration`
-//! crate that ROUTER-2104 will replace it with.
-//!
-//! This module never runs outside tests and nothing here ships. It exists so the swap in
-//! ROUTER-2104 has evidence, gathered beforehand, that running the same YAML through both
-//! parsers produces the same effective settings and the same plugin configuration.
-//!
-//! `Configuration` already implements two of the three traits `apollo_configuration::Configuration`
-//! requires -- `JsonSchema` and `Deserialize` -- so the marker impls below let the shared
-//! crate parse it directly, with no parallel struct tree to keep in sync. Its own `Deserialize`
-//! impl already calls `Configuration::validate()` at the end, so every cross-field invariant
-//! router enforces today (sandbox vs. homepage, persisted-queries safelisting, the mandatory
-//! `limits`/`health_check` plugin entries) runs identically however the document reaches it.
+//! Compares effective settings from router's loader and `apollo-configuration`.
+//! Named cases record differences in diagnostics, expansion and configuration-usage data.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -34,6 +23,7 @@ use super::upgrade::upgrade_configuration;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::subscription::SubscriptionConfig;
 
+// Configuration's Deserialize implementation already runs its cross-field validation.
 impl apollo_configuration::Validate for Configuration {}
 impl apollo_configuration::Configuration for Configuration {}
 
@@ -43,15 +33,8 @@ fn current_major_version() -> i64 {
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
 }
 
-/// Options for the shared parser configured the way ROUTER-2104's loader will need to be.
-///
-/// Router patches `additionalProperties: false` onto the schema root after generation
-/// (`schema::generate_config_schema`), because `Configuration` can't carry
-/// `#[serde(deny_unknown_fields)]` itself -- it has a `#[serde(flatten)]` field, and serde
-/// doesn't support combining the two. Reusing `generate_config_schema` directly, rather than
-/// re-deriving that patch here, means an unknown top-level key is rejected the same way on both
-/// sides by construction, not by coincidence.
 fn router_options() -> ParseYamlOptions {
+    // Use the same schema, including router's additionalProperties patch, for both parsers.
     let schema = serde_json::to_value(generate_config_schema())
         .expect("router's configuration schema serializes");
     ParseYamlOptions::default().schema(schema)
@@ -147,12 +130,7 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
     }
 }
 
-/// Parses `case` through the shared crate. `apollo_configuration` has no concept of router's
-/// migrations, so a fixture needing one is run through router's own `upgrade_configuration`
-/// first -- the same function `router_effective_settings` uses for a major migration, and the
-/// same transformation router's own `Mode::Upgrade` applies internally for a minor one. This
-/// mirrors what ROUTER-2104's loader will actually do: migrate, then hand the result to the
-/// shared parser, rather than expecting the shared crate to know router's migration history.
+/// Migrates legacy fixtures before passing them to the shared parser.
 fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
     let text = case.text;
     let text = match case.migration {
@@ -166,10 +144,6 @@ fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
 }
 
 /// The JSON pointer to the first leaf where `a` and `b` disagree, or `None` if they match.
-///
-/// Panicking with the whole serialized configuration on a mismatch works, but forces the reader
-/// to scan two large JSON documents by eye for the one field that differs. This walks both trees
-/// together and stops at the first disagreement, so a failing comparison can name it directly.
 fn first_difference(a: &Value, b: &Value) -> Option<String> {
     fn walk(a: &Value, b: &Value, path: &mut String) -> Option<String> {
         match (a, b) {
@@ -346,11 +320,8 @@ fn configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml() 
     );
 }
 
-/// Parses through the shared crate the way ROUTER-2104's loader will need to, so the
-/// `apollo.router.config.*` usage gauges keep working after the swap (see the test above).
-/// `apollo_configuration` doesn't expose the post-expansion document `parse_yaml` builds
-/// internally, so this computes it independently with router's own `Expansion` -- the same
-/// expansion step `validate_yaml_configuration` already performs -- and stores it on the result.
+/// Parses settings and supplies `validated_yaml` for configuration-usage selectors.
+/// Configure `options` and `expansion` with equivalent external inputs.
 fn parse_via_apollo_configuration(
     text: &str,
     options: &ParseYamlOptions,
@@ -365,12 +336,6 @@ fn parse_via_apollo_configuration(
     Ok(config)
 }
 
-/// A migrated document that still fails validation stops startup -- the loader does not retry
-/// the un-migrated original. Reload runs through the same `validate_yaml_configuration` call:
-/// this proves the parsing-level precondition an invalid reload relies on, an `Err` rather than a
-/// silently accepted fallback document. What happens to the request-serving pipeline after that
-/// `Err` -- staying on the previously accepted configuration -- is `state_machine.rs`'s job, not
-/// this module's.
 #[test]
 fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
     let invalid_reload_text = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
@@ -545,20 +510,14 @@ fn cross_field_validation_embedded_in_deserialize_rejects_both_the_same_way() {
     );
 }
 
-/// `Configuration::validate` (above) is invariants baked into router's `Deserialize` impl, not
-/// `apollo_configuration`'s own validation mechanism. ROUTER-2104's plugin configs will instead
-/// use `#[configuration(validate = ...)]`, so this proves that mechanism out directly, on a
-/// small, self-contained type unrelated to any router struct: a schema-valid document can still
-/// fail a custom validator, and the shared parse call is what rejects it.
+/// Exercises the shared crate's custom-validation hook with a synthetic configuration type.
 mod custom_plugin_validation {
     use apollo_configuration::ErrorCollector;
     use apollo_configuration::ParseYamlOptions;
     use apollo_configuration::configuration;
     use miette::Diagnostic as _;
 
-    /// A stand-in for a future ROUTER-2104 plugin config with cross-field validation: both
-    /// fields are individually valid integers (so JSON Schema accepts them), but the custom
-    /// validator additionally requires each to be nonzero.
+    // Zero passes the integer schema but fails the custom validator.
     #[configuration(validate = validate_widget)]
     struct WidgetConfig {
         #[config(default = 1)]
@@ -624,10 +583,6 @@ mod custom_plugin_validation {
     }
 }
 
-/// Router's `Expansion::expand_env` and the shared crate's expansion resolve `${env.NAME}`
-/// identically. Both sides use their own mocking seam (`Expansion::mocked_env_vars`,
-/// `apollo_configuration::expansion::MapVariables`) rather than `std::env::set_var`, so this
-/// test cannot race another test over the same process environment.
 #[test]
 fn env_expansion_agrees_between_the_two_expanders() {
     let text = "supergraph:\n  listen: 127.0.0.1:${env.COMPAT_TEST_PORT}\n";
@@ -693,13 +648,6 @@ fn an_env_var_override_beats_the_documents_own_value_on_both_sides() {
     );
 }
 
-/// `${file.PATH}` expansion reads a real file on both sides -- there is no mocking seam for it
-/// because reading an actual temp file this test creates and controls is no less deterministic
-/// than mocking would be, and it exercises the real filesystem code path on both parsers.
-///
-/// This targets `experimental_type_conditioned_fetching`, a plain `bool` declared directly on
-/// `Configuration`, rather than a field nested inside another struct -- see the known-gap test
-/// below for why the distinction matters to whole-value boolean coercion specifically.
 #[test]
 fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
@@ -758,8 +706,6 @@ fn file_expansion_boolean_coercion_does_not_resolve_through_a_nested_allof_ref()
     );
 }
 
-/// A minimal telemetry input -- reusing an existing broad telemetry fixture rather than adding a
-/// new one to this corpus -- produces the same effective settings through both parsers.
 #[test]
 fn telemetry_input_agrees_between_the_two_parsers() {
     let text = include_str!("testdata/tracing_config.router.yaml");
