@@ -18,6 +18,7 @@ use super::expansion::ValueType;
 use super::schema::Mode;
 use super::schema::generate_config_schema;
 use super::schema::validate_yaml_configuration;
+use super::test_discovery;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 use crate::plugins::healthcheck::Config as HealthCheck;
@@ -814,5 +815,247 @@ fn telemetry_input_agrees_between_the_two_parsers() {
     let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
     if let Some(path) = first_difference(&router_json, &shared_json) {
         panic!("telemetry input: router's own pipeline and the shared parser disagree at `{path}`");
+    }
+}
+
+/// Paths already known to hit the shared parser's whole-value `${...}` coercion gap (PLAT-303).
+/// Expansion resolves the reference, but the resulting string is never coerced into the target
+/// scalar type. The coercion step does not traverse the `allOf` wrapper schemars emits around a
+/// nested struct's schema reference, so the shared parser ends up comparing a string against an
+/// integer- or boolean-typed schema.
+/// (`file_expansion_boolean_coercion_does_not_resolve_through_a_nested_allof_ref` above covers
+/// the minimal case.) A document is named here rather than matched by its error text, so a
+/// document that starts failing for an unrelated reason is reported as an unexpected difference
+/// instead of being silently absorbed into this bucket.
+const KNOWN_COERCION_GAP_PATHS: &[&str] = &["./benches/deeply_nested/router.yaml"];
+
+/// Runs every integration fixture, published example, and docs `router.yaml` snippet that
+/// [`test_discovery::discover_project_configs`] finds through both parsers, with the same mocked
+/// environment variables on each side, and compares effective settings the way
+/// `effective_settings_agree_for_the_shared_corpus` compares `CASES`.
+///
+/// A document on [`KNOWN_COERCION_GAP_PATHS`] is allowed to fail the shared parser with the
+/// coercion gap described there; any other rejection or disagreement fails the test naming the
+/// document's path.
+#[test]
+fn effective_settings_agree_for_discovered_project_documents() {
+    let mocked_env_vars = test_discovery::discovery_env_vars();
+    let mut compared = 0usize;
+    let mut coercion_gap_hits = 0usize;
+    let mut unexpected = Vec::new();
+
+    for doc in test_discovery::discover_project_configs() {
+        let router_expansion = Expansion::default_builder()
+            .mocked_env_vars(mocked_env_vars.clone())
+            .build()
+            .unwrap();
+        let router = match validate_yaml_configuration(&doc.yaml, router_expansion, Mode::NoUpgrade)
+        {
+            Ok(config) => config,
+            Err(error) => {
+                unexpected.push(format!(
+                    "{}: router's own pipeline rejected a discovered document expected to \
+                     succeed: {error}",
+                    doc.path.display()
+                ));
+                continue;
+            }
+        };
+
+        let shared_options = router_options().add_variables(MapVariables(mocked_env_vars.clone()));
+        match shared_options.parse::<Configuration>(&doc.yaml) {
+            Ok(shared) => {
+                compared += 1;
+                let router_json = serde_json::to_value(&router).expect("Configuration serializes");
+                let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
+                if let Some(path) = first_difference(&router_json, &shared_json) {
+                    unexpected.push(format!(
+                        "{}: router's own pipeline and the shared parser disagree at `{path}`",
+                        doc.path.display()
+                    ));
+                }
+            }
+            Err(_) if KNOWN_COERCION_GAP_PATHS.contains(&doc.path.to_string_lossy().as_ref()) => {
+                coercion_gap_hits += 1;
+            }
+            Err(error) => unexpected.push(format!(
+                "{}: the shared parser rejected a discovered document expected to succeed: {:?}",
+                doc.path.display(),
+                miette::Report::new(error)
+            )),
+        }
+    }
+
+    assert!(
+        unexpected.is_empty(),
+        "discovered documents disagree between router's own pipeline and the shared parser:\n\n{}",
+        unexpected.join("\n\n")
+    );
+    assert!(
+        compared > 0,
+        "expected to discover at least one project configuration document"
+    );
+    assert_eq!(
+        coercion_gap_hits,
+        KNOWN_COERCION_GAP_PATHS.len(),
+        "every path on KNOWN_COERCION_GAP_PATHS must actually hit the coercion gap, or it no \
+         longer belongs on the list"
+    );
+}
+
+/// Extends `CASES`' curated coverage with every top-level property whose generated schema
+/// declares a scalar `default`: a document setting the property to that exact value must produce
+/// the same effective settings on both sides, the way
+/// `schema_derived_boolean_values_agree_between_parsers` already checks for one such property.
+#[test]
+fn schema_declared_top_level_defaults_agree_between_parsers() {
+    let schema = serde_json::to_value(generate_config_schema()).expect("schema serializes");
+    let properties = schema["properties"]
+        .as_object()
+        .expect("the root schema declares properties");
+
+    let mut checked = 0usize;
+    for (key, property_schema) in properties {
+        let Some(default) = property_schema.get("default") else {
+            continue;
+        };
+        if !(default.is_boolean() || default.is_string() || default.is_number()) {
+            continue;
+        }
+        checked += 1;
+
+        // A JSON scalar is valid YAML flow-scalar syntax, so `default`'s `Display` (JSON text)
+        // can be written directly after the key without a round trip through `serde_yaml`.
+        let text = format!("{key}: {default}\n");
+
+        let router = validate_yaml_configuration(
+            &text,
+            Expansion::builder().build(),
+            Mode::NoUpgrade,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "[{key}] router's own pipeline rejected its own schema-declared default: {error}"
+            )
+        });
+        let shared = router_options()
+            .parse::<Configuration>(&text)
+            .unwrap_or_else(|error| {
+                panic!("[{key}] the shared parser rejected the schema-declared default: {error}")
+            });
+
+        let router_json = serde_json::to_value(&router).expect("Configuration serializes");
+        let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
+        if let Some(path) = first_difference(&router_json, &shared_json) {
+            panic!(
+                "[{key}] router's own pipeline and the shared parser disagree at `{path}` when \
+                 the document sets the schema's own declared default"
+            );
+        }
+    }
+
+    assert!(
+        checked > 0,
+        "expected at least one top-level property with a scalar schema default"
+    );
+}
+
+/// `RateLimitConf` (`traffic_shaping.{router,all}.global_rate_limit`) is one of the schema's
+/// genuinely required-field structs. Most of `Configuration`'s nested structs carry a
+/// struct-level default that keeps their fields out of the schema's `required` array even when
+/// the fields themselves have no default. `RateLimitConf` has no such struct-level default, so
+/// schemars marks `capacity` and `interval` required. Two different valid value permutations must
+/// parse to the same effective settings on both sides.
+#[test]
+fn schema_derived_required_field_permutations_agree_between_parsers() {
+    for (capacity, interval) in [(10, "1s"), (500, "30s")] {
+        let text = format!(
+            "traffic_shaping:\n  all:\n    global_rate_limit:\n      capacity: {capacity}\n      interval: {interval}\n"
+        );
+
+        let router =
+            validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "[capacity={capacity}, interval={interval}] router's own pipeline rejected \
+                     a document supplying RateLimitConf's required fields: {error}"
+                    )
+                });
+        let shared = router_options()
+            .parse::<Configuration>(&text)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "[capacity={capacity}, interval={interval}] the shared parser rejected a \
+                     document supplying RateLimitConf's required fields: {error}"
+                )
+            });
+
+        let router_json = serde_json::to_value(&router).expect("Configuration serializes");
+        let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
+        if let Some(path) = first_difference(&router_json, &shared_json) {
+            panic!(
+                "[capacity={capacity}, interval={interval}] router's own pipeline and the shared \
+                 parser disagree at `{path}`"
+            );
+        }
+    }
+}
+
+/// Licence gating (`ConfigurationRestriction` matching in
+/// `uplink::license_enforcement::LicenseEnforcementReport::configuration_restrictions`) runs its
+/// JSONPath selectors over an already-parsed `Configuration`'s `validated_yaml` field, not over
+/// parsing itself. That field is `#[serde(skip)]`, so it never appears in the `first_difference`
+/// comparisons the rest of this corpus relies on.
+///
+/// Agreement here rests on a mechanism this corpus already proves for one selector:
+/// `configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml`. This case
+/// exercises the same mechanism against representative restriction paths read directly from
+/// `license_enforcement.rs` at the time of writing: `$.batching` and `$.persisted_queries` are
+/// bare presence checks, and `$.subscription.enabled` is a presence-plus-value check. It adds no
+/// new machinery for licence enforcement itself.
+#[test]
+fn licence_restricted_configuration_paths_agree_between_parsers_via_validated_yaml() {
+    let text = "batching:\n  enabled: true\npersisted_queries:\n  enabled: true\nsubscription:\n  enabled: true\n";
+
+    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect("router's own pipeline accepts this");
+    let adapted_shared =
+        parse_via_apollo_configuration(text, &router_options(), &Expansion::builder().build())
+            .expect("the adapter accepts this");
+
+    let router_yaml = router
+        .validated_yaml
+        .as_ref()
+        .expect("router populates validated_yaml");
+    let shared_yaml = adapted_shared
+        .validated_yaml
+        .as_ref()
+        .expect("the adapter populates validated_yaml");
+
+    for (path, expected_value) in [
+        ("$.batching", None),
+        ("$.persisted_queries", None),
+        ("$.subscription.enabled", Some(json!(true))),
+    ] {
+        let router_hit = jsonpath_lib::selector(router_yaml)(path)
+            .unwrap_or_else(|error| panic!("[{path}] valid JSONPath on router's side: {error}"))
+            .first()
+            .copied()
+            .cloned();
+        let shared_hit = jsonpath_lib::selector(shared_yaml)(path)
+            .unwrap_or_else(|error| panic!("[{path}] valid JSONPath on the shared side: {error}"))
+            .first()
+            .copied()
+            .cloned();
+
+        assert_eq!(
+            router_hit.is_some(),
+            shared_hit.is_some(),
+            "[{path}] licence-restriction presence check must agree"
+        );
+        if let Some(expected) = expected_value {
+            assert_eq!(router_hit, Some(expected.clone()), "[{path}] router side");
+            assert_eq!(shared_hit, Some(expected), "[{path}] shared side");
+        }
     }
 }
