@@ -2474,6 +2474,7 @@ mod tests {
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
     use crate::services::router;
+    use crate::services::supergraph;
 
     // Serializes tests that call `plugin.activate()`. `Telemetry::activate()`
     // -> `Activation::commit()` performs two process-wide writes:
@@ -2573,7 +2574,8 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mut supergraph_service = plugin.supergraph_service(mock_service.boxed_clone());
+        let mut supergraph_service =
+            instrumented_supergraph_service(plugin, mock_service.boxed_clone());
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2709,12 +2711,38 @@ mod tests {
         );
     }
 
-    fn enabled_features(plugin: &dyn DynPlugin) -> &EnabledFeatures {
-        &plugin
+    // TODO(@goto-bus-stop): usage sites should use the PluginTestHarness instead
+    fn unwrap_telemetry_plugin(plugin: &dyn DynPlugin) -> &Telemetry {
+        plugin
             .as_any()
             .downcast_ref::<Telemetry>()
             .expect("telemetry plugin")
-            .enabled_features
+    }
+
+    fn enabled_features(plugin: &dyn DynPlugin) -> &EnabledFeatures {
+        &unwrap_telemetry_plugin(plugin).enabled_features
+    }
+
+    // TODO(@goto-bus-stop): usage sites should use the PluginTestHarness instead
+    fn instrumented_router_service(
+        plugin: &dyn DynPlugin,
+        service: router::BoxCloneService,
+    ) -> router::BoxCloneService {
+        ServiceBuilder::new()
+            .layer(unwrap_telemetry_plugin(plugin).instrument_router_layer())
+            .service(service)
+            .boxed_clone()
+    }
+
+    // TODO(@goto-bus-stop): usage sites should use the PluginTestHarness instead
+    fn instrumented_supergraph_service(
+        plugin: &dyn DynPlugin,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
+        ServiceBuilder::new()
+            .layer(unwrap_telemetry_plugin(plugin).instrument_supergraph_layer())
+            .service(service)
+            .boxed_clone()
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2764,8 +2792,10 @@ mod tests {
                         .unwrap(),
                 );
             });
-            let mut bad_request_supergraph_service =
-                plugin.supergraph_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_supergraph_service = instrumented_supergraph_service(
+                plugin.as_ref(),
+                mock_bad_request_service.boxed_clone(),
+            );
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2815,8 +2845,10 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_router_service = instrumented_router_service(
+                plugin.as_ref(),
+                mock_bad_request_service.boxed_clone(),
+            );
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2897,8 +2929,10 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_router_service = instrumented_router_service(
+                plugin.as_ref(),
+                mock_bad_request_service.boxed_clone(),
+            );
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2990,8 +3024,10 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_supergraph_service =
-                plugin.supergraph_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_supergraph_service = instrumented_supergraph_service(
+                plugin.as_ref(),
+                mock_bad_request_service.boxed_clone(),
+            );
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -3332,7 +3368,7 @@ mod tests {
             }
         });
         let mut request_supergraph_service =
-            plugin.supergraph_service(mock_request_service.boxed_clone());
+            instrumented_supergraph_service(plugin.as_ref(), mock_request_service.boxed_clone());
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3863,7 +3899,7 @@ mod tests {
             );
         });
 
-        let mut service = plugin.supergraph_service(mock_service.boxed_clone());
+        let mut service = instrumented_supergraph_service(plugin, mock_service.boxed_clone());
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()

@@ -202,6 +202,10 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
 #[cfg(test)]
 pub(crate) mod test {
 
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
+
     use super::*;
     use crate::Configuration;
     use crate::metrics::FutureMetricsExt;
@@ -229,20 +233,36 @@ pub(crate) mod test {
                 .build()
                 .await.expect("test harness");
 
-            harness
-                .supergraph_service(|req| async {
-                    let response: serde_json::Value = serde_json::from_str(include_str!(
-                        "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
-                    ))
-                    .unwrap();
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                let response: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
+                ))
+                .unwrap();
+                responder.send_response(
                     supergraph::Response::builder()
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                })
+                        .unwrap(),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(request)
                 .await
                 .unwrap();
+
+            crate::plugin::test::await_mock_driver(driver).await;
 
             assert_histogram_sum!(
                 "graphql.field.list.length",
@@ -276,21 +296,36 @@ pub(crate) mod test {
                 .schema(schema_str)
                 .build()
                 .await.expect("test harness");
-            harness
-                .supergraph_service(|req| async {
-                    let response: serde_json::Value = serde_json::from_str(include_str!(
-                        "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
-                    ))
-                    .unwrap();
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                let response: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
+                ))
+                .unwrap();
+                responder.send_response(
                     supergraph::Response::builder()
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
+                        .unwrap(),
+                );
+            });
 
-                })
+            let mut service = ServiceBuilder::new()
+                .layer(harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(request)
                 .await
                 .unwrap();
+
+            crate::plugin::test::await_mock_driver(driver).await;
 
             assert_histogram_sum!(
                 "graphql.field.list.length",
@@ -332,20 +367,36 @@ pub(crate) mod test {
                 .build()
                 .await.expect("test harness");
 
-            harness
-                .supergraph_service(|req| async {
-                    let response: serde_json::Value = serde_json::from_str(include_str!(
-                        "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
-                    ))
-                    .unwrap();
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                let response: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
+                ))
+                .unwrap();
+                responder.send_response(
                     supergraph::Response::builder()
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                })
+                        .unwrap(),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(request)
                 .await
                 .unwrap();
+
+            crate::plugin::test::await_mock_driver(driver).await;
 
             assert_histogram_not_exists!("graphql.field.list.length", f64);
         }
@@ -374,20 +425,36 @@ pub(crate) mod test {
                 .build()
                 .await.expect("test harness");
 
-            harness
-                .supergraph_service(|req| async {
-                    let response: serde_json::Value = serde_json::from_str(include_str!(
-                        "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
-                    ))
-                    .unwrap();
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                let response: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
+                ))
+                .unwrap();
+                responder.send_response(
                     supergraph::Response::builder()
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                })
+                        .unwrap(),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(harness.instrument_supergraph_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
                 .call(request)
                 .await
                 .unwrap();
+
+            crate::plugin::test::await_mock_driver(driver).await;
 
             assert_histogram_sum!("ships.list.length", 2.0);
         }

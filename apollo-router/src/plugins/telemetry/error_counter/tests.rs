@@ -1121,15 +1121,19 @@ async fn test_supergraph_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.supergraph_service(move |req| {
-            let supergraph_response = example_response.clone();
-            async move {
-                Ok(SupergraphResponse::new_from_graphql_response(
-                    supergraph_response.clone(),
-                    req.context,
-                ))
-            }
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(SupergraphResponse::new_from_graphql_response(
+                example_response.clone(),
+                req.context,
+            ));
         });
+
+        let mut router_service = ServiceBuilder::new()
+            .layer(test_harness.instrument_supergraph_layer())
+            .service(mock_service);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1140,6 +1144,9 @@ async fn test_supergraph_error_counting() {
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 supergraph::Request::builder()
                     .query(query)
@@ -1153,6 +1160,8 @@ async fn test_supergraph_error_counting() {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -1225,26 +1234,36 @@ async fn test_router_error_counting() {
             .await
             .expect("test harness");
 
-        let router_service = test_harness.router_service(move |req| async move {
-            RouterResponse::fake_builder()
-                .errors(vec![
-                    graphql::Error::builder()
-                        .message("previously counted error")
-                        .extension_code("ERROR_CODE")
-                        .extension("service", subgraph_name)
-                        .path(Path::from("obj/field"))
-                        .apollo_id(previously_counted_error_id)
-                        .build(),
-                    graphql::Error::builder()
-                        .message("error in supergraph layer")
-                        .extension_code("SUPERGRAPH_CODE")
-                        .extension("service", subgraph_name)
-                        .path(Path::from("obj/field"))
-                        .build(),
-                ])
-                .context(req.context)
-                .build()
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<router::Request, router::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                RouterResponse::fake_builder()
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("previously counted error")
+                            .extension_code("ERROR_CODE")
+                            .extension("service", subgraph_name)
+                            .path(Path::from("obj/field"))
+                            .apollo_id(previously_counted_error_id)
+                            .build(),
+                        graphql::Error::builder()
+                            .message("error in supergraph layer")
+                            .extension_code("SUPERGRAPH_CODE")
+                            .extension("service", subgraph_name)
+                            .path(Path::from("obj/field"))
+                            .build(),
+                    ])
+                    .context(req.context)
+                    .build()
+                    .expect("expecting valid response"),
+            );
         });
+
+        let mut router_service = ServiceBuilder::new()
+            .layer(test_harness.instrument_router_layer())
+            .service(mock_service);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1255,6 +1274,9 @@ async fn test_router_error_counting() {
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 router::Request::fake_builder()
                     .context(context)
@@ -1263,6 +1285,8 @@ async fn test_router_error_counting() {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -1335,8 +1359,11 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
             .await
             .expect("test harness");
 
-        let router_service =
-            test_harness.supergraph_service(|req| async {
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
+        let driver =
+            tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
                 let example_response = graphql::Response::builder()
                 .data(json!({"data": null}))
                 .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
@@ -1364,11 +1391,15 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
                         .build(),
                 ])
                 .build();
-                Ok(SupergraphResponse::new_from_graphql_response(
+                responder.send_response(SupergraphResponse::new_from_graphql_response(
                     example_response,
                     req.context,
-                ))
+                ));
             });
+
+        let mut router_service = ServiceBuilder::new()
+            .layer(test_harness.instrument_supergraph_layer())
+            .service(mock_service);
 
         let context = Context::new();
         context.insert_json_value(APOLLO_OPERATION_ID, operation_id.into());
@@ -1378,6 +1409,9 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
         context.insert_json_value(CLIENT_VERSION, client_version.into());
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 supergraph::Request::builder()
                     .query(query)
@@ -1391,6 +1425,8 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
 
         assert_counter!(
             "apollo.router.operations.error",
