@@ -2,6 +2,7 @@ use insta::assert_snapshot;
 
 use super::ServiceDefinition;
 use super::compose_as_fed2_subgraphs;
+use super::test_helpers::as_fed2_subgraphs;
 
 #[cfg(test)]
 mod tests {
@@ -569,5 +570,100 @@ mod tests {
         let api_schema_string = api_schema.schema().to_string();
 
         assert_snapshot!(api_schema_string);
+    }
+
+    /// Repro for RH-1375: composing (via the connectors expansion path) two
+    /// subgraphs that both define an executable directive whose argument types
+    /// (an enum, a custom scalar, and a — self-referential — input object) are
+    /// referenced nowhere else. Connector expansion replaces the connector
+    /// subgraph with synthetic subgraphs; those types must be declared as
+    /// members of the synthetic subgraphs (via `@join__type` / `@join__enumValue`
+    /// / `@join__field`) so the expanded supergraph stays valid through
+    /// subgraph extraction during satisfiability. Pre-fix, the expanded
+    /// supergraph declared the types absent from the synthetic subgraphs while
+    /// extraction copied the directive (which references them) into every
+    /// subgraph, producing an invalid subgraph and a composition error.
+    #[test]
+    fn executable_directive_enum_arg_survives_connector_expansion() {
+        use apollo_federation::composition::CompositionOptions;
+        use apollo_federation::composition::compose_with_connectors;
+
+        // Shared definitions: an executable directive whose arguments cover all
+        // three input-type kinds, plus those types. `OwnershipFilter` is
+        // self-referential to exercise the recursive input-object path.
+        let shared_defs = r#"
+            directive @ownership(
+                owners: [Owner!]
+                since: DateTime
+                filter: OwnershipFilter
+            ) on FIELD
+
+            enum Owner {
+                ALICE
+                BOB
+            }
+
+            scalar DateTime
+
+            input OwnershipFilter {
+                owner: Owner
+                parent: OwnershipFilter
+            }
+        "#;
+
+        let with_connectors = ServiceDefinition {
+            name: "with-connectors",
+            type_defs: format!(
+                r#"
+                extend schema
+                @link(
+                    url: "https://specs.apollo.dev/connect/v0.1"
+                    import: ["@connect", "@source"]
+                )
+                @source(name: "v1", http: {{ baseURL: "http://v1" }})
+
+                {shared_defs}
+
+                type Query {{
+                    resources: [Resource!]!
+                    @connect(source: "v1", http: {{ GET: "/resources" }}, selection: "id name")
+                }}
+
+                type Resource @key(fields: "id") {{
+                    id: ID!
+                    name: String!
+                }}
+            "#
+            )
+            .leak(),
+        };
+
+        let plain = ServiceDefinition {
+            name: "plain",
+            type_defs: format!(
+                r#"
+                {shared_defs}
+
+                type Query {{
+                    greeting: String
+                }}
+            "#
+            )
+            .leak(),
+        };
+
+        let subgraphs = as_fed2_subgraphs(&[with_connectors, plain])
+            .expect("Expected fed2 subgraph conversion to succeed");
+
+        let result = compose_with_connectors(subgraphs, CompositionOptions::default());
+
+        let supergraph = result.expect("Expected composition to succeed");
+        let schema_string = supergraph.schema().schema().to_string();
+        for expected in ["enum Owner", "scalar DateTime", "input OwnershipFilter"] {
+            assert!(
+                schema_string.contains(expected),
+                "expanded supergraph dropped `{expected}`: {schema_string}"
+            );
+        }
     }
 }
