@@ -484,7 +484,9 @@ impl FieldRoutingSearchSpace {
     ) -> Result<Vec<RoutingChoice>, FederationError> {
         let first_conditions_local = match (&first_key_edge.conditions, origin_type, origin_schema)
         {
-            (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
+            (Some(conds), Some(st), Some(ss)) => {
+                self.cached_can_satisfy(conds, st, origin_source, ss)
+            }
             (None, _, _) => true,
             _ => false,
         };
@@ -608,7 +610,7 @@ impl FieldRoutingSearchSpace {
         key_edge: &crate::query_graph::QueryGraphEdge,
         target_subgraph: Arc<str>,
         provides_anchor: Option<NodeIndex>,
-        (_current_source, source_type, source_schema): (
+        (current_source, source_type, source_schema): (
             &Arc<str>,
             &Option<CompositeTypeDefinitionPosition>,
             &Option<&crate::schema::ValidFederationSchema>,
@@ -622,7 +624,9 @@ impl FieldRoutingSearchSpace {
             true
         } else {
             match (&key_edge.conditions, source_type, source_schema) {
-                (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
+                (Some(conds), Some(st), Some(ss)) => {
+                    self.cached_can_satisfy(conds, st, current_source, ss)
+                }
                 (None, _, _) => true,
                 _ => false,
             }
@@ -1329,6 +1333,13 @@ impl FieldRoutingSearchSpace {
     /// Cached wrapper around `key_hops_guarded`: if the guard fires (cycle),
     /// we record that as a guard_hit and return empty without caching, so
     /// the outermost call still gets the real result and caches it.
+    ///
+    /// A call entered with an empty in-flight set is the outermost
+    /// evaluation, whose result is the deterministic fixpoint a fresh
+    /// call would recompute — safe to memoize even when inner guard hits
+    /// occurred. The provides-anchor path stays uncached: hop options
+    /// there depend on the pending's path, which the (node, key) cache
+    /// key does not carry.
     pub(super) fn cached_key_hops(
         &self,
         node: NodeIndex,
@@ -1340,14 +1351,11 @@ impl FieldRoutingSearchSpace {
         if let Some(cached) = self.caches.key_hops.borrow().get(&cache_key) {
             return Ok(cached.clone());
         }
-        let guard_before = self.caches.guard_hits.get();
+        let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
+        let hits_before = self.caches.guard_hits.get();
         let result = self.key_hops_guarded(node, provides_anchor, key, edge_finder)?;
-        let guard_after = self.caches.guard_hits.get();
         let result = Arc::new(result);
-        // Only cache when the guard didn't fire during this call: a guard
-        // hit means the result was truncated by the cycle breaker, so it's
-        // correct only for this particular call-stack depth.
-        if guard_before == guard_after {
+        if provides_anchor.is_none() && (outermost || self.caches.guard_hits.get() == hits_before) {
             self.caches
                 .key_hops
                 .borrow_mut()
@@ -1390,7 +1398,8 @@ impl FieldRoutingSearchSpace {
         if let Some(&cached) = self.caches.conditions_routable.borrow().get(&cache_key) {
             return Ok(cached);
         }
-        let guard_before = self.caches.guard_hits.get();
+        let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
+        let hits_before = self.caches.guard_hits.get();
         let mut result = true;
         for sel in conditions.selections.values() {
             let routable = match sel {
@@ -1404,8 +1413,7 @@ impl FieldRoutingSearchSpace {
                 break;
             }
         }
-        let guard_after = self.caches.guard_hits.get();
-        if guard_before == guard_after {
+        if outermost || self.caches.guard_hits.get() == hits_before {
             self.caches
                 .conditions_routable
                 .borrow_mut()
