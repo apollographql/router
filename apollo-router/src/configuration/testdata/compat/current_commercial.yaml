@@ -1,6 +1,4 @@
-# Sets every JSONPath selector `license_enforcement.rs`'s `configuration_restrictions` matches,
-# so the effective-settings comparison reaches configuration a self-hosted licence gates.
-# Values are synthetic: no fixture here resolves or authenticates against anything.
+# Synthetic settings for licence-restricted features.
 apq:
   router:
     cache:
