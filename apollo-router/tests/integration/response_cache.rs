@@ -30,16 +30,12 @@ use tower::ServiceExt as _;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::namespace;
 use crate::integration::common::redact_cache_debug_query_hash;
 
 const REDIS_URL: &str = "redis://127.0.0.1:6379";
 const INVALIDATION_PATH: &str = "/invalidation";
 const INVALIDATION_SHARED_KEY: &str = "supersecret";
-
-/// Isolate tests from each other by adding a random redis key prefix
-pub(crate) fn namespace() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
-}
 
 async fn redis_client() -> Result<Client, BoxError> {
     let client =

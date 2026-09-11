@@ -891,7 +891,7 @@ mod tests {
         let schema_arc: Arc<crate::spec::Schema> = schema.into();
         let qp_arc = QueryPlannerService::create_planner(&schema_arc, &config).unwrap();
         let subgraph_schemas = crate::query_planner::build_subgraph_schemas(&qp_arc);
-        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc).unwrap();
+        let mut planner = QueryPlannerService::new(schema_arc, config.clone(), qp_arc);
 
         let ctx = Context::new();
         ctx.extensions()

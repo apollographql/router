@@ -10,6 +10,7 @@ telemetry:
     client_version_header: apollographql-client-version
     endpoint: ENDPOINT
     tracing:
+      throttle: rate_limited
       batch_processor:
         scheduled_delay: 10ms
     metrics:

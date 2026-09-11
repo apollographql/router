@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_federation::connectors::CustomConfiguration;
-use apollo_federation::connectors::SourceName;
 use apollo_federation::connectors::expand::Connectors;
 use http::Uri;
 use schemars::JsonSchema;
@@ -20,11 +19,6 @@ use crate::services::connector_service::ConnectorSourceRef;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConnectorsConfig {
-    /// A map of subgraph name to connectors config for that subgraph
-    #[serde(default)]
-    #[deprecated(note = "use `sources`")]
-    pub(crate) subgraphs: HashMap<String, SubgraphConnectorConfiguration>,
-
     /// Map of subgraph_name.connector_source_name to source configuration
     #[serde(default)]
     pub(crate) sources: HashMap<String, SourceConfiguration>,
@@ -75,28 +69,6 @@ pub(crate) struct ConnectorsConfig {
     /// the v0.5 spec during the preview phase.
     #[serde(default)]
     pub(crate) preview_connect_v0_5: Option<bool>,
-}
-
-// TODO: remove this after deprecation period
-/// Configuration for a connector subgraph
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SubgraphConnectorConfiguration {
-    /// A map of `@source(name:)` to configuration for that source
-    #[schemars(schema_with = "sources_configuration_schema")]
-    pub(crate) sources: HashMap<SourceName, SourceConfiguration>,
-
-    /// Other values that can be used by connectors via `{$config.<key>}`
-    #[serde(rename = "$config")]
-    pub(crate) custom: CustomConfiguration,
-}
-
-// Custom schema implementation to not restrict key type
-fn sources_configuration_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    schemars::json_schema!({
-        "type": "object",
-        "additionalProperties": generator.subschema_for::<SourceConfiguration>(),
-    })
 }
 
 /// Configuration for a `@source` directive
@@ -155,30 +127,6 @@ pub(crate) fn apply_config(
             }
             connector.config = Some(source_config.custom.clone());
         }
-
-        // TODO: remove this after deprecation period
-        #[allow(deprecated)]
-        let Some(subgraph_config) = config.subgraphs.get(&connector.id.subgraph_name) else {
-            continue;
-        };
-        if let Some(source_config) = connector
-            .id
-            .source_name
-            .as_ref()
-            .and_then(|source_name| subgraph_config.sources.get(source_name))
-        {
-            if let Some(uri) = source_config.override_url.as_ref() {
-                // Discards potential StringTemplate parsing error as
-                // URI should always be a valid template string.
-                if let Some(transport) = connector.transport.as_mut() {
-                    transport.source_template = uri.to_string().parse().ok();
-                }
-            }
-            if let Some(max_requests) = source_config.max_requests_per_operation {
-                connector.max_requests = Some(max_requests);
-            }
-        }
-        connector.config = Some(subgraph_config.custom.clone());
     }
     connectors
 }

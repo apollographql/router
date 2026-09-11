@@ -85,11 +85,8 @@ struct AuthenticationPlugin {
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Default)]
 enum OnError {
     Continue,
-    // TODO: make `RedactedError` the default in the next major version. Returning the full
-    // validation error to an unauthenticated caller discloses details of the authentication setup
-    // that no client can act on, so the redacting behavior is the safer default.
-    #[default]
     Error,
+    #[default]
     RedactedError,
 }
 
@@ -112,17 +109,16 @@ struct JWTConf {
     sources: Vec<Source>,
     /// Control the behavior when an error occurs during the authentication process.
     ///
-    /// Defaults to `Error`.
+    /// Defaults to `RedactedError`.
     ///
+    /// * When set to `RedactedError`, requests that fail JWT authentication are rejected with a
+    ///   generic error message instead of the details of the validation failure. The details
+    ///   remain available in the `apollo::authentication::jwt_status` context value and in the
+    ///   `apollo.router.operations.authentication.jwt` metric.
+    /// * When set to `Error`, requests that fail JWT authentication will be rejected with a
+    ///   HTTP 403 error, and the response contains the details of the validation failure.
     /// * When set to `Continue`, requests that fail JWT authentication will continue to be
     ///   processed by the router, but without the JWT claims in the context.
-    /// * When set to `Error`, requests that fail JWT authentication will be rejected with a
-    ///   HTTP 403 error.
-    /// * When set to `RedactedError`, requests that fail JWT authentication are rejected in the
-    ///   same way as `Error`, but the response contains a generic error message instead of the
-    ///   details of the validation failure. The details remain available in the
-    ///   `apollo::authentication::jwt_status` context value and in the
-    ///   `apollo.router.operations.authentication.jwt` metric.
     #[serde(default)]
     on_error: OnError,
 }

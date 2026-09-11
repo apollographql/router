@@ -10,6 +10,7 @@ pub mod response_shape_compare;
 pub mod response_shape_compare_test;
 #[cfg(test)]
 pub mod response_shape_test;
+mod schema_constraint;
 mod subgraph_constraint;
 
 use std::fmt;
@@ -51,6 +52,37 @@ impl fmt::Display for CorrectnessError {
     }
 }
 
+/// Check if `this` response shape is a subset of `other` under a single schema.
+/// - Both response shapes must be derived from the given schema.
+pub fn compare_response_shapes(
+    schema: &ValidFederationSchema,
+    this: &response_shape::ResponseShape,
+    other: &response_shape::ResponseShape,
+) -> Result<(), ComparisonError> {
+    let path_constraint = schema_constraint::SchemaConstraint::new(schema);
+    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    compare_response_shapes_with_constraint(&path_constraint, &assumption, this, other)
+}
+
+/// Check if `this` response shape is a subset of `other` in a federated context (supergraph
+/// schema plus subgraph schemas).
+/// - The response shapes may use any fields from the supergraph schema.
+/// - The schema constraint (from the supergraph schema) is the base; the subgraph constraint
+///   is an extra oracle on top.
+pub fn compare_response_shapes_in_supergraph(
+    supergraph_schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    this: &response_shape::ResponseShape,
+    other: &response_shape::ResponseShape,
+) -> Result<(), ComparisonError> {
+    let path_constraint = (
+        schema_constraint::SchemaConstraint::new(supergraph_schema),
+        subgraph_constraint::SubgraphConstraint::new(subgraphs_by_name),
+    );
+    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    compare_response_shapes_with_constraint(&path_constraint, &assumption, this, other)
+}
+
 /// Check if `this`'s response shape is a subset of `other`'s response shape.
 pub fn compare_operations(
     schema: &ValidFederationSchema,
@@ -62,9 +94,7 @@ pub fn compare_operations(
     tracing::debug!(
         "compare_operations:\nResponse shape (left): {this_rs}\nResponse shape (right): {other_rs}"
     );
-    Ok(response_shape_compare::compare_response_shapes(
-        &this_rs, &other_rs,
-    )?)
+    Ok(compare_response_shapes(schema, &this_rs, &other_rs)?)
 }
 
 /// Check the correctness of the query plan against the schema and input operation by comparing
@@ -98,12 +128,14 @@ pub fn check_plan(
         "check_plan:\nOperation response shape: {op_rs}\nQuery plan response shape: {plan_rs}"
     );
 
-    let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
-    let assumption = response_shape::Clause::default(); // empty assumption at the top level
-    compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs).map_err(|e| {
-        ComparisonError::new(format!(
-            "Response shape from query plan does not match response shape from input operation:\n{e}"
-        ))
-    })?;
+    // Note: The comparison must use the supergraph schema (not the API schema), since `plan_rs`
+    //       may contain any fields from the supergraph schema. The `op_rs` side is indeed
+    //       constrained to the API schema, which is a subset of the supergraph schema.
+    compare_response_shapes_in_supergraph(supergraph_schema, subgraphs_by_name, &op_rs, &plan_rs)
+        .map_err(|e| {
+            ComparisonError::new(format!(
+                "Response shape from query plan does not match response shape from input operation:\n{e}"
+            ))
+        })?;
     Ok(())
 }

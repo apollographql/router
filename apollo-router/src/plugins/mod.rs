@@ -19,7 +19,6 @@ macro_rules! schemar_fn {
 
 pub(crate) mod authentication;
 pub(crate) mod authorization;
-pub(crate) mod chaos;
 pub(crate) mod connectors;
 mod coprocessor;
 pub(crate) mod cors;
@@ -31,11 +30,12 @@ pub(crate) mod expose_query_plan;
 pub(crate) mod file_uploads;
 mod fleet_detector;
 mod forbid_mutations;
-mod headers;
+pub(crate) mod headers;
 pub(crate) mod healthcheck;
-mod include_subgraph_errors;
+pub(crate) mod include_subgraph_errors;
 pub(crate) mod license_enforcement;
 pub(crate) mod limits;
+#[cfg(any(test, feature = "mock_subgraphs_testing"))]
 pub(crate) mod mock_subgraphs;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;

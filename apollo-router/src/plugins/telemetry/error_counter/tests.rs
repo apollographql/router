@@ -49,7 +49,7 @@ use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -112,7 +112,7 @@ async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
 async fn test_count_supergraph_errors_with_previously_counted_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -202,7 +202,7 @@ async fn test_count_supergraph_errors_with_previously_counted_errors() {
 async fn test_count_subgraph_errors_with_include_subgraphs_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             subgraph: SubgraphErrorConfig {
                 subgraphs: HashMap::from([(
                     "some-subgraph".to_string(),
@@ -276,7 +276,7 @@ async fn test_count_subgraph_errors_with_include_subgraphs_enabled() {
 async fn test_count_subgraph_errors_with_include_subgraphs_disabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             subgraph: SubgraphErrorConfig {
                 subgraphs: HashMap::from([(
                     "some-subgraph".to_string(),
@@ -346,7 +346,7 @@ async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
 
     let config = ErrorsConfiguration {
-        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
         ..Default::default()
     };
 
@@ -388,7 +388,7 @@ async fn test_count_subgraph_errors_emits_span_event_with_error_code() {
 async fn test_count_execution_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -454,7 +454,7 @@ async fn test_count_operation_errors_skips_span_event_when_marker_is_set() {
         let _guard = crate::test_harness::tracing_test::dispatcher_guard();
 
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -512,7 +512,7 @@ async fn test_count_execution_errors_emits_span_event_with_error_code() {
     let _guard = crate::test_harness::tracing_test::dispatcher_guard();
 
     let config = ErrorsConfiguration {
-        preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+        extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
         ..Default::default()
     };
 
@@ -555,7 +555,7 @@ async fn test_count_execution_errors_emits_span_event_with_error_code() {
 async fn test_count_router_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -619,7 +619,7 @@ async fn test_count_router_errors() {
 async fn test_count_operation_errors_with_extended_config_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -664,7 +664,7 @@ async fn test_count_operation_errors_with_extended_config_enabled() {
 async fn test_count_operation_errors_with_all_json_types_and_extended_config_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -759,7 +759,7 @@ async fn test_count_operation_errors_with_all_json_types_and_extended_config_ena
 async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_enabled() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -862,7 +862,7 @@ async fn test_subgraph_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -977,7 +977,7 @@ async fn test_execution_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -1089,7 +1089,7 @@ async fn test_supergraph_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -1193,7 +1193,7 @@ async fn test_router_error_counting() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
@@ -1302,7 +1302,7 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
             "telemetry":{
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "extended_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {

@@ -761,7 +761,7 @@ impl SchemaUpgrader {
                         continue;
                     };
                     let mut type_in_other_subgraphs = false;
-                    for (subgraph_name, _) in entries.iter() {
+                    for subgraph_name in entries.keys() {
                         let other_subgraph =
                             self.get_subgraph_by_name(subgraph_name).ok_or_else(|| {
                                 internal_error!(

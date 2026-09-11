@@ -10,9 +10,9 @@ use multimap::MultiMap;
 use tokio::sync::mpsc;
 
 use super::router::ApolloRouterError;
+use crate::axum_factory::Endpoint;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::uplink::license_enforcement::LicenseState;
 

@@ -211,22 +211,22 @@ impl QueryPlannerService {
     ) -> Result<Self, ServiceBuildError> {
         let planner = Self::create_planner(&schema, &configuration)?;
 
-        Self::new(schema, configuration, planner)
+        Ok(Self::new(schema, configuration, planner))
     }
 
     pub(crate) fn new(
         schema: Arc<Schema>,
         configuration: Arc<Configuration>,
         planner: Arc<QueryPlanner>,
-    ) -> Result<Self, ServiceBuildError> {
+    ) -> Self {
         let enable_authorization_directives =
-            AuthorizationPlugin::enable_directives(&configuration, &schema)?;
+            AuthorizationPlugin::enable_directives(&configuration, &schema);
         let federation_instrument = federation_version_instrument(schema.federation_version());
         let signature_normalization_algorithm =
             TelemetryConfig::signature_normalization_algorithm(&configuration);
         let subgraph_schemas = hashed_subgraph_schemas(&planner);
 
-        Ok(Self {
+        Self {
             planner,
             schema,
             subgraph_schemas,
@@ -235,7 +235,7 @@ impl QueryPlannerService {
             configuration,
             _federation_instrument: federation_instrument,
             signature_normalization_algorithm,
-        })
+        }
     }
 
     async fn parse_selections(
@@ -419,9 +419,10 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                 )
                 .await;
 
-            f64_histogram!(
+            f64_histogram_with_unit!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time, in seconds.",
+                "s",
                 start.elapsed().as_secs_f64()
             );
 
@@ -587,9 +588,10 @@ pub(crate) fn metric_query_planning_plan_duration(
     outcome: QueryPlanningOutcome,
     compute_job_type: ComputeJobType,
 ) {
-    f64_histogram!(
+    f64_histogram_with_unit!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
+        "s",
         elapsed,
         "planner" = planner,
         "outcome" = outcome,

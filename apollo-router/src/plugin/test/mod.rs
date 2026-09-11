@@ -8,6 +8,7 @@ mod restricted;
 pub use mock::connector::MockConnector;
 pub use mock::subgraph::MockSubgraph;
 
+#[cfg(any(test, feature = "mock_subgraphs_testing"))]
 pub(crate) use self::mock::canned;
 
 /// Await a mock service driver task, failing the test with a clear message if it

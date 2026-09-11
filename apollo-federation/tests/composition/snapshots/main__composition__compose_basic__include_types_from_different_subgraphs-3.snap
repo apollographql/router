@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/tests/composition/compose_basic.rs
+assertion_line: 243
 expression: subgraph_b_extracted.schema.schema()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
@@ -67,6 +68,10 @@ scalar federation__Policy
 
 scalar federation__ContextFieldValue
 
+type Query {
+  _service: _Service!
+}
+
 type User {
   name: String
   email: String!
@@ -76,8 +81,4 @@ scalar _Any
 
 type _Service {
   sdl: String
-}
-
-type Query {
-  _service: _Service!
 }

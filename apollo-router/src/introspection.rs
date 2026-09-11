@@ -80,29 +80,19 @@ fn introspection_mode(configuration: &Configuration) -> Mode {
 ///
 /// If introspection is disabled in config, always returns an error response.
 /// If a query contains both introspection and concrete fields, returns an error response.
-///
-/// Returns the cache object separately for telemetry activation.
-pub(crate) fn introspection_service(
-    configuration: &Configuration,
-) -> (IntrospectionService, Option<IntrospectionCache>) {
+pub(crate) fn introspection_service(configuration: &Configuration) -> IntrospectionService {
     let builder = ServiceBuilder::new()
         .load_shed()
         .layer(RejectMixedIntrospectionLayer::new());
 
     match introspection_mode(configuration) {
-        Mode::Enabled { storage, max_depth } => (
-            builder
-                .layer(IntrospectionCacheLayer::new(storage.clone()))
-                .service(IntrospectionExecutionService::new(max_depth))
-                .boxed_clone(),
-            Some(storage),
-        ),
-        Mode::Disabled => (
-            builder
-                .service(IntrospectionDisabledService::new())
-                .boxed_clone(),
-            None,
-        ),
+        Mode::Enabled { storage, max_depth } => builder
+            .layer(IntrospectionCacheLayer::new(storage))
+            .service(IntrospectionExecutionService::new(max_depth))
+            .boxed_clone(),
+        Mode::Disabled => builder
+            .service(IntrospectionDisabledService::new())
+            .boxed_clone(),
     }
 }
 
@@ -575,7 +565,7 @@ mod tests {
         let query = "{ x: __typename }";
         let document = Query::parse_document(query, None, &schema, &config).unwrap();
 
-        let (service, _cache) = introspection_service(&config);
+        let service = introspection_service(&config);
         let response = service
             .oneshot(IntrospectionRequest {
                 schema,
@@ -603,7 +593,7 @@ mod tests {
         let query = "{ x: __typename __typename }";
         let document = Query::parse_document(query, None, &schema, &config).unwrap();
 
-        let (service, _cache) = introspection_service(&config);
+        let service = introspection_service(&config);
         let response = service
             .oneshot(IntrospectionRequest {
                 schema,

@@ -131,12 +131,8 @@ impl ApolloOtlpExporter {
         })
     }
 
-    pub(crate) fn prepare_for_export(
-        &self,
-        trace_spans: Vec<LightSpanData>,
-    ) -> Option<Vec<SpanData>> {
+    pub(crate) fn prepare_for_export(&self, trace_spans: Vec<LightSpanData>) -> Vec<SpanData> {
         let mut export_spans: Vec<SpanData> = Vec::new();
-        let mut send_trace: bool = false;
 
         trace_spans.into_iter().for_each(|span| {
             tracing::debug!("apollo otlp: preparing span '{}'", span.name);
@@ -147,23 +143,14 @@ impl ApolloOtlpExporter {
                         .contains_key(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
                     {
                         export_spans.push(self.base_prepare_span(span));
-                        // Mirrors the existing implementation in apollo_telemetry
-                        // which filters out traces that are missing the signature attribute.
-                        // In practice, this results in excluding introspection queries.
-                        send_trace = true
                     }
                 }
                 SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
                 _ => export_spans.push(self.base_prepare_span(span)),
             };
         });
-        if send_trace {
-            tracing::debug!("apollo otlp: sending trace");
-            Some(export_spans)
-        } else {
-            tracing::debug!("apollo otlp: dropping trace");
-            None
-        }
+
+        export_spans
     }
 
     fn extract_span_events(span: &LightSpanData) -> SpanEvents {
@@ -363,19 +350,6 @@ mod tests {
         )
     }
 
-    /// A trace is only exported if its supergraph span carries the operation signature.
-    /// This is what excludes introspection queries (see `prepare_for_export`).
-    #[tokio::test]
-    async fn drops_trace_without_operation_signature() {
-        let exporter = test_exporter(ErrorsConfiguration::default());
-        let spans = vec![light_span(SUPERGRAPH_SPAN_NAME, HashMap::new())];
-
-        assert!(
-            exporter.prepare_for_export(spans).is_none(),
-            "trace without an operation signature must be dropped"
-        );
-    }
-
     #[tokio::test]
     async fn keeps_trace_with_operation_signature() {
         let exporter = test_exporter(ErrorsConfiguration::default());
@@ -386,9 +360,7 @@ mod tests {
         );
         let spans = vec![light_span(SUPERGRAPH_SPAN_NAME, attributes)];
 
-        let prepared = exporter
-            .prepare_for_export(spans)
-            .expect("trace with an operation signature must be kept");
+        let prepared = exporter.prepare_for_export(spans);
         assert_eq!(prepared.len(), 1);
     }
 

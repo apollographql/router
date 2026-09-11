@@ -1629,7 +1629,7 @@ async fn setup_sandboxed_router_and_registry(
     mocks: MockedSubgraphs,
 ) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
-    // Plugin order matters here. `SubgraphServiceFactory::new` folds
+    // Plugin order matters here. `SubgraphServices::new` folds
     // `plugins.iter().rev()` over the inner service, so the plugin added
     // EARLIER becomes the OUTER layer of the resulting service. We want
     // counting to run on every request *before* dispatching to the mock

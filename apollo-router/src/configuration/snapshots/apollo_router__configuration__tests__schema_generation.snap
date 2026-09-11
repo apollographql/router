@@ -277,7 +277,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
+          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nWhatever this sampler lets through is then subject to `tracing.throttle`, which acts as a\nback-stop that further reduces trace volume sent to Apollo Studio."
         },
         "send_headers": {
           "allOf": [
@@ -305,7 +305,7 @@ expression: "&schema"
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
         },
         "subgraph_metrics": {
-          "default": false,
+          "default": true,
           "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
           "type": "boolean"
         },
@@ -319,6 +319,21 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ApolloTraceThrottleConfig": {
+      "description": "The back-stop strategy used to throttle the volume of traces exported to Apollo Studio, after\nhead sampling.",
+      "oneOf": [
+        {
+          "const": "representative_traces",
+          "description": "Send at most one representative trace per minute for each distinct combination of dimensions\n(operation, client, latency bucket, error status, operation type). Duplicate traces sharing\na combination already seen within the current minute are dropped. These traces would end up\nbeing dropped by Apollo at ingestion time anyway.",
+          "type": "string"
+        },
+        {
+          "const": "rate_limited",
+          "description": "Send every trace, but cap the export rate at a fixed maximum of 100 traces per second (per\nrouter instance). Cheaper than `representative_traces` in CPU and memory, at the cost of a\nless even sample. The rate is not configurable.",
+          "type": "string"
+        }
+      ]
     },
     "ApolloUsageReportsBatchProcessorConfiguration": {
       "properties": {
@@ -990,17 +1005,6 @@ expression: "&schema"
           ],
           "description": "Specify a DNS resolution strategy to use when resolving the coprocessor URL."
         },
-        "experimental_http2": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Use HTTP/2 to communicate with the coprocessor."
-        },
         "experimental_http2_keep_alive_interval": {
           "default": null,
           "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
@@ -1016,6 +1020,17 @@ expression: "&schema"
             "string",
             "null"
           ]
+        },
+        "http2": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Http2Config"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Use HTTP/2 to communicate with the coprocessor."
         },
         "pool_idle_timeout": {
           "default": {
@@ -1934,29 +1949,6 @@ expression: "&schema"
       "description": "Subgraph URL mappings"
     },
     "Config": {
-      "additionalProperties": false,
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don't want this in production!\n\n## How Chaos Reloading Works\n\nThe chaos system automatically captures and replays the last known schema and configuration\nevents to force hot reloads even when the underlying content hasn't actually changed. This\nis particularly useful for memory leak detection during hot reload scenarios.\nIf configured, it will activate upon the first config event that is encountered.\n\n### Schema Reloading (`force_schema_reload`)\nWhen enabled, the router will periodically replay the last schema event with a timestamp\ncomment injected into the SDL (e.g., `# Chaos reload timestamp: 1234567890`). This ensures\nthe schema is seen as \"different\" and triggers a full hot reload, even though the functional\nschema content is identical.\n\n### Configuration Reloading (`force_config_reload`)\nWhen enabled, the router will periodically replay the last configuration event. The\nconfiguration is cloned and re-emitted, which triggers the router's configuration change\ndetection and reload logic.\n\n### Example Usage\n```yaml\nexperimental_chaos:\n  force_schema_reload: \"30s\"    # Trigger schema reload every 30 seconds\n  force_config_reload: \"2m\"     # Trigger config reload every 2 minutes\n```",
-      "properties": {
-        "force_config_reload": {
-          "default": null,
-          "description": "Force a hot reload of the configuration at regular intervals by replaying the last\nconfiguration event. This triggers the router's configuration change detection even\nwhen the configuration content hasn't actually changed.\n\nThe system automatically captures the last configuration event and replays it to\nforce configuration reload processing.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "force_schema_reload": {
-          "default": null,
-          "description": "Force a hot reload of the schema at regular intervals by injecting a timestamp comment\ninto the SDL. This ensures schema reloads occur even when the functional schema content\nhasn't changed, which is useful for testing memory leaks during schema hot reloads.\n\nThe system automatically captures the last schema event and replays it with a timestamp\ncomment added to make it appear \"different\" to the reload detection logic.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
-    "Config2": {
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1969,7 +1961,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config2": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1982,11 +1974,11 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config4": {
+    "Config3": {
       "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
-    "Config5": {
+    "Config4": {
       "additionalProperties": false,
       "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
       "properties": {
@@ -2012,11 +2004,11 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config6": {
+    "Config5": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config7": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -2082,7 +2074,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2973,15 +2965,6 @@ expression: "&schema"
           "default": {},
           "description": "Map of subgraph_name.connector_source_name to source configuration",
           "type": "object"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphConnectorConfiguration"
-          },
-          "default": {},
-          "deprecated": true,
-          "description": "A map of subgraph name to connectors config for that subgraph",
-          "type": "object"
         }
       },
       "type": "object"
@@ -3652,7 +3635,7 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "preview_extended_error_metrics": {
+        "extended_error_metrics": {
           "allOf": [
             {
               "$ref": "#/definitions/ExtendedErrorMetricsMode"
@@ -6917,7 +6900,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`.\n\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error.\n* When set to `RedactedError`, requests that fail JWT authentication are rejected in the\n  same way as `Error`, but the response contains a generic error message instead of the\n  details of the validation failure. The details remain available in the\n  `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `RedactedError`.\n\n* When set to `RedactedError`, requests that fail JWT authentication are rejected with a\n  generic error message instead of the details of the validation failure. The details\n  remain available in the `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error, and the response contains the details of the validation failure.\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -6996,10 +6979,6 @@ expression: "&schema"
       "required": [
         "url"
       ],
-      "type": "object"
-    },
-    "LicenseEnforcementConfig": {
-      "description": "The license enforcement plugin has no configuration.",
       "type": "object"
     },
     "LimitsConfig": {
@@ -7770,16 +7749,13 @@ expression: "&schema"
           "$ref": "#/definitions/MyTestPluginConfig"
         },
         "experimental.broken": {
-          "$ref": "#/definitions/Config2"
-        },
-        "experimental.expose_query_plan": {
-          "$ref": "#/definitions/ExposeQueryPlanConfig"
+          "$ref": "#/definitions/Config"
         },
         "experimental.record": {
           "$ref": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config3"
+          "$ref": "#/definitions/Config2"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
@@ -10079,7 +10055,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config8"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -10267,27 +10243,6 @@ expression: "&schema"
           "type": "object"
         }
       ]
-    },
-    "SubgraphConnectorConfiguration": {
-      "additionalProperties": false,
-      "description": "Configuration for a connector subgraph",
-      "properties": {
-        "$config": {
-          "additionalProperties": true,
-          "default": {},
-          "description": "Other values that can be used by connectors via `{$config.<key>}`",
-          "type": "object"
-        },
-        "sources": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SourceConfiguration"
-          },
-          "default": {},
-          "description": "A map of `@source(name:)` to configuration for that source",
-          "type": "object"
-        }
-      },
-      "type": "object"
     },
     "SubgraphDeduplicationConfigConfiguration": {
       "description": "Configuration options pertaining to the subgraph server component.",
@@ -10614,6 +10569,19 @@ expression: "&schema"
           },
           "required": [
             "subgraph_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "is_deferred": {
+              "description": "Set to `true` to emit whether this subgraph fetch is part of the deferred portion of an `@defer` query plan.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_deferred"
           ],
           "type": "object"
         },
@@ -11243,17 +11211,6 @@ expression: "&schema"
           ],
           "description": "DNS resolution strategy for subgraphs"
         },
-        "experimental_http2": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Enable HTTP2 for subgraphs"
-        },
         "experimental_http2_keep_alive_interval": {
           "default": null,
           "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
@@ -11280,6 +11237,17 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "http2": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Http2Config"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Enable HTTP2 for subgraphs"
         },
         "pool_idle_timeout": {
           "default": {
@@ -11623,11 +11591,6 @@ expression: "&schema"
           "description": "Enable errors generated during response reformatting and result coercion to be returned in\nresponses.\nDefault: false\nAll subgraph responses are checked and corrected to ensure alignment with the schema and\nquery. When enabled, misaligned values will generate errors which are included in errors\narray in the response.",
           "type": "boolean"
         },
-        "experimental_log_on_broken_pipe": {
-          "default": false,
-          "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
-          "type": "boolean"
-        },
         "generate_query_fragments": {
           "default": true,
           "description": "Enable QP generation of fragments for subgraph requests\nDefault: true",
@@ -11646,6 +11609,11 @@ expression: "&schema"
           ],
           "default": "127.0.0.1:4000",
           "description": "The socket address and port to listen on\nDefaults to 127.0.0.1:4000"
+        },
+        "log_on_broken_pipe": {
+          "default": false,
+          "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
+          "type": "boolean"
         },
         "path": {
           "default": "/",
@@ -12502,14 +12470,6 @@ expression: "&schema"
           ],
           "description": "Datadog exporter configuration"
         },
-        "experimental_response_trace_id": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExposeTraceId"
-            }
-          ],
-          "description": "A way to expose trace id in response headers"
-        },
         "otlp": {
           "allOf": [
             {
@@ -12525,6 +12485,14 @@ expression: "&schema"
             }
           ],
           "description": "Propagation configuration"
+        },
+        "response_trace_id": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExposeTraceId"
+            }
+          ],
+          "description": "A way to expose trace id in response headers"
         }
       },
       "type": "object"
@@ -12625,6 +12593,14 @@ expression: "&schema"
             }
           ],
           "description": "Configuration for tracing batch processor."
+        },
+        "throttle": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApolloTraceThrottleConfig"
+            }
+          ],
+          "description": "Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the\n`telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers."
         }
       },
       "type": "object"
@@ -12980,7 +12956,7 @@ expression: "&schema"
       "type": "object"
     },
     "^response_cache$": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config6"
     }
   },
   "properties": {
@@ -13080,22 +13056,10 @@ expression: "&schema"
       "$ref": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config4"
-    },
-    "experimental_chaos": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Config"
-        }
-      ],
-      "default": {
-        "force_config_reload": null,
-        "force_schema_reload": null
-      },
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+      "$ref": "#/definitions/Config3"
     },
     "experimental_diagnostics": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config4"
     },
     "experimental_hoist_orphan_errors": {
       "allOf": [
@@ -13115,6 +13079,9 @@ expression: "&schema"
       "default": false,
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
+    },
+    "expose_query_plan": {
+      "$ref": "#/definitions/ExposeQueryPlanConfig"
     },
     "fleet_detector": {
       "$ref": "#/definitions/Conf2"
@@ -13142,9 +13109,6 @@ expression: "&schema"
     },
     "include_subgraph_errors": {
       "$ref": "#/definitions/IncludeSubgraphErrorsConfig"
-    },
-    "license_enforcement": {
-      "$ref": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
       "$ref": "#/definitions/LimitsConfig"
@@ -13187,7 +13151,7 @@ expression: "&schema"
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config6"
+      "$ref": "#/definitions/Config5"
     },
     "reload": {
       "allOf": [
@@ -13255,10 +13219,10 @@ expression: "&schema"
         "defer_support": true,
         "early_cancel": true,
         "enable_result_coercion_errors": false,
-        "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
         "introspection": false,
         "listen": "127.0.0.1:4000",
+        "log_on_broken_pipe": false,
         "path": "/",
         "query_planning": {
           "cache": {

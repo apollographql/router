@@ -77,10 +77,9 @@ impl Line {
 
         let (prefix, is_main) = if let Some(rest) = branch.strip_prefix("main-v") {
             (rest, true)
-        } else if let Some(rest) = branch.strip_prefix("dev-v") {
-            (rest, false)
         } else {
-            return None;
+            let rest = branch.strip_prefix("dev-v")?;
+            (rest, false)
         };
 
         let without_x = prefix.strip_suffix(".x")?;

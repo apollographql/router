@@ -292,7 +292,8 @@ impl Query {
                 return vec![];
             }
             _ => {
-                failfast_debug!("invalid type for data in response. data: {:#?}", data);
+                // XXX(@goto-bus-stop): this should raise an execution error?
+                tracing::debug!("invalid type for data in response. data: {data:#?}");
             }
         }
 
@@ -1049,7 +1050,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1241,7 +1248,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1276,9 +1289,9 @@ impl Query {
                 .difference(&known_variables)
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
-                failfast_debug!(
-                    "Received variable unknown to the query: {:?}",
-                    unknown_variables,
+                tracing::debug!(
+                    unknown_variables = ?unknown_variables,
+                    "Received variable unknown to the query",
                 );
             }
         }

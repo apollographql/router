@@ -22,9 +22,11 @@
 //! * Instruments should use non-prefixed units (i.e. By instead of MiBy) unless there is good
 //!   technical reason to not do so.
 //!
-//! NB: we have not yet modified the existing metrics because some metric exporters (notably
-//! Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
-//! change for customers.
+//! NB: some metric exporters (notably Prometheus) include the unit in the metric name, so
+//! migrating an existing metric to a `_with_unit!` macro is a breaking change for customers
+//! whose unit triggers a Prometheus name suffix (e.g. `s` → `_seconds`, `By` → `_bytes`). Router
+//! 3.x has migrated several such metrics as part of ROUTER-1777; see the router 3.x upgrade
+//! guide for the full list of renamed Prometheus metric names.
 //!
 //! ## Compatibility
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
@@ -183,8 +185,8 @@ impl Drop for HistogramTimerGuard {
     ///
     /// The duration is measured from when the guard was created to when it is dropped.
     fn drop(&mut self) {
-        self.histogram
-            .record(self.start.elapsed().as_secs_f64(), &self.attributes);
+        let elapsed = self.start.elapsed().as_secs_f64();
+        self.histogram.record(elapsed, &self.attributes);
     }
 }
 
@@ -875,19 +877,16 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
 /// `NoopMeterProvider` and reached no exporter.
 ///
 /// This resolves [`meter_provider_internal`] per call rather than capturing it once, so each
-/// `global::meter*` call is answered by whichever provider is current at that moment. That is
-/// what makes the bridge work under test, where the provider is a task local, and what makes a
-/// meter requested after a config reload resolve against the new delegates.
+/// `global::meter*` call is answered by whichever provider is current at that moment — under
+/// test, where the provider is a task local, and across config reloads alike.
 ///
-/// Note what this does *not* buy: an already-created instrument is not rebound by a reload.
-/// `AggregateMeterProvider::meter_with_scope` snapshots the current delegate meters into the
-/// returned `Meter`, and `AggregateMeterProvider::set` only invalidates the instruments the
-/// router's own macros registered — it cannot reach instruments a library is holding. A
-/// dependency that caches its instruments across a reload (in a `static`, say) would keep
-/// writing into the previous, now shut down, provider. The dependencies bridged today are safe
-/// because their instruments are created per pipeline: plugins are activated in
-/// `PluggableSupergraphServiceBuilder::build` before `RouterCreator::new` builds the service
-/// stack, so every reload recreates them against the freshly installed providers.
+/// One caveat: an already-created instrument is not rebound by a reload. A dependency that
+/// caches its instruments across a reload (in a `static`, say) would keep writing into the
+/// previous, now shut down, provider; instruments must be created per pipeline, after
+/// plugin activation. The dependencies bridged today are safe
+/// because their instruments are created per pipeline: `build_pipeline` activates plugins
+/// before it assembles the service stacks, so every reload recreates them against the
+/// freshly installed providers.
 struct DelegatingMeterProvider;
 
 impl opentelemetry::metrics::MeterProvider for DelegatingMeterProvider {
@@ -1453,8 +1452,9 @@ macro_rules! metric {
             {
                 let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
                 let attrs: &[opentelemetry::KeyValue] = &$attrs;
-                instrument.$mutation($value, attrs);
-                $guard::new(instrument.clone(), $value, attrs)
+                let value: $ty = $value;
+                instrument.$mutation(value, attrs);
+                $guard::new(instrument.clone(), value, attrs)
             }
         }
     };

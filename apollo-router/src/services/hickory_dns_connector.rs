@@ -10,7 +10,6 @@ use std::task::Poll;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::net::NetError;
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::connect::dns::Name;
 use tower::Service;
 
@@ -28,7 +27,7 @@ impl AsyncHyperResolver {
     /// Constructs a new resolver from system configuration.
     ///
     /// This will use `/etc/resolv.conf` on Unix OSes and the registry on Windows.
-    fn new_from_system_conf(
+    pub(crate) fn new_from_system_conf(
         dns_resolution_strategy: DnsResolutionStrategy,
     ) -> Result<Self, io::Error> {
         let mut builder = TokioResolver::builder_tokio().map_err(convert_net_error)?;
@@ -76,14 +75,6 @@ impl From<DnsResolutionStrategy> for LookupIpStrategy {
             DnsResolutionStrategy::Ipv4ThenIpv6 => LookupIpStrategy::Ipv4thenIpv6,
         }
     }
-}
-
-/// A helper function to create an http connector and a dns task with the default configuration
-pub(crate) fn new_async_http_connector(
-    dns_resolution_strategy: DnsResolutionStrategy,
-) -> Result<HttpConnector<AsyncHyperResolver>, io::Error> {
-    let resolver = AsyncHyperResolver::new_from_system_conf(dns_resolution_strategy)?;
-    Ok(HttpConnector::new_with_resolver(resolver))
 }
 
 fn convert_net_error(err: NetError) -> io::Error {

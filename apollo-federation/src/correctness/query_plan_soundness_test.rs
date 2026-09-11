@@ -45,6 +45,31 @@ enum link__Purpose {
   EXECUTION
 }
 
+interface E
+  @join__type(graph: A)
+  @join__type(graph: S)
+{
+  e_data: Int!
+}
+
+type EA implements E
+  @join__implements(graph: A, interface: "E")
+  @join__implements(graph: S, interface: "E")
+  @join__type(graph: A)
+  @join__type(graph: S)
+{
+  e_data: Int! @join__field(graph: A, external: true) @join__field(graph: S)
+}
+
+type EB implements E
+  @join__implements(graph: A, interface: "E")
+  @join__implements(graph: S, interface: "E")
+  @join__type(graph: A)
+  @join__type(graph: S)
+{
+  e_data: Int! @join__field(graph: A, external: true) @join__field(graph: S)
+}
+
 type P
   @join__type(graph: A)
   @join__type(graph: S, key: "id")
@@ -68,6 +93,9 @@ type T
   data: Int! @join__field(graph: A, requires: "pre(arg: 0)")
   data2: Int! @join__field(graph: A, requires: "pre2(arg: 2)")
   data3: Int! @join__field(graph: A, requires: "p { p_data(arg: 1) }")
+  data4: Int! @join__field(graph: A, requires: "e { ... on EA { e_data } ... on EB { e_data } }")
+  data5: Int! @join__field(graph: A, requires: "e { e_data }")
+  e: E! @join__field(graph: A, external: true) @join__field(graph: S)
   pre(arg: Int!): Int! @join__field(graph: A, external: true) @join__field(graph: S)
   pre2(arg: Int!): Int! @join__field(graph: A, external: true) @join__field(graph: S)
   p: P! @join__field(graph: A)
@@ -157,6 +185,59 @@ fn test_requires_conditional_multiple_variants() {
         pre -may-> pre(arg: 0)
         data -may-> data
         data -may-> data if v0
+      }
+    }
+    "###);
+}
+
+#[test]
+fn test_requires_starting_at_entity_type_with_interface_fragments() {
+    // The `@requires`/`@key` condition shape starts at the entity type `T`, not at the query
+    // root type. Below the entity type, the required data is partitioned per implementer of
+    // the interface `E`, so the path constraint must narrow starting from `T`'s scope.
+    let op_str = r#"
+        query {
+            start_t {
+                data4
+            }
+        }
+    "#;
+    insta::assert_snapshot!(plan_response_shape(op_str), @r###"
+    {
+      start_t -----> start_t {
+        __typename -----> __typename
+        id -----> id
+        e -----> e {
+          __typename -----> __typename
+          e_data -may-> e_data on EA
+          e_data -may-> e_data on EB
+        }
+        data4 -----> data4
+      }
+    }
+    "###);
+}
+
+#[test]
+fn test_requires_starting_at_entity_type_with_interface_scope_field() {
+    // Same as above, but the required field is demanded at the interface scope.
+    let op_str = r#"
+        query {
+            start_t {
+                data5
+            }
+        }
+    "#;
+    insta::assert_snapshot!(plan_response_shape(op_str), @r###"
+    {
+      start_t -----> start_t {
+        __typename -----> __typename
+        id -----> id
+        e -----> e {
+          __typename -----> __typename
+          e_data -----> e_data
+        }
+        data5 -----> data5
       }
     }
     "###);

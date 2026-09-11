@@ -2,15 +2,9 @@
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
 
-use super::Plugins;
 use super::router::body::RouterBody;
 use crate::Context;
-use crate::batching::JoinBatchRequestsLayer;
-use crate::layers::InternalServiceBuilderExt as _;
-use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 
 pub(crate) mod connection_timing;
 pub(crate) mod service;
@@ -34,59 +28,23 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
-#[derive(Clone)]
-pub(crate) struct HttpClientServiceFactory {
-    pub(crate) service: HttpClientService,
-    pub(crate) plugins: Arc<Plugins>,
-}
-
-impl HttpClientServiceFactory {
-    pub(crate) fn new(service: HttpClientService, plugins: Arc<Plugins>) -> Self {
-        HttpClientServiceFactory { service, plugins }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_config(
-        service: &str,
-        configuration: &crate::Configuration,
-        client_config: crate::configuration::shared::Client,
-    ) -> Self {
-        use indexmap::IndexMap;
-
-        let service = HttpClientService::from_config_for_subgraph(
-            service,
-            configuration,
-            &rustls::RootCertStore::empty(),
-            client_config,
-        )
-        .unwrap();
-
-        HttpClientServiceFactory {
-            service,
-            plugins: Arc::new(IndexMap::default()),
-        }
-    }
-
-    pub(crate) fn create(&self, name: &str) -> BoxCloneService {
-        ServiceBuilder::new()
-            .layer(JoinBatchRequestsLayer::new(name))
-            .layer(SubgraphResponseSizeLimitLayer::new(name))
-            .rust_plugins(self.plugins.clone(), |plugin, service| {
-                plugin.http_client_service(name, service)
-            })
-            .service(self.service.clone())
-            .boxed_clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(name: &str) -> BoxCloneService {
-        Self::from_config(
-            name,
-            &crate::Configuration::default(),
-            crate::configuration::shared::Client::default(),
-        )
-        .create(name)
-    }
+/// Test-only wrapper around the `build_http_client_service` pipeline function: a
+/// subgraph client for `name` built from default configuration with no plugins.
+#[cfg(test)]
+pub(crate) fn test_http_client_service(name: &str) -> BoxCloneService {
+    let inputs = service::HttpClientInputs::for_subgraph(
+        name,
+        &crate::Configuration::default(),
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+        &mut service::DnsResolverCache::default(),
+    )
+    .unwrap();
+    crate::pipeline::build_http_client_service(
+        name,
+        inputs,
+        Arc::new(indexmap::IndexMap::default()),
+    )
 }
 
 /// The kind of remote service an [`HttpClientService`] is configured to talk to.

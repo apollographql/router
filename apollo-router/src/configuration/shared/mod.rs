@@ -22,7 +22,7 @@ pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_sec
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
     /// Use HTTP/2 to communicate with the coprocessor.
-    pub(crate) experimental_http2: Option<Http2Config>,
+    pub(crate) http2: Option<Http2Config>,
 
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
@@ -56,7 +56,7 @@ pub(crate) fn default_pool_idle_timeout() -> Option<Duration> {
     Some(DEFAULT_POOL_IDLE_TIMEOUT)
 }
 
-#[derive(PartialEq, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
+#[derive(PartialEq, Eq, Hash, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DnsResolutionStrategy {
     /// Only query for `A` (IPv4) records

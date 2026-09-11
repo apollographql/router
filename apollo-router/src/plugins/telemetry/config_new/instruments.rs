@@ -1609,35 +1609,28 @@ where
                             }
                         },
                     };
-                    match static_instruments
+                    let counter = static_instruments
                         .get(instrument_name)
                         .expect(
                             "cannot get static instrument for supergraph; this should not happen",
                         )
                         .as_counter_f64()
                         .cloned()
-                    {
-                        Some(counter) => {
-                            let counter = CustomCounterInner {
-                                increment,
-                                condition: instrument.condition.clone(),
-                                counter: Some(counter),
-                                attributes: Vec::new(),
-                                selector,
-                                selectors: Some(instrument.attributes.clone()),
-                                incremented: false,
-                                _phantom: PhantomData,
-                            };
-                            counters.push(CustomCounter {
-                                inner: Mutex::new(counter),
-                            })
-                        }
-                        None => {
-                            failfast_debug!(
-                                "cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub"
-                            );
-                        }
-                    }
+                        .expect("cannot convert static instrument into a counter, this is a bug");
+
+                    let counter = CustomCounterInner {
+                        increment,
+                        condition: instrument.condition.clone(),
+                        counter: Some(counter),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: Some(instrument.attributes.clone()),
+                        incremented: false,
+                        _phantom: PhantomData,
+                    };
+                    counters.push(CustomCounter {
+                        inner: Mutex::new(counter),
+                    })
                 }
                 InstrumentType::Histogram => {
                     let (selector, increment) = match (&instrument.value).into() {
@@ -1671,36 +1664,29 @@ where
                         },
                     };
 
-                    match static_instruments
+                    let histogram = static_instruments
                         .get(instrument_name)
                         .expect(
                             "cannot get static instrument for supergraph; this should not happen",
                         )
                         .as_histogram()
                         .cloned()
-                    {
-                        Some(histogram) => {
-                            let histogram = CustomHistogramInner {
-                                increment,
-                                condition: instrument.condition.clone(),
-                                histogram: Some(histogram),
-                                attributes: Vec::new(),
-                                selector,
-                                selectors: Some(instrument.attributes.clone()),
-                                updated: false,
-                                _phantom: PhantomData,
-                            };
+                        .expect("cannot convert static instrument into a histogram, this is a bug");
 
-                            histograms.push(CustomHistogram {
-                                inner: Mutex::new(histogram),
-                            });
-                        }
-                        None => {
-                            failfast_debug!(
-                                "cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub"
-                            );
-                        }
-                    }
+                    let histogram = CustomHistogramInner {
+                        increment,
+                        condition: instrument.condition.clone(),
+                        histogram: Some(histogram),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: Some(instrument.attributes.clone()),
+                        updated: false,
+                        _phantom: PhantomData,
+                    };
+
+                    histograms.push(CustomHistogram {
+                        inner: Mutex::new(histogram),
+                    });
                 }
             }
         }
@@ -1930,8 +1916,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -1972,8 +1958,8 @@ where
                 Increment::EventCustom(None) => Increment::Custom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2023,8 +2009,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2111,8 +2097,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom: {other:?}"
                     );
                     return;
                 }
@@ -2357,8 +2343,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2398,8 +2384,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2450,8 +2436,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2535,8 +2521,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom: {other:?}"
                     );
                     return;
                 }

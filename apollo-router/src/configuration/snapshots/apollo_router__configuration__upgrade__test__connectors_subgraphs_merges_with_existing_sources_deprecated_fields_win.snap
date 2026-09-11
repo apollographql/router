@@ -1,0 +1,18 @@
+---
+source: apollo-router/src/configuration/upgrade.rs
+expression: config
+---
+{
+  "connectors": {
+    "sources": {
+      "sub_a.src_1": {
+        "override_url": "http://old",
+        "max_requests_per_operation": 3
+      },
+      "sub_a.src_2": {
+        "max_requests_per_operation": 7,
+        "override_url": "http://two"
+      }
+    }
+  }
+}

@@ -165,20 +165,6 @@ impl StorageInterface {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
     }
-
-    /// Activate all storages so they can start emitting metrics.
-    pub(crate) fn activate(&self) {
-        if let Some(all) = &self.all
-            && let Some(storage) = all.get()
-        {
-            storage.activate();
-        }
-        for storage in self.subgraphs.values() {
-            if let Some(storage) = storage.get() {
-                storage.activate();
-            }
-        }
-    }
 }
 
 #[cfg(all(
@@ -480,10 +466,6 @@ impl PluginPrivate for ResponseCache {
             lru_size_instrument: LruSizeInstrument::new(LRU_PRIVATE_QUERIES_INSTRUMENT_NAME),
             drop_tx,
         })
-    }
-
-    fn activate(&self) {
-        self.storage.activate();
     }
 
     fn supergraph_service(

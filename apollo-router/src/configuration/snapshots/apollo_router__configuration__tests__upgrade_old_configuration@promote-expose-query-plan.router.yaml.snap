@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/tests.rs
+assertion_line: 684
+expression: new_config
+---
+---
+plugins: {}
+expose_query_plan: true

@@ -2,11 +2,9 @@ connectors:
   debug_extensions: true
   expose_sources_in_context: true
   max_requests_per_operation_per_source: 100
-  subgraphs:
-    subgraph_name:
+  sources:
+    subgraph_name.source_name:
       $config:
         name_of_the_variable: variable_value
-      sources:
-        source_name:
-          max_requests_per_operation: 50
-          override_url: 'http://localhost'
+      max_requests_per_operation: 50
+      override_url: 'http://localhost'

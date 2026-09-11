@@ -43,11 +43,11 @@ use tower::ServiceBuilder;
 use tower::buffer::future::ResponseFuture;
 
 use crate::ListenAddr;
+use crate::axum_factory::Endpoint;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::notification::Notify;
-use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;

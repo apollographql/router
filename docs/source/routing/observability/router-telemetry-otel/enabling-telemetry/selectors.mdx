@@ -88,6 +88,7 @@ The subgraph service executes multiple times during query execution, with each e
 | `subgraph_operation_kind`   | No          | `string`         | The operation kind from the subgraph query                                     |
 | `subgraph_query`            | Yes         | `string`         | The GraphQL query to the subgraph                                              |
 | `subgraph_name`             | No          | `true` \| `false`  | The subgraph name                                                              |
+| `is_deferred`               | No          | `true`           | Boolean indicating whether this subgraph fetch is part of the deferred portion of an `@defer` query plan. Returns `true` for fetches inside a `DeferredNode` subtree, `false` for primary fetches. For details, see [splitting subgraph metrics by defer phase](#splitting-subgraph-metrics-by-defer-phase). |
 | `subgraph_query_variable`   | Yes         |                  | The name of a subgraph query variable                                          |
 | `subgraph_response_data`    | Yes         |                  | JSON Path into the subgraph response body data (it might impact performance)   |
 | `subgraph_response_errors`  | Yes         |                  | JSON Path into the subgraph response body errors (it might impact performance) |
@@ -110,6 +111,47 @@ The subgraph service executes multiple times during query execution, with each e
 | `response_cache`            | No          | `hit` \| `miss`    | Returns the number of cache hit or miss for this subgraph request              |
 | `response_cache_status`    | No          | `hit` \| `partial_hit`\| `miss`\| `status`    | Indicates the cache status for the subgraph request: `hit` (all data from cache), `miss` (all data from subgraph), or `partial_hit` (some entities from cache).  |
 | `response_cache_control`    | No          | `max_age` \| `scope`\| `no_store`    | Provides data from the computed `Cache-Control` header, such as `max_age`, `scope` (`public`/`private`), or `no_store` status.  |
+
+### Splitting subgraph metrics by defer phase
+
+For `@defer` queries, the router issues some subgraph fetches as part of the primary response and others to satisfy deferred fields. The `is_deferred` selector lets you tag subgraph-scoped metrics with which phase produced the fetch, so you can see, for example, whether deferred fetches contribute disproportionately to tail latency:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            phase:
+              is_deferred: true
+```
+
+This produces two histogram series:
+
+- `http_client_request_duration_seconds{phase="false"}` — primary fetches.
+- `http_client_request_duration_seconds{phase="true"}` — fetches issued to satisfy `@defer` fields.
+
+Combine with `subgraph_name` to get a per-subgraph, per-phase breakdown:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph:
+              subgraph_name: true
+            phase:
+              is_deferred: true
+```
+
+<Note>
+
+`is_deferred` is evaluated at subgraph request time, based on whether the fetch node being dispatched lives under a `DeferredNode` in the query plan. Fetches outside of any `@defer` (including all fetches on non-deferred queries) return `false`.
+
+</Note>
 
 ### HTTP Client
 

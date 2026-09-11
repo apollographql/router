@@ -303,7 +303,7 @@ impl InstrumentData {
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
+            "$[?(@.all.http2 == 'enable' || @.all.http2 == 'http2only' || @.subgraphs..http2 == 'enable' || @.subgraphs..http2 == 'http2only')]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
@@ -409,8 +409,8 @@ impl InstrumentData {
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
             "$.metrics_reference_mode",
-            opt.errors.preview_extended_error_metrics,
-            "$.errors.preview_extended_error_metrics",
+            opt.errors.extended_error_metrics,
+            "$.errors.extended_error_metrics",
             opt.field_level_instrumentation_sampler,
             "$.field_level_instrumentation_sampler",
             opt.tracing.batch_processor.scheduled_delay,
@@ -423,6 +423,8 @@ impl InstrumentData {
             "$.tracing.batch_processor.max_export_timeout",
             opt.tracing.batch_processor.max_queue_size,
             "$.tracing.batch_processor.max_queue_size",
+            opt.tracing.throttle,
+            "$.tracing.throttle",
             opt.metrics.otlp.batch_processor.scheduled_delay,
             "$.metrics.otlp.batch_processor.scheduled_delay",
             opt.metrics.otlp.batch_processor.max_export_timeout,
@@ -447,17 +449,12 @@ impl InstrumentData {
             "$[?(@.expose_sources_in_context == true)]",
             opt.max_requests_per_operation_per_source,
             "$[?(@.max_requests_per_operation_per_source)]",
-            opt.subgraph.config,
-            "$[?(@.subgraphs..['$config'])]",
+            opt.source.config,
+            "$[?(@.sources..['$config'])]",
             opt.source.override_url,
-            "$[?(@.subgraphs..sources..override_url)]",
+            "$[?(@.sources..override_url)]",
             opt.source.max_requests_per_operation,
-            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
-        );
-
-        populate_config_instrument!(
-            apollo.router.config.experimental_chaos,
-            "$.experimental_chaos[?(@.force_schema_reload || @.force_config_reload)]"
+            "$[?(@.sources..max_requests_per_operation)]"
         );
 
         populate_config_instrument!(
@@ -471,8 +468,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_log_on_broken_pipe,
-            "$.supergraph.experimental_log_on_broken_pipe[?(@==true)]"
+            apollo.router.config.log_on_broken_pipe,
+            "$.supergraph.log_on_broken_pipe[?(@==true)]"
         );
 
         populate_config_instrument!(
@@ -501,8 +498,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_response_trace_id,
-            "$.telemetry.exporters.tracing.experimental_response_trace_id[?(@.enabled==true)]"
+            apollo.router.config.response_trace_id,
+            "$.telemetry.exporters.tracing.response_trace_id[?(@.enabled==true)]"
         );
 
         populate_config_instrument!(
@@ -511,8 +508,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_http2,
-            "$.traffic_shaping[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]"
+            apollo.router.config.http2,
+            "$.traffic_shaping[?(@.all.http2 == 'enable' || @.all.http2 == 'http2only' || @.subgraphs..http2 == 'enable' || @.subgraphs..http2 == 'http2only')]"
         );
 
         populate_config_instrument!(
@@ -541,8 +538,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_expose_query_plan,
-            "$.plugins[?(@['experimental.expose_query_plan']==true)]"
+            apollo.router.config.expose_query_plan,
+            "$[?(@.expose_query_plan==true)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.

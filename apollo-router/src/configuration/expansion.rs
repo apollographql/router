@@ -161,7 +161,7 @@ impl Expansion {
 fn dev_mode_defaults() -> Vec<Override> {
     vec![
         Override::builder()
-            .config_path("plugins.[\"experimental.expose_query_plan\"]")
+            .config_path("expose_query_plan")
             .value(true)
             .value_type(ValueType::Bool)
             .build(),
@@ -171,7 +171,7 @@ fn dev_mode_defaults() -> Vec<Override> {
             .value_type(ValueType::Bool)
             .build(),
         Override::builder()
-            .config_path("telemetry.exporters.tracing.experimental_response_trace_id.enabled")
+            .config_path("telemetry.exporters.tracing.response_trace_id.enabled")
             .value(true)
             .value_type(ValueType::Bool)
             .build(),

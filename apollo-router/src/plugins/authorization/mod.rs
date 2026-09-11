@@ -27,7 +27,6 @@ use self::scopes::ScopeFilteringVisitor;
 use crate::Configuration;
 use crate::Context;
 use crate::error::QueryPlannerError;
-use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
@@ -209,10 +208,7 @@ pub(crate) struct AuthorizationPlugin {
 }
 
 impl AuthorizationPlugin {
-    pub(crate) fn enable_directives(
-        configuration: &Configuration,
-        schema: &Schema,
-    ) -> Result<bool, ServiceBuildError> {
+    pub(crate) fn enable_directives(configuration: &Configuration, schema: &Schema) -> bool {
         let has_config = Self::configuration(configuration).directives.enabled;
 
         let has_authorization_directives = schema.has_spec(
@@ -224,7 +220,7 @@ impl AuthorizationPlugin {
         ) || schema
             .has_spec(&Identity::policy_identity(), POLICY_SPEC_VERSION_RANGE);
 
-        Ok(has_config && has_authorization_directives)
+        has_config && has_authorization_directives
     }
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {

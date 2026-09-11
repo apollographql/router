@@ -1,0 +1,20 @@
+supergraph:
+  experimental_log_on_broken_pipe: true
+  query_planning:
+    experimental_plans_limit: 100
+    experimental_paths_limit: 50
+traffic_shaping:
+  all:
+    experimental_http2: enable
+  subgraphs:
+    accounts:
+      experimental_http2: enable
+coprocessor:
+  url: http://example.com
+  client:
+    experimental_http2: enable
+telemetry:
+  exporters:
+    tracing:
+      experimental_response_trace_id:
+        enabled: true

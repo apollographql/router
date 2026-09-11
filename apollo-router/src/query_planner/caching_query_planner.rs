@@ -10,6 +10,7 @@ use futures::future::BoxFuture;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio_util::time::FutureExt;
+#[cfg(test)]
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -154,18 +155,6 @@ fn init_query_plan_from_redis(
     Ok(())
 }
 
-impl CachingQueryPlanner<()> {
-    /// Create a cache for query plans. This cache can deduplicate requests and uses both Redis and
-    /// an in-memory backend.
-    pub(crate) async fn create_cache(
-        config: &crate::configuration::QueryPlanCache,
-    ) -> Result<QueryPlanCache, BoxError> {
-        let cache =
-            DeduplicatingCache::from_configuration(&config.clone().into(), "query planner").await?;
-        Ok(Arc::new(cache))
-    }
-}
-
 impl<T> CachingQueryPlanner<T> {
     #[cfg(test)]
     pub(crate) async fn for_test(
@@ -174,10 +163,17 @@ impl<T> CachingQueryPlanner<T> {
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
     ) -> Result<Self, BoxError> {
-        let cache =
-            CachingQueryPlanner::create_cache(&configuration.supergraph.query_planning.cache)
-                .await?;
-        Self::new(delegate, schema, subgraph_schemas, configuration, cache)
+        let cache = crate::pipeline::build_query_plan_cache(
+            configuration,
+            crate::pipeline::connect_query_plan_redis(configuration).await?,
+        );
+        Ok(Self::new(
+            delegate,
+            schema,
+            subgraph_schemas,
+            configuration,
+            cache,
+        ))
     }
 
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
@@ -187,9 +183,9 @@ impl<T> CachingQueryPlanner<T> {
         subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
         cache: QueryPlanCache,
-    ) -> Result<Self, BoxError> {
+    ) -> Self {
         let enable_authorization_directives =
-            AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+            AuthorizationPlugin::enable_directives(configuration, &schema);
 
         let config_mode_hash = Arc::new(ConfigModeHash::from_configuration(configuration));
         let cooperative_cancellation = configuration
@@ -198,7 +194,7 @@ impl<T> CachingQueryPlanner<T> {
             .experimental_cooperative_cancellation
             .clone();
 
-        Ok(Self {
+        Self {
             cache,
             delegate,
             schema,
@@ -206,7 +202,7 @@ impl<T> CachingQueryPlanner<T> {
             enable_authorization_directives,
             cooperative_cancellation,
             config_mode_hash,
-        })
+        }
     }
 }
 
@@ -464,7 +460,7 @@ where
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     exceeded_memory_limit_setter.store(true, Ordering::Relaxed);
                                     abort_handle.abort();
-                                        log::warn!("memory limit exceeded planning query: {}", &query);
+                                        log::warn!("memory limit exceeded planning query: {}", query);
                                     }));
                                 task
                             } else {
@@ -559,7 +555,7 @@ where
                                 let memory_limit_bytes = memory_limit.as_u64() as usize;
                                 stats.set_allocation_limit(memory_limit_bytes, Box::new(move |_bytes_allocated| {
                                     notify_memory_limit_exceeded.notify_waiters();
-                                    log::warn!("memory limit exceeded planning query: {}", &query);
+                                    log::warn!("memory limit exceeded planning query: {}", query);
                                 }));
                                 tokio::task::spawn(planning_task).await
                             } else {

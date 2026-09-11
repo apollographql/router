@@ -7,5 +7,4 @@ telemetry:
       stdout:
         format: text
 
-plugins:
-  experimental.expose_query_plan: true
+expose_query_plan: true

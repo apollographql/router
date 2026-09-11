@@ -32,9 +32,9 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugins::connectors::tests::req_asserts::Plan;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::router_factory::PipelineFactory;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterSuperServiceFactory;
-use crate::router_factory::YamlRouterFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
@@ -185,13 +185,9 @@ async fn source_max_requests() {
         Default::default(),
         Some(json!({
           "connectors": {
-            "subgraphs": {
-              "connectors": {
-                "sources": {
-                  "json": {
-                    "max_requests_per_operation": 2,
-                  }
-                }
+            "sources": {
+              "connectors.json": {
+                "max_requests_per_operation": 2,
               }
             }
           }
@@ -596,8 +592,8 @@ async fn test_headers() {
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -683,8 +679,8 @@ async fn test_override_headers_with_config() {
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -778,8 +774,8 @@ async fn should_only_send_named_header_once_when_both_config_and_schema_propagat
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -861,8 +857,8 @@ async fn should_only_send_matching_header_once_when_both_config_and_schema_propa
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -949,8 +945,8 @@ async fn should_remove_header_when_sdl_has_insert_and_yaml_has_remove() {
         Default::default(),
         Some(json!({
             "connectors": {
-                "subgraphs": {
-                    "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                           "source": {
                             "val": "val-from-config-source"
@@ -1935,8 +1931,8 @@ async fn test_variables() {
         Default::default(),
         Some(json!({
           "connectors": {
-            "subgraphs": {
-              "connectors": {
+            "sources": {
+              "connectors.v1": {
                 "$config": {
                   "value": "C"
                 }
@@ -2304,8 +2300,8 @@ async fn execute(
     let connector_uri = format!("{uri}/");
     let subgraph_uri = format!("{uri}/graphql");
 
-    // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
-    let mut factory = YamlRouterFactory;
+    // we cannot use Testharness because the subgraph connectors are actually extracted in PipelineFactory
+    let mut factory = PipelineFactory;
 
     let common_config = json!({
         "include_subgraph_errors": { "all": true },
@@ -2326,8 +2322,8 @@ async fn execute(
     };
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
 
-    let router_creator = factory
-        .create(
+    let pipeline = factory
+        .create_pipeline(
             false,
             Arc::new(config.clone()),
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
@@ -2337,7 +2333,7 @@ async fn execute(
         )
         .await
         .unwrap();
-    let service = router_creator.create();
+    let service = pipeline.create();
 
     let mut request = supergraph::Request::fake_builder()
         .query(query)

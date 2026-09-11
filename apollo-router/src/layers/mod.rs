@@ -21,6 +21,7 @@ use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService
 use crate::layers::rust_plugins::RustPluginsLayer;
 use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugin::DynPlugin;
+use crate::plugin::PluginPrivate;
 use crate::services::Plugins;
 use crate::services::supergraph;
 
@@ -417,6 +418,9 @@ pub trait ServiceExt<Request>: Service<Request> {
 }
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
 
+/// Helper type to name layers produced by [`ServiceBuilder::option_layer()`].
+type OptionLayer<L> = tower::util::Either<L, tower::layer::util::Identity>;
+
 /// Extension to [`ServiceBuilder`] for pipeline utilities that are not exposed to crate consumers.
 pub(crate) trait InternalServiceBuilderExt<L>: Sized {
     /// Apply plugins to a service stack.
@@ -440,6 +444,52 @@ pub(crate) trait InternalServiceBuilderExt<L>: Sized {
             &dyn DynPlugin,
             tower::util::BoxCloneService<R, Resp, Err>,
         ) -> tower::util::BoxCloneService<R, Resp, Err>;
+
+    /// Apply a plugin layer to a service stack.
+    ///
+    /// Provide the plugin layer to apply as a method reference.
+    ///
+    /// If the plugin isn't available in the `plugins` registry, this function is a no-op.
+    /// For a plugin that `create_plugins` always registers, prefer
+    /// [`Self::apply_required_plugin_layer`], which panics on a miss instead of silently
+    /// dropping the layer.
+    ///
+    /// ## Example
+    ///
+    /// To apply the masking-context layer from the Headers plugin:
+    ///
+    /// ```rust,ignore
+    /// ServiceBuilder::new()
+    ///     .apply_plugin_layer(&plugins, Headers::router_masking_layer)
+    ///     .service(router_service)
+    /// ```
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
+
+    /// Apply the layer of a *mandatory* plugin to a service stack.
+    ///
+    /// Same as [`Self::apply_plugin_layer`], except that a missing plugin is treated as a
+    /// bug rather than a supported configuration: the miss panics instead of quietly
+    /// reducing the stack to a no-op.
+    fn apply_required_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate;
+}
+
+/// Find the single instance of plugin type `P` in the registry, if it was built.
+fn find_plugin<P: PluginPrivate>(plugins: &Plugins) -> Option<&P> {
+    plugins
+        .values()
+        .find_map(|plugin| plugin.as_any().downcast_ref::<P>())
 }
 
 impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
@@ -455,5 +505,63 @@ impl<L> InternalServiceBuilderExt<L> for ServiceBuilder<L> {
         ) -> tower::util::BoxCloneService<R, Resp, Err>,
     {
         self.layer(RustPluginsLayer::new(plugins, apply))
+    }
+
+    fn apply_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        self.option_layer(find_plugin::<P>(plugins).map(get_layer))
+    }
+
+    fn apply_required_plugin_layer<P, OutLayer>(
+        self,
+        plugins: &Plugins,
+        get_layer: impl FnOnce(&P) -> OutLayer,
+    ) -> ServiceBuilder<Stack<OptionLayer<OutLayer>, L>>
+    where
+        P: PluginPrivate,
+    {
+        if find_plugin::<P>(plugins).is_none() && !plugins.is_empty() {
+            panic!(
+                "mandatory plugin {} is missing from the plugin registry, so its layer will not \
+                 be applied to the pipeline; this is a router bug",
+                std::any::type_name::<P>()
+            );
+        }
+        self.apply_plugin_layer(plugins, get_layer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tower::ServiceBuilder;
+
+    use super::InternalServiceBuilderExt;
+    use crate::plugins::headers::Headers;
+    use crate::services::Plugins;
+    use crate::test_harness::MockedSubgraphs;
+
+    #[test]
+    fn apply_required_plugin_layer_skips_empty_registry() {
+        let plugins = Plugins::default();
+        let _ = ServiceBuilder::new()
+            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
+    }
+
+    #[test]
+    #[should_panic(expected = "mandatory plugin")]
+    fn apply_required_plugin_layer_panics_when_mandatory_plugin_is_missing() {
+        let mut plugins = Plugins::default();
+        plugins.insert(
+            "unrelated".to_string(),
+            Box::new(MockedSubgraphs::default()),
+        );
+        let _ = ServiceBuilder::new()
+            .apply_required_plugin_layer(&plugins, Headers::router_masking_layer);
     }
 }

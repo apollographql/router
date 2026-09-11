@@ -31,7 +31,7 @@ pub fn validate_satisfiability(
 ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
     let supergraph_schema = supergraph.schema().clone();
     let mut errors = vec![];
-    let mut hints = supergraph.hints_mut().drain(..).collect();
+    let mut hints = std::mem::take(supergraph.hints_mut());
     if let Err(e) = validate_satisfiability_inner(supergraph, options, &mut errors, &mut hints) {
         return Err(CompositionFailure {
             errors: vec![CompositionError::InternalError {

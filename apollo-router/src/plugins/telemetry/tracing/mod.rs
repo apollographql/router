@@ -23,6 +23,7 @@ use crate::plugins::telemetry::tracing::datadog::DatadogSpanProcessor;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
+pub(crate) mod apollo_trace_throttle;
 pub(crate) mod datadog;
 #[allow(unreachable_pub, dead_code)]
 pub(crate) mod datadog_exporter;

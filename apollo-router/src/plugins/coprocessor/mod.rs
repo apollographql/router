@@ -651,7 +651,7 @@ pub(crate) fn update_context_from_coprocessor(
 }
 
 fn get_coprocessor_timer(stage: PipelineStep) -> crate::metrics::HistogramTimerGuard {
-    f64_histogram_timer!(
+    f64_histogram_timer_with_unit!(
         "apollo.router.operations.coprocessor.duration",
         "Time spent waiting for the coprocessor to answer, in seconds",
         coprocessor.stage = stage.to_string()

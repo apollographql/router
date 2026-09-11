@@ -10,6 +10,7 @@ pub(crate) mod redis_monitor;
 mod allowed_features;
 mod connectors;
 mod coprocessor;
+#[cfg(feature = "mock_subgraphs_testing")]
 mod demand_control;
 mod docs;
 // In the CI environment we only install Redis on x86_64 Linux
@@ -19,6 +20,7 @@ mod http_server;
 mod introspection;
 mod lifecycle;
 mod metrics;
+#[cfg(feature = "mock_subgraphs_testing")]
 mod mock_subgraphs;
 mod oci;
 mod operation_limits;
@@ -30,7 +32,10 @@ mod traffic_shaping;
 mod typename;
 
 // In the CI environment we only install Redis on x86_64 Linux
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[cfg(all(
+    feature = "mock_subgraphs_testing",
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
 mod response_cache;
 // In the CI environment we only install Redis on x86_64 Linux
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]

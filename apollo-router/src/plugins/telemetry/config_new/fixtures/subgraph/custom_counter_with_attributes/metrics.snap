@@ -18,6 +18,16 @@ info:
               custom_attribute:
                 subgraph_request_header: custom_header
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          has_errors: false
+          subgraph.name: products
 - name: custom_counter
   description: count of requests
   unit: unit
