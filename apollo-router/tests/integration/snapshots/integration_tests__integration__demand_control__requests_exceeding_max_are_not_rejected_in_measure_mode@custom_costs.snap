@@ -31,10 +31,10 @@ expression: parse_result_for_snapshot(response).await
       "fieldWithDynamicListSize": {
         "items": [
           {
-            "id": 7
+            "id": "7"
           },
           {
-            "id": 9
+            "id": "9"
           }
         ]
       },
@@ -47,7 +47,7 @@ expression: parse_result_for_snapshot(response).await
       ],
       "inputWithCost": 5,
       "objectWithCost": {
-        "id": 9
+        "id": "9"
       },
       "scalarWithCost": 6172364
     }

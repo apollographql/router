@@ -330,17 +330,17 @@ async fn should_map_json_content_type() {
       "data": {
         "users": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           }
@@ -441,17 +441,17 @@ async fn should_map_json_like_content_type() {
       "data": {
         "users": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           }

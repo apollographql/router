@@ -2355,7 +2355,6 @@ fn matches_graphql_js_directive_applications() {
         r#"
         type Query {
             a: Int @deprecated
-            b: Int @deprecated(reason: null)
             c: Int @deprecated(reason: "Reason")
             d: Int @deprecated(reason: "No longer supported")
         }
@@ -2366,18 +2365,33 @@ fn matches_graphql_js_directive_applications() {
     insta::assert_snapshot!(api_schema, @r###"
         type Query {
           a: Int @deprecated
-          b: Int
           c: Int @deprecated(reason: "Reason")
           d: Int @deprecated
         }
     "###);
 }
 
-// Note that federation will keep certain default value invalidities, and will not coerce
-// default values as graphql-js would (as this is not required by the spec).
 #[test]
-fn matches_federation_default_value_propagation() {
-    let api_schema = inaccessible_to_api_schema(
+fn rejects_deprecated_with_null_reason() {
+    let err = inaccessible_to_api_schema(
+        r#"
+        type Query {
+            b: Int @deprecated(reason: null)
+        }
+        "#,
+    )
+    .expect_err("should reject null for String! argument");
+    assert!(
+        err.to_string().contains("null"),
+        "error should mention null: {err}"
+    );
+}
+
+// apollo-compiler v2 validates default values against input types, so empty objects
+// for inputs with required fields are now rejected during schema parsing.
+#[test]
+fn rejects_invalid_default_values_for_inputs_with_required_fields() {
+    inaccessible_to_api_schema(
         r#"
         type Query {
           defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
@@ -2395,24 +2409,7 @@ fn matches_federation_default_value_propagation() {
         }
         "#,
     )
-    .expect("should succeed");
-
-    insta::assert_snapshot!(api_schema, @r###"
-    type Query {
-      defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
-      defaultShouldNotHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
-    }
-
-    input OneOptionalOneDefault {
-      notDefaulted: Int
-      defaulted: Boolean = false
-    }
-
-    input OneRequiredOneDefault {
-      notDefaulted: Int!
-      defaulted: Boolean = false
-    }
-    "###);
+    .expect_err("empty default for input with required fields should be rejected");
 }
 
 #[test]

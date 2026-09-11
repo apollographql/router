@@ -59,17 +59,17 @@ async fn basic_batch() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }
@@ -138,17 +138,17 @@ async fn basic_batch_query_params() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }
@@ -215,22 +215,22 @@ async fn batch_missing_items() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": null,
             "username": null
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 4,
+            "id": "4",
             "name": null,
             "username": null
           }
@@ -309,17 +309,17 @@ async fn connect_on_type() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }
@@ -488,17 +488,17 @@ async fn batch_with_max_size_under_batch_size() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }
@@ -602,37 +602,37 @@ async fn batch_with_max_size_over_batch_size() {
       "data": {
         "users": [
           {
-            "id": 3,
+            "id": "3",
             "name": "Clementine Bauch",
             "username": "Samantha"
           },
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           },
           {
-            "id": 4,
+            "id": "4",
             "name": "John Doe",
             "username": "jdoe"
           },
           {
-            "id": 5,
+            "id": "5",
             "name": "John Wick",
             "username": "jwick"
           },
           {
-            "id": 6,
+            "id": "6",
             "name": "Jack Reacher",
             "username": "reacher"
           },
           {
-            "id": 7,
+            "id": "7",
             "name": "James Bond",
             "username": "jbond"
           }

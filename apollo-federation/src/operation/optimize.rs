@@ -137,6 +137,7 @@ impl Operation {
 
         let operation_type: executable::OperationType = self.root_kind.into();
         let operation = executable::Operation {
+            description: None,
             operation_type,
             name: self.name.clone(),
             variables: self.variables.deref().clone(),
@@ -409,6 +410,7 @@ impl<'a> FragmentGenerator<'a> {
         // minify current selection set and extract named fragment
         let minified_selection_set = self.minify(selection_set)?;
         let new_fragment = Fragment {
+            description: None,
             name: self.next_name(),
             selection_set: minified_selection_set,
             directives: Default::default(),

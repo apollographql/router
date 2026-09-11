@@ -245,6 +245,7 @@ fn transform_operation(
         if arguments.contains(v.name.as_str()) {
             for i in 0..*count {
                 new_variables.push(Node::new(VariableDefinition {
+                    description: None,
                     name: Name::new_unchecked(&format!("{}_{}", v.name.as_str(), i)),
                     ty: v.ty.clone(),
                     default_value: v.default_value.clone(),
@@ -440,6 +441,7 @@ mod subgraph_context_unit_tests {
         // add_alias = true will add a "_3:" alias
         let clone = selection_set.clone();
         let mut operation = Node::new(executable::Operation {
+            description: None,
             operation_type: executable::OperationType::Query,
             name: None,
             variables: vec![],

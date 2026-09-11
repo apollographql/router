@@ -84,6 +84,55 @@ async fn validation_errors_from_rust() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn oneof_input_rejects_multiple_fields() {
+    let router = apollo_router::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "telemetry": {
+                "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            }
+        }))
+        .unwrap()
+        .schema(include_str!("fixtures/supergraph_with_oneof.graphql"))
+        .build_router()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(r#"query { userBy(by: { id: "1", email: "a@b.com" }) { name } }"#)
+        .build()
+        .expect("expecting valid request");
+
+    let response: graphql::Response = serde_json::from_slice(
+        router
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert!(
+        !response.errors.is_empty(),
+        "expected validation errors for @oneOf with multiple fields"
+    );
+    assert!(
+        response
+            .errors
+            .iter()
+            .any(|e| e.message.contains("exactly one")),
+        "expected @oneOf validation error about exactly one field, got: {:?}",
+        response.errors
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
     // get request
     let get_request = supergraph::Request::builder()

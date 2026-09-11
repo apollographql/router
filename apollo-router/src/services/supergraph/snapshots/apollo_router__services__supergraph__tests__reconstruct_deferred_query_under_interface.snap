@@ -1,11 +1,11 @@
 ---
-source: apollo-router/src/services/supergraph_service.rs
+source: apollo-router/src/services/supergraph/tests.rs
 expression: stream.next_response().await.unwrap()
 ---
 {
   "data": {
     "me": {
-      "id": 0,
+      "id": "0",
       "fullName": "A",
       "memberships": [
         {

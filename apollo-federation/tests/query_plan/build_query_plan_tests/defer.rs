@@ -1,6 +1,5 @@
 use apollo_compiler::ExecutableDocument;
-use apollo_federation::error::FederationError;
-use apollo_federation::error::SingleFederationError;
+use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -4084,25 +4083,15 @@ fn defer_deferred_depends_on_source_with_shared_merge_at_prefix() {
     );
 }
 
-#[track_caller]
-fn assert_duplicate_defer_label<T: std::fmt::Debug>(
-    result: Result<T, FederationError>,
-    expected_label: &str,
-) {
-    match result {
-        Err(FederationError::SingleFederationError(
-            SingleFederationError::DuplicateDeferLabel { label },
-        )) if label == expected_label => {}
-        Err(e) => panic!("expected DuplicateDeferLabel({expected_label:?}), got: {e}"),
-        Ok(plan) => panic!("expected DuplicateDeferLabel({expected_label:?}), got plan: {plan:?}"),
-    }
-}
-
 /// Regression guard for a stack overflow in
 /// `FetchDependencyGraph::process_root_nodes`. An operation with two nested
 /// `@defer` inline fragments sharing the same `label` used to make the outer
 /// defer its own descendant in the deferred-info graph, and the recursive
 /// processing then never terminated.
+///
+/// apollo-compiler v2 catches duplicate `@defer` labels at validation time,
+/// so we also verify the planner's own guard in `DeferNormalizer::new` via
+/// `assume_valid` to bypass the compiler's check.
 ///
 /// Minimum repro:
 /// ```graphql
@@ -4142,13 +4131,26 @@ fn defer_test_nested_duplicate_label_must_not_stack_overflow() {
     "#;
 
     let api_schema = planner.api_schema();
-    let document =
-        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
-            .expect("operation parses+validates against the api schema");
 
-    assert_duplicate_defer_label(
-        planner.build_query_plan(&document, None, Default::default()),
-        "dup",
+    // apollo-compiler v2 rejects duplicate @defer labels at validation time.
+    let err =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect_err("duplicate @defer labels should be rejected at validation time");
+    assert!(
+        err.to_string().contains("label"),
+        "error should mention label: {err}"
+    );
+
+    // The planner's own DeferNormalizer guard also rejects duplicate labels.
+    let doc = ExecutableDocument::parse(api_schema.schema(), operation, "operation.graphql")
+        .expect("should parse without validation");
+    let doc = Valid::assume_valid(doc);
+    let err = planner
+        .build_query_plan(&doc, None, Default::default())
+        .expect_err("planner should reject duplicate @defer labels");
+    assert!(
+        err.to_string().contains("label"),
+        "planner error should mention label: {err}"
     );
 }
 
@@ -4160,7 +4162,8 @@ fn defer_test_nested_duplicate_label_must_not_stack_overflow() {
 /// response by label.
 ///
 /// The same `DeferNormalizer::new` check that fixes the nested-defer crash
-/// also rejects sibling duplicates.
+/// also rejects sibling duplicates. apollo-compiler v2 catches this at
+/// validation time; the planner guard is exercised via `assume_valid`.
 #[test]
 fn defer_test_sibling_duplicate_label_must_be_rejected() {
     let planner = planner!(
@@ -4193,12 +4196,25 @@ fn defer_test_sibling_duplicate_label_must_be_rejected() {
     "#;
 
     let api_schema = planner.api_schema();
-    let document =
-        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
-            .expect("operation parses+validates against the api schema");
 
-    assert_duplicate_defer_label(
-        planner.build_query_plan(&document, None, Default::default()),
-        "dup",
+    // apollo-compiler v2 rejects duplicate @defer labels at validation time.
+    let err =
+        ExecutableDocument::parse_and_validate(api_schema.schema(), operation, "operation.graphql")
+            .expect_err("duplicate @defer labels should be rejected at validation time");
+    assert!(
+        err.to_string().contains("label"),
+        "error should mention label: {err}"
+    );
+
+    // The planner's own DeferNormalizer guard also rejects duplicate labels.
+    let doc = ExecutableDocument::parse(api_schema.schema(), operation, "operation.graphql")
+        .expect("should parse without validation");
+    let doc = Valid::assume_valid(doc);
+    let err = planner
+        .build_query_plan(&doc, None, Default::default())
+        .expect_err("planner should reject duplicate @defer labels");
+    assert!(
+        err.to_string().contains("label"),
+        "planner error should mention label: {err}"
     );
 }

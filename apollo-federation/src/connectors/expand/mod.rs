@@ -56,6 +56,7 @@ pub enum ExpansionResult {
 pub fn expand_connectors(
     supergraph_str: &str,
     api_schema_options: &ApiSchemaOptions,
+    validate_default_values: bool,
 ) -> Result<ExpansionResult, FederationError> {
     // TODO: Don't rely on finding the URL manually to short out
     let connect_url = ConnectSpec::identity();
@@ -64,7 +65,8 @@ pub fn expand_connectors(
         return Ok(ExpansionResult::Unchanged);
     }
 
-    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+    let supergraph =
+        Supergraph::new_with_router_specs_and_options(supergraph_str, validate_default_values)?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let all_subgraphs: Vec<_> = supergraph.extract_subgraphs()?.into_iter().collect();

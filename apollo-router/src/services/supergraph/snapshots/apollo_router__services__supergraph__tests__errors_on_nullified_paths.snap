@@ -5,9 +5,9 @@ expression: stream.next_response().await.unwrap()
 {
   "data": {
     "foo": {
-      "id": 1,
+      "id": "1",
       "bar": {
-        "id": 2,
+        "id": "2",
         "something": null
       }
     }

@@ -7,7 +7,7 @@ expression: response
     "orga": {
       "id": null,
       "creatorUser": {
-        "id": 0,
+        "id": "0",
         "name": "Ada",
         "phone": null
       }

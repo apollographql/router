@@ -1806,7 +1806,7 @@ fn get_invalidation_root_keys_from_schema(
         fn resolve_field<'a>(
             &'a self,
             info: &'a resolvers::ResolveInfo<'a>,
-        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::FieldError> {
+        ) -> Result<resolvers::ResolvedValue<'a>, resolvers::ExecutionError> {
             let mut result = self.result.borrow_mut();
             let Ok(keys) = &mut *result else {
                 return Ok(resolvers::ResolvedValue::SkipForPartialExecution);

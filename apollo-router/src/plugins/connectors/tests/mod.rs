@@ -89,7 +89,7 @@ async fn value_from_config() {
     {
       "data": {
         "me": {
-          "id": 1,
+          "id": "1",
           "name": "Leanne Graham",
           "username": "Bret"
         }
@@ -132,12 +132,12 @@ async fn max_requests() {
       "data": {
         "users": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": null
           }
@@ -204,12 +204,12 @@ async fn source_max_requests() {
       "data": {
         "users": [
           {
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": null
           }
@@ -267,13 +267,13 @@ async fn test_root_field_plus_entity() {
         "users": [
           {
             "__typename": "User",
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret"
           },
           {
             "__typename": "User",
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette"
           }
@@ -340,14 +340,14 @@ async fn test_root_field_plus_entity_plus_requires() {
         "users": [
           {
             "__typename": "User",
-            "id": 1,
+            "id": "1",
             "name": "Leanne Graham",
             "username": "Bret",
             "d": "1-770-736-8031 x56442"
           },
           {
             "__typename": "User",
-            "id": 2,
+            "id": "2",
             "name": "Ervin Howell",
             "username": "Antonette",
             "d": "1-770-736-8031 x56442"
@@ -1195,7 +1195,7 @@ async fn test_mutation() {
         "createUser": {
           "success": true,
           "user": {
-            "id": 3,
+            "id": "3",
             "name": "New User"
           }
         }
@@ -1369,7 +1369,7 @@ async fn test_nullability() {
     {
       "data": {
         "user": {
-          "id": 1,
+          "id": "1",
           "name": "Leanne Graham",
           "occupation": null,
           "address": null,
@@ -1550,7 +1550,7 @@ async fn test_form_encoding() {
     {
       "data": {
         "post": {
-          "id": 1
+          "id": "1"
         }
       }
     }
@@ -1590,7 +1590,7 @@ async fn test_no_source() {
     {
       "data": {
         "user": {
-          "id": 1,
+          "id": "1",
           "name": "Leanne Graham"
         }
       }
@@ -1771,7 +1771,7 @@ async fn test_interface_object() {
         "itfs": [
           {
             "__typename": "T1",
-            "id": 1,
+            "id": "1",
             "c": 10,
             "d": 20,
             "e": "e1",
@@ -1779,7 +1779,7 @@ async fn test_interface_object() {
           },
           {
             "__typename": "T2",
-            "id": 2,
+            "id": "2",
             "c": 11,
             "d": 21,
             "e": "e2",
@@ -2159,12 +2159,12 @@ mod quickstart_tests {
           "data": {
             "posts": [
               {
-                "id": 1,
+                "id": "1",
                 "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
                 "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit"
               },
               {
-                "id": 2,
+                "id": "2",
                 "body": "est rerum tempore vitae\nsequi sint nihil reprehenderit dolor beatae ea dolores neque\nfugiat blanditiis voluptate porro vel nihil molestiae ut reiciendis\nqui aperiam non debitis possimus qui neque nisi nulla",
                 "title": "qui est esse"
               }
@@ -2192,7 +2192,7 @@ mod quickstart_tests {
         {
           "data": {
             "post": {
-              "id": 1,
+              "id": "1",
               "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
               "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
             }
@@ -2223,11 +2223,11 @@ mod quickstart_tests {
         {
           "data": {
             "post": {
-              "id": 1,
+              "id": "1",
               "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
               "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto",
               "author": {
-                "id": 1,
+                "id": "1",
                 "name": "Leanne Graham"
               }
             }
@@ -2261,22 +2261,22 @@ mod quickstart_tests {
         {
           "data": {
             "user": {
-              "id": 1,
+              "id": "1",
               "name": "Leanne Graham",
               "posts": [
                 {
-                  "id": 1,
+                  "id": "1",
                   "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
                   "author": {
-                    "id": 1,
+                    "id": "1",
                     "name": "Leanne Graham"
                   }
                 },
                 {
-                  "id": 2,
+                  "id": "2",
                   "title": "qui est esse",
                   "author": {
-                    "id": 1,
+                    "id": "1",
                     "name": "Leanne Graham"
                   }
                 }
