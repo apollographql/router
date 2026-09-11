@@ -938,10 +938,8 @@ fn effective_settings_agree_for_discovered_project_documents() {
     );
 }
 
-/// Extends `CASES`' curated coverage with every top-level property whose generated schema
-/// declares a scalar `default`: a document setting the property to that exact value must produce
-/// the same effective settings on both sides, the way
-/// `schema_derived_boolean_values_agree_between_parsers` already checks for one such property.
+/// Both parsers accept each top-level boolean, string and number default declared by the
+/// generated schema and produce matching effective settings.
 #[test]
 fn schema_declared_top_level_defaults_agree_between_parsers() {
     let schema = serde_json::to_value(generate_config_schema()).expect("schema serializes");
