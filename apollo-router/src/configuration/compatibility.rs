@@ -429,13 +429,8 @@ fn configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml() 
     );
 }
 
-/// `raw_yaml` holds the router yaml exactly as read, before migration or env expansion, and
-/// diagnostics derive line numbers from it. It is `#[serde(skip)]`, like `validated_yaml`, and
-/// `Configuration::deserialize` hardcodes it to `None` -- so a bare call through the shared parser
-/// can never set it. The gap is the same one
-/// `configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml` documents for
-/// `validated_yaml`, and the adapter closes it the same way: by setting the field itself, from the
-/// exact text handed to the parser.
+/// The adapter preserves the parser's input text in `raw_yaml`, matching the router loader.
+/// Bare shared parsing leaves this field empty.
 #[test]
 fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
     let text = include_str!("testdata/compat/current_minimal.yaml");
