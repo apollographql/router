@@ -14,7 +14,7 @@ pub enum AdvanceResult<D> {
 }
 
 /// Search space for BULB (Beam search Using Limited discrepancy
-/// Backtracking; Furcy 2006, "Limited Discrepancy Beam Search").
+/// Backtracking; Furcy and Koenig 2005, "Limited Discrepancy Beam Search").
 ///
 /// Operates on a single mutable candidate via checkpoint/rollback instead
 /// of cloning; `snapshot()` is called only to save the best complete candidate.
@@ -23,9 +23,7 @@ pub enum AdvanceResult<D> {
 ///
 /// A two-decision space where the option that probes cheapest at the
 /// first decision forces an expensive follow-up. The greedy pass (fuel 0)
-/// falls into the trap; one discrepancy iteration revisits the first
-/// decision and escapes it. This is the design doc's "Iteration 0 /
-/// Iteration 1" walkthrough in miniature.
+/// falls into the trap; one discrepancy iteration escapes it.
 ///
 /// ```
 /// use apollo_federation::query_plan::incremental_planner::bulb_search::*;
@@ -104,11 +102,12 @@ pub trait BulbSearchSpace {
     /// returning the next multi-option decision point or `Complete`.
     fn advance(&self, candidate: &mut Self::Candidate) -> AdvanceResult<Self::Decision>;
 
-    /// Enumerate options for a decision, best first.
+    /// Enumerate the choices available at a decision point. The search
+    /// orders them by cost itself; enumeration order only breaks cost ties.
     fn options(&self, decision: &Self::Decision) -> Vec<Self::Choice>;
 
-    /// Apply a choice in place at the decision point (`advance` already
-    /// called): pops the decision and commits the choice.
+    /// Commit a choice in place. Only called with the candidate in the
+    /// state where `advance` returned this decision.
     fn apply(
         &self,
         candidate: &mut Self::Candidate,
@@ -120,45 +119,32 @@ pub trait BulbSearchSpace {
     fn checkpoint(&self, candidate: &Self::Candidate) -> Self::Checkpoint;
 
     /// Restore a previously saved checkpoint, undoing all mutations since.
-    /// Checkpoints must be used in LIFO order.
-    ///
-    /// Effort accounting (see [`effort`](Self::effort)) is exempt from
-    /// rollback: the counter must be monotonically non-decreasing across
-    /// the entire search, including rolled-back work. Implementations
-    /// must therefore store the effort counter outside the candidate
-    /// (e.g. on the search space itself) or explicitly skip it during
-    /// rollback.
+    /// Checkpoints must be used in LIFO order. The effort counter (see
+    /// [`effort`](Self::effort)) is exempt: it must keep counting
+    /// rolled-back work, so store it outside the rolled-back state.
     fn rollback(&self, candidate: &mut Self::Candidate, cp: Self::Checkpoint);
 
     /// Full deep clone; used only to save the best complete candidate.
     fn snapshot(&self, candidate: &Self::Candidate) -> Self::Candidate;
 
     /// Heuristic cost of a (possibly partial) candidate. Lower is better.
-    ///
-    /// Cost must be monotonically non-decreasing as choices are applied:
-    /// prefix pruning compares a partial candidate's cost against the best
-    /// complete candidate's total cost, which is only sound when applying
-    /// more choices cannot reduce the cost.
+    /// Must be monotonically non-decreasing as choices are applied, since
+    /// the search prunes partial candidates against the best complete cost.
     fn cost(&self, candidate: &Self::Candidate) -> f64;
 
-    /// Whether a completed candidate satisfies the full request. Only
-    /// complete candidates update the incumbent prune bound and are saved
-    /// as results; incomplete terminal states (dead ends) are counted but
-    /// discarded. The default (always true) suits spaces where every
-    /// terminal state satisfies the request.
+    /// Whether a terminal candidate satisfies the full request. Dead ends
+    /// are never returned and never constrain the search. The default
+    /// (always true) suits spaces where every terminal state is a solution.
     fn is_complete(&self, candidate: &Self::Candidate) -> bool {
         let _ = candidate;
         true
     }
 
-    /// Monotonic total work spent on this candidate across the whole
-    /// search, including rolled-back work; the budget is the effort at the
-    /// first complete candidate plus `fuel`. The default (always 0) disables
-    /// effort budgeting — do NOT combine it with `timeout: None` unless the
-    /// space is finite: there is deliberately no "no-improvement" stop (an
-    /// iteration can end completion-free while deeper discrepancy levels
-    /// still hold improvements), so only `!alternatives_existed` would end
-    /// the loop.
+    /// Monotonic total work spent across the whole search, including
+    /// rolled-back work; fuel (see [`BulbConfig::fuel`]) is measured in
+    /// these units. The default (always 0) disables effort budgeting, so
+    /// pair it with a timeout unless the space is finite: the search has
+    /// no no-improvement cutoff.
     fn effort(&self, candidate: &Self::Candidate) -> u64 {
         let _ = candidate;
         0
@@ -167,20 +153,17 @@ pub trait BulbSearchSpace {
 
 #[derive(Debug, Clone)]
 pub struct BulbConfig {
-    /// B: children explored per decision. B=1 is greedy. The greedy pass
-    /// (discrepancy=0) always uses B=1; later iterations use this value.
+    /// Options explored per decision. The greedy first iteration always
+    /// uses 1; later iterations use this value.
     pub beam_width: usize,
-    /// Cap on search effort beyond the first complete candidate, in effort
-    /// units (see [`BulbSearchSpace::effort`]). The search runs unbudgeted
-    /// until a candidate satisfying [`BulbSearchSpace::is_complete`] is
-    /// recorded; `fuel: 0` stops at the first complete candidate. When
-    /// exhausted, the search returns the best complete candidate found so
-    /// far.
+    /// Cap on effort (see [`BulbSearchSpace::effort`]) spent after the
+    /// first complete candidate; the search for that one runs unbudgeted.
+    /// `fuel: 0` stops at the first complete candidate. Exhaustion returns
+    /// the best found so far.
     pub fuel: u64,
     /// Optional wall-clock limit, after which the best solution so far is
     /// returned, making the result machine-load dependent. Leave `None`
-    /// (the default) for deterministic, fuel-bounded search; set it to cap
-    /// the search at a surrounding request's deadline.
+    /// (the default) for deterministic, fuel-bounded search.
     pub timeout: Option<Duration>,
 }
 
@@ -227,17 +210,14 @@ pub struct BulbStats {
 /// candidate found (if any) along with statistics. `None` means no
 /// candidate satisfying [`BulbSearchSpace::is_complete`] was ever reached.
 ///
-/// A DFS variant of Furcy 2006 "Limited Discrepancy Beam Search" adapted
-/// for undo-based operation: instead of a beam of B cloned states per
-/// layer, a single mutable candidate with checkpoint/rollback. At each
-/// decision point, all options are scored (apply -> cost -> rollback),
-/// sorted, and the top `beam_width` explored via DFS. Scoring uses partial
-/// cost (no advance past single-option decisions), keeping it O(B) per
-/// decision point; completions are only found during exploration.
-///
-/// The outer loop increments the allowed discrepancies: iteration 0 is
-/// greedy (B=1), each subsequent iteration permits one more deviation
-/// (choosing a non-first slice).
+/// A DFS variant of Furcy and Koenig 2005 "Limited Discrepancy Beam
+/// Search": a single
+/// mutable candidate with checkpoint/rollback instead of a beam of cloned
+/// states. Iteration 0 is a greedy descent for a fast first plan; each
+/// later iteration allows one more discrepancy (an option outside the
+/// cheapest `beam_width` at one decision) and the best complete candidate
+/// improves monotonically until exhaustion or a budget (fuel, timeout,
+/// cancellation) stops the search.
 pub fn bulb_search<S: BulbSearchSpace>(
     space: &S,
     mut initial: S::Candidate,
@@ -256,7 +236,6 @@ pub fn bulb_search<S: BulbSearchSpace>(
         effort_budget: None,
         first_complete_effort: None,
         last_effort: 0,
-        deepest_stack: 0,
         best: None,
         best_cost: f64::MAX,
     };
@@ -265,12 +244,10 @@ pub fn bulb_search<S: BulbSearchSpace>(
     let initial_cp = space.checkpoint(&initial);
 
     for max_disc in 0.. {
-        // Divergence from Furcy 2006: the paper uses B (beam width) at
-        // every iteration. We force B=1 for iteration 0 (greedy pass)
-        // because query-graph decision trees can be very deep, and
-        // scoring B options per level on the greedy pass allocates
-        // proportionally to B * depth without improving the first
-        // candidate (greedy only follows the best option anyway).
+        // Divergence from Furcy and Koenig 2005, which uses B every iteration: force
+        // B=1 on the greedy pass. Scoring B options per level allocates
+        // B * depth without improving the first candidate, since greedy
+        // only follows the best option anyway.
         let effective_b = if max_disc == 0 { 1 } else { b };
         trace!(
             max_disc,
@@ -280,9 +257,6 @@ pub fn bulb_search<S: BulbSearchSpace>(
         let alternatives_existed =
             bulb_probe(space, &mut initial, max_disc, effective_b, &mut progress);
 
-        // Restore to initial state for the next iteration. The effort
-        // budget is armed by `record_completion` when the first complete
-        // candidate lands; until then the search runs unbudgeted.
         space.rollback(&mut initial, initial_cp.clone());
 
         trace!(
@@ -304,17 +278,6 @@ pub fn bulb_search<S: BulbSearchSpace>(
             break;
         }
         if !alternatives_existed {
-            break;
-        }
-        // A path with d decision points can absorb at most d discrepancies
-        // (one alternative slice each), so once the budget covers the
-        // deepest stack seen, every reachable combination has been explored.
-        // After an incumbent is found, cost pruning can shorten explored
-        // paths and lower this bound, which may cause the loop to exit
-        // before exhausting all theoretical discrepancy combinations. This
-        // is safe because pruned paths cost more than the incumbent and
-        // cannot improve the result.
-        if max_disc >= progress.deepest_stack {
             break;
         }
     }
@@ -339,27 +302,19 @@ struct BulbProgress<'a, C> {
     completions: usize,
     expansions: usize,
     fuel: u64,
-    /// Cap on the candidate's monotonic effort counter (see
-    /// [`BulbSearchSpace::effort`]): the effort at the first complete
-    /// candidate plus `fuel`. `None` until the first complete candidate is
-    /// recorded — fuel bounds optimization beyond a complete plan, never
-    /// the search for one.
+    /// Effort cap, armed at the first complete candidate (its effort plus
+    /// `fuel`). `None` until then: fuel bounds optimization beyond a
+    /// complete plan, never the search for one.
     effort_budget: Option<u64>,
     /// Effort at the moment the first complete candidate was recorded.
     first_complete_effort: Option<u64>,
     /// Last effort value observed, for monotonicity assertions.
     last_effort: u64,
-    /// Deepest decision stack seen across all probe iterations. A path
-    /// with d decision points can absorb at most d discrepancies, so once
-    /// `max_disc` reaches this depth every discrepancy combination has been
-    /// explored and further iterations are no-ops.
-    deepest_stack: usize,
-    /// Best complete candidate found so far — never an incomplete one.
+    /// Best complete candidate found so far, never an incomplete one.
     best: Option<C>,
-    /// Incumbent prune bound: cheapest *complete* candidate cost seen.
-    /// Only complete candidates update this (incomplete terminal states
-    /// are ignored for pruning), so the bound never incorrectly prunes a
-    /// path to a reachable complete plan.
+    /// Incumbent prune bound: cheapest complete candidate cost seen.
+    /// Incomplete terminals never tighten it, so it never prunes a path
+    /// to a reachable complete plan.
     best_cost: f64,
 }
 
@@ -402,16 +357,10 @@ impl<C> BulbProgress<'_, C> {
     }
 }
 
-/// One level of the BULB DFS, stored on an explicit stack instead of the
-/// call stack so deeply nested queries don't overflow.
-///
-/// Each frame represents a decision point. The search descends by pushing
-/// frames (one per decision encountered), and ascends by popping them when
-/// all options at that level have been explored or pruned.
-///
-/// Options are pre-sorted by cost and arranged in exploration order at
-/// construction time: alt slices (1..N) first, then the best slice (0).
-/// This follows the paper's "backtrack alternatives before greedy" order.
+/// One decision point of the BULB DFS, on an explicit stack so deeply
+/// nested queries don't overflow the call stack. Options are arranged in
+/// exploration order at construction: alt slices first, then the best
+/// slice, following the paper's backtrack-alternatives-before-greedy order.
 struct BulbFrame<D, Ch, Cp> {
     decision: D,
     options: Vec<Ch>,
@@ -424,7 +373,6 @@ struct BulbFrame<D, Ch, Cp> {
     pos: usize,
     checkpoint: Cp,
     disc: usize,
-    alternatives_existed: bool,
 }
 
 impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
@@ -436,11 +384,6 @@ impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
         disc: usize,
         bw: usize,
     ) -> Self {
-        // Only flag alternatives when they are actually dropped (disc == 0).
-        // When disc > 0, alt-slice options are included in the exploration
-        // order, so they are visited in this probe. Any unexplored sub-tree
-        // beneath them will be flagged by a descendant frame at disc == 0.
-        let alternatives_existed = disc == 0 && scored.len() > bw;
         let best_end = bw.min(scored.len());
 
         // Alt slices first (indices bw..end of scored), then best slice
@@ -461,7 +404,6 @@ impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
             alt_end,
             disc,
             bw,
-            alternatives_existed,
             "beam candidate pool finalized for this decision",
         );
 
@@ -473,24 +415,19 @@ impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
             pos: 0,
             checkpoint,
             disc,
-            alternatives_existed,
         }
     }
 
-    /// Advance to the next option to explore at this decision, returning
-    /// the option index and the discrepancy budget for child decisions.
-    /// Options whose cost meets or exceeds the incumbent are pruned.
-    /// Both sections are sorted, so the first pruned entry skips the
-    /// remainder of that section.
+    /// Next option to explore, with the discrepancy budget for its
+    /// children. Options costing at least the incumbent are pruned; each
+    /// section is sorted, so one pruned entry skips the section's rest.
     fn next_option(&mut self, best_cost: f64) -> Option<(usize, usize)> {
         while self.pos < self.order.len() {
             let (opt_idx, cost) = self.order[self.pos];
             if cost >= best_cost {
                 if self.pos < self.alt_end {
-                    // Alt section is sorted; skip to the best section.
                     self.pos = self.alt_end;
                 } else {
-                    // Best section is sorted; nothing left to explore.
                     break;
                 }
                 continue;
@@ -507,32 +444,11 @@ impl<D, Ch, Cp> BulbFrame<D, Ch, Cp> {
     }
 }
 
-/// Bubble a frame's `alternatives_existed` flag up to its parent frame
-/// (or to the probe-level result if no parent exists).
-fn propagate_alternatives<D, Ch, Cp>(
-    stack: &mut [BulbFrame<D, Ch, Cp>],
-    result_alts: &mut bool,
-    alts: bool,
-) {
-    if let Some(parent) = stack.last_mut() {
-        parent.alternatives_existed |= alts;
-    } else {
-        *result_alts |= alts;
-    }
-}
-
-/// Iterative DFS BULB probe. At each node:
-///
-/// 1. Advance past deterministic decisions to the next choice point.
-/// 2. Score all options: apply -> cost -> rollback (no advance).
-/// 3. Sort by cost, arrange into exploration order (alt slices first,
-///    then best slice).
-/// 4. Explore via DFS: disc=0 explores the best slice only; disc>0
-///    explores alternative slices first (disc-1), then the best slice
-///    (full disc).
-///
-/// Returns whether any decision point had more than one slice (a genuine
-/// alternative to backtrack into).
+/// Iterative DFS BULB probe. At each decision point, all options are
+/// scored (apply -> cost -> rollback) and sorted; disc=0 explores the best
+/// slice only, disc>0 explores alt slices first (disc-1), then the best
+/// slice (full disc). Returns whether any options were dropped for lack
+/// of discrepancy budget (a genuine alternative to backtrack into).
 fn bulb_probe<S: BulbSearchSpace>(
     space: &S,
     candidate: &mut S::Candidate,
@@ -554,10 +470,9 @@ fn bulb_probe<S: BulbSearchSpace>(
 
             match space.advance(candidate) {
                 AdvanceResult::Complete => {
-                    // Only cancellation skips recording. If fuel or time
-                    // ran out we still record the completion we already
-                    // reached, since the work is done and the snapshot
-                    // is cheap.
+                    // Only cancellation skips recording. On fuel or time
+                    // exhaustion the completion is already reached and the
+                    // snapshot is cheap, so keep it.
                     if !progress.cancelled() {
                         record_completion(space, candidate, progress);
                     }
@@ -582,6 +497,11 @@ fn bulb_probe<S: BulbSearchSpace>(
                     }
 
                     scored.sort_by(|a, b| a.1.total_cmp(&b.1));
+                    // Flag alternatives only when actually dropped. With
+                    // disc > 0 the alt slices are visited in this probe,
+                    // and anything unexplored beneath them gets flagged by
+                    // a descendant at disc == 0.
+                    result_alts |= disc_budget == 0 && scored.len() > beam_width;
                     let mut frame = BulbFrame::new(
                         decision,
                         options,
@@ -596,22 +516,13 @@ fn bulb_probe<S: BulbSearchSpace>(
                         "non-empty scored produced an empty exploration order",
                     );
 
-                    match frame.next_option(progress.best_cost) {
-                        Some((opt_idx, child_disc)) => {
-                            space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
-                            disc_budget = child_disc;
-                            stack.push(frame);
-                            progress.deepest_stack = progress.deepest_stack.max(stack.len());
-                            true
-                        }
-                        None => {
-                            propagate_alternatives(
-                                &mut stack,
-                                &mut result_alts,
-                                frame.alternatives_existed,
-                            );
-                            false
-                        }
+                    if let Some((opt_idx, child_disc)) = frame.next_option(progress.best_cost) {
+                        space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
+                        disc_budget = child_disc;
+                        stack.push(frame);
+                        true
+                    } else {
+                        false
                     }
                 }
             }
@@ -635,8 +546,7 @@ fn bulb_probe<S: BulbSearchSpace>(
                 space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
                 continue 'search;
             }
-            let frame = stack.pop().unwrap();
-            propagate_alternatives(&mut stack, &mut result_alts, frame.alternatives_existed);
+            stack.pop();
         }
     }
 }
@@ -676,12 +586,10 @@ fn score_options<S: BulbSearchSpace>(
     scored
 }
 
-/// Record a completed candidate. Only complete candidates update the
-/// incumbent prune bound and are saved as results; the first complete
-/// candidate arms the fuel budget. Incomplete terminal states are
-/// counted but cannot tighten the bound. Their cost is required to
-/// exceed every complete candidate's (see [`BulbSearchSpace::is_complete`]),
-/// so admitting them would incorrectly prune paths to better complete plans.
+/// Record a terminal candidate. Only complete candidates are saved and
+/// tighten the prune bound, since admitting dead ends would incorrectly
+/// prune paths to better complete plans. The first complete candidate
+/// arms the fuel budget.
 fn record_completion<S: BulbSearchSpace>(
     space: &S,
     candidate: &S::Candidate,
