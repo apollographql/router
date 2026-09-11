@@ -204,4 +204,10 @@ Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
 		build_docker_image.sh -d v0.9.1
 ```
 
-The example uses the [debian:bookworm-slim image](https://hub.docker.com/_/debian/) for the final image build. Modify the script to use images that better suit your needs. When you use the `-d` flag, ensure a `heaptrack` package is available to install.
+The example uses the [debian:trixie-slim image](https://hub.docker.com/_/debian/) for the final image build. Modify the script to use images that better suit your needs. When you use the `-d` flag, ensure a `heaptrack` package is available to install.
+
+<Note>
+
+Because this script compiles the router from source using the stock `rust` Docker Hub image, binaries it produces link against that image's glibc and are not guaranteed to run on older glibc-based hosts such as RHEL 8. The [officially released binaries and images](#basic-example-running-router-in-docker) are built on an older-glibc environment specifically to support those targets. If you need a self-built image for an old-glibc host, use an older build base (or a static musl target) rather than this script as-is.
+
+</Note>
