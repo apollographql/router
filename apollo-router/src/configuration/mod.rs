@@ -76,6 +76,8 @@ pub(crate) mod server;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
+mod test_discovery;
+#[cfg(test)]
 mod tests;
 mod upgrade;
 mod yaml;
