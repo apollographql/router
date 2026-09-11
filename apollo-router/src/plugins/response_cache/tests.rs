@@ -5610,6 +5610,18 @@ async fn wait_for_connector_cache_insert(
     (storage, drop_tx)
 }
 
+/// Grace period for a fire-and-forget cache insert that the test asserts must **not** happen.
+///
+/// These tests prove a negative — nothing was stored, caching was disabled, the request was
+/// private, the mutation was not cached — so there is no condition to wait on the way
+/// [`wait_for_connector_cache_insert`] waits for a key to appear. What is needed instead is
+/// enough time for a `tokio::spawn`ed insert to have landed *if* the code under test wrongly
+/// issued one, so that the following assertion would catch it. Named rather than inlined so the
+/// distinction is visible at the call site: a bare `sleep` before an assertion usually is a bug.
+async fn grace_period_for_unwanted_insert() {
+    tokio::time::sleep(Duration::from_secs(2)).await;
+}
+
 /// Number of requests the wiremock server received for the given path.
 async fn mock_requests_for_path(mock_server: &MockServer, path: &str) -> usize {
     mock_server
@@ -6161,7 +6173,7 @@ async fn connector_root_field_no_store() {
     let _response = service.oneshot(request).await.unwrap();
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request should NOT be cached due to no-store
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6265,7 +6277,7 @@ async fn connector_cache_disabled() {
     let _response = service.oneshot(request).await.unwrap();
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request should still hit the backend (caching disabled)
     let service = create_connector_cache_service(&uri, &namespace, Some(extra_config)).await;
@@ -6393,7 +6405,7 @@ async fn connector_root_field_request_no_store() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request WITHOUT no-store: should be a cache miss since first request didn't store
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6489,7 +6501,7 @@ async fn connector_root_field_request_no_cache_no_store() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request without cache-control: should be a cache miss (first didn't store)
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6581,7 +6593,7 @@ async fn connector_entity_request_no_store() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request WITHOUT no-store: should be a cache miss since first request didn't store
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6628,7 +6640,7 @@ async fn connector_root_field_private_no_id_not_stored() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request: should NOT be served from cache (private without private_id)
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6673,7 +6685,7 @@ async fn connector_entity_private_no_id_not_stored() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request: should NOT be served from cache (private without private_id)
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6716,7 +6728,7 @@ async fn connector_mutation_not_cached() {
     );
     let received_after_first = mock_server.received_requests().await.unwrap().len();
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request: same mutation — should NOT be served from cache
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6769,7 +6781,7 @@ async fn connector_root_field_debug_requires_header() {
         "response should NOT contain apolloCacheDebugging without the debug header, got: {body:?}"
     );
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Request WITH debug header — should have apolloCacheDebugging extension (cache hit)
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6816,7 +6828,7 @@ async fn connector_entity_debug_requires_header() {
         "response should NOT contain apolloCacheDebugging without the debug header, got: {body:?}"
     );
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Request WITH debug header — should have apolloCacheDebugging extension (cache hit)
     let service = create_connector_cache_service(&uri, &namespace, None).await;
@@ -6958,7 +6970,7 @@ async fn connector_root_field_private_debug_entry() {
         "first request should return data, got: {body:?}"
     );
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request: known-private bypass path should include debug entry
     let service = factory.create();
@@ -7020,7 +7032,7 @@ async fn connector_entity_private_debug_entry() {
         "first request should return data, got: {body:?}"
     );
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    grace_period_for_unwanted_insert().await;
 
     // Second request: known-private bypass path should include debug entry
     let service = factory.create();
