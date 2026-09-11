@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use apollo_redaction::Redacted;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -8,8 +9,9 @@ use crate::configuration::RedisCache;
 use crate::configuration::TlsClient;
 use crate::configuration::default_metrics_interval;
 use crate::configuration::default_required_to_start;
+use crate::plugin::serde::serialize_redacted_option;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct Config {
@@ -17,9 +19,11 @@ pub(crate) struct Config {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(serialize_with = "serialize_redacted_option")]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(serialize_with = "serialize_redacted_option")]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -99,6 +103,25 @@ fn default_maintenance_timeout() -> Duration {
 
 fn default_pool_size() -> u32 {
     5
+}
+
+impl PartialEq for Config {
+    fn eq(&self, other: &Self) -> bool {
+        self.urls == other.urls
+            && self.username.as_ref().map(Redacted::unredact)
+                == other.username.as_ref().map(Redacted::unredact)
+            && self.password.as_ref().map(Redacted::unredact)
+                == other.password.as_ref().map(Redacted::unredact)
+            && self.fetch_timeout == other.fetch_timeout
+            && self.insert_timeout == other.insert_timeout
+            && self.invalidate_timeout == other.invalidate_timeout
+            && self.maintenance_timeout == other.maintenance_timeout
+            && self.namespace == other.namespace
+            && self.tls == other.tls
+            && self.required_to_start == other.required_to_start
+            && self.pool_size == other.pool_size
+            && self.metrics_interval == other.metrics_interval
+    }
 }
 
 impl From<&Config> for RedisCache {

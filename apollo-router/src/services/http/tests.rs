@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use apollo_redaction::Redacted;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use axum::body::Body;
@@ -600,7 +601,7 @@ mod tls {
                 certificate_authorities: Some(ca_pem.into()),
                 client_authentication: Some(Arc::new(TlsClientAuth {
                     certificate_chain: load_certs(client_certificate_pem).unwrap(),
-                    key: load_key(client_key_pem).unwrap(),
+                    key: Redacted::new(load_key(client_key_pem).unwrap()),
                 })),
             },
         );
@@ -1822,7 +1823,7 @@ mod redis_tls_config {
 
         let client_auth = TlsClientAuth {
             certificate_chain: load_certs(client_cert_pem).unwrap(),
-            key: load_key(client_key_pem).unwrap(),
+            key: Redacted::new(load_key(client_key_pem).unwrap()),
         };
 
         let tls_config = crate::services::subgraph::http::generate_tls_client_config(

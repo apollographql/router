@@ -443,6 +443,64 @@ supergraph:
 }
 
 #[test]
+fn redacted_tls_key_errors_hide_the_input() {
+    for key in [
+        "-----BEGIN secret-key-with-invalid-header",
+        "-----BEGIN secret-key-with-missing-footer-----",
+    ] {
+        let error = serde_json::from_value::<TlsClientAuth>(json!({
+            "certificate_chain": "",
+            "key": key,
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(!error.contains("secret-key"), "{error}");
+        assert!(error.contains("could not parse TLS private key"), "{error}");
+    }
+}
+
+#[test]
+fn redacted_tls_key_preserves_pem_contents() {
+    let pem = include_str!("../services/http/testdata/client.key");
+    let config: TlsClientAuth = serde_json::from_value(json!({
+        "certificate_chain": "",
+        "key": pem,
+    }))
+    .unwrap();
+    assert_eq!(config.key.unredact(), &load_key(pem).unwrap());
+    assert_eq!(
+        format!("{config:?}"),
+        "TlsClientAuth { certificate_chain: [], key: [REDACTED] }"
+    );
+}
+
+#[test]
+fn redacted_redis_credentials_are_hidden_from_debug_output() {
+    let config: QueryPlanRedisCache = serde_json::from_value(json!({
+        "urls": ["redis://localhost:6379"],
+        "username": "redis-admin",
+        "password": "hunter2-super-secret",
+    }))
+    .expect("valid redis config");
+
+    let debug = format!("{config:?}");
+    assert!(
+        !debug.contains("hunter2-super-secret"),
+        "password must not appear in Debug output: {debug}"
+    );
+    assert!(
+        !debug.contains("redis-admin"),
+        "username must not appear in Debug output: {debug}"
+    );
+
+    // Confirm the credentials survived parsing.
+    let password = config.password.as_ref().expect("password was set");
+    let username = config.username.as_ref().expect("username was set");
+    assert_eq!(password.unredact(), "hunter2-super-secret");
+    assert_eq!(username.unredact(), "redis-admin");
+}
+
+#[test]
 fn line_precise_config_errors_with_inline_sequence_env_expansion() {
     let expansion = Expansion::default_builder()
         .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")

@@ -13,6 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use apollo_redaction::Redacted;
 use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -1002,9 +1003,11 @@ pub(crate) struct QueryPlanRedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1094,9 +1097,11 @@ pub(crate) struct RedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1200,9 +1205,9 @@ pub(crate) struct TlsSupergraph {
     #[schemars(with = "String")]
     pub(crate) certificate: CertificateDer<'static>,
     /// server key in PEM format
-    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
-    #[schemars(with = "String")]
-    pub(crate) key: PrivateKeyDer<'static>,
+    #[serde(deserialize_with = "deserialize_redacted_key", skip_serializing)]
+    #[schemars(with = "Redacted<String>")]
+    pub(crate) key: Redacted<PrivateKeyDer<'static>>,
     /// list of certificate authorities in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
@@ -1216,7 +1221,7 @@ impl TlsSupergraph {
 
         let mut config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(certificates, self.key.clone_key())
+            .with_single_cert(certificates, self.key.unredact().clone_key())
             .map_err(ApolloRouterError::Rustls)?;
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
@@ -1254,13 +1259,16 @@ where
     load_certs(&data).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>
+fn deserialize_redacted_key<'de, D>(
+    deserializer: D,
+) -> Result<Redacted<PrivateKeyDer<'static>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let data = String::deserialize(deserializer)?;
-
-    load_key(&data).map_err(serde::de::Error::custom)
+    let data = Redacted::<String>::deserialize(deserializer)?;
+    load_key(data.unredact())
+        .map(Redacted::new)
+        .map_err(|_| serde::de::Error::custom("could not parse TLS private key"))
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1342,7 +1350,7 @@ impl Default for TlsClient {
 }
 
 /// TLS client authentication
-#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format
@@ -1350,9 +1358,17 @@ pub(crate) struct TlsClientAuth {
     #[schemars(with = "String")]
     pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
     /// key in PEM format
-    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
-    #[schemars(with = "String")]
-    pub(crate) key: PrivateKeyDer<'static>,
+    #[serde(deserialize_with = "deserialize_redacted_key", skip_serializing)]
+    #[schemars(with = "Redacted<String>")]
+    pub(crate) key: Redacted<PrivateKeyDer<'static>>,
+}
+
+// Compare key contents because `Redacted` does not implement `PartialEq`.
+impl PartialEq for TlsClientAuth {
+    fn eq(&self, other: &Self) -> bool {
+        self.certificate_chain == other.certificate_chain
+            && self.key.unredact() == other.key.unredact()
+    }
 }
 
 /// Configuration for router reload behavior.

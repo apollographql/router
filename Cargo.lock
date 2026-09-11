@@ -374,6 +374,7 @@ dependencies = [
  "apollo-configuration",
  "apollo-environment-detector",
  "apollo-federation",
+ "apollo-redaction",
  "astral-tokio-tar",
  "async-compression",
  "async-trait",

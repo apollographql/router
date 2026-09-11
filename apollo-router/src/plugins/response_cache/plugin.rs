@@ -388,7 +388,7 @@ impl PluginPrivate for ResponseCache {
             .all
             .invalidation
             .as_ref()
-            .map(|i| i.shared_key.is_empty())
+            .map(|i| i.shared_key.unredact().is_empty())
             .unwrap_or_default()
         {
             return Err(
@@ -855,7 +855,9 @@ impl ResponseCache {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                        shared_key: apollo_redaction::Redacted::new(
+                            INVALIDATION_SHARED_KEY.to_string(),
+                        ),
                         ..Default::default()
                     }),
                     ..Default::default()

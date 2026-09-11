@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use apollo_redaction::Redacted;
 use bytes::Buf;
 use futures::future::BoxFuture;
 use http::HeaderValue;
@@ -125,13 +126,14 @@ mod invalidation_indexes_tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct SubgraphInvalidationConfig {
     /// Enable the invalidation
     pub(crate) enabled: bool,
     /// Shared key needed to request the invalidation endpoint
-    pub(crate) shared_key: String,
+    #[serde(serialize_with = "apollo_redaction::ser::unredacted")]
+    pub(crate) shared_key: Redacted<String>,
     /// Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to
     /// all three (`subgraph`, `type`, `cache_tag`) enabled, matching the original
     /// `response_cache` behavior. Operators with workloads that only invalidate by a subset of
@@ -142,6 +144,31 @@ pub(crate) struct SubgraphInvalidationConfig {
     /// useful for pure TTL-based caching without an invalidation API.
     #[serde(default)]
     pub(crate) indexes: InvalidationIndexes,
+}
+
+#[cfg(test)]
+mod subgraph_invalidation_config_tests {
+    use super::*;
+
+    #[test]
+    fn redacted_shared_key_is_hidden_from_debug_output() {
+        let config = SubgraphInvalidationConfig {
+            enabled: true,
+            shared_key: Redacted::new("TopSecretInvalidationKeyScratch1".to_string()),
+            indexes: InvalidationIndexes::default(),
+        };
+
+        let debug = format!("{config:?}");
+        assert!(
+            !debug.contains("TopSecretInvalidationKeyScratch1"),
+            "shared_key must not appear in Debug output: {debug}"
+        );
+
+        assert_eq!(
+            config.shared_key.unredact(),
+            "TopSecretInvalidationKeyScratch1"
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -381,13 +408,13 @@ fn validate_shared_key(
         .all
         .invalidation
         .as_ref()
-        .map(|i| i.shared_key == shared_key)
+        .map(|i| i.shared_key.unredact() == shared_key)
         .unwrap_or_default()
         || config
             .subgraphs
             .get(subgraph_name)
             .and_then(|s| s.invalidation.as_ref())
-            .map(|i| i.shared_key == shared_key)
+            .map(|i| i.shared_key.unredact() == shared_key)
             .unwrap_or_default()
 }
 
@@ -479,7 +506,7 @@ mod indexes_tests {
             private_id: None,
             invalidation: all_indexes.map(|indexes| SubgraphInvalidationConfig {
                 enabled: true,
-                shared_key: String::from("k"),
+                shared_key: Redacted::new(String::from("k")),
                 indexes,
             }),
         };
@@ -494,7 +521,7 @@ mod indexes_tests {
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: String::from("k"),
+                        shared_key: Redacted::new(String::from("k")),
                         indexes,
                     }),
                 },
@@ -751,7 +778,7 @@ mod tests {
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("test"),
+                    shared_key: Redacted::new(String::from("test")),
                     ..Default::default()
                 }),
             },
@@ -803,7 +830,7 @@ mod tests {
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("test"),
+                    shared_key: Redacted::new(String::from("test")),
                     ..Default::default()
                 }),
             },
@@ -816,7 +843,7 @@ mod tests {
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: String::from("test_test"),
+                        shared_key: Redacted::new(String::from("test_test")),
                         ..Default::default()
                     }),
                 },
@@ -865,7 +892,7 @@ mod tests {
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("test"),
+                    shared_key: Redacted::new(String::from("test")),
                     ..Default::default()
                 }),
             },
@@ -879,7 +906,7 @@ mod tests {
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
-                            shared_key: String::from("test_test"),
+                            shared_key: Redacted::new(String::from("test_test")),
                             ..Default::default()
                         }),
                     },
@@ -893,7 +920,7 @@ mod tests {
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
-                            shared_key: String::from("test_test_bis"),
+                            shared_key: Redacted::new(String::from("test_test_bis")),
                             ..Default::default()
                         }),
                     },
@@ -948,7 +975,7 @@ mod tests {
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("test"),
+                    shared_key: Redacted::new(String::from("test")),
                     ..Default::default()
                 }),
             },
@@ -962,7 +989,7 @@ mod tests {
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
-                            shared_key: String::from("test_test"),
+                            shared_key: Redacted::new(String::from("test_test")),
                             ..Default::default()
                         }),
                     },
@@ -976,7 +1003,7 @@ mod tests {
                         private_id: None,
                         invalidation: Some(SubgraphInvalidationConfig {
                             enabled: true,
-                            shared_key: String::from("test_test_bis"),
+                            shared_key: Redacted::new(String::from("test_test_bis")),
                             ..Default::default()
                         }),
                     },
@@ -1031,7 +1058,7 @@ mod tests {
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("test"),
+                    shared_key: Redacted::new(String::from("test")),
                     ..Default::default()
                 }),
             },

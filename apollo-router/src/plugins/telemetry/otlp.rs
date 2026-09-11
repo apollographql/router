@@ -1,6 +1,7 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use apollo_redaction::Redacted;
 use http::Uri;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
@@ -242,7 +243,7 @@ pub(crate) struct HttpExporter {
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
@@ -253,12 +254,24 @@ pub(crate) struct GrpcExporter {
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
     /// The optional private key file for TLS configuration.
-    pub(crate) key: Option<String>,
+    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    pub(crate) key: Option<Redacted<String>>,
 
     /// gRPC metadata
     #[serde(with = "http_serde::header_map")]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: http::HeaderMap,
+}
+
+impl PartialEq for GrpcExporter {
+    fn eq(&self, other: &Self) -> bool {
+        self.domain_name == other.domain_name
+            && self.ca == other.ca
+            && self.cert == other.cert
+            && self.key.as_ref().map(Redacted::unredact)
+                == other.key.as_ref().map(Redacted::unredact)
+            && self.metadata == other.metadata
+    }
 }
 
 fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -280,7 +293,7 @@ impl GrpcExporter {
                 .with_native_roots()
                 .domain_name(domain_name)
                 .ca_certificate(Certificate::from_pem(ca.clone()))
-                .identity(Identity::from_pem(cert.clone(), key.clone())))
+                .identity(Identity::from_pem(cert.clone(), key.unredact().clone())))
         } else {
             // This was a breaking change in tonic where we now have to specify native roots.
             Ok(ClientTlsConfig::new().with_native_roots())
@@ -334,6 +347,25 @@ impl From<Temporality> for SdkTemporality {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacted_grpc_key_preserves_serialization_and_change_detection() {
+        let input = serde_json::json!({"key": "synthetic-otlp-private-key"});
+        let config: GrpcExporter = serde_json::from_value(input.clone()).unwrap();
+        let debug = format!("{config:?}");
+        assert!(debug.contains("key: Some([REDACTED])"), "{debug}");
+        assert!(!debug.contains("synthetic-otlp-private-key"), "{debug}");
+        let serialized = serde_json::to_value(&config).unwrap();
+        assert_eq!(serialized["key"], input["key"]);
+        let round_trip: GrpcExporter = serde_json::from_value(serialized).unwrap();
+        assert_eq!(config, round_trip);
+
+        for key in [serde_json::Value::Null, serde_json::json!("rotated-key")] {
+            let changed = serde_json::from_value(serde_json::json!({"key": key})).unwrap();
+            assert_ne!(config, changed);
+        }
+        assert!(serde_json::from_value::<GrpcExporter>(serde_json::json!({"key": 42})).is_err());
+    }
 
     #[test]
     fn endpoint_grpc_defaulting_no_scheme() {
