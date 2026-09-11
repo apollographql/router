@@ -480,22 +480,19 @@ struct TypedApolloPlugins {
 }
 
 fn typed_apollo_plugins(config: &Configuration) -> Result<TypedApolloPlugins, String> {
-    let health_check_raw = config
-        .apollo_plugins
-        .plugins
-        .get("health_check")
-        .cloned()
-        .expect("health_check is a mandatory plugin default and is always present");
-    let subscription_raw = config
-        .apollo_plugins
-        .plugins
-        .get("subscription")
-        .cloned()
-        .expect("subscription config is present in the featureful fixture");
+    fn raw(config: &Configuration, name: &str) -> Result<Value, String> {
+        config
+            .apollo_plugins
+            .plugins
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("the parsed configuration holds no `{name}` plugin config"))
+    }
+
     Ok(TypedApolloPlugins {
-        health_check: serde_json::from_value(health_check_raw)
+        health_check: serde_json::from_value(raw(config, "health_check")?)
             .map_err(|error| error.to_string())?,
-        subscription: serde_json::from_value(subscription_raw)
+        subscription: serde_json::from_value(raw(config, "subscription")?)
             .map_err(|error| error.to_string())?,
     })
 }
