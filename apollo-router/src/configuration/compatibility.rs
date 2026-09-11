@@ -549,6 +549,11 @@ mod custom_plugin_validation {
         shard_count: u32,
     }
 
+    #[configuration]
+    struct PluginConfig {
+        widget: WidgetConfig,
+    }
+
     fn validate_widget(config: &WidgetConfig, mut errors: ErrorCollector<'_>) {
         if config.replica_count == 0 {
             errors
@@ -567,18 +572,24 @@ mod custom_plugin_validation {
     #[test]
     fn schema_valid_input_is_rejected_by_the_custom_validator() {
         let yaml = "replica_count: 0\nshard_count: 1\n";
-        ParseYamlOptions::default()
+        let error = ParseYamlOptions::default()
             .parse::<WidgetConfig>(yaml)
             .expect_err("zero replicas passes the schema but fails custom validation");
+        let messages: Vec<_> = error.related().unwrap().map(ToString::to_string).collect();
+        assert_eq!(messages, ["replica_count must be at least 1"]);
+
+        ParseYamlOptions::default()
+            .parse::<WidgetConfig>("replica_count: 1\nshard_count: 1\n")
+            .expect("positive counts pass custom validation");
     }
 
     /// Multiple custom-validation errors on nested fields are all reported, each labeled at its
     /// own location in the source document rather than collapsed into one error at the root.
     #[test]
     fn multiple_custom_validation_errors_keep_distinct_nested_locations() {
-        let yaml = "replica_count: 0\nshard_count: 0\n";
+        let yaml = "widget:\n  replica_count: 0\n  shard_count: 0\n";
         let error = ParseYamlOptions::default()
-            .parse::<WidgetConfig>(yaml)
+            .parse::<PluginConfig>(yaml)
             .expect_err("both fields are invalid");
 
         let related: Vec<_> = error
@@ -591,16 +602,20 @@ mod custom_plugin_validation {
             "one error per invalid field, not one merged error"
         );
 
-        let spans: Vec<_> = related
-            .iter()
-            .flat_map(|diagnostic| diagnostic.labels().into_iter().flatten())
-            .collect();
-        assert_eq!(spans.len(), 2, "each error carries its own labeled span");
-        assert_ne!(
-            spans[0].offset(),
-            spans[1].offset(),
-            "the two errors must point at their own field, not both at the same location"
-        );
+        for (field, offset) in [
+            ("replica_count", yaml.find('0').unwrap()),
+            ("shard_count", yaml.rfind('0').unwrap()),
+        ] {
+            let message = format!("{field} must be at least 1");
+            let diagnostic = related
+                .iter()
+                .find(|diagnostic| diagnostic.to_string() == message)
+                .expect("each field has its own validation message");
+            let spans: Vec<_> = diagnostic.labels().unwrap().collect();
+            assert_eq!(spans.len(), 1);
+            assert_eq!(spans[0].offset(), offset, "{field}");
+            assert_eq!(spans[0].len(), 1, "{field}");
+        }
     }
 }
 
