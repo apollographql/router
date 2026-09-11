@@ -729,19 +729,9 @@ fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
     assert!(shared_config.experimental_type_conditioned_fetching);
 }
 
-/// Named, verified gap in `apollo_configuration` 0.6.1: whole-value `${...}` coercion
-/// (`expansion::coercion::kind_at`) resolves a direct `$ref` but does not look inside an `allOf`
-/// wrapper. Schemars emits exactly that wrapper -- `{"description": ..., "default": ...,
-/// "allOf": [{"$ref": "#/definitions/Supergraph"}]}` -- for any struct-typed field that carries
-/// both a `#[serde(default)]` and a doc comment, which is most of router's nested configuration
-/// (confirmed by inspecting `generate_config_schema()`'s own output for `supergraph`). Path
-/// resolution gives up at the first such wrapper and reports the field's declared type as
-/// unresolvable, so a whole-value boolean or integer more than one level deep from the document
-/// root stays a string instead of coercing, and then fails router's own schema, which expects a
-/// real boolean. Router's own `Expansion::visit` has no such limitation: it reparses the expanded
-/// string unconditionally (`expansion::coerce`), regardless of nesting. ROUTER-2104 needs either
-/// an upstream fix to `kind_at`, or to keep doing its own coercion ahead of the shared parser the
-/// way `parse_via_apollo_configuration` already does for `validated_yaml`.
+/// The shared parser leaves the expanded `supergraph.introspection` value as a string;
+/// router converts it to a boolean. Shared coercion in version 0.6.1 cannot traverse the
+/// `allOf` wrapper around the schema's `Supergraph` reference.
 #[test]
 fn file_expansion_boolean_coercion_does_not_resolve_through_a_nested_allof_ref() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
