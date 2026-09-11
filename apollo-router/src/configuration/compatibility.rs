@@ -1024,18 +1024,8 @@ fn schema_derived_required_field_permutations_agree_between_parsers() {
     }
 }
 
-/// Licence gating (`ConfigurationRestriction` matching in
-/// `uplink::license_enforcement::LicenseEnforcementReport::configuration_restrictions`) runs its
-/// JSONPath selectors over an already-parsed `Configuration`'s `validated_yaml` field, not over
-/// parsing itself. That field is `#[serde(skip)]`, so it never appears in the `first_difference`
-/// comparisons the rest of this corpus relies on.
-///
-/// Agreement here rests on a mechanism this corpus already proves for one selector:
-/// `configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml`. This case
-/// exercises the same mechanism against representative restriction paths read directly from
-/// `license_enforcement.rs` at the time of writing: `$.batching` and `$.persisted_queries` are
-/// bare presence checks, and `$.subscription.enabled` is a presence-plus-value check. It adds no
-/// new machinery for licence enforcement itself.
+/// The adapter preserves licence-selector inputs in `validated_yaml`: the presence of
+/// batching and persisted queries, and the value of `subscription.enabled`.
 #[test]
 fn licence_restricted_configuration_paths_agree_between_parsers_via_validated_yaml() {
     let text = "batching:\n  enabled: true\npersisted_queries:\n  enabled: true\nsubscription:\n  enabled: true\n";
