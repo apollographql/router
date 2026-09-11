@@ -443,24 +443,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
-            ),
-            Shape::error_with_partial(
-                "Method ->ne can only compare values of the same type. Got Int != \"a\"."
-                    .to_string(),
-                Shape::bool_value(true, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"true (err "Method ->ne can only compare values of the same type. Got Int != \"a\".")"#,
         );
     }
 
     #[test]
     fn ne_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->ne requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->ne requires one argument")"#,
         );
     }
 
@@ -473,11 +466,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(43)), None)
                 ],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->ne requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->ne requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -491,11 +482,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->ne requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->ne requires one argument")"#,
         );
     }
 

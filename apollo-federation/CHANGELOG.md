@@ -22,6 +22,32 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## 🐛 Fixes
 
+### Fix connector composition validation for `->toString`, `->get`, `->contains`, and `->in` with concrete array and object shapes ([PR #10118](https://github.com/apollographql/router/pull/10118))
+
+The shape checks used by several connector selection methods to identify arrays
+and objects were broken: they tested whether a closed empty container *accepted*
+the input, which was always false for non-empty containers. As a result:
+
+- `->toString` silently skipped its "cannot convert arrays or objects" guard for
+  any non-trivially-shaped object or array. Schemas that compose a
+  `someObject->toString` selection will now correctly receive a composition error
+  directing the user toward `->jsonStringify` or `->joinNotNull`.
+- `->get` fell through to the unknown/error branch for non-empty objects and
+  arrays, producing less precise shape information than intended.
+- `->contains` and `->in` did not recognize non-empty arrays as arrays, falling
+  through to an incorrect error path.
+
+All four methods now use the shape crate's `is_object()` / `is_array()` helpers,
+which correctly identify any object or array regardless of its fields or
+elements.
+
+Additionally, composition error diagnostics that reference shape types have
+updated display formatting: `List<T>` now appears as `[...T]`, `Dict<T>` as
+`{...T}`, and error shapes as `<type> (err "message")` rather than
+`Error<"message">`.
+
+By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10118>
+
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
 
 Connectors validation rejected `->match` results assigned to union- or
