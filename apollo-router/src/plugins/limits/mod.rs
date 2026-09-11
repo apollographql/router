@@ -55,7 +55,7 @@ pub(crate) struct RouterLimitsConfig {
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
     ///
-    /// Counts depth of an operation, looking at its selection sets,˛
+    /// Counts depth of an operation, looking at its selection sets,
     /// including fields in fragments and inline fragments. The following
     /// example has a depth of 3.
     ///
@@ -78,7 +78,7 @@ pub(crate) struct RouterLimitsConfig {
 
     /// If set, requests with operations higher than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
-    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    /// `"extensions": {"code": "MAX_HEIGHT_LIMIT"}`
     ///
     /// Height is based on simple merging of fields using the same name or alias,
     /// but only within the same selection set.
@@ -94,7 +94,7 @@ pub(crate) struct RouterLimitsConfig {
     /// This may change in a future version of Apollo Router to do
     /// [full field merging across fragments][merging] instead.
     ///
-    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]
+    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging
     pub(crate) max_height: Option<u32>,
 
     /// If set, requests with operations with more root fields than this maximum
