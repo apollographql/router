@@ -417,21 +417,6 @@ fn introspection_defaults_and_explicit_values_agree_between_parsers() {
     assert!(shared_next.supergraph.introspection);
 }
 
-/// Registered built-in plugins (`health_check`, `subscription`), a hidden/preview built-in
-/// plugin (`response_cache`, kept out of the generated schema's `properties` and matched through
-/// its `patternProperties` instead by `HIDDEN_FROM_CONFIG_JSON_SCHEMA`) and a custom,
-/// non-Apollo-prefixed plugin (`apollo_testing.my_test_plugin`, registered only in this crate's
-/// own test binary by `plugins/test/mod.rs`) all parse through `current_featureful.yaml` in the
-/// main corpus loop above, using router's own generated schema, which builds these plugin
-/// properties from `crate::plugin::plugins()` for both parsers.
-///
-/// Router itself never deserializes a plugin's config into its typed struct until plugin
-/// construction (`PluginFactory::create_instance` -> `PluginInit::with_deserialized_config`,
-/// `plugin/mod.rs`) -- `Configuration::apollo_plugins`/`plugins` hold raw JSON until then. This
-/// models the two-step split ROUTER-2104 introduces: parsing already produces a typed value for
-/// each plugin (`typed_apollo_plugins`), and "constructing" the plugin from it
-/// (`plugins_from_typed_configs`) takes that value by move, with no `serde_json::Value` parameter
-/// through which it could deserialize a second time.
 struct TypedApolloPlugins {
     health_check: HealthCheck,
     subscription: SubscriptionConfig,
@@ -485,9 +470,8 @@ fn mandatory_plugin_defaults_are_present_without_being_configured() {
     }
 }
 
-/// Typed plugin initialization, including subscription deduplication, agrees between the two
-/// parsers, and constructing the "running plugin" from the typed values needs no second
-/// deserialize (see `TypedApolloPlugins`'s doc comment).
+/// Both parsers retain raw plugin settings. Deserialize those settings into the plugin types
+/// to check subscription deduplication and health-check defaults beyond schema validation.
 #[test]
 fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
     let case = &FEATUREFUL_CASE;
