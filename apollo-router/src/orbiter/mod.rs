@@ -361,13 +361,22 @@ mod test {
 
     #[test]
     fn test_visit_config_that_needed_upgrade() {
-        let result: ConfigurationError =
-            Configuration::from_str("supergraph:\n  preview_defer_support: true")
-                .expect_err("expected an error");
-        // Note: Can't implement PartialEq on ConfigurationError, so...
-        let err_message = "configuration had errors";
-        let err_error = "\n1. at line 2\n\n  supergraph:\n┌   preview_defer_support: true\n└-----> Additional properties are not allowed ('preview_defer_support' was unexpected)\n\n".to_string();
-        matches!(result, ConfigurationError::InvalidConfiguration {message, error} if err_message == message && err_error == error);
+        // preview_defer_support moved to defer_support in 0004-defer_support_ga.yaml, a
+        // major-version migration, so startup must reject it rather than migrate it.
+        let result = Configuration::from_str("supergraph:\n  preview_defer_support: true")
+            .expect_err("major migration should not be applied at startup");
+        match result {
+            ConfigurationError::InvalidConfiguration { message, error } => {
+                assert_eq!(message, "configuration had errors");
+                assert!(
+                    error.contains(
+                        "Additional properties are not allowed ('preview_defer_support' was unexpected)"
+                    ),
+                    "expected an additional-properties error for the unmigrated field, got: {error}"
+                );
+            }
+            other => panic!("expected InvalidConfiguration, got {other:?}"),
+        }
     }
 
     #[test]
