@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 
+use apollo_federation::connectors::runtime::mapping::Problem;
 pub(super) use error::Error;
 use tokio_util::time::FutureExt;
 
@@ -46,6 +47,12 @@ pub(super) struct Document {
     /// Which scope's index namespace this document's cache-tag entries are written under.
     /// Defaults to [`CacheScope::Subgraph`]; connector store paths set [`CacheScope::Connector`].
     pub(super) scope: CacheScope,
+    /// Connector response-mapping problems produced while mapping the response this document
+    /// holds, persisted so a later cache hit can replay them. Without this, mapping problems
+    /// would be reported once — on the request that missed — and then disappear for the whole
+    /// TTL, leaving `ConnectorSelector::ResponseMappingProblems` and the cache debugger showing
+    /// a clean connector for a response that has problems. Always empty on the subgraph path.
+    pub(super) mapping_problems: Vec<Problem>,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -61,6 +68,10 @@ pub(super) struct CacheEntry {
     /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
     /// both configurable
     pub(super) invalidation_labels: Option<InvalidationLabels>,
+    /// Connector response-mapping problems recorded when this entry was stored. See
+    /// [`Document::mapping_problems`]; empty for subgraph entries and for entries stored before
+    /// mapping problems were persisted.
+    pub(super) mapping_problems: Vec<Problem>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

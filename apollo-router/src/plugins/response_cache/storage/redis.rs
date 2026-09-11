@@ -5,6 +5,7 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_federation::connectors::runtime::mapping::Problem;
 use fred::interfaces::ClientLike;
 use fred::interfaces::KeysInterface;
 use fred::interfaces::SortedSetsInterface;
@@ -54,6 +55,11 @@ struct CacheValue {
     // cache debugger and to rebuild the CDN `Cache-Tag` header without a Redis `cache_tag`
     // index being enabled. See `internal_insert_in_batch`'s `cdn_invalidation_tags_per_doc`.
     cache_tags: Option<HashSet<String>>,
+    // Connector response-mapping problems for this entry, replayed on a cache hit so mapping
+    // problems don't vanish for the whole TTL. Defaulted rather than required, so entries
+    // written before this field existed still deserialize.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    mapping_problems: Vec<Problem>,
 }
 
 impl ValueType for CacheValue {}
@@ -71,6 +77,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
                 tags,
                 ..Default::default()
             }),
+            mapping_problems: cache_value.mapping_problems,
         }
     }
 }
@@ -410,6 +417,7 @@ impl CacheStorage for Storage {
                 data: document.data,
                 cache_control: document.control,
                 cache_tags: Some(cdn_invalidation_tags.into_iter().collect()),
+                mapping_problems: document.mapping_problems,
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -700,6 +708,7 @@ mod tests {
             cdn_invalidation_tags: vec!["invalidate".to_string()],
             expire: Duration::from_secs(60),
             scope: CacheScope::Subgraph,
+            mapping_problems: Vec::new(),
         }
     }
 

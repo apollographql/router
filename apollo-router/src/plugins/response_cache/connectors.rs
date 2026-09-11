@@ -1537,7 +1537,11 @@ impl ConnectorRequestCacheService {
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
                             key: request.key,
-                            problems: Vec::new(),
+                            // Replay the mapping problems recorded when this entry was stored,
+                            // so `ConnectorSelector::ResponseMappingProblems` and the cache
+                            // debugger keep reporting them for the life of the entry instead of
+                            // showing a clean connector until the next miss.
+                            problems: entry.mapping_problems,
                         },
                 };
 
@@ -1570,6 +1574,7 @@ impl ConnectorRequestCacheService {
                 // Store in cache if appropriate
                 if let apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                     ref data,
+                    ref problems,
                     ..
                 } = response.mapped_response
                 {
@@ -1675,6 +1680,9 @@ impl ConnectorRequestCacheService {
                             expire: ttl,
                             cdn_invalidation_tags: connector_cdn_invalidation_tags(),
                             scope: CacheScope::Connector,
+                            // Persist the mapping problems with the data so hits replay them
+                            // rather than reporting a clean connector for the whole TTL.
+                            mapping_problems: problems.clone(),
                         };
 
                         let source = source_name;

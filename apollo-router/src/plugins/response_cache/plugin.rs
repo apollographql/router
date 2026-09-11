@@ -2513,6 +2513,8 @@ async fn cache_store_root_from_response(
                 cdn_invalidation_tags,
                 expire: ttl,
                 scope: CacheScope::Subgraph,
+                // Subgraph responses have no connector response mapping.
+                mapping_problems: Vec::new(),
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -3393,6 +3395,11 @@ pub(super) fn build_entity_store_document(
         cdn_invalidation_tags: miss.cdn_invalidation_tags.clone(),
         expire,
         scope,
+        // Entity mapping problems are deliberately not persisted: a fully cached entity fetch
+        // short-circuits above `make_requests`, so no `connector::request_service::Response`
+        // exists on a hit for `ConnectorSelector::ResponseMappingProblems` to read them from.
+        // Root-field entries do carry them (see `ConnectorRequestCacheService`).
+        mapping_problems: Vec::new(),
     }
 }
 
