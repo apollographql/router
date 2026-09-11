@@ -100,10 +100,14 @@ pub(crate) struct FetchEdgeWeight {
 enum FetchGraphOp {
     /// A node was added. Undo: remove_node (StableDiGraph keeps indices
     /// stable); a root node (`root_key` set) also removes its root_groups
-    /// entry.
+    /// entry, and an entity node (`entity_key` set) releases its
+    /// entity_groups reuse slot when it still owns it. Both cleanups must
+    /// be symmetric: StableDiGraph recycles removed indices, so a stale map
+    /// entry could later resolve to an unrelated node.
     AddNode {
         node_index: NodeIndex,
         root_key: Option<Arc<str>>,
+        entity_key: Option<EntityGroupKey>,
     },
     /// An edge was added. Undo: remove_edge.
     AddEdge(EdgeIndex),
@@ -184,6 +188,13 @@ impl FetchGraph {
         if self.stage_counts.len() <= d {
             self.stage_counts.resize(d + 1, 0);
         }
+        // An underflow here would wrap to ~2^64 and silently prune valid
+        // branches through an astronomically wrong cost; surface drift at
+        // the mutation site instead.
+        debug_assert!(
+            self.stage_counts[d].checked_add_signed(delta).is_some(),
+            "stage count under/overflow at depth {depth}",
+        );
         self.stage_counts[d] = self.stage_counts[d].wrapping_add_signed(delta);
     }
 
@@ -227,11 +238,19 @@ impl FetchGraph {
                 FetchGraphOp::AddNode {
                     node_index,
                     root_key,
+                    entity_key,
                 } => {
                     self.bump_stage_count(self.depth[node_index.index()], -1);
                     self.graph.remove_node(node_index);
                     if let Some(key) = root_key {
                         self.root_groups.remove(&key);
+                    }
+                    // Only the slot owner releases it: a later duplicate
+                    // node for the same key never claimed the slot.
+                    if let Some(key) = entity_key
+                        && self.entity_groups.get(&key) == Some(&node_index)
+                    {
+                        self.entity_groups.remove(&key);
                     }
                 }
                 FetchGraphOp::AddEdge(idx) => {
@@ -270,18 +289,17 @@ impl FetchGraph {
             self.root_groups.insert(key.clone(), id);
         }
         self.register_node_depth(id);
+        // Claim the entity_groups reuse slot if this is the first node for
+        // this (subgraph, merge_at) pair. Rollback releases the slot only
+        // when this node still owns it, mirroring root_groups.
+        if let Some(key) = &entity_key {
+            self.entity_groups.entry(key.clone()).or_insert(id);
+        }
         self.undo_log.push(FetchGraphOp::AddNode {
             node_index: id,
             root_key,
+            entity_key,
         });
-        // Claim the entity_groups reuse slot if this is the first node for
-        // this (subgraph, merge_at) pair. The undo log entry for AddNode
-        // already handles removing the node; cleaning up the entity_groups
-        // slot is handled inline in rollback by checking whether the slot
-        // points to the removed node.
-        if let Some(key) = entity_key {
-            self.entity_groups.entry(key).or_insert(id);
-        }
         id
     }
 
@@ -338,11 +356,11 @@ impl FetchGraph {
     ) -> NodeIndex {
         let key = (subgraph.clone(), merge_at);
         if let Some(&id) = self.entity_groups.get(&key) {
-            if self.graph.contains_node(id) {
-                return id;
-            }
-            // Stale entry from a rolled-back node; remove and fall through.
-            self.entity_groups.remove(&key);
+            debug_assert!(
+                self.graph.contains_node(id),
+                "entity_groups slot points at a removed node; rollback cleanup is broken",
+            );
+            return id;
         }
         self.add_entity_group(subgraph, key.1)
     }
@@ -368,10 +386,14 @@ impl FetchGraph {
         child: NodeIndex,
         inputs: Vec<InputContribution>,
     ) -> EdgeIndex {
-        debug_assert_ne!(
-            parent, child,
-            "self-loop in FetchGraph: node {:?} ({}) cannot depend on itself",
-            parent, self.graph[parent].subgraph,
+        // Covers self-loops too (is_reachable(x, x) is true). raise_depth
+        // assumes acyclicity: on any cycle it would recurse forever.
+        debug_assert!(
+            !self.is_reachable(child, parent),
+            "edge {:?} -> {:?} ({}) would create a cycle in the fetch graph",
+            parent,
+            child,
+            self.graph[parent].subgraph,
         );
         let id = self
             .graph
@@ -572,6 +594,28 @@ mod tests {
         assert!(graph.graph[edge].inputs.is_empty());
     }
 
+    /// Build a real InputContribution from a tiny schema so the append and
+    /// undo paths are exercised with representative data.
+    fn test_input_contribution() -> InputContribution {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            r#"
+            type Query { user: User }
+            type User { id: ID }
+            "#,
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema =
+            crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
+        let op = crate::operation::Operation::parse(schema, r#"{ user { id } }"#, "op.graphql")
+            .expect("valid operation");
+        InputContribution {
+            source_type_name: apollo_compiler::name!("User"),
+            conditions: Arc::new(op.selection_set.clone()),
+            rewrite_info: None,
+        }
+    }
+
     #[test]
     fn add_input_to_edge_appends() {
         let mut graph = FetchGraph::new();
@@ -579,11 +623,50 @@ mod tests {
         let root = graph.get_or_create_root_group(&sg, dummy_root_type());
         let entity = graph.add_entity_group(&sg, vec![]);
         let edge = graph.add_dependency(root, entity, vec![]);
-
-        // We can't easily construct a full InputContribution in a unit test
-        // without a real schema, but we can verify the edge exists and
-        // inputs is initially empty.
         assert_eq!(graph.graph[edge].inputs.len(), 0);
+
+        graph.add_input_to_edge(edge, test_input_contribution());
+        assert_eq!(graph.graph[edge].inputs.len(), 1);
+        assert_eq!(
+            graph.graph[edge].inputs[0].source_type_name,
+            apollo_compiler::name!("User"),
+        );
+    }
+
+    #[test]
+    fn rollback_removes_appended_edge_input() {
+        let mut graph = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = graph.get_or_create_root_group(&sg, dummy_root_type());
+        let entity = graph.add_entity_group(&sg, vec![]);
+        let edge = graph.add_dependency(root, entity, vec![]);
+        graph.add_input_to_edge(edge, test_input_contribution());
+
+        let cp = graph.checkpoint();
+        graph.add_input_to_edge(edge, test_input_contribution());
+        assert_eq!(graph.graph[edge].inputs.len(), 2);
+
+        graph.rollback(cp);
+        assert_eq!(graph.graph[edge].inputs.len(), 1);
+    }
+
+    #[test]
+    fn rollback_restores_selection_builder_head() {
+        let mut graph = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let node = graph.add_entity_group(&sg, vec![]);
+        let path = SharedPath::new();
+
+        graph.append_selection(node, &path, None);
+        assert_eq!(graph.node(node).selection_builder.entries().len(), 1);
+
+        let cp = graph.checkpoint();
+        graph.append_selection(node, &path, None);
+        graph.append_selection(node, &path, None);
+        assert_eq!(graph.node(node).selection_builder.entries().len(), 3);
+
+        graph.rollback(cp);
+        assert_eq!(graph.node(node).selection_builder.entries().len(), 1);
     }
 
     #[test]
@@ -860,12 +943,57 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
-    #[should_panic(expected = "self-loop")]
+    #[should_panic(expected = "cycle")]
     fn add_dependency_self_loop_panics() {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
         let node = g.add_entity_group(&sg, vec![]);
         g.add_dependency(node, node, vec![]);
+    }
+
+    /// A 2-cycle must be rejected up front: raise_depth assumes acyclicity
+    /// and recurses forever (stack overflow, in release too) if an edge
+    /// closing a cycle is ever inserted.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "cycle")]
+    fn add_dependency_two_cycle_panics_instead_of_recursing_forever() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let a = g.add_entity_group(&sg, vec![]);
+        let b = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(a, b, vec![]);
+        g.add_dependency(b, a, vec![]);
+    }
+
+    /// A rolled-back entity group must not leave its reuse slot pointing at
+    /// a recycled node index: StableDiGraph reuses removed indices, so a
+    /// liveness check on the stale index can resolve to an unrelated node.
+    #[test]
+    fn rollback_does_not_leak_entity_group_slot_to_reused_index() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        let original = g.get_or_create_entity_group(&sg, user_path(None));
+        g.rollback(cp);
+
+        // Reuse the freed index for an unrelated group (different merge_at).
+        let unrelated = g.add_entity_group(&sg, vec![]);
+        assert_eq!(
+            unrelated.index(),
+            original.index(),
+            "test setup requires StableDiGraph to reuse the freed index",
+        );
+
+        let looked_up = g.get_or_create_entity_group(&sg, user_path(None));
+        assert_ne!(
+            looked_up, unrelated,
+            "stale entity_groups slot resolved to an unrelated node",
+        );
+        let FetchGroupKind::Entity { merge_at } = &g.node(looked_up).kind else {
+            panic!("expected an entity group");
+        };
+        assert_eq!(merge_at, &user_path(None));
     }
 
     // --- Ordering dependencies ---
