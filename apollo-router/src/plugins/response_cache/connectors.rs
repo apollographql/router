@@ -66,6 +66,7 @@ use crate::plugins::response_cache::cache_key::ConnectorCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_connector_additional_data;
 use crate::plugins::response_cache::cache_key::hash_operation;
+use crate::plugins::response_cache::cache_key::hash_selection;
 use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeyContext;
 use crate::plugins::response_cache::debugger::CacheKeySource;
@@ -1375,10 +1376,18 @@ impl ConnectorRequestCacheService {
             &key_inputs,
         );
 
+        // The response-mapping selection discriminates aliased uses of the single root field
+        // within one fetch node: `operation_hash` is the whole document and the arguments are
+        // folded into `additional_data_hash`, so without this two aliases with equal arguments
+        // and different sub-selections would share an entry and read back each other's
+        // (differently narrowed) mapped data.
+        let selection_hash = hash_selection(&request.key.selection().to_string());
+
         let mut cache_key = ConnectorCacheKeyRoot {
             source_name: &self.source_name,
             graphql_type: "Query",
             operation_hash: &operation_hash,
+            selection_hash: &selection_hash,
             additional_data_hash: &additional_data_hash,
             private_id: if is_known_private {
                 private_id.as_deref()

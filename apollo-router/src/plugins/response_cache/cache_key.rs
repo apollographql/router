@@ -112,6 +112,16 @@ pub(super) struct ConnectorCacheKeyRoot<'a> {
     pub(super) source_name: &'a str,
     pub(super) graphql_type: &'a str,
     pub(super) operation_hash: &'a str,
+    /// Hash of the response-mapping selection this request maps its upstream response through.
+    ///
+    /// A connector subgraph has a single root field, but one fetch node can request it several
+    /// times with aliases (`root_fields` in `plugins/connectors/make_requests.rs` emits one
+    /// `ResponseKey::RootField` per field selection). `operation_hash` covers the whole fetch
+    /// node's document and `additional_data_hash` covers the field arguments, so two aliases with
+    /// equal arguments and different sub-selections would otherwise share one entry. The stored
+    /// value is the *mapped* data, already narrowed by the storing request's selection, so the
+    /// second alias would read back the wrong shape.
+    pub(super) selection_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
     pub(super) private_id: Option<&'a str>,
 }
@@ -122,12 +132,13 @@ impl<'a> ConnectorCacheKeyRoot<'a> {
             source_name,
             graphql_type,
             operation_hash,
+            selection_hash,
             additional_data_hash,
             private_id,
         } = self;
 
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{graphql_type}:hash:{operation_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{graphql_type}:hash:{operation_hash}:selection:{selection_hash}:data:{additional_data_hash}"
         );
         if let Some(private_id) = private_id {
             let _ = write!(&mut key, ":{private_id}");
@@ -178,8 +189,18 @@ impl<'a> ConnectorCacheKeyEntity<'a> {
 
 /// Hash an operation document for use as a connector query hash
 pub(super) fn hash_operation(operation: &str) -> String {
+    hash_str(operation)
+}
+
+/// Hash a connector response-mapping selection for use in a connector root-field cache key.
+/// See [`ConnectorCacheKeyRoot::selection_hash`] for why the selection is part of the key.
+pub(super) fn hash_selection(selection: &str) -> String {
+    hash_str(selection)
+}
+
+fn hash_str(value: &str) -> String {
     let mut digest = blake3::Hasher::new();
-    digest.update(operation.as_bytes());
+    digest.update(value.as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.finalize().to_hex().to_string()
 }
@@ -429,6 +450,7 @@ mod tests {
             source_name: "mysubgraph.my_api",
             graphql_type: "Query",
             operation_hash: "abc123",
+            selection_hash: "sel789",
             additional_data_hash: "def456",
             private_id: None,
         };
@@ -437,9 +459,46 @@ mod tests {
         assert!(hash.contains(":connector:mysubgraph.my_api:"));
         assert!(hash.contains(":type:Query:"));
         assert!(hash.contains(":hash:abc123:"));
+        assert!(hash.contains(":selection:sel789:"));
         assert!(hash.contains(":data:def456"));
         assert!(!hash.contains(":subgraph:"));
         assert_snapshot!(hash);
+    }
+
+    /// Two aliases of the same root field, same arguments and same fetch-node document, but
+    /// different sub-selections: the mapped data stored for one must not be read back for the
+    /// other.
+    #[test]
+    fn connector_root_cache_key_separates_aliased_root_fields() {
+        let narrow = ConnectorCacheKeyRoot {
+            source_name: "mysubgraph.my_api",
+            graphql_type: "Query",
+            operation_hash: "abc123",
+            selection_hash: &hash_selection("id"),
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        let wide = ConnectorCacheKeyRoot {
+            source_name: "mysubgraph.my_api",
+            graphql_type: "Query",
+            operation_hash: "abc123",
+            selection_hash: &hash_selection("id title"),
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        assert_ne!(narrow.hash(), wide.hash());
+
+        // ... while two aliases with the *same* selection still share an entry, which is the
+        // whole point of caching them.
+        let same_as_narrow = ConnectorCacheKeyRoot {
+            source_name: "mysubgraph.my_api",
+            graphql_type: "Query",
+            operation_hash: "abc123",
+            selection_hash: &hash_selection("id"),
+            additional_data_hash: "def456",
+            private_id: None,
+        };
+        assert_eq!(narrow.hash(), same_as_narrow.hash());
     }
 
     #[test]
@@ -448,6 +507,7 @@ mod tests {
             source_name: "mysubgraph.my_api",
             graphql_type: "Query",
             operation_hash: "abc123",
+            selection_hash: "sel789",
             additional_data_hash: "def456",
             private_id: None,
         };
@@ -455,6 +515,7 @@ mod tests {
             source_name: "mysubgraph.my_api",
             graphql_type: "Query",
             operation_hash: "abc123",
+            selection_hash: "sel789",
             additional_data_hash: "def456",
             private_id: Some("user_hash_xyz"),
         };
@@ -603,6 +664,7 @@ mod tests {
             source_name: "test_source",
             graphql_type: "Query",
             operation_hash: "hash",
+            selection_hash: "selection",
             additional_data_hash: "data",
             private_id: None,
         };
