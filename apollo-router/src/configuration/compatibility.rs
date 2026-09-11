@@ -834,10 +834,7 @@ fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
     assert!(shared_config.experimental_type_conditioned_fetching);
 }
 
-/// The same expansion one level below the document root. Coercion has to resolve the field's
-/// declared type through the `allOf` wrapper schemars emits around a nested struct's reference,
-/// which is what `apollo-configuration` 0.6.2 added (PLAT-303). Before it, the shared parser
-/// left the value a string and failed the schema's boolean check.
+/// File expansion coerces a nested boolean through the schema's `allOf` reference wrapper.
 #[test]
 fn file_expansion_boolean_coercion_resolves_through_a_nested_allof_ref() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
