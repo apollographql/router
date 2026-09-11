@@ -20,6 +20,7 @@ use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 
 const CONDITION_DEPTH_LIMIT: u8 = 32;
 use super::NodeSource;
@@ -134,11 +135,35 @@ impl FieldRoutingSearchSpace {
         let field_source_node = qg.node_weight(field_source)?;
         let root_type: CompositeTypeDefinitionPosition =
             field_source_node.type_.clone().try_into()?;
+        // The hop resolves through the kind of the subgraph root it lands
+        // on, not the surrounding operation's kind.
+        let subgraph_schema = qg.schema_by_source(choice.target_subgraph())?;
+        let root_kind = [
+            SchemaRootDefinitionKind::Query,
+            SchemaRootDefinitionKind::Mutation,
+            SchemaRootDefinitionKind::Subscription,
+        ]
+        .into_iter()
+        .find(|kind| {
+            subgraph_schema
+                .schema()
+                .root_operation((*kind).into())
+                .is_some_and(|name| name == root_type.type_name())
+        })
+        .ok_or_else(|| {
+            FederationError::internal(format!(
+                "root hop target type {} is not a root type in subgraph {}",
+                root_type.type_name(),
+                choice.target_subgraph(),
+            ))
+        })?;
 
-        let new_group =
-            state
-                .graph
-                .add_root_hop_group(choice.target_subgraph(), root_type, merge_at);
+        let new_group = state.graph.add_root_hop_group(
+            choice.target_subgraph(),
+            root_type,
+            root_kind,
+            merge_at,
+        );
 
         let edge = state
             .graph
@@ -208,19 +233,19 @@ impl FieldRoutingSearchSpace {
             let dest_type: CompositeTypeDefinitionPosition =
                 qg.node_weight(dest_node)?.type_.clone().try_into()?;
 
-            Some(InputContribution {
+            Some(InputContribution::Key {
                 source_type_name: source.type_pos.type_name().clone(),
                 conditions: key_conditions.clone(),
-                rewrite_info: Some(InputRewriteInfo {
+                rewrite_info: InputRewriteInfo {
                     dest_type,
                     dest_subgraph: first_subgraph.clone(),
-                }),
+                },
             })
         } else {
             None
         };
 
-        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input, true);
+        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
 
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
@@ -273,7 +298,6 @@ impl FieldRoutingSearchSpace {
                 let hop_schema = qg.schema_by_source(&hop_node_data.source)?.clone();
                 let hop_source = NodeSource {
                     type_pos: hop_type_pos.clone(),
-                    subgraph: hop.target_subgraph.clone(),
                     schema: hop_schema,
                 };
                 let hop_path = self.entity_root_path(hop_type_pos.type_name())?;
@@ -306,19 +330,19 @@ impl FieldRoutingSearchSpace {
                         .clone()
                         .try_into()?
                 };
-                Some(InputContribution {
+                Some(InputContribution::Key {
                     source_type_name: hop_type_pos.type_name().clone(),
                     conditions: key_conds.clone(),
-                    rewrite_info: Some(InputRewriteInfo {
+                    rewrite_info: InputRewriteInfo {
                         dest_type,
                         dest_subgraph: next_subgraph.clone(),
-                    }),
+                    },
                 })
             } else {
                 None
             };
 
-            let hop_edge = self.wire_key_edge(state, prev_group, next_group, hop_key_input, true);
+            let hop_edge = self.wire_key_edge(state, prev_group, next_group, hop_key_input);
 
             if is_last {
                 return Ok((next_group, hop_edge));
@@ -351,22 +375,20 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Find or create the anchor->group dependency edge and attach the key
-    /// input. With `dedupe_same_type_key`, an edge already carrying a key
-    /// for the input's source type is left alone.
+    /// input. An edge already carrying a key for the input's source type is
+    /// left alone.
     fn wire_key_edge(
         &self,
         state: &mut PlanState,
         anchor: NodeIndex,
         group: NodeIndex,
         key_input: Option<InputContribution>,
-        dedupe_same_type_key: bool,
     ) -> EdgeIndex {
         if let Some(existing_edge) = state.graph.find_edge(anchor, group) {
             if let Some(input) = key_input
-                && !(dedupe_same_type_key
-                    && state
-                        .graph
-                        .edge_has_key_input(existing_edge, &input.source_type_name))
+                && !state
+                    .graph
+                    .edge_has_key_input(existing_edge, input.source_type_name())
             {
                 state.graph.add_input_to_edge(existing_edge, input);
             }
