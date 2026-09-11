@@ -766,11 +766,12 @@ fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
     assert!(shared_config.experimental_type_conditioned_fetching);
 }
 
-/// The shared parser leaves the expanded `supergraph.introspection` value as a string;
-/// router converts it to a boolean. Shared coercion in version 0.6.1 cannot traverse the
-/// `allOf` wrapper around the schema's `Supergraph` reference.
+/// The same expansion one level below the document root. Coercion has to resolve the field's
+/// declared type through the `allOf` wrapper schemars emits around a nested struct's reference,
+/// which is what `apollo-configuration` 0.6.2 added (PLAT-303). Before it, the shared parser
+/// left the value a string and failed the schema's boolean check.
 #[test]
-fn file_expansion_boolean_coercion_does_not_resolve_through_a_nested_allof_ref() {
+fn file_expansion_boolean_coercion_resolves_through_a_nested_allof_ref() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
     std::io::Write::write_all(&mut file, b"true").expect("can write the temp file");
     let text = format!(
@@ -780,26 +781,15 @@ fn file_expansion_boolean_coercion_does_not_resolve_through_a_nested_allof_ref()
 
     let router_expansion = Expansion::builder().supported_mode("file").build();
     let router_config = validate_yaml_configuration(&text, router_expansion, Mode::NoUpgrade)
-        .expect("router's own file expansion always coerces, so this succeeds");
-    assert!(router_config.supergraph.introspection);
+        .expect("router's own file expansion resolves this");
 
     let shared_options = router_options().add_variables(FileVariables);
-    let shared_error = shared_options.parse::<Configuration>(&text).expect_err(
-        "the shared crate leaves the expanded value as the string \"true\" here, which then \
-             fails the schema's boolean check",
-    );
-    // `ConfigError::ValidationError` displays a fixed "schema validation error" summary; the
-    // per-field message lives on the related diagnostics `miette::Diagnostic::related` exposes.
-    let related_message = miette::Diagnostic::related(&shared_error)
-        .into_iter()
-        .flatten()
-        .map(|diagnostic| diagnostic.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        related_message.contains("is not of type \"boolean\""),
-        "expected a boolean-type schema error, got: {related_message}"
-    );
+    let shared_config = shared_options
+        .parse::<Configuration>(&text)
+        .expect("the shared crate resolves the nested field's declared type too");
+
+    assert!(router_config.supergraph.introspection);
+    assert!(shared_config.supergraph.introspection);
 }
 
 #[test]
@@ -818,30 +808,16 @@ fn telemetry_input_agrees_between_the_two_parsers() {
     }
 }
 
-/// Paths already known to hit the shared parser's whole-value `${...}` coercion gap (PLAT-303).
-/// Expansion resolves the reference, but the resulting string is never coerced into the target
-/// scalar type. The coercion step does not traverse the `allOf` wrapper schemars emits around a
-/// nested struct's schema reference, so the shared parser ends up comparing a string against an
-/// integer- or boolean-typed schema.
-/// (`file_expansion_boolean_coercion_does_not_resolve_through_a_nested_allof_ref` above covers
-/// the minimal case.) A document is named here rather than matched by its error text, so a
-/// document that starts failing for an unrelated reason is reported as an unexpected difference
-/// instead of being silently absorbed into this bucket.
-const KNOWN_COERCION_GAP_PATHS: &[&str] = &["./benches/deeply_nested/router.yaml"];
-
 /// Runs every integration fixture, published example, and docs `router.yaml` snippet that
 /// [`test_discovery::discover_project_configs`] finds through both parsers, with the same mocked
 /// environment variables on each side, and compares effective settings the way
 /// `effective_settings_agree_for_the_shared_corpus` compares `CASES`.
 ///
-/// A document on [`KNOWN_COERCION_GAP_PATHS`] is allowed to fail the shared parser with the
-/// coercion gap described there; any other rejection or disagreement fails the test naming the
-/// document's path.
+/// Any rejection or disagreement fails the test naming the document's path.
 #[test]
 fn effective_settings_agree_for_discovered_project_documents() {
     let mocked_env_vars = test_discovery::discovery_env_vars();
     let mut compared = 0usize;
-    let mut coercion_gap_hits = 0usize;
     let mut unexpected = Vec::new();
 
     for doc in test_discovery::discover_project_configs() {
@@ -875,9 +851,6 @@ fn effective_settings_agree_for_discovered_project_documents() {
                     ));
                 }
             }
-            Err(_) if KNOWN_COERCION_GAP_PATHS.contains(&doc.path.to_string_lossy().as_ref()) => {
-                coercion_gap_hits += 1;
-            }
             Err(error) => unexpected.push(format!(
                 "{}: the shared parser rejected a discovered document expected to succeed: {:?}",
                 doc.path.display(),
@@ -894,12 +867,6 @@ fn effective_settings_agree_for_discovered_project_documents() {
     assert!(
         compared > 0,
         "expected to discover at least one project configuration document"
-    );
-    assert_eq!(
-        coercion_gap_hits,
-        KNOWN_COERCION_GAP_PATHS.len(),
-        "every path on KNOWN_COERCION_GAP_PATHS must actually hit the coercion gap, or it no \
-         longer belongs on the list"
     );
 }
 
