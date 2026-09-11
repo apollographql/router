@@ -398,13 +398,6 @@ fn typed_apollo_plugins(config: &Configuration) -> Result<TypedApolloPlugins, St
     })
 }
 
-/// Stands in for plugin construction. Its signature has no `serde_json::Value` parameter, so the
-/// only way to call it is with values a parsing step already typed -- it cannot deserialize the
-/// raw config again.
-fn plugins_from_typed_configs(typed: TypedApolloPlugins) -> (HealthCheck, SubscriptionConfig) {
-    (typed.health_check, typed.subscription)
-}
-
 /// Mandatory plugin defaults (`limits`, `health_check`) are present even when the document never
 /// mentions them, on both sides, because both call the same `Configuration::deserialize`.
 #[test]
@@ -430,8 +423,8 @@ fn mandatory_plugin_defaults_are_present_without_being_configured() {
 
 /// Both parsers retain raw plugin settings. Deserialize those settings into the plugin types
 /// to check subscription deduplication and health-check defaults beyond schema validation.
-#[test]
-fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
+#[tokio::test]
+async fn typed_plugin_configs_and_initialization_agree() {
     let case = &FEATUREFUL_CASE;
     let router = router_effective_settings(case).expect("the featureful fixture is valid");
     let shared = shared_effective_settings(case).expect("the featureful fixture is valid");
@@ -452,14 +445,21 @@ fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
         "typed health_check config must agree"
     );
 
-    let router_config_for_comparison = serde_json::to_value(&router_typed.subscription).unwrap();
-    let (_constructed_health_check, constructed_subscription) =
-        plugins_from_typed_configs(router_typed);
-    assert_eq!(
-        serde_json::to_value(&constructed_subscription).unwrap(),
-        router_config_for_comparison,
-        "construction must reuse the exact typed value parsing produced"
-    );
+    for name in ["health_check", "subscription"] {
+        let factory = crate::plugin::plugins()
+            .find(|factory| factory.name == format!("apollo.{name}"))
+            .expect("built-in plugin is registered");
+        for config in [&router, &shared] {
+            factory
+                .create_instance(
+                    crate::plugin::PluginInit::fake_builder()
+                        .config(config.apollo_plugins.plugins[name].clone())
+                        .build(),
+                )
+                .await
+                .unwrap_or_else(|error| panic!("{name} initialization failed: {error}"));
+        }
+    }
 }
 
 /// The flat deduplication shape passes schema validation but fails typed deserialization.
