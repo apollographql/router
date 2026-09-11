@@ -841,6 +841,7 @@ impl PluginPrivate for ResponseCache {
                     .boxed_clone(),
                 storage,
                 connectors_config,
+                enabled: self.enabled,
                 private_queries,
                 debug,
                 supergraph_schema,

@@ -168,6 +168,11 @@ pub(super) struct ConnectorCacheService {
     pub(super) service: tower::util::BoxCloneService<connect::Request, connect::Response, BoxError>,
     pub(super) storage: Arc<StorageInterface>,
     pub(super) connectors_config: Arc<ConnectorCacheConfiguration>,
+    /// Whether the response cache plugin itself is enabled, as passed to
+    /// [`ConnectorCacheConfiguration::is_source_enabled`]. `connector_service` only installs this
+    /// wrapper when the plugin is on, so this is `true` in practice today — carrying it anyway
+    /// keeps the enablement decision in one place instead of hardcoding it at the call site.
+    pub(super) enabled: bool,
     pub(super) private_queries: Arc<RwLock<LruCache<PrivateQueryKey, ()>>>,
     pub(super) debug: bool,
     pub(super) supergraph_schema: Arc<Valid<Schema>>,
@@ -200,18 +205,32 @@ impl ConnectorCacheService {
         mut self,
         request: connect::Request,
     ) -> Result<connect::Response, BoxError> {
-        // Look up the connector to get the source_config_key
+        // Look up the connector to get the source_config_key. The connectors map is populated
+        // during planning, so a miss here means the request never went through connector
+        // planning and we have no source identity to cache under. Falling through with an empty
+        // source name would silently resolve config against the `all` block and key every entry
+        // under "", so bypass the cache entirely instead.
         let connectors = get_connectors(&request.context);
-        let connector = connectors
+        let Some(connector) = connectors
             .as_ref()
-            .and_then(|c| c.get(&request.service_name));
+            .and_then(|c| c.get(&request.service_name))
+        else {
+            tracing::warn!(
+                service.name = %request.service_name,
+                "no connector found for connector service; bypassing response cache"
+            );
+            return self.service.call(request).await;
+        };
 
-        let source_name = connector.map(|c| c.source_config_key()).unwrap_or_default();
-        let connector_synthetic_name = connector.map(|c| c.id.synthetic_name()).unwrap_or_default();
+        let source_name = connector.source_config_key();
+        let connector_synthetic_name = connector.id.synthetic_name();
 
         // Check if caching is enabled for this connector source
         let connector_config = self.connectors_config.get(&source_name);
-        if !self.connectors_config.is_source_enabled(true, &source_name) {
+        if !self
+            .connectors_config
+            .is_source_enabled(self.enabled, &source_name)
+        {
             return self.service.call(request).await;
         }
 
@@ -386,7 +405,7 @@ impl ConnectorCacheService {
             // Snapshot the connector's referenced $context/$request.headers inputs for the cache
             // key (request-scoped, shared by every representation in the batch).
             let key_inputs = connector_key_inputs(
-                connector,
+                Some(connector),
                 &request.context,
                 request.supergraph_request.headers(),
             );
