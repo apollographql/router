@@ -154,7 +154,7 @@ fn first_difference(a: &Value, b: &Value) -> Option<String> {
                 for key in keys {
                     let prefix_len = path.len();
                     path.push('/');
-                    path.push_str(key);
+                    path.push_str(&key.replace('~', "~0").replace('/', "~1"));
                     let found = match (a_map.get(key), b_map.get(key)) {
                         (Some(av), Some(bv)) => walk(av, bv, path),
                         (None, None) => None,
@@ -187,6 +187,27 @@ fn first_difference(a: &Value, b: &Value) -> Option<String> {
 
     let mut path = String::new();
     walk(a, b, &mut path)
+}
+
+#[test]
+fn difference_paths_resolve_object_keys_and_array_entries() {
+    for (left, right, expected) in [
+        (
+            json!({"a/b~c": [1, 2]}),
+            json!({"a/b~c": [1, 3]}),
+            "/a~1b~0c/1",
+        ),
+        (json!({"a": 1}), json!({}), "/a"),
+        (json!({}), json!({"a": 1}), "/a"),
+        (json!([1]), json!([1, 2]), ""),
+        (json!(null), json!(false), ""),
+    ] {
+        let path = first_difference(&left, &right).expect("values differ");
+        assert_eq!(path, expected);
+        assert_ne!(left.pointer(&path), right.pointer(&path));
+    }
+    let identical = json!({"a": [null, true, 1, "text", {}]});
+    assert_eq!(first_difference(&identical, &identical), None);
 }
 
 /// Current-format inputs, and inputs migrated ahead of time exactly as a real deployment would
