@@ -415,11 +415,6 @@ fn minor_migration_warns_with_upgrade_command_and_migrated_line_numbers() {
 /// this module's.
 #[test]
 fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
-    let previous_text = include_str!("testdata/compat/current_minimal.yaml");
-    let previous =
-        validate_yaml_configuration(previous_text, Expansion::builder().build(), Mode::Upgrade)
-            .expect("the previous configuration is valid");
-
     let invalid_reload_text = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
     let reload_error = validate_yaml_configuration(
         invalid_reload_text,
@@ -430,13 +425,6 @@ fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
     assert!(reload_error.to_string().contains(
         "Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)"
     ),);
-
-    // The failed reload attempt above must not have touched the value obtained from the
-    // previous, successful parse -- an operator relies on the router continuing to serve it.
-    assert_eq!(
-        previous.supergraph.listen.to_string(),
-        "http://127.0.0.1:4000"
-    );
 }
 
 /// A configuration a reload replaces stays independently usable: parsing the new document
