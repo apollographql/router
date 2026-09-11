@@ -246,6 +246,15 @@ impl FetchGraph {
         // 3. Materialize entity inputs from incoming edges.
         let (requires_selection, input_rewrites) = if is_entity {
             let (sel, rewrites) = self.materialize_entity_inputs(ctx, node_idx, &parent_type)?;
+            // Without representations the router can fetch nothing; an
+            // entity group reachable only through input-less edges is an
+            // upstream bug, not a plannable fetch.
+            if sel.selections.is_empty() {
+                return Err(FederationError::internal(format!(
+                    "entity fetch group for subgraph {} has no representation inputs",
+                    node.subgraph,
+                )));
+            }
             (Some(sel), rewrites)
         } else {
             (None, Vec::new())
@@ -591,9 +600,65 @@ mod tests {
             operation_counter: 0,
         };
 
+        let err = graph
+            .to_query_plan(&mut ctx)
+            .expect_err("two mutation root groups cannot be ordered");
+        assert!(
+            err.to_string().contains("cannot order"),
+            "expected the root-ordering error, got: {err}",
+        );
+    }
+
+    /// An entity group whose incoming edges carry no inputs cannot build
+    /// representations; materializing it must error rather than emit an
+    /// _entities fetch with an empty requires.
+    #[test]
+    fn entity_group_without_inputs_errors() {
+        let (supergraph_schema, qg) = setup();
+        let mut graph = FetchGraph::new();
+        let s1: Arc<str> = Arc::from("S1");
+        let s2: Arc<str> = Arc::from("S2");
+        let root = graph.get_or_create_root_group(&s1, mutation_pos());
+        let s1_schema = qg.schema_by_source(&s1).expect("S1 schema").clone();
+        let s2_schema = qg.schema_by_source(&s2).expect("S2 schema").clone();
+        append_parsed_selection(&mut graph, root, &s1_schema, mutation_pos(), "m1");
+
+        let entity = graph.add_entity_group(
+            &s2,
+            vec![FetchDataPathElement::Key(name!("t"), Default::default())],
+        );
+        let entity_parent: CompositeTypeDefinitionPosition = s2_schema
+            .entity_type()
+            .expect("entity type lookup")
+            .expect("S2 has entities")
+            .into();
+        append_parsed_selection(
+            &mut graph,
+            entity,
+            &s2_schema,
+            entity_parent,
+            "... on T { a }",
+        );
+        // Ordering-only edge: no key inputs ever attached.
+        graph
+            .add_ordering_dependency(root, entity)
+            .expect("acyclic");
+
+        let mut compression = SubgraphOperationCompression::Disabled;
+        let directives = DirectiveList::default();
+        let mut ctx = PlanBuildContext {
+            supergraph_schema: &supergraph_schema,
+            query_graph: &qg,
+            root_kind: SchemaRootDefinitionKind::Mutation,
+            variable_definitions: &[],
+            operation_directives: &directives,
+            operation_name: &None,
+            operation_compression: &mut compression,
+            operation_counter: 0,
+        };
         assert!(
             graph.to_query_plan(&mut ctx).is_err(),
-            "two mutation root groups cannot be ordered; the builder must not parallelize them",
+            "an entity fetch without representations must not materialize",
         );
     }
 
