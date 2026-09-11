@@ -743,7 +743,10 @@ impl ConnectorCacheService {
                             .iter()
                             .filter_map(|t| t.user_value().map(String::from))
                             .collect(),
-                        has_tags: false,
+                        // Derived from the same tags the keys above come from, rather than
+                        // hardcoded: these entries have real `@cacheTag` values whenever the
+                        // schema gave them any.
+                        has_tags: ir.cache_tags.iter().any(|t| t.user_value().is_some()),
                         cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                         indexes,
                         kind: CacheEntryKind::Entity {
@@ -1323,6 +1326,22 @@ impl ConnectorRequestCacheService {
             _ => String::new(),
         };
 
+        // Whether this root field actually carries `@cacheTag` labels. Needed even on paths that
+        // store nothing, because the debugger's NO_CACHE_TAG_ON_ROOT_FIELD warning is driven by
+        // it: reporting `false` for a field that does have `@cacheTag` tells an operator who
+        // already did the work that they still have it to do.
+        let root_field_has_cache_tags = |request: &connector::request_service::Request| {
+            get_connector_root_cache_tags(
+                &self.supergraph_schema,
+                &self.subgraph_enums,
+                &request.connector.id.synthetic_name(),
+                &root_field_name,
+                &request.key.inputs().args,
+            )
+            .map(|tags| !tags.is_empty())
+            .unwrap_or(false)
+        };
+
         // The response will have a private scope but we don't have a way to differentiate users,
         // so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
@@ -1341,13 +1360,17 @@ impl ConnectorRequestCacheService {
             let source_name = self.source_name.clone();
             let debug = self.debug;
             let indexes = self.indexes;
+            let has_tags = debug && root_field_has_cache_tags(&request);
             let resp = self.handle_with_cache_control_extraction(request).await?;
 
             if debug {
                 let cache_key_context = CacheKeyContext {
                     key: "-".to_string(),
+                    // Nothing was stored, so there are no invalidation keys to show — but the
+                    // field's own `@cacheTag` labels still decide whether the debugger should
+                    // warn that root fields carry none.
                     invalidation_keys: vec![],
-                    has_tags: false,
+                    has_tags,
                     cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                     indexes,
                     kind: CacheEntryKind::RootFields {
