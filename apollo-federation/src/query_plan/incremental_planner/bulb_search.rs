@@ -511,17 +511,16 @@ fn bulb_probe<S: BulbSearchSpace>(
                         beam_width,
                     );
 
-                    debug_assert!(
-                        !frame.order.is_empty(),
-                        "non-empty scored produced an empty exploration order",
-                    );
-
                     if let Some((opt_idx, child_disc)) = frame.next_option(progress.best_cost) {
                         space.apply(candidate, &frame.decision, &frame.options[opt_idx]);
                         disc_budget = child_disc;
                         stack.push(frame);
                         true
                     } else {
+                        // Unreachable: scored is non-empty and was filtered
+                        // against the same best_cost, which cannot have
+                        // changed since score_options.
+                        debug_assert!(false, "next_option returned None on a fresh frame",);
                         false
                     }
                 }
