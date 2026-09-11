@@ -1073,18 +1073,8 @@ fn licence_restricted_configuration_paths_agree_between_parsers_via_validated_ya
     }
 }
 
-/// The previous case shows that both parsers' `validated_yaml` agrees at three restriction
-/// paths. This case runs the actual licence check those paths feed --
-/// `LicenseEnforcementReport::build`, `pub(crate)` in `uplink::license_enforcement` and callable
-/// directly with a `LicenseState` built in memory, the way `license_enforcement`'s own
-/// `test_restricted_features_via_config_unlicensed` builds its license state: no `APOLLO_KEY`,
-/// `APOLLO_GRAPH_REF`, or other credential is read.
-///
-/// A `Configuration` from each parser is checked against the same `LicenseState::Unlicensed`
-/// verdict. Agreement matters here specifically because `validate_configuration` reads
-/// `validated_yaml`, which `first_difference`'s comparisons never see -- a divergence at this
-/// layer would silently change which features a licence permits, rather than only which JSON
-/// field disagrees.
+/// Licence enforcement reports the same restricted features and verdict for an unlicensed
+/// router using either parser's commercial configuration.
 #[test]
 fn licence_verdict_agrees_between_parsers_for_commercial_configuration() {
     let text = include_str!("testdata/compat/current_commercial.yaml");
