@@ -32,7 +32,7 @@ use std::sync::Arc;
 /// assert_eq!(prefix.to_vec(), vec!["a", "b"]);
 /// assert_eq!(c.parent().to_vec(), prefix.to_vec());
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SharedPath<T> {
     head: Option<Arc<Node<T>>>,
     len: usize,
@@ -49,14 +49,12 @@ impl<T> Drop for SharedPath<T> {
     fn drop(&mut self) {
         let mut current = self.head.take();
         while let Some(arc) = current {
-            // into_inner rather than try_unwrap: under concurrent drops,
-            // try_unwrap's loser could still end up the last owner and take
-            // Node's recursive drop. into_inner guarantees exactly one
-            // caller wins the value, so a None here means someone else owns
-            // the tail and will continue the iterative teardown.
-            match Arc::into_inner(arc) {
-                Some(mut node) => current = node.next.take(),
-                None => break,
+            // into_inner guarantees exactly one caller wins the value, unlike try_unwrap
+            if let Some(mut node) = Arc::into_inner(arc) {
+                current = node.next.take()
+            } else {
+                // someone else owns the tail; they are in charge of dropping it.
+                break;
             }
         }
     }
@@ -102,7 +100,7 @@ impl<T> SharedPath<T> {
     ///
     /// Allocates a Vec of node references (O(n)). Suitable for
     /// finalization boundaries; avoid calling per-entry in hot loops.
-    pub fn iter(&self) -> Iter<'_, T> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &T> {
         let mut nodes = Vec::with_capacity(self.len);
         let mut current = &self.head;
         while let Some(node) = current {
@@ -110,17 +108,9 @@ impl<T> SharedPath<T> {
             current = &node.next;
         }
         nodes.reverse();
-        Iter { nodes, pos: 0 }
-    }
-}
-
-impl<T: Clone> SharedPath<T> {
-    /// Materialize into a Vec. O(n). Used at finalization boundaries.
-    pub fn to_vec(&self) -> Vec<T> {
-        self.iter().cloned().collect()
+        nodes.into_iter().map(|node| &node.value)
     }
 
-    /// Build from a Vec.
     pub fn from_vec(v: Vec<T>) -> Self {
         let mut path = Self::new();
         for item in v {
@@ -130,51 +120,31 @@ impl<T: Clone> SharedPath<T> {
     }
 }
 
-impl<T> Clone for SharedPath<T> {
-    fn clone(&self) -> Self {
-        Self {
-            head: self.head.clone(),
-            len: self.len,
-        }
+impl<T: Clone> SharedPath<T> {
+    pub fn to_vec(&self) -> Vec<T> {
+        self.iter().cloned().collect()
     }
 }
 
+// Using #[derive] bounds T: Default, so we implement manually to handle
+// shared paths of non-Default elements.
 impl<T> Default for SharedPath<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Iterator yielding elements root-to-tip (oldest first).
-pub struct Iter<'a, T> {
-    nodes: Vec<&'a Node<T>>,
-    pos: usize,
-}
-
-impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos < self.nodes.len() {
-            let val = &self.nodes[self.pos].value;
-            self.pos += 1;
-            Some(val)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.nodes.len() - self.pos;
-        (remaining, Some(remaining))
-    }
-}
-
-impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct NoDefault;
+
+    #[test]
+    fn default_works_without_t_default() {
+        let path: SharedPath<NoDefault> = Default::default();
+        assert!(path.is_empty());
+    }
 
     #[test]
     fn parent_removes_newest_element() {
