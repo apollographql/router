@@ -6,6 +6,7 @@ use std::sync::Arc;
 use petgraph::graph::NodeIndex;
 
 use super::super::fetch_graph::FetchGraph;
+use super::super::fetch_graph::FetchGraphCheckpoint;
 use super::super::shared_path::SharedPath;
 use crate::operation::Selection;
 use crate::query_graph::graph_path::operation::OpPathElement;
@@ -80,7 +81,9 @@ impl PendingSelection {
     pub(super) fn into_condition_for(mut self, dependent: NodeIndex) -> Self {
         self.condition = Some(ConditionScope {
             dependent,
-            depth: self.condition_depth() + 1,
+            // Saturating keeps an over-deep chain permanently over any cap;
+            // wrapping would reset the bound this counter exists to enforce.
+            depth: self.condition_depth().saturating_add(1),
         });
         self
     }
@@ -144,7 +147,7 @@ pub(crate) struct PlanState {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PlanCheckpoint {
-    graph_cp: usize,
+    graph_cp: FetchGraphCheckpoint,
     pending_cp: usize,
     dropped_fields: usize,
 }
@@ -189,6 +192,19 @@ impl PlanState {
         Some(popped)
     }
 
+    /// Clone for saving a completed candidate; drops both undo logs, which
+    /// snapshots never roll back.
+    pub(crate) fn snapshot(&self) -> Self {
+        Self {
+            graph: self.graph.snapshot(),
+            pending: self.pending.clone(),
+            pending_undo: Vec::new(),
+            dropped_fields: self.dropped_fields,
+            effort: self.effort,
+            forced_backtracks: self.forced_backtracks,
+        }
+    }
+
     /// Save the current state for later rollback. O(1).
     pub(crate) fn checkpoint(&self) -> PlanCheckpoint {
         PlanCheckpoint {
@@ -216,5 +232,49 @@ impl PlanState {
             }
         }
         self.dropped_fields = cp.dropped_fields;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn any_selection() -> Selection {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            "type Query { x: Int }",
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema =
+            crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
+        let op = crate::operation::Operation::parse(schema, "{ x }", "op.graphql")
+            .expect("valid operation");
+        op.selection_set
+            .selections
+            .values()
+            .next()
+            .expect("one selection")
+            .clone()
+    }
+
+    /// The depth counter bounds requires-of-requires recursion; overflowing
+    /// it must not wrap back to zero (which would reset the bound and
+    /// re-enable the very spiral it exists to stop). Saturating keeps an
+    /// over-deep chain permanently over any cap.
+    #[test]
+    fn condition_depth_saturates_instead_of_wrapping() {
+        let pending = PendingSelection {
+            selection: any_selection(),
+            query_graph_node: NodeIndex::new(0),
+            fetch_node: NodeIndex::new(0),
+            op_path: SharedPath::new(),
+            path_in_fetch: SharedPath::new(),
+            condition: Some(ConditionScope {
+                dependent: NodeIndex::new(0),
+                depth: u8::MAX,
+            }),
+        };
+        let deeper = pending.into_condition_for(NodeIndex::new(1));
+        assert_eq!(deeper.condition_depth(), u8::MAX);
     }
 }
