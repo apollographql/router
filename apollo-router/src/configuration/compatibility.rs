@@ -413,17 +413,21 @@ fn parse_via_apollo_configuration(
 }
 
 #[test]
-fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
-    let invalid_reload_text = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
-    let reload_error = validate_yaml_configuration(
-        invalid_reload_text,
-        Expansion::builder().build(),
-        Mode::Upgrade,
-    )
-    .expect_err("a migrated document that still fails validation must stop the reload");
-    assert!(reload_error.to_string().contains(
-        "Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)"
-    ),);
+fn invalid_migrated_input_is_rejected_by_both_parsers() {
+    let case = Case {
+        name: "unknown key after a minor migration",
+        text: "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n",
+        migration: Migration::Minor,
+    };
+    for error in [
+        router_effective_settings(&case).expect_err("router rejects the migrated input"),
+        shared_effective_settings(&case).expect_err("the shared parser rejects the migrated input"),
+    ] {
+        assert!(
+            error.contains("this_key_does_not_exist_anywhere"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
