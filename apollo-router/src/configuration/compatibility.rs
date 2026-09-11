@@ -392,13 +392,8 @@ fn an_invalid_migrated_replacement_does_not_fall_back_to_the_original() {
     ),);
 }
 
-/// A configuration a reload replaces stays independently usable: parsing the new document
-/// mutates nothing on the value a previous parse already produced. This is the parsing-level
-/// precondition "previous configurations on reload" depends on -- the actual previous/new
-/// hand-off that plugins see (`PluginInit::previous_config`) is wired up outside
-/// `apollo-router/src/configuration`.
 #[test]
-fn a_previous_configuration_is_unaffected_by_parsing_its_replacement() {
+fn introspection_defaults_and_explicit_values_agree_between_parsers() {
     let previous_text = include_str!("testdata/compat/current_minimal.yaml");
     let next_text = include_str!("testdata/compat/current_minimal_v2.yaml");
 
@@ -416,10 +411,8 @@ fn a_previous_configuration_is_unaffected_by_parsing_its_replacement() {
         .parse::<Configuration>(next_text)
         .expect("the shared parser accepts the replacement configuration");
 
-    // Parsing the replacement must not have changed what the earlier parse produced.
     assert!(!router_previous.supergraph.introspection);
     assert!(!shared_previous.supergraph.introspection);
-    // The replacement enables introspection; both parsers must agree it takes effect.
     assert!(router_next.supergraph.introspection);
     assert!(shared_next.supergraph.introspection);
 }
