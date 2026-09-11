@@ -531,7 +531,9 @@ impl QueryPlannerService {
                             paths,
                             errors: self.authorization_config.error_config(),
                         };
-                        unauthorized.log_unauthorized_paths();
+                        if !compute_job_type.is_warmup() {
+                            unauthorized.log_unauthorized_paths();
+                        }
                         unauthorized.update_response_with_unauthorized_path_errors(&mut response);
                     }
 
@@ -692,6 +694,7 @@ mod tests {
 
     use test_log::test;
     use tower::ServiceExt;
+    use tracing::Instrument;
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
@@ -1331,5 +1334,70 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    async fn plan_unauthorized_operation(compute_job_type: ComputeJobType) -> QueryPlannerContent {
+        let configuration: Arc<Configuration> = Arc::default();
+        let schema = Schema::parse(
+            include_str!("../../tests/fixtures/directives/policy/policy_basic_schema.graphql"),
+            &configuration,
+        )
+        .unwrap();
+        let planner = QueryPlannerService::new(schema.into(), configuration.clone())
+            .await
+            .unwrap();
+
+        let query = "{ private { id } }";
+        let doc = Query::parse_document(query, None, &planner.schema(), &configuration).unwrap();
+
+        planner
+            .get(
+                QueryKey {
+                    original_query: query.to_string(),
+                    filtered_query: query.to_string(),
+                    operation_name: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                },
+                doc,
+                compute_job_type,
+                Default::default(),
+            )
+            .await
+            .expect("filtering an unauthorized operation returns a null response, not an error")
+    }
+
+    /// Drives the plan inside a span named for this test, so the shared log buffer can be
+    /// read back for this test alone. `tracing_test`'s buffer is process-global and never
+    /// cleared, so an unscoped read sees sibling tests' events — which an absence assertion
+    /// cannot survive.
+    #[test(tokio::test)]
+    async fn warm_up_does_not_log_a_filtered_out_operation_as_an_authorization_error() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+        let result = plan_unauthorized_operation(ComputeJobType::QueryPlanningWarmup)
+            .instrument(tracing::info_span!("warm_up_filtered_operation"))
+            .await;
+
+        assert!(matches!(result, QueryPlannerContent::Response { .. }));
+        assert!(!crate::test_harness::tracing_test::logs_with_scope_contain(
+            "warm_up_filtered_operation",
+            "Authorization error"
+        ));
+    }
+
+    #[test(tokio::test)]
+    async fn a_real_unauthorized_request_still_logs_an_authorization_error() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+        let result = plan_unauthorized_operation(ComputeJobType::QueryPlanning)
+            .instrument(tracing::info_span!("real_unauthorized_request"))
+            .await;
+
+        assert!(matches!(result, QueryPlannerContent::Response { .. }));
+        assert!(crate::test_harness::tracing_test::logs_with_scope_contain(
+            "real_unauthorized_request",
+            "Authorization error"
+        ));
     }
 }
