@@ -116,6 +116,14 @@ const CASES: &[Case] = &[
     },
 ];
 
+/// Applies `mode`'s migrations to `text` and reserializes the result, the way the loader does
+/// before it reparses a migrated document.
+fn migrate(text: &str, mode: UpgradeMode) -> Result<String, String> {
+    let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
+    let migrated = upgrade_configuration(&raw, false, mode).map_err(|error| error.to_string())?;
+    serde_yaml::to_string(&migrated).map_err(|error| error.to_string())
+}
+
 /// Parses `case` the way router's own startup path does: `Configuration::from_str`'s
 /// `Mode::Upgrade` migrates within-major shapes automatically, and a case needing a major
 /// migration is pre-upgraded first, standing in for an operator running `router config upgrade`
@@ -128,11 +136,7 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
                 .map_err(|error| error.to_string())
         }
         Migration::Major => {
-            let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-            let upgraded = upgrade_configuration(&raw, false, UpgradeMode::Major)
-                .map_err(|error| error.to_string())?;
-            let upgraded_yaml =
-                serde_yaml::to_string(&upgraded).map_err(|error| error.to_string())?;
+            let upgraded_yaml = migrate(text, UpgradeMode::Major)?;
             validate_yaml_configuration(
                 &upgraded_yaml,
                 Expansion::builder().build(),
@@ -153,19 +157,8 @@ fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
     let text = case.text;
     let text = match case.migration {
         Migration::None => text.to_string(),
-        Migration::Minor => {
-            let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-            let migrated =
-                upgrade_configuration(&raw, false, UpgradeMode::Minor(current_major_version()))
-                    .map_err(|error| error.to_string())?;
-            serde_yaml::to_string(&migrated).map_err(|error| error.to_string())?
-        }
-        Migration::Major => {
-            let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-            let migrated = upgrade_configuration(&raw, false, UpgradeMode::Major)
-                .map_err(|error| error.to_string())?;
-            serde_yaml::to_string(&migrated).map_err(|error| error.to_string())?
-        }
+        Migration::Minor => migrate(text, UpgradeMode::Minor(current_major_version()))?,
+        Migration::Major => migrate(text, UpgradeMode::Major)?,
     };
     router_options()
         .parse::<Configuration>(&text)
