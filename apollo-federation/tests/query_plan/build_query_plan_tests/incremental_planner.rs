@@ -639,8 +639,12 @@ fn inc_mutation_multiple_fields_are_sequential() {
 // Greedy tiebreak correction by backtracking
 // ---------------------------------------------------------------------------
 
+/// Baseline for the backtracking test below: at fuel 0 the greedy pass
+/// keeps its suboptimal tiebreak (3 fetches). The snapshot pins the current
+/// tiebreak ranking, not required behavior; a legitimate ranking change may
+/// churn it.
 #[test]
-fn inc_greedy_tiebreak_mistake_is_corrected_by_backtracking_greedy() {
+fn inc_greedy_tiebreak_mistake_survives_without_fuel() {
     let greedy_config = QueryPlannerConfig {
         incremental_planner: IncrementalPlannerConfig {
             fuel: 0,
@@ -827,7 +831,7 @@ fn inc_greedy_tiebreak_mistake_is_corrected_by_backtracking() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inc_incomplete_plan_is_an_error_not_a_partial_plan() {
+fn inc_shareable_parent_hop_reaches_keyless_child_detail() {
     let config = QueryPlannerConfig {
         incremental_planner: IncrementalPlannerConfig {
             fuel: 0,
@@ -870,17 +874,66 @@ fn inc_incomplete_plan_is_an_error_not_a_partial_plan() {
         "test.graphql",
     )
     .expect("valid graphql document");
-    let result = planner.build_query_plan(&document, None, Default::default());
-    match result {
-        Err(_) => {}
-        Ok(plan) => {
-            let plan_str = format!("{plan}");
-            assert!(
-                plan_str.contains("detail"),
-                "Planner returned an incomplete plan instead of erroring: {plan_str}"
-            );
-        }
-    }
+    // Even at fuel 0 the greedy pass finds the complete plan through the
+    // shareable parent in b; pin that so the error-path test below stays
+    // the only place exercising planning failure.
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("this topology plans completely");
+    let plan_str = format!("{plan}");
+    assert!(
+        plan_str.contains("detail"),
+        "plan must fetch the requested field: {plan_str}"
+    );
+}
+
+/// A genuinely unplannable state: the only subgraph resolving the field is
+/// disabled, so the greedy pass drops it, no complete candidate is ever
+/// recorded, and planning must fail with the disabled-subgraphs error, not
+/// return a partial plan.
+#[test]
+fn inc_incomplete_plan_is_an_error_not_a_partial_plan() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query {
+            user: User
+          }
+
+          type User @key(fields: "id") {
+            id: ID!
+            name: String
+          }
+        "#,
+        b: r#"
+          type User @key(fields: "id") {
+            id: ID!
+            email: String
+          }
+        "#,
+    );
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ user { email } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let err = planner
+        .build_query_plan(
+            &document,
+            None,
+            QueryPlanOptions {
+                disabled_subgraph_names: std::iter::once("b".to_string()).collect(),
+                ..Default::default()
+            },
+        )
+        .expect_err("email is only resolvable in the disabled subgraph");
+    assert!(
+        err.to_string()
+            .contains("No plan was found when subgraphs were disabled"),
+        "expected the disabled-subgraphs planning error, got: {err}",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -924,10 +977,12 @@ fn inc_cooperative_cancellation_stops_planning() {
             ..Default::default()
         },
     );
+    let err = result.expect_err("cancelled planning should error");
     assert!(
-        result.is_err(),
-        "Cancelled planning should error, got:\n{}",
-        result.map(|p| p.to_string()).unwrap_or_default(),
+        err.to_string()
+            .contains("the caller requested cancellation"),
+        "expected the cancellation error specifically (not a generic \
+         planning failure), got: {err}",
     );
 }
 
@@ -938,7 +993,7 @@ fn inc_cooperative_cancellation_stops_planning() {
 /// iterations (beam > 1) explore the alternative parent routing that
 /// reaches the correct subgraph.
 #[test]
-fn inc_fuel_needed_for_keyless_child_behind_wrong_ranked_hop() {
+fn inc_keyless_child_behind_wrong_ranked_hop_recovered_by_search() {
     let planner = planner!(
         config = incremental_config(),
         SubgraphA: r#"
@@ -1191,5 +1246,93 @@ fn inc_diamond_shaped_compound_key_dependency() {
       },
     }
     "###
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Defer fallback and statistics
+// ---------------------------------------------------------------------------
+
+/// The incremental planner has no defer support yet; a deferred operation
+/// must fall back to the legacy planner and keep its DeferNode rather than
+/// silently planning every field eagerly.
+#[test]
+fn inc_defer_falls_back_to_legacy_planner() {
+    let mut config = incremental_config();
+    config.incremental_delivery.enable_defer = true;
+    let planner = planner!(
+        config = config,
+        a: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        b: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            v1: Int
+            v2: Int
+          }
+        "#,
+    );
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        r#"{ t { v1 ... @defer { v2 } } }"#,
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("deferred operation plans via the legacy planner");
+    let plan_str = format!("{plan}");
+    assert!(
+        plan_str.contains("Defer"),
+        "deferred operations must keep their DeferNode, got: {plan_str}",
+    );
+}
+
+/// Mutation planning runs one search per top-level field; the statistics
+/// must accumulate across those searches rather than keep only the last.
+#[test]
+fn inc_mutation_statistics_accumulate_across_fields() {
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            fuel: 0,
+            ..incremental_config().incremental_planner
+        },
+        ..incremental_config()
+    };
+    let planner = planner!(
+        config = config,
+        a: r#"
+          type Query {
+            q: Int
+          }
+
+          type Mutation {
+            m1: Int
+            m2: Int
+          }
+        "#,
+    );
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "mutation { m1 m2 }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("mutation plans");
+    assert_eq!(
+        plan.statistics.evaluated_plan_count.get(),
+        2,
+        "each per-field greedy search evaluates one plan; the counts must sum",
     );
 }
