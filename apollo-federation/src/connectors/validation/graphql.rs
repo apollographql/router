@@ -20,6 +20,10 @@ pub(crate) struct SchemaInfo<'schema> {
     pub(crate) connect_link: ConnectLink,
     /// A lookup map for the Shapes computed from GraphQL types.
     pub(crate) shape_lookup: IndexMap<String, Shape>,
+    /// The global registry of custom `->` method definitions (`@source(methods:)`,
+    /// `@connect(methods:)`, and `@method`), so shape-based validation can resolve
+    /// `->customMethod` calls. `None` when no (admissible) methods are declared.
+    methods: Option<std::sync::Arc<crate::connectors::MethodRegistry>>,
 }
 
 impl<'schema> SchemaInfo<'schema> {
@@ -28,13 +32,26 @@ impl<'schema> SchemaInfo<'schema> {
         src: &'schema str,
         connect_link: ConnectLink,
     ) -> Self {
+        let methods = super::methods::build_registry(
+            schema,
+            &connect_link.source_directive_name,
+            &connect_link.connect_directive_name,
+            &connect_link.method_directive_name,
+            connect_link.spec,
+        );
         Self {
             schema,
             len: src.len(),
             lookup: LineColLookup::new(src),
             connect_link,
             shape_lookup: shape::graphql::shapes_for_schema(schema),
+            methods,
         }
+    }
+
+    /// The global custom-method registry, if any admissible methods are declared.
+    pub(crate) fn methods(&self) -> Option<&std::sync::Arc<crate::connectors::MethodRegistry>> {
+        self.methods.as_ref()
     }
 
     /// Get the 1-based line and column values for an offset into this schema.

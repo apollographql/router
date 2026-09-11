@@ -336,9 +336,12 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
     for connector in &connectors {
         if connector.entity_resolver == Some(TypeBatch) {
             let input_trie = compute_batch_input_trie(connector);
-            match SelectionSetWalker::new(connector.name(), schema, &input_trie)
-                .walk(&connector.selection.shape(), connector)
-            {
+            match SelectionSetWalker::new(connector.name(), schema, &input_trie).walk(
+                &connector
+                    .selection
+                    .shape_with_methods(connector.methods.clone()),
+                connector,
+            ) {
                 Ok(res) => messages.extend(res),
                 Err(err) => messages.push(err),
             }
@@ -353,7 +356,12 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
                 messages.push(field_set_error(&variables, &connector, schema));
             }
             Ok(Some(field_set)) => {
-                entity_checker.add_connector(field_set, &connector.selection.shape());
+                entity_checker.add_connector(
+                    field_set,
+                    &connector
+                        .selection
+                        .shape_with_methods(connector.methods.clone()),
+                );
             }
         }
     }

@@ -2,6 +2,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -11,7 +12,6 @@ use crate::connectors::json_selection::helpers::json_type_name;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(SplitMethod, split_method, split_shape);
@@ -28,8 +28,9 @@ fn split_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let mut errors = Vec::new();
 
     // Require at least one argument (the separator)
@@ -64,7 +65,7 @@ fn split_method(
     };
 
     // Evaluate the separator argument
-    let (separator_opt, sep_errors) = separator_arg.apply_to_path(data, vars, input_path, spec);
+    let (separator_opt, sep_errors) = separator_arg.apply_to_path(data, vars, input_path, context);
     errors.extend(sep_errors);
 
     let separator: &str = match separator_opt.as_ref() {
@@ -98,7 +99,7 @@ fn split_method(
 
     // Evaluate the optional limit argument
     let limit: Option<usize> = if let Some(limit_arg) = args.get(1) {
-        let (limit_opt, limit_errors) = limit_arg.apply_to_path(data, vars, input_path, spec);
+        let (limit_opt, limit_errors) = limit_arg.apply_to_path(data, vars, input_path, context);
         errors.extend(limit_errors);
         match limit_opt {
             Some(JSON::Number(n)) => match n.as_u64() {

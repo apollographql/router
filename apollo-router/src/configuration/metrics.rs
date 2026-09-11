@@ -471,7 +471,13 @@ impl InstrumentData {
             opt.source.override_url,
             "$[?(@.subgraphs..sources..override_url)]",
             opt.source.max_requests_per_operation,
-            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
+            "$[?(@.subgraphs..sources..max_requests_per_operation)]",
+            // Opting in to connect/v0.5 is the only signal of adoption for
+            // everything the preview spec adds (`@source(methods:)`,
+            // `@connect(methods:)`, `@method`), since those are declared in
+            // subgraph schemas rather than in router config.
+            opt.preview_connect_v0_5,
+            "$[?(@.preview_connect_v0_5 == true)]"
         );
 
         populate_config_instrument!(

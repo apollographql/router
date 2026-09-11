@@ -31,6 +31,7 @@ use super::http::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use super::http::PATH_ARGUMENT_NAME;
 use super::http::QUERY_PARAMS_ARGUMENT_NAME;
 use super::http::URL_PATH_TEMPLATE_SCALAR_NAME;
+use super::methods::METHODS_ARGUMENT_NAME;
 use super::source::BaseUrl;
 use super::source::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use super::source::SOURCE_HTTP_NAME_IN_SPEC;
@@ -48,10 +49,12 @@ use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
+pub(crate) const METHODS_SCALAR_NAME: Name = name!("Methods");
 
 pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
     vec![
         Box::new(json_selection_spec()),
+        Box::new(methods_scalar_spec()),
         Box::new(url_path_template_spec()),
         Box::new(connector_errors_spec()),
         Box::new(http_header_mapping_spec()),
@@ -65,6 +68,20 @@ pub(crate) fn type_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification
 fn json_selection_spec() -> ScalarTypeSpecification {
     ScalarTypeSpecification {
         name: JSON_SELECTION_SCALAR_NAME,
+    }
+}
+
+// scalar Methods
+//
+// The value of `@source(methods:)` / `@connect(methods:)` is a GraphQL object literal
+// mapping each def name to its body string
+// (e.g. `{ User: "id name", min: "($n) => $->min($n)" }`).
+// A custom scalar lets us accept that object literal and parse it ourselves;
+// the def names are arbitrary user identifiers, so no fixed input-object type
+// could describe them.
+fn methods_scalar_spec() -> ScalarTypeSpecification {
+    ScalarTypeSpecification {
+        name: METHODS_SCALAR_NAME,
     }
 }
 
@@ -317,11 +334,61 @@ fn connect_http_spec() -> InputObjectTypeSpecification {
     }
 }
 
+pub(crate) const METHOD_DIRECTIVE_NAME_IN_SPEC: Name = name!("method");
+pub(crate) const METHOD_AS_ARGUMENT_NAME: Name = name!("as");
+
 pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
     vec![
         Box::new(connect_directive_spec()),
         Box::new(source_directive_spec()),
+        Box::new(mapping_directive_spec()),
     ]
+}
+
+// connect/v0.5:
+// directive @method(
+//   selection: JSONSelection
+//   as: String
+// ) repeatable on OBJECT | INTERFACE
+//
+// Fernando Koch's `@method` proposal, realized as convenience sugar over
+// `@source(methods:)`: `@method` on a type registers a nullary custom `->` method
+// (named after the type, or `as:`) whose body is `selection:` or is auto-derived
+// from the type's fields.
+//
+// NOTE: the connect SDL is version-flat — this directive is defined for every
+// spec version, with its *use* gated to connect/v0.5+ in validation. Stricter
+// per-version directive gating (emitting `@method` only for v0.5+) is a
+// possible pre-release follow-up.
+fn mapping_directive_spec() -> DirectiveSpecification {
+    DirectiveSpecification::new(
+        METHOD_DIRECTIVE_NAME_IN_SPEC,
+        &[
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: CONNECT_SELECTION_ARGUMENT_NAME,
+                    get_type: |schema, link| {
+                        let json_selection_scalar =
+                            lookup_scalar_in_schema(&JSON_SELECTION_SCALAR_NAME, schema, link)?;
+                        Ok(Type::Named(json_selection_scalar))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: METHOD_AS_ARGUMENT_NAME,
+                    get_type: |_, _| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+        ],
+        true,
+        &[DirectiveLocation::Object, DirectiveLocation::Interface],
+        None,
+    )
 }
 
 // connect/v0.1:
@@ -355,6 +422,16 @@ pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecific
 //   selection: JSONSelection!
 //   entity: Boolean = false
 //   isSuccess: JSONSelection
+// ) repeatable on FIELD_DEFINITION | OBJECT
+//
+// connect/v0.5 (preview) additionally:
+// directive @connect(
+//   ...
+//   # Reusable custom `->` method definitions, colocated with this connector.
+//   # Same one-global-namespace semantics as `@source(methods:)` — declaring a def
+//   # here does not scope it to this connector. Present in the SDL for all
+//   # versions (like isSuccess), gated to v0.5+ in validation.
+//   methods: Methods
 // ) repeatable on FIELD_DEFINITION | OBJECT
 fn connect_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
@@ -450,6 +527,18 @@ fn connect_directive_spec() -> DirectiveSpecification {
                 },
                 composition_strategy: None,
             },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: METHODS_ARGUMENT_NAME,
+                    get_type: |schema, link| {
+                        let methods_scalar =
+                            lookup_scalar_in_schema(&METHODS_SCALAR_NAME, schema, link)?;
+                        Ok(Type::Named(methods_scalar))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
         ],
         true,
         &[
@@ -474,6 +563,10 @@ fn connect_directive_spec() -> DirectiveSpecification {
 //   http: SourceHTTP!
 //   errors: ConnectorErrors
 //   isSuccess: JSONSelection
+//   # connect/v0.5: reusable, type-inferred custom `->` method definitions.
+//   # Present in the SDL for all versions (like isSuccess), gated to v0.5+ in
+//   # validation.
+//   methods: Methods
 // ) repeatable on SCHEMA
 fn source_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
@@ -518,6 +611,18 @@ fn source_directive_spec() -> DirectiveSpecification {
                         let json_selection_scalar =
                             lookup_scalar_in_schema(&JSON_SELECTION_SCALAR_NAME, schema, link)?;
                         Ok(Type::Named(json_selection_scalar))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: METHODS_ARGUMENT_NAME,
+                    get_type: |schema, link| {
+                        let methods_scalar =
+                            lookup_scalar_in_schema(&METHODS_SCALAR_NAME, schema, link)?;
+                        Ok(Type::Named(methods_scalar))
                     },
                     default_value: None,
                 },
@@ -630,9 +735,11 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on SCHEMA
+
+        directive @connect__method(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -661,6 +768,8 @@ mod tests {
         scalar federation__ContextFieldValue
 
         scalar connect__JSONSelection
+
+        scalar connect__Methods
 
         scalar connect__URLTemplate
 
@@ -764,9 +873,11 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on SCHEMA
+
+        directive @connect__method(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -795,6 +906,8 @@ mod tests {
         scalar federation__ContextFieldValue
 
         scalar connect__JSONSelection
+
+        scalar connect__Methods
 
         scalar connect__URLTemplate
 
@@ -874,9 +987,11 @@ mod tests {
 
         directive @extends on OBJECT | INTERFACE
 
-        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on SCHEMA
+
+        directive @connect__method(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -899,6 +1014,8 @@ mod tests {
         scalar _FieldSet
 
         scalar connect__JSONSelection
+
+        scalar connect__Methods
 
         scalar connect__URLTemplate
 
@@ -1007,9 +1124,11 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect(source: String, id: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, selection: Mapping!, entity: Boolean = false, isSuccess: Mapping) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, selection: Mapping!, entity: Boolean = false, isSuccess: Mapping, methods: connect__Methods) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @api(name: String!, http: connect__SourceHTTP!, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
+        directive @api(name: String!, http: connect__SourceHTTP!, errors: ErrorMappings, isSuccess: Mapping, methods: connect__Methods) repeatable on SCHEMA
+
+        directive @connect__method(selection: Mapping, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -1038,6 +1157,8 @@ mod tests {
         scalar federation__ContextFieldValue
 
         scalar Mapping
+
+        scalar connect__Methods
 
         scalar connect__URLTemplate
 
@@ -1150,7 +1271,9 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect__source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
+        directive @connect__source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection, methods: connect__Methods) repeatable on SCHEMA
+
+        directive @connect__method(selection: connect__JSONSelection, as: String) repeatable on OBJECT | INTERFACE
 
         type Query {
           hello: String
@@ -1183,6 +1306,8 @@ mod tests {
         scalar federation__Policy
 
         scalar federation__ContextFieldValue
+
+        scalar connect__Methods
 
         scalar connect__URLTemplate
 
