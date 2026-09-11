@@ -21,9 +21,8 @@ pub(crate) struct ConditionScope {
     /// commits into gets an ordering edge to this dependent.
     pub(crate) dependent: NodeIndex,
     /// Condition-resolution nesting level. Bounds requires-of-requires
-    /// chains: mutually recursive @requires would otherwise spiral forever,
-    /// each round minting fresh entity groups.
-    pub(crate) depth: u8,
+    /// chains: mutually recursive @requires would otherwise spiral forever.
+    pub(crate) depth: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -81,9 +80,7 @@ impl PendingSelection {
     pub(super) fn into_condition_for(mut self, dependent: NodeIndex) -> Self {
         self.condition = Some(ConditionScope {
             dependent,
-            // Saturating keeps an over-deep chain permanently over any cap;
-            // wrapping would reset the bound this counter exists to enforce.
-            depth: self.condition_depth().saturating_add(1),
+            depth: self.condition_depth() + 1,
         });
         self
     }
@@ -95,13 +92,12 @@ impl PendingSelection {
     }
 
     /// Condition nesting level; 0 for ordinary query selections.
-    pub(super) fn condition_depth(&self) -> u8 {
+    pub(super) fn condition_depth(&self) -> usize {
         self.condition.map_or(0, |c| c.depth)
     }
 }
 
 /// Undo-log entry for one pending-stack mutation.
-#[derive(Clone)]
 enum PendingOp {
     /// An entry was pushed. Undo: pop and drop it.
     Pushed,
@@ -117,9 +113,7 @@ enum PendingOp {
 ///
 /// A single `PlanState` is mutated during search; trial branches are
 /// applied, scored, and undone via `checkpoint()` / `rollback()` without
-/// cloning. `Clone` is only used for `snapshot()` (saving the best complete
-/// candidate) and is cheap: both stacks hold `Arc`s.
-#[derive(Clone)]
+/// cloning. `snapshot()` saves the best complete candidate.
 pub(crate) struct PlanState {
     /// Lightweight fetch graph tracking groups, dependencies, and selections.
     pub(crate) graph: FetchGraph,
@@ -138,11 +132,6 @@ pub(crate) struct PlanState {
     /// than decision counts. Used by the search's effort budget;
     /// deliberately not restored by `rollback`.
     pub(crate) effort: u64,
-    /// Monotonic count of forced-commit backtracking attempts (see
-    /// `backtrack_forced`). Like `effort`, deliberately not restored by
-    /// `rollback`: the cap must bound total work even when the greedy pass
-    /// (which has no effort budget) keeps hitting doomed forced commits.
-    pub(crate) forced_backtracks: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -164,7 +153,6 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: 0,
             effort: 0,
-            forced_backtracks: 0,
         }
     }
 
@@ -201,7 +189,6 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: self.dropped_fields,
             effort: self.effort,
-            forced_backtracks: self.forced_backtracks,
         }
     }
 
@@ -257,24 +244,39 @@ mod tests {
             .clone()
     }
 
-    /// The depth counter bounds requires-of-requires recursion; overflowing
-    /// it must not wrap back to zero (which would reset the bound and
-    /// re-enable the very spiral it exists to stop). Saturating keeps an
-    /// over-deep chain permanently over any cap.
+    /// Push/pop/lift interleavings across nested checkpoints must restore
+    /// the stack exactly.
     #[test]
-    fn condition_depth_saturates_instead_of_wrapping() {
-        let pending = PendingSelection {
+    fn pending_log_rolls_back_interleaved_mutations() {
+        let entry = |n: u32| PendingSelection {
             selection: any_selection(),
-            query_graph_node: NodeIndex::new(0),
+            query_graph_node: NodeIndex::new(n as usize),
             fetch_node: NodeIndex::new(0),
             op_path: SharedPath::new(),
             path_in_fetch: SharedPath::new(),
-            condition: Some(ConditionScope {
-                dependent: NodeIndex::new(0),
-                depth: u8::MAX,
-            }),
+            condition: None,
         };
-        let deeper = pending.into_condition_for(NodeIndex::new(1));
-        assert_eq!(deeper.condition_depth(), u8::MAX);
+        let ids = |state: &PlanState| -> Vec<usize> {
+            state
+                .pending
+                .iter()
+                .map(|p| p.query_graph_node.index())
+                .collect()
+        };
+
+        let mut state = PlanState::new(vec![entry(0), entry(1), entry(2)]);
+        let outer = state.checkpoint();
+        state.push_pending(entry(3));
+        state.lift_pending(1);
+        let inner = state.checkpoint();
+        state.pop_pending().expect("pops the lifted entry");
+        state.lift_pending(0);
+        state.push_pending(entry(4));
+        assert_eq!(ids(&state), vec![2, 3, 0, 4]);
+
+        state.rollback(inner);
+        assert_eq!(ids(&state), vec![0, 2, 3, 1]);
+        state.rollback(outer);
+        assert_eq!(ids(&state), vec![0, 1, 2]);
     }
 }
