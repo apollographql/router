@@ -48,6 +48,7 @@ use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
 use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
 use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
+pub use crate::query_plan::query_planning_traversal::non_local_selections_estimation::DEFAULT_MAX_NON_LOCAL_SELECTIONS;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -212,6 +213,20 @@ pub struct QueryPlanOptions<'a> {
     /// Impose a limit on the number of non-local selections, which can be a
     /// performance hazard. On by default.
     pub non_local_selections_limit_enabled: bool,
+    /// Maximum estimated non-local selections, scaled by estimated query-graph tail-node counts.
+    /// Planning returns `SingleFederationError::QueryPlanComplexityExceeded` when the estimate
+    /// exceeds this value. Applies when `non_local_selections_limit_enabled` is `true`.
+    /// Defaults to [`DEFAULT_MAX_NON_LOCAL_SELECTIONS`].
+    ///
+    /// ```
+    /// use apollo_federation::query_plan::query_planner::QueryPlanOptions;
+    ///
+    /// let options = QueryPlanOptions {
+    ///     max_non_local_selections: 250_000,
+    ///     ..Default::default()
+    /// };
+    /// ```
+    pub max_non_local_selections: u64,
     /// Names of subgraphs that are disabled and should be avoided during
     /// planning. If this is non-empty, query planner may error if it cannot
     /// find a plan that doesn't use the disabled subgraphs, specifically with
@@ -225,6 +240,7 @@ impl Default for QueryPlanOptions<'_> {
             override_conditions: Vec::new(),
             check_for_cooperative_cancellation: None,
             non_local_selections_limit_enabled: true,
+            max_non_local_selections: DEFAULT_MAX_NON_LOCAL_SELECTIONS,
             disabled_subgraph_names: Default::default(),
         }
     }
@@ -246,6 +262,7 @@ impl std::fmt::Debug for QueryPlanOptions<'_> {
                 "non_local_selections_limit_enabled",
                 &self.non_local_selections_limit_enabled,
             )
+            .field("max_non_local_selections", &self.max_non_local_selections)
             .finish()
     }
 }
@@ -496,7 +513,7 @@ impl QueryPlanner {
 
         let mut non_local_selection_state = options
             .non_local_selections_limit_enabled
-            .then(non_local_selections_estimation::State::default);
+            .then(|| non_local_selections_estimation::State::new(options.max_non_local_selections));
         let mut resolver_cache = ConditionResolverCache::new();
         let (root_node, cost) = if !defer_conditions.is_empty() {
             compute_plan_for_defer_conditionals(
@@ -1414,6 +1431,60 @@ type User
           },
         }
         "###);
+    }
+
+    #[test]
+    fn max_non_local_selections_is_configurable() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+            {
+                bestRatedProducts {
+                    vendor { name }
+                }
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+
+        planner
+            .build_query_plan(&document, None, Default::default())
+            .expect("operation should plan under the default limit");
+
+        let error = planner
+            .build_query_plan(
+                &document,
+                None,
+                QueryPlanOptions {
+                    max_non_local_selections: 0,
+                    ..Default::default()
+                },
+            )
+            .expect_err("operation should exceed a limit of 0");
+        match error {
+            FederationError::SingleFederationError(
+                SingleFederationError::QueryPlanComplexityExceeded { message },
+            ) => {
+                assert_eq!(message, "Number of non-local selections exceeds limit of 0");
+            }
+            other => panic!("expected QueryPlanComplexityExceeded, got {other:?}"),
+        }
+
+        planner
+            .build_query_plan(
+                &document,
+                None,
+                QueryPlanOptions {
+                    max_non_local_selections: 0,
+                    non_local_selections_limit_enabled: false,
+                    ..Default::default()
+                },
+            )
+            .expect("disabled check should allow an operation above the configured limit");
     }
 
     #[test]
