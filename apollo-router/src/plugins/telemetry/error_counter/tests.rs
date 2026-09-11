@@ -1026,7 +1026,10 @@ async fn test_execution_error_counting() {
         let _ = context.insert(COUNTED_ERRORS, HashSet::from([previously_counted_error_id]));
 
         service
-            .oneshot(execution::Request::fake_builder().context(context).build())
+            .ready()
+            .await
+            .unwrap()
+            .call(execution::Request::fake_builder().context(context).build())
             .await
             .unwrap();
 

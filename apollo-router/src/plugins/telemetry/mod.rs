@@ -352,11 +352,13 @@ where
 
 /// Layer type for [Telemetry::instrument_http_client_layer].
 #[derive(Clone)]
-pub(crate) struct InstrumentHttpClientLayer;
+pub(crate) struct InstrumentHttpClientLayer {
+    _private: (),
+}
 
 impl InstrumentHttpClientLayer {
     fn new() -> Self {
-        Self
+        Self { _private: () }
     }
 }
 
@@ -483,11 +485,13 @@ where
 
 /// Layer type for [Telemetry::subgraph_ftv1_layer].
 #[derive(Clone, Copy)]
-pub(crate) struct SubgraphFtv1Layer;
+pub(crate) struct SubgraphFtv1Layer {
+    _private: (),
+}
 
 impl SubgraphFtv1Layer {
     fn new() -> Self {
-        Self
+        Self { _private: () }
     }
 }
 
