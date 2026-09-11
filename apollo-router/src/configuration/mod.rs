@@ -444,7 +444,14 @@ impl Configuration {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
-            incremental_planner: Default::default(),
+            incremental_planner:
+                apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
+                    enabled: self
+                        .supergraph
+                        .query_planning
+                        .experimental_incremental_planning,
+                    ..Default::default()
+                },
         }
     }
 }
@@ -957,6 +964,12 @@ pub(crate) struct QueryPlanning {
     ///
     /// See [`CooperativeCancellation`] for more details.
     pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
+
+    /// Enables the experimental incremental (BULB) query planner, which
+    /// builds plans field-by-field with bounded backtracking instead of
+    /// exhaustively enumerating plan candidates. Deferred operations fall
+    /// back to the default planner.
+    pub(crate) experimental_incremental_planning: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -969,6 +982,7 @@ impl QueryPlanning {
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
+        experimental_incremental_planning: Option<bool>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
@@ -976,6 +990,8 @@ impl QueryPlanning {
             experimental_plans_limit,
             experimental_paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
+                .unwrap_or_default(),
+            experimental_incremental_planning: experimental_incremental_planning
                 .unwrap_or_default(),
         }
     }

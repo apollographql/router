@@ -116,15 +116,26 @@ impl Default for QueryPlannerConfig {
 
 impl std::hash::Hash for QueryPlannerConfig {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.generate_query_fragments.hash(state);
-        self.subgraph_graphql_validation.hash(state);
-        self.incremental_delivery.hash(state);
-        self.debug.hash(state);
-        self.type_conditioned_fetching.hash(state);
+        // Destructured so adding a field is a compile error until it is
+        // added to the hash; a silently omitted field would let config
+        // changes serve stale cached plans.
+        let Self {
+            generate_query_fragments,
+            subgraph_graphql_validation,
+            incremental_delivery,
+            debug,
+            type_conditioned_fetching,
+            incremental_planner,
+        } = self;
+        generate_query_fragments.hash(state);
+        subgraph_graphql_validation.hash(state);
+        incremental_delivery.hash(state);
+        debug.hash(state);
+        type_conditioned_fetching.hash(state);
         // Only include incremental_planner in the hash when enabled,
         // so the cache key for the existing planner stays unchanged.
-        if self.incremental_planner.enabled {
-            self.incremental_planner.hash(state);
+        if incremental_planner.enabled {
+            incremental_planner.hash(state);
         }
     }
 }
@@ -918,12 +929,21 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
+    // The BULB planner has no defer support yet: it would plan every field
+    // eagerly and silently drop the DeferNodes, so deferred operations
+    // (including the defer-conditionals path, which always plans with
+    // has_defers) fall back to the legacy planner.
+    let use_incremental = parameters.config.incremental_planner.enabled && !has_defers;
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
-        && parameters.config.incremental_planner.enabled
+        && use_incremental
     {
         // BULB planner: plan each top-level mutation field independently,
-        // then sequence the results.
+        // then sequence the results. One naming state spans all fields so
+        // generated subgraph operation names stay unique across the plan.
+        let mut naming = crate::query_plan::incremental_planner::OperationNaming::new(
+            parameters.config.generate_query_fragments,
+        );
         let mut plans: Vec<Option<PlanNode>> = Vec::new();
         for field_selection in parameters
             .operation
@@ -935,7 +955,7 @@ fn compute_plan_internal(
                 parameters,
                 &field_selection,
                 root_kind,
-                has_defers,
+                &mut naming,
             )?;
             plans.push(bulb.plan);
         }
@@ -976,15 +996,18 @@ fn compute_plan_internal(
         }
         // No cost computation necessary. Return NaN for cost.
         (main, deferred, primary_selection, f64::NAN)
-    } else if parameters.config.incremental_planner.enabled {
+    } else if use_incremental {
         // BULB planner: bypass the traversal loop and FDG processing
         // entirely; the plan is materialized directly from the FetchGraph.
         let selection_set = parameters.operation.selection_set.clone();
+        let mut naming = crate::query_plan::incremental_planner::OperationNaming::new(
+            parameters.config.generate_query_fragments,
+        );
         let bulb = crate::query_plan::incremental_planner::build_bulb_plan(
             parameters,
             &selection_set,
             root_kind,
-            has_defers,
+            &mut naming,
         )?;
         (bulb.plan, vec![], None, bulb.cost)
     } else {
