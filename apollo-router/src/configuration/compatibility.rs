@@ -104,12 +104,12 @@ const CASES: &[Case] = &[
     },
     Case {
         name: "flat subscription.deduplication migrates under deduplication.all",
-        text: include_str!("testdata/compat/needs_minor_migration_subscription_dedup.yaml"),
+        text: include_str!("testdata/migrations/subscription_dedup_subgraph.yaml"),
         migration: Migration::Minor,
     },
     Case {
         name: "experimental_batching renamed to batching (breaking; needs `router config upgrade`)",
-        text: include_str!("testdata/compat/needs_major_migration_batching.yaml"),
+        text: include_str!("testdata/migrations/batching.yaml"),
         migration: Migration::Major,
     },
 ];
@@ -596,7 +596,7 @@ fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
 /// (`typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing`, above).
 #[test]
 fn unmigrated_flat_subscription_dedup_fails_at_plugin_init_not_at_parse() {
-    let text = include_str!("testdata/compat/needs_minor_migration_subscription_dedup.yaml");
+    let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
 
     let shared = router_options()
         .parse::<Configuration>(text)

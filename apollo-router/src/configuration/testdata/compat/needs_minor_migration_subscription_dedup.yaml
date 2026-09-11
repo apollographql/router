@@ -1,6 +1,0 @@
-subscription:
-  deduplication:
-    enabled: true
-    ignored_headers:
-      - authorization
-      - x-user-id
