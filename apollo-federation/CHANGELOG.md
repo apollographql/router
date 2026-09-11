@@ -107,6 +107,19 @@ pass or fail validation is unchanged.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
 
+## 🛠 Maintenance
+
+### Composition errors print shape types in the newer `shape` notation ([PR #9947](https://github.com/apollographql/router/pull/9947))
+
+Composition error messages that quote a shape now use the notation introduced by
+`shape` 0.8: `List<T>` prints as `[...T]`, `Dict<T>` as `{...T}`, and a shape
+carrying an error as `<type> (err "message")` rather than `Error<"message">`.
+
+No validation outcome changes. Anything matching on the previous strings, such as
+a test snapshot or a log query, needs updating.
+
+By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9947>
+
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))
