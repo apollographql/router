@@ -294,24 +294,9 @@ impl BaseQueryGraphBuilder {
         for edge in self.query_graph.graph.edge_indices() {
             let edge_weight = self.query_graph.edge_weight(edge)?.clone();
             let (_, tail) = self.query_graph.edge_endpoints(edge)?;
-            let out_edges = out_edges_cache.entry(tail).or_insert_with(|| {
-                let mut out_edges: Vec<_> = self
-                    .query_graph
-                    .graph
-                    .edges_directed(tail, Direction::Outgoing)
-                    .filter(|edge_ref| {
-                        !(edge_ref.source() == edge_ref.target()
-                            && matches!(
-                                edge_ref.weight().transition,
-                                QueryGraphEdgeTransition::KeyResolution
-                                    | QueryGraphEdgeTransition::RootTypeResolution { .. }
-                            ))
-                    })
-                    .map(|edge_ref| edge_ref.id())
-                    .collect();
-                out_edges.sort_by_key(|edge_id| -> EdgeIndex { *edge_id });
-                out_edges
-            });
+            let out_edges = out_edges_cache
+                .entry(tail)
+                .or_insert_with(|| self.query_graph.out_edge_ids(tail));
             let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
             for followup_edge in out_edges {
                 let followup_edge_weight = self.query_graph.edge_weight(*followup_edge)?;
