@@ -48,6 +48,7 @@ use super::plugin::build_entity_debug_entry;
 use super::plugin::build_entity_store_document;
 use super::plugin::get_invalidation_entity_keys_from_schema;
 use super::plugin::hash_private_id;
+use super::plugin::non_entity_errors;
 use super::plugin::reindex_entity_errors;
 use super::plugin::update_cache_control;
 use super::storage;
@@ -1088,10 +1089,13 @@ impl ConnectorCacheService {
         }
         response.response.body_mut().data = response_data;
 
-        // Update errors with reindexed paths (entity indices changed due to cache merge)
-        if !new_errors.is_empty() {
-            response.response.body_mut().errors = new_errors;
-        }
+        // Update errors with reindexed paths (entity indices changed due to cache merge), keeping
+        // any error that has no entity slot to be reindexed into. Identical to the subgraph path
+        // (`insert_entities_in_result`'s caller), so a partial hit returns the same error set on
+        // both, which is what `EntityCacheMiss`'s shared shape is there to keep true.
+        let mut errors = non_entity_errors(&response.response.body().errors);
+        errors.extend(new_errors);
+        response.response.body_mut().errors = errors;
 
         // Store new entities in cache asynchronously
         if !to_insert.is_empty() {

@@ -2612,7 +2612,10 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
-        response.response.body_mut().errors = new_errors;
+        // Errors that could not be reindexed into an entity slot are not the merge's to discard.
+        let mut errors = non_entity_errors(&response.response.body().errors);
+        errors.extend(new_errors);
+        response.response.body_mut().errors = errors;
     } else {
         let (new_entities, new_errors) =
             assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
@@ -3304,6 +3307,30 @@ fn filter_representations(
 /// Shared by the subgraph (`insert_entities_in_result`) and connector
 /// (`ConnectorRequestCacheService::merge_cached_entities` in `connectors.rs`) entity-merge loops,
 /// which both need to do this identically.
+/// The errors from a subgraph or connector response that are **not** scoped to a specific
+/// `_entities[i]` slot.
+///
+/// The entity-merge loops rebuild the error list from the errors they can reindex — see
+/// [`reindex_entity_errors`], which keeps only errors whose path starts `_entities[i]`. Anything
+/// else (a top-level error, an error on a non-entity field) has no slot to be reindexed into and
+/// would be dropped by that rebuild, so it is carried across unchanged instead. Both the subgraph
+/// and connector loops use this, so a partial cache hit never swallows an error that a full miss
+/// would have returned.
+pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
+    errors
+        .iter()
+        .filter(|e| {
+            !e.path.as_ref().is_some_and(|path| {
+                matches!(
+                    path.0.first(),
+                    Some(PathElement::Key(key, None)) if key == ENTITIES
+                )
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 pub(super) fn reindex_entity_errors(
     errors: &[Error],
     entity_idx: usize,
