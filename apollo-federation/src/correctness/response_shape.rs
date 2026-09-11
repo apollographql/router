@@ -98,7 +98,7 @@ fn runtime_types_implies(
             let union = union.get(schema.schema())?;
             let interface_implementers = get_interface_implementers(interface, schema)?;
             Ok(union.members.iter().all(|m| {
-                let m_ty = ObjectTypeDefinitionPosition::new(m.name.clone());
+                let m_ty = ObjectTypeDefinitionPosition::new(Name::clone(m));
                 interface_implementers.contains(&m_ty)
             }))
         }

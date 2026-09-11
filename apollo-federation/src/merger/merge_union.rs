@@ -1,6 +1,5 @@
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::UnionType;
 
 use crate::error::FederationError;
@@ -31,7 +30,7 @@ impl Merger {
         }
 
         // For each member in the destination union, add join directives and check for inconsistencies
-        let member_names: Vec<ComponentName> = dest
+        let member_names: Vec<Node<Name>> = dest
             .get(self.merged.schema())?
             .members
             .iter()
@@ -50,7 +49,7 @@ impl Merger {
         &mut self,
         sources: &Sources<Node<UnionType>>,
         dest: &UnionTypeDefinitionPosition,
-        member_name: &ComponentName,
+        member_name: &Node<Name>,
     ) -> Result<(), FederationError> {
         // Add @join__unionMember directive for each subgraph that has this member
         for (&idx, source) in sources.iter() {
@@ -63,11 +62,11 @@ impl Merger {
                 let directive = self.join_spec_definition.union_member_directive(
                     &self.merged,
                     name_in_join_spec,
-                    member_name.as_ref(),
+                    member_name,
                 )?;
 
                 // Apply the directive to the destination union
-                dest.insert_directive(&mut self.merged, Component::new(directive))?;
+                dest.insert_directive(&mut self.merged, Node::new(directive))?;
             }
         }
 
@@ -79,7 +78,7 @@ impl Merger {
         &mut self,
         sources: &Sources<Node<UnionType>>,
         dest: &UnionTypeDefinitionPosition,
-        member_name: &ComponentName,
+        member_name: &Node<Name>,
     ) {
         for union_type in sources.values().flatten() {
             // As soon as we find a subgraph that has the union type but not the member, we hint
@@ -134,8 +133,7 @@ mod tests {
 
         for member_name in member_names {
             let name_value = Name::new(member_name).expect("Valid name");
-            let component_name = ComponentName::from(name_value);
-            union_type.members.insert(component_name);
+            union_type.members.insert(name_value.to_node(None));
         }
 
         Node::new(union_type)
@@ -188,12 +186,12 @@ mod tests {
         assert!(
             union1
                 .members
-                .contains(&ComponentName::from(Name::new("User").expect("Valid name")))
+                .contains(&Name::new("User").expect("Valid name").to_node(None))
         );
         assert!(
             union1
                 .members
-                .contains(&ComponentName::from(Name::new("Post").expect("Valid name")))
+                .contains(&Name::new("Post").expect("Valid name").to_node(None))
         );
     }
 
@@ -223,11 +221,9 @@ mod tests {
             .expect("union in supergraph")
             .members;
         assert_eq!(members.len(), 3);
-        assert!(members.contains(&ComponentName::from(Name::new("User").expect("Valid name"))));
-        assert!(members.contains(&ComponentName::from(Name::new("Post").expect("Valid name"))));
-        assert!(members.contains(&ComponentName::from(
-            Name::new("Comment").expect("Valid name")
-        )));
+        assert!(members.contains(&Name::new("User").expect("Valid name").to_node(None)));
+        assert!(members.contains(&Name::new("Post").expect("Valid name").to_node(None)));
+        assert!(members.contains(&Name::new("Comment").expect("Valid name").to_node(None)));
     }
 
     #[test]
@@ -258,8 +254,8 @@ mod tests {
 
         // Should contain both members
         assert_eq!(members.len(), 2);
-        assert!(members.contains(&ComponentName::from(Name::new("User").expect("Valid name"))));
-        assert!(members.contains(&ComponentName::from(Name::new("Post").expect("Valid name"))));
+        assert!(members.contains(&Name::new("User").expect("Valid name").to_node(None)));
+        assert!(members.contains(&Name::new("Post").expect("Valid name").to_node(None)));
 
         // Verify that no hints were generated
         let (_errors, hints) = merger.error_reporter.into_errors_and_hints();

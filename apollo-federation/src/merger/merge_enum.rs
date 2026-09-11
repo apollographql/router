@@ -3,7 +3,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 
@@ -80,7 +79,7 @@ impl Merger {
                 .iter()
                 .filter_map(|(_, source)| source.as_ref())
                 .flat_map(|source| source.values.values())
-                .map(|value| value.node.value.clone()),
+                .map(|value| value.value.clone()),
         );
 
         // Merge each enum value
@@ -116,7 +115,7 @@ impl Merger {
         // 1. this will catch any problems merging the description/directives (which feels like a good thing).
         // 2. it easier to see if the value is marked @inaccessible.
 
-        let value_sources: Sources<&Component<EnumValueDefinition>> = sources
+        let value_sources: Sources<&Node<EnumValueDefinition>> = sources
             .iter()
             .map(|(&idx, source)| {
                 let source_value = source
@@ -127,7 +126,7 @@ impl Merger {
             .collect();
 
         // create new dest for the value
-        let dest = Component::new(EnumValueDefinition {
+        let dest = Node::new(EnumValueDefinition {
             description: None,
             value: value_pos.value_name.clone(),
             directives: Default::default(),
@@ -237,7 +236,7 @@ impl Merger {
 
     fn add_join_enum_value(
         &mut self,
-        sources: &Sources<&Component<EnumValueDefinition>>,
+        sources: &Sources<&Node<EnumValueDefinition>>,
         value_pos: &EnumValueDefinitionPosition,
     ) -> Result<(), FederationError> {
         for (&idx, source) in sources.iter() {
@@ -302,7 +301,6 @@ pub(crate) mod tests {
     use apollo_compiler::Node;
     use apollo_compiler::Schema;
     use apollo_compiler::name;
-    use apollo_compiler::schema::ComponentName;
     use apollo_compiler::schema::InterfaceType;
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::UnionType;
@@ -407,7 +405,7 @@ pub(crate) mod tests {
         };
         object_type
             .implements_interfaces
-            .insert(ComponentName::from(name!("I")));
+            .insert(name!("I").to_node(None));
         object_pos.pre_insert(&mut schema)?;
         object_pos.insert(&mut schema, Node::new(object_type))?;
 
@@ -421,7 +419,7 @@ pub(crate) mod tests {
             directives: Default::default(),
             members: Default::default(),
         };
-        union_type.members.insert(ComponentName::from(name!("A")));
+        union_type.members.insert(name!("A").to_node(None));
         union_pos.pre_insert(&mut schema)?;
         union_pos.insert(&mut schema, Node::new(union_type))?;
 

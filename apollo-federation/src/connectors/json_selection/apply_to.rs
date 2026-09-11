@@ -4119,8 +4119,8 @@ mod tests {
             .pretty_print(),
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
-            // it would have been if we knew that, where friends: List<{ id:
-            // $root.friend_ids.* }> (note the * meaning any array index),
+            // it would have been if we knew that, where friends: [...{ id:
+            // $root.friend_ids.* }] (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
             r#"{

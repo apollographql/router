@@ -1,5 +1,5 @@
 use apollo_compiler::Name;
-use apollo_compiler::schema::Component;
+use apollo_compiler::Node;
 use indexmap::IndexMap;
 use tracing::instrument;
 
@@ -166,7 +166,7 @@ impl Merger {
                     None,
                     is_interface_object.then_some(is_interface_object),
                 )?;
-                dest.insert_directive(&mut self.merged, Component::new(directive))?;
+                dest.insert_directive(&mut self.merged, Node::new(directive))?;
             } else {
                 // If this type has keys, we apply a `@join__type` for each key.
                 let extends_directive_name = subgraph
@@ -175,7 +175,7 @@ impl Merger {
                     .unwrap_or(FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC);
 
                 for key in keys {
-                    let extension = key.origin.extension_id().is_some()
+                    let extension = key.extension_id().is_some()
                         || source.has_applied_directive(subgraph.schema(), &extends_directive_name)
                         || subgraph.is_orphan_extension_type(source.type_name());
                     let key_fields =
@@ -195,7 +195,7 @@ impl Merger {
                         key_resolvable.and_then(|v| v.to_bool()),
                         is_interface_object.then_some(is_interface_object),
                     )?;
-                    dest.insert_directive(&mut self.merged, Component::new(directive))?;
+                    dest.insert_directive(&mut self.merged, Node::new(directive))?;
                 }
             }
         }

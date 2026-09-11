@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
@@ -11,7 +12,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
@@ -69,7 +69,7 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
         .schema_definition
         .subscription
         .as_ref()
-        .map(|sub| &sub.name);
+        .map(|sub| sub.as_str());
     let spec = schema.connect_link.spec;
 
     schema
@@ -96,7 +96,7 @@ fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<I
                         .collect(),
                 })
             }
-            ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == &obj.name) => {
+            ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == obj.name.as_str()) => {
                     Some(Message {
                         code: Code::SubscriptionInConnectors,
                         message: format!(
@@ -286,7 +286,7 @@ fn fields_seen_by_resolvable_keys(schema: &SchemaInfo) -> IndexSet<(Name, Name)>
 fn resolvable_key_fields<'a>(
     object: &'a ObjectType,
     schema: &'a Schema,
-) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> {
+) -> impl Iterator<Item = (FieldSet, &'a Node<Directive>)> {
     object
         .directives
         .iter()
@@ -523,7 +523,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
     }
 }
 
-fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Component<Directive>)> {
+fn find_all_resolvable_keys(schema: &Schema) -> Vec<(FieldSet, &Node<Directive>)> {
     schema
         .types
         .values()

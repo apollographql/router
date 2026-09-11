@@ -15,8 +15,6 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
@@ -227,7 +225,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
         let mut field_map = IndexMap::default();
         for field_spec in field_specs {
             let field_def: FieldDefinition = field_spec.into();
-            field_map.insert(field_def.name.clone(), Component::new(field_def));
+            field_map.insert(field_def.name.clone(), Node::new(field_def));
         }
 
         let type_pos = ObjectTypeDefinitionPosition {
@@ -251,7 +249,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
     }
 }
 
-type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<ComponentName>;
+type UnionTypeMembersFn = dyn Fn(&FederationSchema) -> IndexSet<Node<Name>>;
 
 pub(crate) struct UnionTypeSpecification {
     pub(crate) name: Name,
@@ -412,7 +410,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                     .map(|val| {
                         (
                             val.name.clone(),
-                            Component::new(EnumValueDefinition {
+                            Node::new(EnumValueDefinition {
                                 description: val.description.as_ref().map(|s| s.into()),
                                 value: val.name.clone(),
                                 directives: Default::default(),
@@ -547,9 +545,9 @@ impl TypeAndDirectiveSpecification for InputObjectTypeSpecification {
             }
             MultipleFederationErrors::from_iter(errors).into_result()
         } else {
-            let field_map: IndexMap<Name, Component<InputValueDefinition>> = resolved_specs
+            let field_map: IndexMap<Name, Node<InputValueDefinition>> = resolved_specs
                 .into_iter()
-                .map(|(k, v)| (k, Component::new(v.into())))
+                .map(|(k, v)| (k, Node::new(v.into())))
                 .collect();
             let type_pos = InputObjectTypeDefinitionPosition {
                 type_name: actual_name,
@@ -629,7 +627,7 @@ pub(crate) struct DirectiveSpecification {
     pub(crate) composition: Option<DirectiveCompositionSpecification>,
     args: Vec<DirectiveArgumentSpecification>,
     repeatable: bool,
-    locations: Vec<DirectiveLocation>,
+    locations: IndexSet<DirectiveLocation>,
 }
 
 impl DirectiveSpecification {
@@ -675,7 +673,7 @@ impl DirectiveSpecification {
             composition: composition_spec,
             args: args.to_vec(),
             repeatable,
-            locations: locations.to_vec(),
+            locations: locations.iter().copied().collect(),
         }
     }
 }
@@ -1025,7 +1023,7 @@ fn ensure_same_directive_structure(
     name: &Name,
     args: &[ResolvedArgumentSpecification],
     repeatable: bool,
-    locations: &[DirectiveLocation],
+    locations: &IndexSet<DirectiveLocation>,
     schema: &FederationSchema,
 ) -> Result<(), FederationError> {
     let directive_name = format!("@{name}");

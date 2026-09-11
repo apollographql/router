@@ -3,7 +3,6 @@ use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use tracing::instrument;
 use tracing::trace;
@@ -226,7 +225,7 @@ impl Merger {
                 {
                     field.insert(
                         &mut self.merged,
-                        Component::new(InputValueDefinition {
+                        Node::new(InputValueDefinition {
                             description: None,
                             name: field.field_name.clone(),
                             default_value: None,

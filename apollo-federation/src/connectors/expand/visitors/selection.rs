@@ -1,9 +1,6 @@
-use std::ops::Deref;
-
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InterfaceType;
@@ -130,13 +127,13 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                 directives: filter_directives(self.directive_deny_list, &field.directives),
             };
             if let Some(old_field) = r#type.fields.get(&field_name) {
-                if *old_field.deref().deref() != new_field {
+                if **old_field != new_field {
                     return Err(FederationError::internal(format!(
                         "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
                     )));
                 }
             } else {
-                r#type.fields.insert(field_name, Component::new(new_field));
+                r#type.fields.insert(field_name, Node::new(new_field));
             }
         }
 
@@ -373,7 +370,7 @@ impl<'a> TypeShapeWalker<'a> {
                         directives: filter_directives(self.directive_deny_list, &field.directives),
                     };
                     if let Some(old_field) = new_object_type.fields.get(&field_name) {
-                        if *old_field.deref().deref() != new_field {
+                        if **old_field != new_field {
                             return Err(FederationError::internal(format!(
                                 "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
                             )));
@@ -381,7 +378,7 @@ impl<'a> TypeShapeWalker<'a> {
                     } else {
                         new_object_type
                             .fields
-                            .insert(field_name, Component::new(new_field));
+                            .insert(field_name, Node::new(new_field));
                     }
                 }
             }
@@ -652,7 +649,7 @@ impl<'a> TypeShapeWalker<'a> {
 
         for member_name in def.members.iter() {
             if let TypeDefinitionPosition::Object(object_type_pos) =
-                self.original_schema.get_type(&member_name.name)?
+                self.original_schema.get_type(member_name)?
             {
                 try_pre_insert!(self.to_schema, object_type_pos)?;
             }
@@ -690,7 +687,7 @@ impl<'a> TypeShapeWalker<'a> {
                                         // GraphQL __typename string will need
                                         // character escaping, but we're all hedged
                                         // up if such a possibility comes to pass.
-                                        serde_json_bytes::Value::String(n.name.to_string().into())
+                                        serde_json_bytes::Value::String(n.to_string().into())
                                             .to_string()
                                     })
                                     .collect::<Vec<_>>()

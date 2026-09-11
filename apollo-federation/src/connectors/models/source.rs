@@ -12,7 +12,6 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::schema::Component;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -36,7 +35,7 @@ impl SourceName {
     ///
     /// For enhanced validity checks, use [`SourceName::from_directive`]
     pub(crate) fn from_directive_permissive(
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
         sources: &SourceMap,
     ) -> Result<Self, Message> {
         Self::parse_basics(directive, sources)
@@ -50,10 +49,7 @@ impl SourceName {
             node: None,
         }
     }
-    fn parse_basics(
-        directive: &Component<Directive>,
-        sources: &SourceMap,
-    ) -> Result<Self, Message> {
+    fn parse_basics(directive: &Node<Directive>, sources: &SourceMap) -> Result<Self, Message> {
         let coordinate = NameCoordinate {
             directive_name: &directive.name,
             value: None,
@@ -96,7 +92,7 @@ impl SourceName {
         })
     }
     pub(crate) fn from_directive(
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
         sources: &SourceMap,
     ) -> (Option<Self>, Option<Message>) {
         let name = match Self::parse_basics(directive, sources) {

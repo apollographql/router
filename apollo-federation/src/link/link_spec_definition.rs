@@ -11,7 +11,6 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
 use itertools::Itertools;
 
@@ -492,7 +491,8 @@ impl LinkSpecDefinition {
     /// ```
     fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
         definition.repeatable
-            && definition.locations == [DirectiveLocation::Schema]
+            && definition.locations.len() == 1
+            && definition.locations.contains(&DirectiveLocation::Schema)
             && definition.argument_by_name("url").is_some_and(|argument| {
                 // The "true" type of `url` in the @link spec is actually `String` (nullable), and this
                 // for future-proofing reasons (the idea was that we may introduce later other
@@ -519,7 +519,8 @@ impl LinkSpecDefinition {
         // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
         // removed when those are updated.
         definition.repeatable
-            && definition.locations == [DirectiveLocation::Schema]
+            && definition.locations.len() == 1
+            && definition.locations.contains(&DirectiveLocation::Schema)
             && definition
                 .argument_by_name("feature")
                 .is_some_and(|argument| {
@@ -586,20 +587,22 @@ impl LinkSpecDefinition {
             }));
         }
 
-        let schema_definition = SchemaDefinitionPosition.get(schema.schema());
+        let directive = Node::new(Directive { name, arguments });
+        let directive = match SchemaDefinitionPosition
+            .get(schema.schema())
+            .origin_to_use()
+        {
+            Some(ext_id) => directive.with_extension_id(ext_id),
+            None => directive,
+        };
         SchemaDefinitionPosition.insert_directive_at(
-            schema,
-            Component {
-                origin: schema_definition.origin_to_use(),
-                node: Node::new(Directive { name, arguments }),
-            },
-            0, // @link to link spec should be first
+            schema, directive, 0, // @link to link spec should be first
         )?;
         Ok(())
     }
 
     pub(crate) fn extract_alias_and_imports_on_missing_link_directive_definition(
-        application: &Component<Directive>,
+        application: &Node<Directive>,
     ) -> Result<(Option<Name>, Vec<Arc<Import>>), FederationError> {
         // PORT_NOTE: This is really logic encapsulated from onMissingDirectiveDefinition() in the
         // JS codebase's FederationBlueprint, but moved here since it's all link-specific. The logic
@@ -740,8 +743,7 @@ impl LinkSpecDefinition {
             }
         }
 
-        if let Err(error) =
-            SchemaDefinitionPosition.insert_directive(schema, Component::new(directive))
+        if let Err(error) = SchemaDefinitionPosition.insert_directive(schema, Node::new(directive))
         {
             on_apply_error(error)?;
         };

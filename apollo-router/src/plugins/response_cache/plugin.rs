@@ -367,7 +367,7 @@ impl PluginPrivate for ResponseCache {
             .schema_definition
             .query
             .as_ref()
-            .map(|q| q.name.to_string());
+            .map(|q| q.to_string());
 
         if init.config.subgraph.all.ttl.is_none()
             && init
