@@ -61,6 +61,8 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
+#[cfg(test)]
+mod compatibility;
 pub(crate) mod connector;
 pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
