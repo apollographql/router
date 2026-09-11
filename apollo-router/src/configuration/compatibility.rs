@@ -504,18 +504,8 @@ fn typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing() {
     );
 }
 
-/// Router's live migration rewrites the flat `subscription.deduplication.{enabled,ignored_headers}`
-/// shape to the nested `deduplication.all.*` shape before that value is ever stored, so plugin
-/// construction always sees the nested shape once startup has accepted the document.
-/// `apollo_configuration` has no migration step of its own: handed the unmigrated flat shape, it
-/// stores it verbatim in the same raw `Map<String, Value>` `Configuration::apollo_plugins` uses
-/// today, because a hoisted Apollo plugin's config is untyped until construction. It parses at
-/// the `Configuration` level and only fails once something tries to deserialize that raw value
-/// into `SubscriptionConfig` -- which `SubgraphConfiguration<T>`'s deserialize rejects, since it
-/// only recognizes `all`/`subgraphs` as keys. This is why "typed plugin initialization" needs its
-/// own comparison in addition to the top-level schema one: the two disagree lower down than the
-/// schema can see, and only after migration is applied does construction succeed on both sides
-/// (`typed_plugin_configs_agree_and_construction_reuses_them_without_reparsing`, above).
+/// The flat deduplication shape passes schema validation but fails typed deserialization.
+/// Migration must nest its settings under `deduplication.all` before plugin initialization.
 #[test]
 fn unmigrated_flat_subscription_dedup_fails_at_plugin_init_not_at_parse() {
     let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
