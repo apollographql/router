@@ -887,10 +887,15 @@ fn effective_settings_agree_for_discovered_project_documents() {
     let mut unexpected = Vec::new();
 
     for doc in test_discovery::discover_project_configs() {
-        let router_expansion = Expansion::default_builder()
+        // Not `Expansion::default_builder`: its override table reads the real process
+        // environment (`APOLLO_USAGE_REPORTING_INGRESS_URL` and friends) and would write values
+        // at paths the shared side never sees, failing the comparison on any machine that sets
+        // one. Both sides expand from the mocked map and nothing else.
+        let router_expansion = Expansion::builder()
+            .supported_mode("env")
+            .supported_mode("file")
             .mocked_env_vars(mocked_env_vars.clone())
-            .build()
-            .unwrap();
+            .build();
         let router = match validate_yaml_configuration(&doc.yaml, router_expansion, Mode::NoUpgrade)
         {
             Ok(config) => config,
@@ -904,7 +909,9 @@ fn effective_settings_agree_for_discovered_project_documents() {
             }
         };
 
-        let shared_options = router_options().add_variables(MapVariables(mocked_env_vars.clone()));
+        let shared_options = router_options()
+            .add_variables(MapVariables(mocked_env_vars.clone()))
+            .add_variables(FileVariables);
         match shared_options.parse::<Configuration>(&doc.yaml) {
             Ok(shared) => {
                 compared += 1;
