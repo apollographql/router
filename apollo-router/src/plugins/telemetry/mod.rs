@@ -1439,7 +1439,7 @@ impl Telemetry {
         AllocationMetricsLayer::new()
     }
 
-    /// Returns a layer that instruments query planner execution with a span and error metrics.
+    /// Returns a layer that instruments query plan execution with a span and error metrics.
     pub(crate) fn instrument_execution_layer(&self) -> InstrumentExecutionLayer {
         InstrumentExecutionLayer::new(self.config.clone())
     }
