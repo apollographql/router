@@ -62,7 +62,15 @@ impl SelectionBuilder {
     }
 
     /// Restore a saved length, undoing all insertions since the checkpoint.
+    ///
+    /// Checkpoints must be restored on the builder that issued them, in
+    /// LIFO order, and never across a `merge_from` (a restore would
+    /// truncate merged entries along with probe entries).
     pub(super) fn restore_head(&mut self, cp: SelectionCheckpoint) {
+        debug_assert!(
+            cp.0 <= self.entries.len(),
+            "checkpoint is newer than the builder state; checkpoints must be restored in LIFO order",
+        );
         self.entries.truncate(cp.0);
     }
 
@@ -74,8 +82,13 @@ impl SelectionBuilder {
     }
 
     /// Map from response path to field signature (name, alias, arguments,
-    /// directives). Two builders with different signatures at the same
-    /// response path cannot be merged into one fetch.
+    /// directives, and declared type). Two builders with different
+    /// signatures at the same response path cannot be merged into one fetch.
+    ///
+    /// The declared type is part of the signature because inline fragments
+    /// are transparent in the keys: same-named fields under different type
+    /// conditions land on the same key, and merging them is only valid when
+    /// their types agree (SameResponseShape).
     ///
     /// Keys use field response names only; inline fragments are
     /// transparent (they add no level to the response). Fields under
@@ -88,6 +101,13 @@ impl SelectionBuilder {
     /// field signature within this builder, which indicates a bug in the
     /// commit logic.
     pub(super) fn field_signatures(&self) -> Option<HashMap<String, String>> {
+        fn signature(field: &crate::operation::Field) -> String {
+            match field.field_position.get(field.schema.schema()) {
+                Ok(def) => format!("{field}: {}", def.ty),
+                Err(_) => field.to_string(),
+            }
+        }
+
         fn record_selection_set(
             out: &mut HashMap<String, String>,
             prefix: &str,
@@ -97,7 +117,7 @@ impl SelectionBuilder {
                 match sel {
                     Selection::Field(field_sel) => {
                         let key = format!("{prefix}/{}", field_sel.field.response_name());
-                        if !try_insert(out, key.clone(), field_sel.field.to_string()) {
+                        if !try_insert(out, key.clone(), signature(&field_sel.field)) {
                             return false;
                         }
                         if let Some(sub) = &field_sel.selection_set
@@ -136,7 +156,7 @@ impl SelectionBuilder {
                 match element.as_ref() {
                     OpPathElement::Field(field) => {
                         let key = format!("{prefix}/{}", field.response_name());
-                        if !try_insert(&mut out, key.clone(), field.to_string()) {
+                        if !try_insert(&mut out, key.clone(), signature(field)) {
                             return None;
                         }
                         prefix = key;
@@ -251,8 +271,7 @@ mod tests {
     }
 
     /// Inserting two entries that produce different field signatures at the
-    /// same response key should be detectable. Currently the second insert
-    /// silently overwrites the first.
+    /// same response key is detected and reported as `None`.
     #[test]
     fn field_signatures_detects_intra_builder_conflict() {
         let schema = apollo_compiler::schema::Schema::parse_and_validate(
@@ -308,6 +327,50 @@ mod tests {
         );
     }
 
+    /// Same-named fields with different return types under different type
+    /// conditions land on the same (fragment-transparent) key, so merging
+    /// the builders would violate SameResponseShape. The declared type in
+    /// the signature is what makes the maps differ.
+    #[test]
+    fn field_signatures_distinguish_return_types_across_type_conditions() {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            r#"
+            type Query { node: Node }
+            interface Node { id: ID }
+            type A implements Node { id: ID, x: String }
+            type B implements Node { id: ID, x: Int }
+            "#,
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema =
+            crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
+
+        let builder_for = |query: &str, name: &str| {
+            let op = crate::operation::Operation::parse(schema.clone(), query, name)
+                .expect("valid operation");
+            let Some(Selection::Field(node)) = op.selection_set.selections.values().next() else {
+                panic!("expected node field");
+            };
+            let subs = Arc::new(node.selection_set.clone().expect("has sub-selections"));
+            let mut builder = SelectionBuilder::default();
+            let path = SharedPath::new().pushed(Arc::new(OpPathElement::Field(node.field.clone())));
+            builder.insert(&path, Some(&subs));
+            builder
+        };
+
+        let builder_a = builder_for(r#"{ node { ... on A { x } } }"#, "a.graphql");
+        let builder_b = builder_for(r#"{ node { ... on B { x } } }"#, "b.graphql");
+
+        let sigs_a = builder_a.field_signatures().expect("consistent");
+        let sigs_b = builder_b.field_signatures().expect("consistent");
+        assert_ne!(
+            sigs_a.get("/node/x"),
+            sigs_b.get("/node/x"),
+            "String- and Int-typed `x` must not share a signature",
+        );
+    }
+
     #[test]
     fn field_signatures_recurses_into_sub_selections_and_fragments() {
         let schema = apollo_compiler::schema::Schema::parse_and_validate(
@@ -351,17 +414,20 @@ mod tests {
             .expect("no conflicting signatures");
 
         // The path element records the enclosing field itself.
-        assert_eq!(signatures.get("/node").map(String::as_str), Some("node"));
+        assert_eq!(
+            signatures.get("/node").map(String::as_str),
+            Some("node: Node"),
+        );
 
         // Inline fragments are transparent: fields inside them are keyed
         // by their response path without the type condition segment.
         assert_eq!(
             signatures.get("/node/address").map(String::as_str),
-            Some("address"),
+            Some("address: Address"),
         );
         assert_eq!(
             signatures.get("/node/address/street").map(String::as_str),
-            Some("street"),
+            Some("street: String"),
         );
     }
 }
