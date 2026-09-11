@@ -311,7 +311,9 @@ impl Opt {
                     }
                 }
                 (Some(_license), _, _, _, _) => LicenseSource::Env,
-                (_, _, Some(_), _, _) => LicenseSource::OCI(self.oci_config()?),
+                (_, _, Some(_graph_artifact_reference), _, _) => {
+                    LicenseSource::OCI(self.oci_config()?)
+                }
                 (_, _, None, Some(_apollo_key), Some(_apollo_graph_ref)) => {
                     LicenseSource::Registry(self.uplink_config()?)
                 }
