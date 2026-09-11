@@ -73,6 +73,9 @@ pub enum AdvanceResult<D> {
 ///     fn effort(&self, _: &Vec<u64>) -> u64 {
 ///         self.effort.get()
 ///     }
+///     fn is_complete(&self, _: &Vec<u64>) -> bool {
+///         true
+///     }
 /// }
 ///
 /// let config = |fuel| BulbConfig {
@@ -98,16 +101,13 @@ pub trait BulbSearchSpace {
     type Choice: Clone;
     type Checkpoint: Clone;
 
-    /// Advance past all deterministic (single-option) decisions in place,
-    /// returning the next multi-option decision point or `Complete`.
+    /// Advance to the next decision point or `Complete`.
     fn advance(&self, candidate: &mut Self::Candidate) -> AdvanceResult<Self::Decision>;
 
-    /// Enumerate the choices available at a decision point. The search
-    /// orders them by cost itself; enumeration order only breaks cost ties.
+    /// Enumerate the choices available at a decision point.
     fn options(&self, decision: &Self::Decision) -> Vec<Self::Choice>;
 
-    /// Commit a choice in place. Only called with the candidate in the
-    /// state where `advance` returned this decision.
+    /// Commit a choice in place.
     fn apply(
         &self,
         candidate: &mut Self::Candidate,
@@ -115,40 +115,24 @@ pub trait BulbSearchSpace {
         choice: &Self::Choice,
     );
 
-    /// Save the candidate's current state for later rollback. O(1).
+    /// Save the candidate's current state for later rollback.
     fn checkpoint(&self, candidate: &Self::Candidate) -> Self::Checkpoint;
 
-    /// Restore a previously saved checkpoint, undoing all mutations since.
-    /// Checkpoints must be used in LIFO order. The effort counter (see
-    /// [`effort`](Self::effort)) is exempt: it must keep counting
-    /// rolled-back work, so store it outside the rolled-back state.
+    /// Restore a previously saved checkpoint.
     fn rollback(&self, candidate: &mut Self::Candidate, cp: Self::Checkpoint);
 
-    /// Full deep clone; used only to save the best complete candidate.
+    /// Create a clone of the candidate.
     fn snapshot(&self, candidate: &Self::Candidate) -> Self::Candidate;
 
-    /// Heuristic cost of a (possibly partial) candidate. Lower is better.
-    /// Must be monotonically non-decreasing as choices are applied, since
-    /// the search prunes partial candidates against the best complete cost.
+    /// Heuristic cost of a (possibly partial) candidate. This should be
+    /// monotonically non-decreasing as choices are applied.
     fn cost(&self, candidate: &Self::Candidate) -> f64;
 
-    /// Whether a terminal candidate satisfies the full request. Dead ends
-    /// are never returned and never constrain the search. The default
-    /// (always true) suits spaces where every terminal state is a solution.
-    fn is_complete(&self, candidate: &Self::Candidate) -> bool {
-        let _ = candidate;
-        true
-    }
+    /// Whether a terminal candidate satisfies the full request.
+    fn is_complete(&self, candidate: &Self::Candidate) -> bool;
 
-    /// Monotonic total work spent across the whole search, including
-    /// rolled-back work; fuel (see [`BulbConfig::fuel`]) is measured in
-    /// these units. The default (always 0) disables effort budgeting, so
-    /// pair it with a timeout unless the space is finite: the search has
-    /// no no-improvement cutoff.
-    fn effort(&self, candidate: &Self::Candidate) -> u64 {
-        let _ = candidate;
-        0
-    }
+    /// Monotonic total work spent across the whole search, including rolled-back work.
+    fn effort(&self, candidate: &Self::Candidate) -> u64;
 }
 
 #[derive(Debug, Clone)]
@@ -681,6 +665,11 @@ mod tests {
 
         fn cost(&self, candidate: &LevelState) -> f64 {
             (self.cost_fn)(&candidate.path, candidate.level)
+        }
+
+        fn is_complete(&self, candidate: &LevelState) -> bool {
+            let space_depth = self.options_per_level.len();
+            candidate.level == space_depth
         }
     }
 
