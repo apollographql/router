@@ -5,7 +5,7 @@
 //! ROUTER-2104 has evidence, gathered beforehand, that running the same YAML through both
 //! parsers produces the same effective settings and the same plugin configuration.
 //!
-//! `Configuration` already implements the two traits `apollo_configuration::Configuration`
+//! `Configuration` already implements two of the three traits `apollo_configuration::Configuration`
 //! requires -- `JsonSchema` and `Deserialize` -- so the marker impls below let the shared
 //! crate parse it directly, with no parallel struct tree to keep in sync. Its own `Deserialize`
 //! impl already calls `Configuration::validate()` at the end, so every cross-field invariant
