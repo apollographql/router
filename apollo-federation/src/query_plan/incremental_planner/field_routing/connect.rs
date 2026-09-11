@@ -55,7 +55,6 @@ fn unwrap_list_shape(shape: &Shape) -> &Shape {
     shape
 }
 
-#[allow(dead_code)]
 impl FieldRoutingSearchSpace {
     /// Commit a routing choice that targets a connector. Connector fields
     /// are opaque to the planner — the connector resolves the field and its
@@ -76,10 +75,7 @@ impl FieldRoutingSearchSpace {
             coordinate = %connector.id.coordinate(),
             "committing connector choice",
         );
-        let current_node_data = self
-            .cached_query_graph
-            .query_graph
-            .node_weight(pending.query_graph_node)?;
+        let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
 
         let Selection::Field(field_sel) = &pending.selection else {
             // Connectors resolve fields, not inline fragments.

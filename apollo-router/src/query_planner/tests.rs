@@ -328,6 +328,7 @@ async fn defer() {
                 subselection: Some("{ t { x } }".to_string()),
                 node: Some(Box::new(PlanNode::Fetch(FetchNode {
                     service_name: "X".into(),
+                    protocol: Default::default(),
                     requires: vec![],
                     variable_usages: vec![],
                     operation: SerializableDocument::from_string("{ t { id __typename x } }"),
@@ -352,6 +353,7 @@ async fn defer() {
                     path: Path(vec![PathElement::Key("t".to_string(), None)]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Y".into(),
+                        protocol: Default::default(),
                         requires: vec![requires_selection::Selection::InlineFragment(
                             requires_selection::InlineFragment {
                                 type_condition: Some(name!("T")),
@@ -1867,6 +1869,7 @@ fn broken_plan_does_not_panic() {
     let mut plan = QueryPlan {
         root: Some(Arc::new(PlanNode::Fetch(FetchNode {
             service_name: "X".into(),
+            protocol: Default::default(),
             requires: vec![],
             variable_usages: vec![],
             operation: SerializableDocument::from_string(operation),
@@ -1936,6 +1939,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         // node can depend on it for __typename and id.
                         PlanNode::Fetch(FetchNode {
                             service_name: "X".into(),
+                            protocol: Default::default(),
                             requires: vec![],
                             variable_usages: vec![],
                             operation: SerializableDocument::from_string(
@@ -1959,6 +1963,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             ]),
                             node: Box::new(PlanNode::Fetch(FetchNode {
                                 service_name: "Y".into(),
+                                protocol: Default::default(),
                                 requires: vec![requires_selection::Selection::InlineFragment(
                                     requires_selection::InlineFragment {
                                         type_condition: Some(name!("Sub")),
@@ -2019,6 +2024,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                     ]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Z".into(),
+                        protocol: Default::default(),
                         requires: vec![requires_selection::Selection::InlineFragment(
                             requires_selection::InlineFragment {
                                 type_condition: Some(name!("Inner")),

@@ -439,4 +439,84 @@ mod tests {
         );
         assert_eq!(block.parent_label, None);
     }
+
+    #[test]
+    fn nested_defer_records_parent_label() {
+        let op = parse(
+            r#"{
+              user {
+                ... on User @defer(label: "outer") {
+                  name
+                  ... on User @defer(label: "inner") { address { street } }
+                }
+              }
+            }"#,
+        );
+
+        let info = build_defer_info(&op.selection_set, Default::default());
+
+        let outer = info.blocks.get("outer").expect("outer block");
+        assert_eq!(outer.parent_label, None);
+        let inner = info.blocks.get("inner").expect("inner block");
+        assert_eq!(inner.parent_label.as_deref(), Some("outer"));
+    }
+
+    #[test]
+    fn serialize_selection_set_handles_inline_fragments() {
+        let op = parse(r#"{ node { ... on User { name address { street } } } }"#);
+        let Selection::Field(node_sel) = op.selection_set.selections.values().next().unwrap()
+        else {
+            panic!("expected field");
+        };
+        let sub = node_sel.selection_set.as_ref().unwrap();
+        let result = serialize_selection_set(sub);
+        assert!(
+            result.contains("... on User"),
+            "Should contain type condition: {result}"
+        );
+        assert!(result.contains("name"), "Should contain name: {result}");
+        assert!(result.contains("street"), "Should contain street: {result}");
+    }
+
+    #[test]
+    fn collect_non_deferred_bare_fragment_inlines_contents() {
+        let op = parse(r#"{ user { name ... { address { street } } } }"#);
+
+        let info = build_defer_info(&op.selection_set, Default::default());
+
+        let primary = info.primary_sub_selection.as_deref().unwrap();
+        assert!(
+            primary.contains("name"),
+            "Primary should contain 'name': {primary}"
+        );
+        assert!(
+            primary.contains("address"),
+            "Primary should contain 'address' from bare fragment: {primary}"
+        );
+    }
+
+    #[test]
+    fn mixed_deferred_and_non_deferred_at_same_level() {
+        let op =
+            parse(r#"{ user { name ... on User @defer(label: "d5") { address { street } } } }"#);
+
+        let info = build_defer_info(&op.selection_set, Default::default());
+
+        let primary = info.primary_sub_selection.as_deref().unwrap();
+        assert!(
+            primary.contains("name"),
+            "Primary should contain 'name': {primary}"
+        );
+        assert!(
+            !primary.contains("street"),
+            "Primary should not contain deferred 'street': {primary}"
+        );
+
+        let block = info.blocks.get("d5").unwrap();
+        let sub = block.sub_selection.as_deref().unwrap();
+        assert!(
+            sub.contains("street"),
+            "Deferred sub_selection should contain 'street': {sub}"
+        );
+    }
 }
