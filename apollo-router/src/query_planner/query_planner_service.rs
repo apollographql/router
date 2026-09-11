@@ -64,13 +64,9 @@ const INTERNAL_INIT_ERROR: &str = "internal";
 
 const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
     "APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK";
-/// Should we enforce the non-local selections limit? Default true, can be toggled off with an
-/// environment variable.
-///
-/// Disabling this check is very much not advisable and we don't expect that anyone will need to do
-/// it. In the extremely unlikely case that the new protection breaks someone's legitimate queries,
-/// though, they could temporarily disable this individual limit so they can still benefit from the
-/// other new limits, until we improve the detection.
+/// Enforces the limit unless `APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK=true`.
+/// The environment setting is read once, on the first call. To allow larger operations while
+/// retaining the check, raise `limits.router.max_non_local_selections`.
 pub(crate) fn non_local_selections_check_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
@@ -155,6 +151,7 @@ impl QueryPlannerService {
     ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
+        let max_non_local_selections = self.configuration.limits.router.max_non_local_selections;
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
@@ -163,6 +160,7 @@ impl QueryPlannerService {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
                 non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                max_non_local_selections,
                 disabled_subgraph_names: Default::default(),
             };
 
@@ -1255,6 +1253,82 @@ mod tests {
 
         let subgraph_queries = subgraph_queries2.lock().await;
         insta::assert_snapshot!(*subgraph_queries, @"{ topProducts { name } }")
+    }
+
+    #[rstest::rstest]
+    #[case(false)]
+    #[case(true)]
+    #[tokio::test]
+    async fn non_local_selections_limit_rejects_with_client_error(#[case] warn_only: bool) {
+        // Root selections count toward the estimate even when they stay within one subgraph.
+        let mut harness = crate::TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "limits": { "router": {
+                    "max_non_local_selections": 0,
+                    "warn_only": warn_only,
+                } },
+            }))
+            .unwrap()
+            // The operation never reaches a subgraph, but without a hook the harness builds real
+            // subgraph HTTP clients.
+            .subgraph_hook(|_name, _default| {
+                tower::service_fn(|request: subgraph::Request| async move {
+                    Ok(subgraph::Response::builder()
+                        .extensions(crate::json_ext::Object::new())
+                        .id(request.id)
+                        .context(request.context)
+                        .subgraph_name(String::default())
+                        .build())
+                })
+                .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("{ topProducts { name } }")
+            .build()
+            .unwrap();
+        let mut response = harness.ready().await.unwrap().call(request).await.unwrap();
+        assert_eq!(response.response.status(), http::StatusCode::BAD_REQUEST);
+
+        let response = response.next_response().await.unwrap();
+        assert_eq!(response.errors.len(), 1);
+        assert_eq!(
+            response.errors[0]
+                .extensions
+                .get("code")
+                .and_then(|code| code.as_str()),
+            Some("QUERY_PLAN_COMPLEXITY_EXCEEDED")
+        );
+        assert!(
+            response.errors[0]
+                .message
+                .contains("Number of non-local selections exceeds limit of 0"),
+            "unexpected error message: {}",
+            response.errors[0].message
+        );
+    }
+
+    #[test]
+    fn test_metric_query_planning_plan_duration_complexity_exceeded() {
+        let bridge = FederationErrorBridge::QueryPlanComplexityExceeded(
+            "Number of non-local selections exceeds limit of 100000".to_string(),
+        );
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            0.0,
+            QueryPlanningOutcome::from(&bridge),
+            ComputeJobType::QueryPlanning,
+        );
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust",
+            "outcome" = "error",
+            "job.type" = "query_planning"
+        );
     }
 
     #[test]
