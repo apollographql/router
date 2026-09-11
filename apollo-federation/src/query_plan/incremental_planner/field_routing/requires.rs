@@ -10,8 +10,9 @@ use crate::query_graph::graph_path::operation::OpPathElement;
 /// The trailing inline-fragment elements of `op_path` (after the last field)
 /// that carry @skip/@include conditions at the current position, which a key
 /// hop must carry into the entity fetch's op path or the hopped selections
-/// lose their gating. Only the condition directives are carried, the exact
-/// complement of what `unconditioned_input_path` strips.
+/// lose their gating. Only the condition directives are carried. Conditions
+/// before the last field are deliberately kept by neither helper: the
+/// parent fetch's data dependence already gates them.
 pub(super) fn trailing_condition_fragments(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Vec<Arc<OpPathElement>> {

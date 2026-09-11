@@ -13,6 +13,8 @@
 mod conditions;
 mod requires;
 pub(super) mod state;
+#[cfg(test)]
+mod test_support;
 
 use std::sync::Arc;
 
@@ -38,13 +40,6 @@ use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
-/// Cache key for routing options. Captures the selection identity at a QG node.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) enum RoutingCacheKey {
-    Field(Name),
-    InlineFragment(Option<Name>),
-}
-
 /// Type position and schema at a query graph node.
 pub(super) struct NodeSource {
     pub(super) type_pos: CompositeTypeDefinitionPosition,
@@ -56,7 +51,6 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) query_graph: Arc<QueryGraph>,
     pub(crate) supergraph_schema: ValidFederationSchema,
     pub(crate) override_conditions: OverrideConditions,
-    pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
 }
 
 impl FieldRoutingSearchSpace {

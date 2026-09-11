@@ -1,12 +1,11 @@
 //! Condition satisfiability: can a set of @requires / @key fields be resolved
 //! at a given query graph node?
 
-use std::sync::Arc;
-
 use petgraph::graph::NodeIndex;
 
 use super::FieldRoutingSearchSpace;
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::SelectionSet;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -18,7 +17,7 @@ impl FieldRoutingSearchSpace {
     /// satisfy conditions.
     pub(super) fn can_satisfy(
         &self,
-        conditions: &Arc<SelectionSet>,
+        conditions: &SelectionSet,
         type_pos: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> bool {
@@ -92,17 +91,19 @@ impl FieldRoutingSearchSpace {
                     }
                 }
                 crate::operation::Selection::InlineFragment(frag_sel) => {
+                    // A type-conditioned fragment without a downcast edge
+                    // (same-type or supertype spread) collects at this node;
+                    // checking here over-approximates safely for unrelated
+                    // conditions (fields without edges are ignored anyway).
                     let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        self.edge_for_inline_fragment(node, &frag_sel.inline_fragment)
-                            .map(|edge| self.query_graph.edge_endpoints(edge))
-                            .transpose()?
-                            .map(|(_, tail)| tail)
+                        match self.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
+                            Some(edge) => self.query_graph.edge_endpoints(edge)?.1,
+                            None => node,
+                        }
                     } else {
-                        Some(node)
+                        node
                     };
-                    if let Some(target) = target
-                        && self.conditions_have_requires(target, &frag_sel.selection_set)?
-                    {
+                    if self.conditions_have_requires(target, &frag_sel.selection_set)? {
                         return Ok(true);
                     }
                 }
@@ -110,6 +111,25 @@ impl FieldRoutingSearchSpace {
         }
         Ok(false)
     }
+}
+
+/// Whether the field definition carries a progressive @override label.
+fn has_progressive_override(
+    definition: &apollo_compiler::schema::FieldDefinition,
+    schema: &ValidFederationSchema,
+) -> bool {
+    let Ok(spec) = get_federation_spec_definition_from_subgraph(schema) else {
+        return false;
+    };
+    let Ok(directive_definition) = spec.override_directive_definition(schema) else {
+        return false;
+    };
+    definition.directives.iter().any(|d| {
+        d.name == directive_definition.name
+            && spec
+                .override_directive_arguments(d)
+                .is_ok_and(|args| args.label.is_some())
+    })
 }
 
 /// Check whether every field in `conditions` (recursively) is resolvable in
@@ -138,6 +158,11 @@ fn can_satisfy_conditions(
                     .subgraph_metadata()
                     .is_some_and(|meta| meta.external_metadata().is_external(&field_pos))
                 {
+                    return false;
+                }
+                // A progressive @override label routes this field per
+                // request; only the override-aware graph check can decide.
+                if has_progressive_override(definition, schema) {
                     return false;
                 }
                 if let Some(sub) = &field_sel.selection_set {
@@ -184,84 +209,95 @@ fn can_satisfy_conditions(
 mod tests {
     use apollo_compiler::name;
 
+    use super::super::test_support;
     use super::*;
-    use crate::Supergraph;
-    use crate::subgraph::Subgraph;
 
-    fn composed_schemas() -> (ValidFederationSchema, ValidFederationSchema) {
-        let (_, s1, s2) = space_and_schemas();
-        (s1, s2)
-    }
+    const S1: &str = r#"
+        extend schema @link(
+          url: "https://specs.apollo.dev/federation/v2.7"
+          import: ["@key", "@shareable"]
+        )
+        type Query { t: T }
+        type T @key(fields: "k") {
+          k: ID
+          x: Int
+          xo: Int
+          a: A @shareable
+        }
+        type A { b: Int @shareable, c: Int }
+    "#;
+    const S2: &str = r#"
+        extend schema @link(
+          url: "https://specs.apollo.dev/federation/v2.7"
+          import: ["@key", "@external", "@requires", "@override", "@shareable"]
+        )
+        interface I { y: Int }
+        type T implements I @key(fields: "k") {
+          k: ID
+          x: Int @external
+          xo: Int @override(from: "S1", label: "pct")
+          y: Int @requires(fields: "x")
+          a: A @shareable
+        }
+        type A { b: Int @shareable }
+    "#;
 
     fn space_and_schemas() -> (
         FieldRoutingSearchSpace,
         ValidFederationSchema,
         ValidFederationSchema,
     ) {
-        let s1 = Subgraph::parse_and_expand(
-            "S1",
-            "http://s1",
-            r#"
-            type Query { t: T }
-            type T @key(fields: "k") {
-              k: ID
-              x: Int
-              a: A
-            }
-            type A { b: Int, c: Int }
-            "#,
-        )
-        .expect("S1 parses");
-        let s2 = Subgraph::parse_and_expand(
-            "S2",
-            "http://s2",
-            r#"
-            type T @key(fields: "k") {
-              k: ID
-              x: Int @external
-              y: Int @requires(fields: "x")
-              a: A
-            }
-            type A { b: Int }
-            "#,
-        )
-        .expect("S2 parses");
-        let supergraph = Supergraph::compose(vec![&s1, &s2]).expect("composes");
-        let api = supergraph
-            .to_api_schema(Default::default())
-            .expect("api schema");
-        let qg = crate::query_graph::build_federated_query_graph(
-            supergraph.schema.clone(),
-            api,
-            None,
-            None,
-        )
-        .expect("query graph");
-        let s1_schema = qg.schema_by_source("S1").expect("S1 schema").clone();
-        let s2_schema = qg.schema_by_source("S2").expect("S2 schema").clone();
-        let space = FieldRoutingSearchSpace {
-            query_graph: Arc::new(qg),
-            supergraph_schema: supergraph.schema,
-            override_conditions: Default::default(),
-            inconsistent_abstract_types: Default::default(),
-        };
-        (space, s1_schema, s2_schema)
+        let space = test_support::search_space(&[("S1", S1), ("S2", S2)]);
+        let s1 = space
+            .query_graph
+            .schema_by_source("S1")
+            .expect("S1 schema")
+            .clone();
+        let s2 = space
+            .query_graph
+            .schema_by_source("S2")
+            .expect("S2 schema")
+            .clone();
+        (space, s1, s2)
     }
 
-    /// The query graph node for type `T` in the given subgraph.
+    fn composed_schemas() -> (ValidFederationSchema, ValidFederationSchema) {
+        let (_, s1, s2) = space_and_schemas();
+        (s1, s2)
+    }
+
     fn t_node(space: &FieldRoutingSearchSpace, subgraph: &str) -> NodeIndex {
-        space
-            .query_graph
-            .graph()
-            .node_indices()
-            .find(|&idx| {
-                let node = space
-                    .query_graph
-                    .node_weight(idx)
-                    .expect("node weight exists");
-                node.source.as_ref() == subgraph && node.type_.to_string() == "T"
-            })
-            .expect("subgraph has a T node")
+        test_support::node_for(space, subgraph, "T")
+    }
+
+    /// A hidden @requires inside a supertype fragment (which has no
+    /// downcast edge at an object node) must still be detected; skipping
+    /// the fragment ships the field without its inputs.
+    #[test]
+    fn requires_detected_through_edgeless_fragment() {
+        let (space, _, s2_schema) = space_and_schemas();
+        let cond = SelectionSet::parse(s2_schema.clone(), t_pos(&s2_schema), "... on I { y }")
+            .expect("conditions parse");
+        let s2_t = t_node(&space, "S2");
+        assert!(
+            space
+                .conditions_have_requires(s2_t, &cond)
+                .expect("check runs"),
+            "y carries @requires even under a supertype fragment with no downcast edge",
+        );
+    }
+
+    /// A field under a progressive @override label resolves here only when
+    /// the label routes here; the schema check must leave that verdict to
+    /// the override-aware graph check.
+    #[test]
+    fn progressive_override_fields_do_not_satisfy_conditions() {
+        let (_, _, s2_schema) = space_and_schemas();
+        let cond = conditions(&s2_schema, "xo");
+        assert!(
+            !can_satisfy_conditions(&cond, &t_pos(&s2_schema), &s2_schema),
+            "xo is progressively overridden; only the query graph can decide",
+        );
     }
 
     /// The graph-based check must recurse into sub-selections: an edge for
@@ -269,7 +305,7 @@ mod tests {
     #[test]
     fn graph_resolvability_recurses_into_sub_selections() {
         let (space, s1_schema, _) = space_and_schemas();
-        let cond = Arc::new(conditions(&s1_schema, "a { c }"));
+        let cond = conditions(&s1_schema, "a { c }");
         let s1_t = t_node(&space, "S1");
         let s2_t = t_node(&space, "S2");
         assert!(
