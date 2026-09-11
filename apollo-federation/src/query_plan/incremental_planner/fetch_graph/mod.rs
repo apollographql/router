@@ -1,6 +1,6 @@
 //! The fetch graph: fetch groups (nodes), dependencies (edges), and the
 //! entity inputs riding those edges, built incrementally during BULB
-//! search with O(1) checkpoint / undo-log rollback.
+//! search with checkpoint / undo-log rollback.
 
 pub(crate) mod selection_builder;
 
@@ -14,6 +14,7 @@ use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
+use petgraph::visit::NodeIndexable;
 use selection_builder::SelectionBuilder;
 use selection_builder::SelectionCheckpoint;
 
@@ -42,15 +43,48 @@ pub(crate) enum FetchGroupKind {
     },
 }
 
-/// Deferred entity input: stored during search, applied when building
-/// the query plan from the winning FetchGraph.
 #[derive(Clone, Debug)]
-pub(crate) struct InputContribution {
-    pub(crate) source_type_name: Name,
-    pub(crate) conditions: Arc<SelectionSet>,
-    /// Present for key-hop inputs (triggers `compute_input_rewrites_on_key_fetch`);
-    /// absent for @requires inputs.
-    pub(crate) rewrite_info: Option<InputRewriteInfo>,
+pub(crate) enum InputContribution {
+    /// @key fields the parent sends to enter the child; drives input
+    /// rewrites on the key fetch.
+    Key {
+        source_type_name: Name,
+        conditions: Arc<SelectionSet>,
+        rewrite_info: InputRewriteInfo,
+    },
+    /// @requires condition fields riding an existing edge. Constructed by
+    /// the requires support in a later change.
+    #[allow(dead_code)]
+    Requires {
+        source_type_name: Name,
+        conditions: Arc<SelectionSet>,
+    },
+}
+
+impl InputContribution {
+    pub(crate) fn source_type_name(&self) -> &Name {
+        match self {
+            Self::Key {
+                source_type_name, ..
+            }
+            | Self::Requires {
+                source_type_name, ..
+            } => source_type_name,
+        }
+    }
+
+    pub(crate) fn conditions(&self) -> &Arc<SelectionSet> {
+        match self {
+            Self::Key { conditions, .. } | Self::Requires { conditions, .. } => conditions,
+        }
+    }
+
+    pub(crate) fn rewrite_info(&self) -> Option<&InputRewriteInfo> {
+        match self {
+            Self::Key { rewrite_info, .. } => Some(rewrite_info),
+            Self::Requires { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -98,12 +132,9 @@ pub(crate) struct FetchEdgeWeight {
 /// methods and replayed in reverse by `rollback()`.
 #[derive(Clone, Debug)]
 enum FetchGraphOp {
-    /// A node was added. Undo: remove_node (StableDiGraph keeps indices
-    /// stable); a root node (`root_key` set) also removes its root_groups
-    /// entry, and an entity node (`entity_key` set) releases its
-    /// entity_groups reuse slot when it still owns it. Both cleanups must
-    /// be symmetric: StableDiGraph recycles removed indices, so a stale map
-    /// entry could later resolve to an unrelated node.
+    /// A node was added. Undo: remove it and release its root_groups /
+    /// entity_groups entries (entity slots only when this node owns them;
+    /// node indices are recycled, so stale entries must never linger).
     AddNode {
         node_index: NodeIndex,
         root_key: Option<Arc<str>>,
@@ -118,46 +149,29 @@ enum FetchGraphOp {
         node_index: NodeIndex,
         prev_head: SelectionCheckpoint,
     },
-    /// A node's depth was raised by an edge insertion. Undo: restore the
-    /// previous depth and stage counts.
-    RaiseDepth { node_index: NodeIndex, prev: u32 },
 }
 
 /// Index key for entity fetch group reuse.
 type EntityGroupKey = (Arc<str>, Vec<FetchDataPathElement>);
 
-/// Lightweight fetch graph for BULB search.
-///
-/// Undo works via an append-only mutation log: `checkpoint()` returns the
-/// current log position, `rollback(cp)` reverses back to it. Trial
-/// branches are applied, scored, and undone on a single instance, so no
-/// cloning during search.
+/// Opaque undo checkpoint: the undo log length at a point in time.
+#[derive(Clone, Debug)]
+pub(crate) struct FetchGraphCheckpoint(usize);
+
+/// Lightweight fetch graph for BULB search. Trial branches are applied,
+/// scored, and undone on one instance via an append-only mutation log:
+/// `checkpoint()` marks a log position, `rollback(cp)` reverses back to it.
 #[derive(Clone, Debug)]
 pub(crate) struct FetchGraph {
     graph: StableDiGraph<FetchNode, FetchEdgeWeight>,
-    /// Root groups keyed by subgraph name.
+    /// Root groups keyed by subgraph name. One search plans one root kind,
+    /// so the kind is not part of the key; root hops never register here.
     root_groups: HashMap<Arc<str>, NodeIndex>,
-    /// First-created entity group per (subgraph, merge_at), so
-    /// `get_or_create_entity_group` (run on every key hop) is a lookup
-    /// instead of a node scan. Only the first node with a key claims the
-    /// slot (earliest-index-wins); undo is LIFO, so a later duplicate can
-    /// never outlive the slot owner. Stale after post-search sibling
-    /// merging, which is fine since nothing creates groups after search.
+    /// First-created entity group per (subgraph, merge_at), so group reuse
+    /// is a lookup instead of a node scan. The first node with a key owns
+    /// the slot; LIFO undo releases it with that node.
     entity_groups: HashMap<EntityGroupKey, NodeIndex>,
     undo_log: Vec<FetchGraphOp>,
-    /// Pipeline depth (longest parent chain) per node index, maintained
-    /// incrementally so `cost()` (the hot path, run per routing option)
-    /// is O(max_depth) instead of a full graph walk.
-    depth: Vec<u32>,
-    /// The stage_counts array tracks how many fetch groups exist at each
-    /// pipeline depth, so cost() can compute the structural cost in
-    /// O(max_depth) instead of walking all nodes. Each depth's count is
-    /// maintained incrementally as nodes are added and depths are raised.
-    stage_counts: Vec<u64>,
-    /// Set by post-search mutations that bypass incremental depth
-    /// maintenance (sibling merging relocates edges and removes nodes).
-    /// `cost()` is search-only and debug-asserts this is unset.
-    depth_dirty: bool,
 }
 
 impl FetchGraph {
@@ -167,86 +181,33 @@ impl FetchGraph {
             root_groups: HashMap::new(),
             entity_groups: HashMap::new(),
             undo_log: Vec::new(),
-            depth: Vec::new(),
-            stage_counts: Vec::new(),
-            depth_dirty: false,
-        }
-    }
-
-    /// Record a freshly added node at depth 0.
-    fn register_node_depth(&mut self, node: NodeIndex) {
-        let i = node.index();
-        if self.depth.len() <= i {
-            self.depth.resize(i + 1, 0);
-        }
-        self.depth[i] = 0;
-        self.bump_stage_count(0, 1);
-    }
-
-    fn bump_stage_count(&mut self, depth: u32, delta: i64) {
-        let d = depth as usize;
-        if self.stage_counts.len() <= d {
-            self.stage_counts.resize(d + 1, 0);
-        }
-        // An underflow here would wrap to ~2^64 and silently prune valid
-        // branches through an astronomically wrong cost; surface drift at
-        // the mutation site instead.
-        debug_assert!(
-            self.stage_counts[d].checked_add_signed(delta).is_some(),
-            "stage count under/overflow at depth {depth}",
-        );
-        self.stage_counts[d] = self.stage_counts[d].wrapping_add_signed(delta);
-    }
-
-    /// Raise `node`'s depth to at least `min_depth`, propagating to its
-    /// descendants. Each change is logged for rollback.
-    fn raise_depth(&mut self, node: NodeIndex, min_depth: u32) {
-        let prev = self.depth[node.index()];
-        if prev >= min_depth {
-            return;
-        }
-        self.undo_log.push(FetchGraphOp::RaiseDepth {
-            node_index: node,
-            prev,
-        });
-        self.bump_stage_count(prev, -1);
-        self.bump_stage_count(min_depth, 1);
-        self.depth[node.index()] = min_depth;
-        let children: Vec<NodeIndex> = self
-            .graph
-            .edges_directed(node, Direction::Outgoing)
-            .map(|e| e.target())
-            .collect();
-        for child in children {
-            self.raise_depth(child, min_depth + 1);
         }
     }
 
     /// Current undo log position, for `rollback()`.
-    pub(crate) fn checkpoint(&self) -> usize {
-        self.undo_log.len()
+    pub(crate) fn checkpoint(&self) -> FetchGraphCheckpoint {
+        FetchGraphCheckpoint(self.undo_log.len())
     }
 
-    /// Undo all mutations back to the given checkpoint position.
-    ///
-    /// Entries are replayed in reverse. `StableDiGraph::remove_node` is
-    /// safe here because edges to added nodes are always logged (and thus
-    /// undone) before the node itself.
-    pub(crate) fn rollback(&mut self, cp: usize) {
-        while self.undo_log.len() > cp {
+    /// Undo all mutations back to the checkpoint, replaying log entries in
+    /// reverse.
+    pub(crate) fn rollback(&mut self, cp: FetchGraphCheckpoint) {
+        debug_assert!(
+            cp.0 <= self.undo_log.len(),
+            "checkpoint is newer than the log; checkpoints must be restored in LIFO order",
+        );
+        while self.undo_log.len() > cp.0 {
             match self.undo_log.pop().unwrap() {
                 FetchGraphOp::AddNode {
                     node_index,
                     root_key,
                     entity_key,
                 } => {
-                    self.bump_stage_count(self.depth[node_index.index()], -1);
                     self.graph.remove_node(node_index);
                     if let Some(key) = root_key {
                         self.root_groups.remove(&key);
                     }
-                    // Only the slot owner releases it: a later duplicate
-                    // node for the same key never claimed the slot.
+                    // A later duplicate node never claimed the slot.
                     if let Some(key) = entity_key
                         && self.entity_groups.get(&key) == Some(&node_index)
                     {
@@ -267,18 +228,12 @@ impl FetchGraph {
                         .selection_builder
                         .restore_head(prev_head);
                 }
-                FetchGraphOp::RaiseDepth { node_index, prev } => {
-                    self.bump_stage_count(self.depth[node_index.index()], -1);
-                    self.bump_stage_count(prev, 1);
-                    self.depth[node_index.index()] = prev;
-                }
             }
         }
     }
 
-    /// Add a `FetchNode`, registering its depth and logging for rollback.
-    /// With `root_key` set, also registers it as a root group. Entity nodes
-    /// claim the `entity_groups` reuse slot for their key if free.
+    /// Add a `FetchNode`, logging for rollback. `root_key` registers a
+    /// root group; entity nodes claim their `entity_groups` slot if free.
     fn insert_node(&mut self, node: FetchNode, root_key: Option<Arc<str>>) -> NodeIndex {
         let entity_key = match &node.kind {
             FetchGroupKind::Entity { merge_at } => Some((node.subgraph.clone(), merge_at.clone())),
@@ -288,10 +243,6 @@ impl FetchGraph {
         if let Some(key) = &root_key {
             self.root_groups.insert(key.clone(), id);
         }
-        self.register_node_depth(id);
-        // Claim the entity_groups reuse slot if this is the first node for
-        // this (subgraph, merge_at) pair. Rollback releases the slot only
-        // when this node still owns it, mirroring root_groups.
         if let Some(key) = &entity_key {
             self.entity_groups.entry(key.clone()).or_insert(id);
         }
@@ -386,8 +337,8 @@ impl FetchGraph {
         child: NodeIndex,
         inputs: Vec<InputContribution>,
     ) -> EdgeIndex {
-        // Covers self-loops too (is_reachable(x, x) is true). raise_depth
-        // assumes acyclicity: on any cycle it would recurse forever.
+        // Everything downstream assumes acyclicity; is_reachable(x, x) is
+        // true, so this also rejects self-loops.
         debug_assert!(
             !self.is_reachable(child, parent),
             "edge {:?} -> {:?} ({}) would create a cycle in the fetch graph",
@@ -399,14 +350,11 @@ impl FetchGraph {
             .graph
             .add_edge(parent, child, FetchEdgeWeight { inputs });
         self.undo_log.push(FetchGraphOp::AddEdge(id));
-        self.raise_depth(child, self.depth[parent.index()] + 1);
         id
     }
 
     /// Add an ordering-only dependency edge (no inputs) unless one exists.
-    /// Errors if it would create a cycle: if the child already
-    /// (transitively) feeds the parent, no valid execution order exists and
-    /// the caller must fail this resolution branch.
+    /// Errors if it would create a cycle; the caller must fail the branch.
     pub(crate) fn add_ordering_dependency(
         &mut self,
         parent: NodeIndex,
@@ -425,17 +373,17 @@ impl FetchGraph {
         Ok(())
     }
 
-    /// Whether the edge already carries a key input (`rewrite_info` set)
-    /// for the given source type.
+    /// Whether the edge already carries a key input for the given source
+    /// type.
     pub(crate) fn edge_has_key_input(&self, edge: EdgeIndex, source_type: &Name) -> bool {
-        self.graph[edge]
-            .inputs
-            .iter()
-            .any(|i| i.rewrite_info.is_some() && i.source_type_name == *source_type)
+        self.graph[edge].inputs.iter().any(|i| {
+            matches!(i, InputContribution::Key { source_type_name, .. }
+                if source_type_name == source_type)
+        })
     }
 
     /// Get a reference to an edge's weight.
-    pub(crate) fn edge_weight_raw(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
+    pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
         &self.graph[edge]
     }
 
@@ -466,8 +414,19 @@ impl FetchGraph {
         &self.graph[node]
     }
 
-    /// Whether `node` refers to a live node (false for placeholders like
-    /// `NodeIndex::end()` on uncommitted federated-root pendings).
+    /// Clone for saving a completed candidate; drops the undo log, which
+    /// snapshots never roll back.
+    pub(crate) fn snapshot(&self) -> Self {
+        Self {
+            undo_log: Vec::new(),
+            graph: self.graph.clone(),
+            root_groups: self.root_groups.clone(),
+            entity_groups: self.entity_groups.clone(),
+        }
+    }
+
+    /// Whether `node` refers to a live node (false for placeholder
+    /// `NodeIndex` values a caller has not committed yet).
     pub(crate) fn contains_node(&self, node: NodeIndex) -> bool {
         self.graph.contains_node(node)
     }
@@ -494,22 +453,27 @@ impl FetchGraph {
         self.graph.edge_count()
     }
 
-    /// Structural cost: each group contributes FETCH_COST scaled by a
-    /// PIPELINING_COST multiplier for its pipeline depth.
-    ///
-    /// O(max_depth) via the incrementally maintained `stage_counts`. Only
-    /// valid during search. Post-search mutations set `depth_dirty`; the
-    /// final plan cost is computed independently by `plan_builder`.
+    /// Structural cost: FETCH_COST per group, scaled by pipeline depth
+    /// (longest parent chain). Recomputed per call; incremental caching is
+    /// deferred until the search is proven correct.
     pub(crate) fn cost(&self) -> QueryPlanCost {
-        debug_assert!(
-            !self.depth_dirty,
-            "cost() called after merge_sibling_entities invalidated stage counts"
-        );
-        self.stage_counts
-            .iter()
-            .enumerate()
-            .map(|(i, &count)| count as f64 * FETCH_COST * (1.0f64).max(i as f64 * PIPELINING_COST))
-            .sum()
+        let Ok(order) = petgraph::algo::toposort(&self.graph, None) else {
+            debug_assert!(false, "cycle in fetch graph");
+            return f64::MAX;
+        };
+        let mut depth = vec![0u32; self.graph.node_bound()];
+        let mut total: QueryPlanCost = 0.0;
+        for node in order {
+            let d = self
+                .graph
+                .edges_directed(node, Direction::Incoming)
+                .map(|e| depth[e.source().index()] + 1)
+                .max()
+                .unwrap_or(0);
+            depth[node.index()] = d;
+            total += FETCH_COST * (1.0f64).max(d as f64 * PIPELINING_COST);
+        }
+        total
     }
 
     /// Whether `to` is reachable from `from` via directed edges.
@@ -532,12 +496,6 @@ impl FetchGraph {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use petgraph::Direction;
-    use petgraph::stable_graph::NodeIndex;
-    use petgraph::visit::EdgeRef;
-
     use super::*;
 
     fn dummy_root_type() -> CompositeTypeDefinitionPosition {
@@ -567,6 +525,19 @@ mod tests {
 
         assert_eq!(id1, id2);
         assert_eq!(graph.node_count(), 1);
+    }
+
+    #[test]
+    fn add_root_hop_group_round_trips() {
+        let mut graph = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let node = graph.add_root_hop_group(&sg, dummy_root_type(), user_path(None));
+        let FetchGroupKind::RootHop { merge_at, .. } = &graph.node(node).kind else {
+            panic!("expected a root hop group");
+        };
+        assert_eq!(merge_at, &user_path(None));
+        assert_eq!(graph.merge_at(node), user_path(None));
+        assert_eq!(graph.node(node).root_type(), Some(&dummy_root_type()),);
     }
 
     #[test]
@@ -609,10 +580,9 @@ mod tests {
             crate::schema::ValidFederationSchema::new(schema).expect("valid federation schema");
         let op = crate::operation::Operation::parse(schema, r#"{ user { id } }"#, "op.graphql")
             .expect("valid operation");
-        InputContribution {
+        InputContribution::Requires {
             source_type_name: apollo_compiler::name!("User"),
             conditions: Arc::new(op.selection_set.clone()),
-            rewrite_info: None,
         }
     }
 
@@ -628,7 +598,7 @@ mod tests {
         graph.add_input_to_edge(edge, test_input_contribution());
         assert_eq!(graph.graph[edge].inputs.len(), 1);
         assert_eq!(
-            graph.graph[edge].inputs[0].source_type_name,
+            *graph.graph[edge].inputs[0].source_type_name(),
             apollo_compiler::name!("User"),
         );
     }
@@ -849,9 +819,9 @@ mod tests {
     }
 
     #[test]
-    fn rollback_restores_depths_through_raise_depth_chain() {
-        // Attaching an existing subtree under a deeper parent raises the whole
-        // chain (raise_depth recursion); rollback must restore every stage count.
+    fn cost_tracks_depth_changes_through_rollback() {
+        // Attaching an existing subtree under a deeper parent deepens the
+        // whole chain; rollback must restore the original cost.
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
         let root = g.get_or_create_root_group(&sg, dummy_root_type());
@@ -873,72 +843,6 @@ mod tests {
 
         g.rollback(cp);
         assert_eq!(g.cost(), 202_000.0);
-    }
-
-    /// From-scratch cost oracle: recompute longest-path depths in topological
-    /// order and apply the same FETCH_COST/PIPELINING_COST formula as `cost()`.
-    /// Guards the incremental depth/stage-count bookkeeping against drift.
-    fn recomputed_cost(g: &FetchGraph) -> QueryPlanCost {
-        let order = petgraph::algo::toposort(&g.graph, None)
-            .expect("fetch graph must be acyclic during search");
-        let mut depth: HashMap<NodeIndex, u32> = HashMap::with_capacity(order.len());
-        let mut total: QueryPlanCost = 0.0;
-        for node in order {
-            let d = g
-                .graph
-                .edges_directed(node, Direction::Incoming)
-                .map(|e| depth[&e.source()] + 1)
-                .max()
-                .unwrap_or(0);
-            depth.insert(node, d);
-            total += FETCH_COST * (1.0f64).max(d as f64 * PIPELINING_COST);
-        }
-        total
-    }
-
-    #[test]
-    fn incremental_cost_matches_recomputation_through_adds_raises_and_rollbacks() {
-        let mut g = FetchGraph::new();
-        let sg: Arc<str> = Arc::from("sg");
-        let sg2: Arc<str> = Arc::from("sg2");
-        assert_eq!(g.cost(), recomputed_cost(&g));
-
-        // Adds: two independent chains.
-        let root = g.get_or_create_root_group(&sg, dummy_root_type());
-        let a = g.add_entity_group(&sg, vec![]);
-        g.add_dependency(root, a, vec![]);
-        let b = g.add_entity_group(&sg2, vec![]);
-        g.add_dependency(a, b, vec![]);
-        let c = g.add_entity_group(&sg2, user_path(None));
-        let d = g.add_entity_group(&sg, user_path(None));
-        g.add_dependency(c, d, vec![]);
-        assert_eq!(g.cost(), recomputed_cost(&g));
-
-        // Raise: attaching the (c, d) subtree under b propagates depth
-        // increases through raise_depth's descendant recursion.
-        let cp_outer = g.checkpoint();
-        g.add_dependency(b, c, vec![]);
-        assert_eq!(g.cost(), recomputed_cost(&g));
-
-        // A second parent edge that does NOT raise (a is shallower than b).
-        g.add_dependency(a, c, vec![]);
-        assert_eq!(g.cost(), recomputed_cost(&g));
-
-        // Nested checkpoint: extend the deep chain, then roll it back.
-        let cp_inner = g.checkpoint();
-        let e = g.add_entity_group(&sg, vec![]);
-        g.add_dependency(d, e, vec![]);
-        assert_eq!(g.cost(), recomputed_cost(&g));
-        g.rollback(cp_inner);
-        assert_eq!(g.cost(), recomputed_cost(&g));
-
-        // Outer rollback undoes the raises too.
-        g.rollback(cp_outer);
-        assert_eq!(g.cost(), recomputed_cost(&g));
-
-        // Build forward again after rollback.
-        g.add_dependency(b, c, vec![]);
-        assert_eq!(g.cost(), recomputed_cost(&g));
     }
 
     #[cfg(debug_assertions)]
