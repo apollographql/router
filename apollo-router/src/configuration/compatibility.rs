@@ -40,9 +40,7 @@ fn current_major_version() -> i64 {
 }
 
 fn router_options() -> ParseYamlOptions {
-    // Use the same schema, including router's additionalProperties patch, for both parsers.
-    // Generating it costs roughly as much as a parse, and the corpus tests want fresh options
-    // per document, so generate once for the whole test binary and clone.
+    // Cache the patched router schema across parses.
     static SCHEMA: OnceLock<Value> = OnceLock::new();
     let schema = SCHEMA
         .get_or_init(|| {
@@ -461,11 +459,8 @@ fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
     );
 }
 
-/// Parses settings and supplies `validated_yaml` and `raw_yaml`, the two `#[serde(skip)]` fields
-/// `Configuration::deserialize` always leaves as `None`. Router's own `validate_yaml_configuration`
-/// sets both after the same `Deserialize` call runs; this adapter does the same, from the same
-/// pre-expansion `text` router itself would have set `raw_yaml` from. Configure `options` and
-/// `expansion` with equivalent external inputs.
+/// Parses settings, stores the expanded document in `validated_yaml` and keeps `text` in
+/// `raw_yaml`. Configure `options` and `expansion` with equivalent external inputs.
 fn parse_via_apollo_configuration(
     text: &str,
     options: &ParseYamlOptions,
@@ -635,9 +630,7 @@ fn unmigrated_flat_subscription_dedup_fails_at_plugin_init_not_at_parse() {
     );
 }
 
-/// A configuration passing router's JSON Schema but failing router's own custom validation
-/// (`Configuration::validate`, called from inside `Configuration::deserialize`) is rejected
-/// identically by both parsers, because both call the very same `Deserialize` impl.
+/// Both parsers report the cross-field conflict between enabled sandbox and homepage settings.
 #[test]
 fn cross_field_validation_embedded_in_deserialize_rejects_both_the_same_way() {
     let text = "sandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n";
@@ -772,11 +765,7 @@ fn env_expansion_agrees_between_the_two_expanders() {
     );
 }
 
-/// Router's env-var overrides (`Expansion::Override`) write a value at a fixed config path
-/// regardless of whether the document contains a `${...}` placeholder there at all -- unlike
-/// expansion, which only replaces a placeholder that is already written. `apollo_configuration`'s
-/// `provenance::Injection` is the equivalent: both take precedence over whatever the document
-/// itself set at that path.
+/// Router overrides and shared-parser injections replace an explicit value in the document.
 #[test]
 fn an_env_var_override_beats_the_documents_own_value_on_both_sides() {
     let text = "supergraph:\n  listen: 127.0.0.1:4000\n";
@@ -871,12 +860,8 @@ fn telemetry_input_agrees_between_the_two_parsers() {
     }
 }
 
-/// Runs every integration fixture, published example, and docs `router.yaml` snippet that
-/// [`test_discovery::discover_project_configs`] finds through both parsers, with the same mocked
-/// environment variables on each side, and compares effective settings the way
-/// `effective_settings_agree_for_the_shared_corpus` compares `CASES`.
-///
-/// Any rejection or disagreement fails the test naming the document's path.
+/// Discovered configurations produce matching effective settings with identical expansion
+/// inputs. Failures identify the source file and any differing configuration path.
 #[test]
 fn effective_settings_agree_for_discovered_project_documents() {
     let mocked_env_vars = test_discovery::discovery_env_vars();
@@ -884,10 +869,7 @@ fn effective_settings_agree_for_discovered_project_documents() {
     let mut unexpected = Vec::new();
 
     for doc in test_discovery::discover_project_configs() {
-        // Not `Expansion::default_builder`: its override table reads the real process
-        // environment (`APOLLO_USAGE_REPORTING_INGRESS_URL` and friends) and would write values
-        // at paths the shared side never sees, failing the comparison on any machine that sets
-        // one. Both sides expand from the mocked map and nothing else.
+        // Use explicit providers to keep process-environment overrides out of the comparison.
         let router_expansion = Expansion::builder()
             .supported_mode("env")
             .supported_mode("file")
@@ -985,12 +967,7 @@ fn schema_declared_top_level_defaults_agree_between_parsers() {
     );
 }
 
-/// `RateLimitConf` (`traffic_shaping.{router,all}.global_rate_limit`) is one of the schema's
-/// genuinely required-field structs. Most of `Configuration`'s nested structs carry a
-/// struct-level default that keeps their fields out of the schema's `required` array even when
-/// the fields themselves have no default. `RateLimitConf` has no such struct-level default, so
-/// schemars marks `capacity` and `interval` required. Two different valid value permutations must
-/// parse to the same effective settings on both sides.
+/// Both parsers agree on rate limits with different capacities and intervals.
 #[test]
 fn schema_derived_required_field_permutations_agree_between_parsers() {
     for (capacity, interval) in [(10, "1s"), (500, "30s")] {
