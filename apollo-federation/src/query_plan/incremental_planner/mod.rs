@@ -30,6 +30,28 @@ pub(crate) struct BulbPlan {
     pub(crate) cost: QueryPlanCost,
 }
 
+/// Subgraph operation naming state spanning one whole query plan. Mutation
+/// planning runs one BULB search per top-level field; sharing this across
+/// those searches keeps generated operation names (`{name}__{subgraph}__{n}`)
+/// unique per plan instead of restarting the counter per field.
+pub(crate) struct OperationNaming {
+    compression: SubgraphOperationCompression,
+    counter: u32,
+}
+
+impl OperationNaming {
+    pub(crate) fn new(generate_query_fragments: bool) -> Self {
+        Self {
+            compression: if generate_query_fragments {
+                SubgraphOperationCompression::GenerateFragments
+            } else {
+                SubgraphOperationCompression::Disabled
+            },
+            counter: 0,
+        }
+    }
+}
+
 /// Entry point for the field-routing BULB planner: drives query planning
 /// field-by-field via BULB on the `FieldRoutingSearchSpace`.
 #[tracing::instrument(level = "debug", skip_all, name = "build_bulb_plan")]
@@ -37,7 +59,7 @@ pub(crate) fn build_bulb_plan(
     parameters: &QueryPlanningParameters,
     selection_set: &SelectionSet,
     root_kind: SchemaRootDefinitionKind,
-    _has_defers: bool,
+    naming: &mut OperationNaming,
 ) -> Result<BulbPlan, FederationError> {
     debug!(
         selections = selection_set.selections.len(),
@@ -59,9 +81,7 @@ pub(crate) fn build_bulb_plan(
         query_graph: query_graph.clone(),
         supergraph_schema: supergraph_schema.clone(),
         override_conditions: parameters.override_conditions.clone(),
-        inconsistent_abstract_types: parameters
-            .abstract_types_with_inconsistent_runtime_types
-            .clone(),
+        disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };
 
     let root_qg_node = parameters.head;
@@ -74,11 +94,15 @@ pub(crate) fn build_bulb_plan(
             let fetch_node = graph.get_or_create_root_group(&root_node_data.source, root_type);
             let pending = root_pending_selections(selection_set, root_qg_node, fetch_node);
             let initial = PlanState::with_graph(graph, pending);
-            run_bulb_and_finalize(&search_space, parameters, initial, root_kind)
+            run_bulb_and_finalize(&search_space, parameters, initial, root_kind, naming)
         }
-        QueryGraphNodeType::FederatedRootType(_) => {
-            build_bulb_plan_from_federated_root(&search_space, parameters, selection_set, root_kind)
-        }
+        QueryGraphNodeType::FederatedRootType(_) => build_bulb_plan_from_federated_root(
+            &search_space,
+            parameters,
+            selection_set,
+            root_kind,
+            naming,
+        ),
     }
 }
 
@@ -90,6 +114,7 @@ fn build_bulb_plan_from_federated_root(
     parameters: &QueryPlanningParameters,
     selection_set: &SelectionSet,
     root_kind: SchemaRootDefinitionKind,
+    naming: &mut OperationNaming,
 ) -> Result<BulbPlan, FederationError> {
     let root_qg_node = parameters.head;
 
@@ -97,7 +122,7 @@ fn build_bulb_plan_from_federated_root(
     // actual root fetch group from the chosen subgraph.
     let pending = root_pending_selections(selection_set, root_qg_node, NodeIndex::end());
     let initial = PlanState::new(pending);
-    run_bulb_and_finalize(search_space, parameters, initial, root_kind)
+    run_bulb_and_finalize(search_space, parameters, initial, root_kind, naming)
 }
 
 /// Run BULB search on the initial state and finalize into a `BulbPlan`.
@@ -107,6 +132,7 @@ fn run_bulb_and_finalize(
     parameters: &QueryPlanningParameters,
     initial: PlanState,
     root_kind: SchemaRootDefinitionKind,
+    naming: &mut OperationNaming,
 ) -> Result<BulbPlan, FederationError> {
     let config = BulbConfig {
         beam_width: parameters.config.incremental_planner.beam_width,
@@ -128,10 +154,10 @@ fn run_bulb_and_finalize(
         parameters.check_for_cooperative_cancellation,
     );
 
-    parameters
-        .statistics
-        .evaluated_plan_count
-        .set(stats.evaluated_plans);
+    // Accumulate: mutation planning runs one search per top-level field and
+    // the statistics span the whole operation.
+    let evaluated = &parameters.statistics.evaluated_plan_count;
+    evaluated.set(evaluated.get() + stats.evaluated_plans);
 
     if matches!(stats.termination, BulbTermination::Cancelled) {
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
@@ -163,27 +189,23 @@ fn run_bulb_and_finalize(
         "BULB search complete",
     );
 
-    // An incomplete plan must never be returned: executing it would
-    // silently omit response fields.
+    // Unreachable: bulb_search only records candidates that pass
+    // is_complete, which for PlanState is exactly this condition. Kept as a
+    // hard internal error (never a plausible planner outcome like
+    // NoPlanFoundWithDisabledSubgraphs) so an engine bug cannot masquerade
+    // as an expected planning result.
+    debug_assert!(
+        result.dropped_fields == 0 && result.pending.is_empty(),
+        "bulb_search returned an incomplete candidate as best",
+    );
     if result.dropped_fields > 0 || !result.pending.is_empty() {
-        if !parameters.disabled_subgraphs.is_empty() {
-            return Err(
-                crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into(),
-            );
-        }
         return Err(FederationError::internal(format!(
-            "BULB planner could not produce a complete plan: \
+            "BULB planner returned an incomplete plan: \
              {} dropped selection(s), {} unplanned selection(s)",
             result.dropped_fields,
             result.pending.len(),
         )));
     }
-
-    let mut operation_compression = if parameters.config.generate_query_fragments {
-        SubgraphOperationCompression::GenerateFragments
-    } else {
-        SubgraphOperationCompression::Disabled
-    };
 
     let mut build_ctx = fetch_graph::plan_builder::PlanBuildContext {
         supergraph_schema: &parameters.supergraph_schema,
@@ -192,10 +214,11 @@ fn run_bulb_and_finalize(
         variable_definitions: &parameters.operation.variables,
         operation_directives: &parameters.operation.directives,
         operation_name: &parameters.operation.name,
-        operation_compression: &mut operation_compression,
-        operation_counter: 0,
+        operation_compression: &mut naming.compression,
+        operation_counter: naming.counter,
     };
     let (plan, cost) = result.graph.to_query_plan(&mut build_ctx)?;
+    naming.counter = build_ctx.operation_counter;
 
     Ok(BulbPlan { plan, cost })
 }
