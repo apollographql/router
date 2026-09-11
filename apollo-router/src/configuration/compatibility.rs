@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
@@ -40,8 +41,15 @@ fn current_major_version() -> i64 {
 
 fn router_options() -> ParseYamlOptions {
     // Use the same schema, including router's additionalProperties patch, for both parsers.
-    let schema = serde_json::to_value(generate_config_schema())
-        .expect("router's configuration schema serializes");
+    // Generating it costs roughly as much as a parse, and the corpus tests want fresh options
+    // per document, so generate once for the whole test binary and clone.
+    static SCHEMA: OnceLock<Value> = OnceLock::new();
+    let schema = SCHEMA
+        .get_or_init(|| {
+            serde_json::to_value(generate_config_schema())
+                .expect("router's configuration schema serializes")
+        })
+        .clone();
     ParseYamlOptions::default().schema(schema)
 }
 
