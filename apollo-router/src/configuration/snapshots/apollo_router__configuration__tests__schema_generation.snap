@@ -13148,9 +13148,6 @@ expression: "&schema"
       },
       "description": "Configuration for the incremental query planner."
     },
-    "license_enforcement": {
-      "$ref": "#/definitions/LicenseEnforcementConfig"
-    },
     "limits": {
       "$ref": "#/definitions/LimitsConfig"
     },
