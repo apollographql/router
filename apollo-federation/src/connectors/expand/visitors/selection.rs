@@ -10,11 +10,11 @@ use apollo_compiler::schema::InterfaceType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use shape::Shape;
-use shape::ShapeCase;
 
 use super::FieldVisitor;
 use super::GroupVisitor;
@@ -848,10 +848,10 @@ fn is_satisfiable_typename_shape(shape: &Shape) -> bool {
 mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::name;
+    use apollo_shape::Shape;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
     use insta::assert_snapshot;
-    use shape::Shape;
 
     use super::walk_type_with_shape;
     use crate::connectors::ConnectSpec;

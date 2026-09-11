@@ -1,6 +1,6 @@
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
-use shape::ShapeCase;
 
 use super::keys_to_camel_case::transform_keys;
 use super::keys_to_camel_case::transform_shape;
@@ -214,8 +214,8 @@ mod tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use shape::location::Location;
-    use shape::location::SourceId;
+    use apollo_shape::location::Location;
+    use apollo_shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;

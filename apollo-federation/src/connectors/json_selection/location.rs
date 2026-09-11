@@ -1,9 +1,9 @@
+use apollo_shape::location::Location;
+use apollo_shape::location::SourceId;
 use nom::Parser;
 use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
-use shape::location::Location;
-use shape::location::SourceId;
 
 use crate::connectors::ConnectSpec;
 

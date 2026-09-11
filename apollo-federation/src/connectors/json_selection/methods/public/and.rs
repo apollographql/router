@@ -1,5 +1,5 @@
+use apollo_shape::Shape;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -262,8 +262,8 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use shape::location::Location;
-    use shape::location::SourceId;
+    use apollo_shape::location::Location;
+    use apollo_shape::location::SourceId;
 
     use super::*;
     use crate::connectors::Key;

@@ -120,6 +120,29 @@ a test snapshot or a log query, needs updating.
 
 By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9947>
 
+### Connectors validation depends on `apollo-shape` rather than `shape` ([PR #10208](https://github.com/apollographql/router/pull/10208))
+
+`shape` 0.9.0 moved its GraphQL front end into a new `apollo-shape` crate, so
+that `shape` itself no longer depends on `apollo-compiler` and an
+`apollo-compiler` upgrade is no longer a `shape` release. Connectors validation
+now depends on `apollo-shape` 0.2.0, which re-exports all of `shape`.
+
+One change reaches composition diagnostics. An input object field whose type is
+a built-in scalar now carries that scalar's shape rather than `Unknown`, so a
+composition error quoting such a shape names the real field type:
+
+```
+does not accept `One<{ val: One<String, null> }, null>`
+```
+
+where it previously said `{ val: Unknown }`. Object *output* fields were
+already correct, since connectors converts those types itself.
+
+No validation outcome changes. Anything matching on the previous strings, such
+as a test snapshot or a log query, needs updating.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10208>
+
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))

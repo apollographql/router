@@ -7,8 +7,8 @@ use std::fmt::Formatter;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use apollo_shape::Shape;
 use multi_try::MultiTry;
-use shape::Shape;
 
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::IsSuccessCoordinate;

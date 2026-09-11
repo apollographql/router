@@ -1,6 +1,6 @@
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -205,8 +205,8 @@ fn join_not_null_method_shape(
 
 #[cfg(test)]
 mod tests {
+    use apollo_shape::location::SourceId;
     use serde_json_bytes::json;
-    use shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::ApplyToError;

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use apollo_shape::Shape;
+use apollo_shape::ShapeCase;
 use heck::ToLowerCamelCase;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
-use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::ConnectSpec;
 use crate::connectors::json_selection::ApplyToError;
@@ -134,7 +134,7 @@ pub(super) fn transform_keys(
 pub(super) fn transform_shape(
     input_shape: Shape,
     recursive: bool,
-    locations: impl IntoIterator<Item = shape::location::Location> + Clone,
+    locations: impl IntoIterator<Item = apollo_shape::location::Location> + Clone,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
@@ -403,8 +403,8 @@ mod tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use shape::location::Location;
-    use shape::location::SourceId;
+    use apollo_shape::location::Location;
+    use apollo_shape::location::SourceId;
 
     use super::*;
     use crate::connectors::json_selection::lit_expr::LitExpr;
