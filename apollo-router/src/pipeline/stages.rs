@@ -21,6 +21,7 @@ use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
@@ -147,6 +148,9 @@ pub(crate) fn build_http_client_service(
     ServiceBuilder::new()
         .layer(JoinBatchRequestsLayer::new(name))
         .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
+        .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.http_client_service(name, service)
         })
@@ -205,6 +209,8 @@ pub(crate) fn build_subgraph_service(
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
         })
         .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
+        .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
+        .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -218,7 +224,9 @@ pub(crate) fn build_subgraph_service(
         .service(SubgraphService::new(name, http_service))
         .boxed_clone();
 
-    UnconstrainedBuffer::new(service, DEFAULT_BUFFER_SIZE)
+    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
+    // the type easier to name
+    ServiceBuilder::new().buffered().service(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
@@ -253,6 +261,7 @@ fn build_connector_request_services(
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
+                .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })
@@ -414,6 +423,7 @@ fn build_execution_service(
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
+        .apply_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.execution_service(service)
         })
@@ -456,6 +466,7 @@ fn build_supergraph_service(
             &plugins,
             IncludeSubgraphErrors::redact_subgraph_errors_layer,
         )
+        .apply_plugin_layer(&plugins, Telemetry::instrument_supergraph_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.supergraph_service(service)
         })
@@ -488,6 +499,8 @@ pub(crate) fn build_router_service(
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
         .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
+        .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

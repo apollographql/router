@@ -18,7 +18,6 @@ use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use config_new::router_overhead;
 use futures::StreamExt;
-use futures::future::BoxFuture;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderMap;
@@ -116,6 +115,7 @@ use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_router_errors;
 use crate::plugins::telemetry::error_counter::count_subgraph_errors;
 use crate::plugins::telemetry::error_counter::count_supergraph_errors;
+use crate::plugins::telemetry::metrics::allocation::AllocationMetricsLayer;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -294,76 +294,279 @@ impl EnabledFeatures {
     }
 }
 
-#[async_trait::async_trait]
-impl PluginPrivate for Telemetry {
-    type Config = config::Conf;
+/// Layer type for [Telemetry::instrument_execution_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentExecutionLayer {
+    config: Arc<config::Conf>,
+}
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        // Log whether we received previous configuration for testing
-        // In a followup PR we will be detecting if exporters need to be refreshed, and at this point
-        // this debug logging will disappear.
-        match &init.previous_config {
-            Some(_prev_config) => {
-                ::tracing::debug!("Telemetry plugin reload detected with previous configuration");
-            }
-            None => {
-                ::tracing::debug!(
-                    "Telemetry plugin initial startup without previous configuration"
-                );
-            }
-        }
-
-        let mut config = init.config;
-        config.instrumentation.spans.update_defaults();
-        config.instrumentation.instruments.update_defaults();
-        if let Err(err) = config.instrumentation.validate() {
-            ::tracing::warn!(
-                "Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events"
-            );
-        }
-
-        config.validate_per_exporter_samplers()?;
-        let field_level_instrumentation_ratio =
-            config.calculate_field_level_instrumentation_ratio()?;
-
-        let (activation, custom_endpoints, apollo_metrics_sender) =
-            reload::prepare(&init.previous_config, &config)?;
-
-        // Set up feature usage list
-        let full_config = init
-            .full_config
-            .as_ref()
-            .expect("Required full router configuration not found in telemetry plugin");
-        let enabled_features = Self::extract_enabled_features(full_config);
-        ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
-
-        Ok(Telemetry {
-            custom_endpoints,
-            apollo_metrics_sender,
-            supergraph_schema_id: init.supergraph_schema_id,
-            field_level_instrumentation_ratio,
-            activation: Mutex::new(Some(activation)),
-            builtin_instruments: RwLock::new(create_builtin_instruments(
-                &config.instrumentation.instruments,
-            )),
-            enabled_features,
-            config: Arc::new(config),
-        })
+impl InstrumentExecutionLayer {
+    fn new(config: Arc<config::Conf>) -> Self {
+        Self { config }
     }
+}
 
-    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+impl<S> tower::Layer<S> for InstrumentExecutionLayer
+where
+    S: tower::Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = execution::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        let config = self.config.clone();
+
+        ServiceBuilder::new()
+            .instrument(move |req: &ExecutionRequest| {
+                let operation_kind = req.query_plan.query.operation.kind();
+
+                match operation_kind {
+                    OperationKind::Subscription => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                        "apollo_private.operation.subtype" =
+                            OperationSubType::SubscriptionRequest.as_str(),
+                    ),
+                    _ => info_span!(
+                        EXECUTION_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                    ),
+                }
+            })
+            .and_then(move |resp: ExecutionResponse| {
+                let config = config.clone();
+                async move {
+                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
+                    Ok::<_, BoxError>(resp)
+                }
+            })
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [Telemetry::instrument_http_client_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentHttpClientLayer {
+    _private: (),
+}
+
+impl InstrumentHttpClientLayer {
+    fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentHttpClientLayer
+where
+    S: tower::Service<
+            crate::services::http::HttpRequest,
+            Response = crate::services::http::HttpResponse,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = crate::services::http::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ServiceBuilder::new()
+            .instrument(move |request: &crate::services::http::HttpRequest| {
+                let schema_uri = request.http_request.uri();
+                let host = schema_uri.host().unwrap_or_default();
+                let port = schema_uri.port_u16().unwrap_or_else(|| {
+                    let scheme = schema_uri.scheme_str();
+                    if scheme == Some("https") {
+                        443
+                    } else if scheme == Some("http") {
+                        80
+                    } else {
+                        0
+                    }
+                });
+
+                let path = schema_uri.path();
+                ::tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
+                    "otel.kind" = "CLIENT",
+                    "net.peer.name" = %host,
+                    "net.peer.port" = %port,
+                    "http.route" = %path,
+                    "http.url" = %schema_uri,
+                    "net.transport" = "ip_tcp",
+                )
+            })
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [Telemetry::custom_instrument_http_client_layer].
+#[derive(Clone)]
+pub(crate) struct CustomInstrumentHttpClientLayer {
+    config: Arc<config::Conf>,
+}
+
+impl CustomInstrumentHttpClientLayer {
+    fn new(config: Arc<config::Conf>) -> Self {
+        Self { config }
+    }
+}
+
+impl<S> tower::Layer<S> for CustomInstrumentHttpClientLayer
+where
+    S: tower::Service<
+            crate::services::http::HttpRequest,
+            Response = crate::services::http::HttpResponse,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = crate::services::http::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
+
+        ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |request: &crate::services::http::HttpRequest| {
+                    let custom_span_attributes = req_fn_config
+                        .instrumentation
+                        .spans
+                        .http_client
+                        .attributes
+                        .on_request(request);
+
+                    (request.context.clone(), custom_span_attributes)
+                },
+                move |(context, custom_span_attributes): (Context, Vec<KeyValue>), f| {
+                    let conf = res_fn_config.clone();
+                    async move {
+                        let span = Span::current();
+                        span.set_span_dyn_attributes(custom_span_attributes);
+
+                        let result: Result<crate::services::http::HttpResponse, BoxError> = f.await;
+                        match &result {
+                            Ok(response) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .http_client
+                                        .attributes
+                                        .on_response(response),
+                                );
+                            }
+                            Err(err) => {
+                                span.set_span_dyn_attributes(
+                                    conf.instrumentation
+                                        .spans
+                                        .http_client
+                                        .attributes
+                                        .on_error(err, &context),
+                                );
+                            }
+                        }
+                        result
+                    }
+                },
+            )
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [Telemetry::subgraph_ftv1_layer].
+#[derive(Clone, Copy)]
+pub(crate) struct SubgraphFtv1Layer {
+    _private: (),
+}
+
+impl SubgraphFtv1Layer {
+    fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl<S> tower::Layer<S> for SubgraphFtv1Layer
+where
+    S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = subgraph::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ServiceBuilder::new()
+            .map_request(request_ftv1)
+            .map_response(|resp: SubgraphResponse| {
+                let subgraph_name = ByteString::from(resp.subgraph_name.as_str());
+                store_ftv1(&subgraph_name, resp)
+            })
+            .service(inner)
+            .boxed_clone()
+    }
+}
+
+/// Layer type for [Telemetry::instrument_router_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentRouterLayer {
+    config: Arc<config::Conf>,
+    supergraph_schema_id: Arc<String>,
+    enabled_features: EnabledFeatures,
+    field_level_instrumentation_ratio: f64,
+    metrics_sender: apollo_exporter::Sender,
+    static_router_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl InstrumentRouterLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        supergraph_schema_id: Arc<String>,
+        enabled_features: EnabledFeatures,
+        field_level_instrumentation_ratio: f64,
+        metrics_sender: apollo_exporter::Sender,
+        static_router_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            supergraph_schema_id,
+            enabled_features,
+            field_level_instrumentation_ratio,
+            metrics_sender,
+            static_router_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentRouterLayer
+where
+    S: tower::Service<router::Request, Response = router::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = router::BoxCloneService;
+
+    fn layer(&self, service: S) -> Self::Service {
         let supergraph_schema_id = self.supergraph_schema_id.clone();
         let config_later = self.config.clone();
         let config_request = self.config.clone();
         let config_checkpoint = self.config.clone();
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let metrics_sender = self.apollo_metrics_sender.clone();
-        let static_router_instruments = self
-            .builtin_instruments
-            .read()
-            .router_custom_instruments
-            .clone();
+        let metrics_sender = self.metrics_sender.clone();
+        let static_router_instruments = self.static_router_instruments.clone();
 
         let spans = &self.config.instrumentation.spans;
         let router_attributes = &spans.router.attributes.attributes;
@@ -379,7 +582,6 @@ impl PluginPrivate for Telemetry {
             .and_then(|a| a.key(CLIENT_VERSION_KEY));
 
         ServiceBuilder::new()
-            .layer(metrics::allocation::AllocationMetricsLayer::new())
             .map_response(move |response: router::Response| {
                 // The current span *should* be the request span as we are outside the instrument block.
                 let span = Span::current();
@@ -563,7 +765,7 @@ impl PluginPrivate for Telemetry {
                     let client_name_key = client_name_key.clone();
                     let client_version_key = client_version_key.clone();
 
-                    Self::plugin_metrics(&config);
+                    Telemetry::plugin_metrics(&config);
 
                     async move {
                         if let Some(http_server_response_body_size) =
@@ -671,7 +873,7 @@ impl PluginPrivate for Telemetry {
                                     .map(|u| matches!(**u, UsageReporting::Error { .. }))
                                     .unwrap_or(false)
                             }) {
-                                Self::update_apollo_metrics(
+                                Telemetry::update_apollo_metrics(
                                     &response.context,
                                     field_level_instrumentation_ratio,
                                     sender,
@@ -715,28 +917,59 @@ impl PluginPrivate for Telemetry {
             .service(service)
             .boxed_clone()
     }
+}
 
-    fn supergraph_service(
-        &self,
-        service: supergraph::BoxCloneService,
-    ) -> supergraph::BoxCloneService {
-        let metrics_sender = self.apollo_metrics_sender.clone();
+/// Layer type for [Telemetry::instrument_supergraph_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentSupergraphLayer {
+    config: Arc<config::Conf>,
+    metrics_sender: apollo_exporter::Sender,
+    enabled_features: EnabledFeatures,
+    field_level_instrumentation_ratio: f64,
+    static_supergraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_graphql_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl InstrumentSupergraphLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        metrics_sender: apollo_exporter::Sender,
+        enabled_features: EnabledFeatures,
+        field_level_instrumentation_ratio: f64,
+        static_supergraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_graphql_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            metrics_sender,
+            enabled_features,
+            field_level_instrumentation_ratio,
+            static_supergraph_instruments,
+            static_graphql_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentSupergraphLayer
+where
+    S: tower::Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = supergraph::BoxCloneService;
+
+    fn layer(&self, service: S) -> Self::Service {
+        let metrics_sender = self.metrics_sender.clone();
         let config = self.config.clone();
         let config_instrument = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let enabled_features = self.enabled_features.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let static_supergraph_instruments = self
-            .builtin_instruments
-            .read()
-            .supergraph_custom_instruments
-            .clone();
-        let static_graphql_instruments = self
-            .builtin_instruments
-            .read()
-            .graphql_custom_instruments
-            .clone();
+        let static_supergraph_instruments = self.static_supergraph_instruments.clone();
+        let static_graphql_instruments = self.static_graphql_instruments.clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| {
                 span_factory::create_supergraph(
@@ -801,7 +1034,7 @@ impl PluginPrivate for Telemetry {
                         .supergraph
                         .attributes
                         .on_request(req);
-                    Self::populate_context(field_level_instrumentation_ratio, req);
+                    Telemetry::populate_context(field_level_instrumentation_ratio, req);
                     let custom_instruments = config
                         .instrumentation
                         .instruments
@@ -884,7 +1117,7 @@ impl PluginPrivate for Telemetry {
                             result = Ok(count_supergraph_errors(resp, &config.apollo.errors).await);
                         }
 
-                        result = Self::update_otel_metrics(
+                        result = Telemetry::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
                             result,
@@ -893,7 +1126,7 @@ impl PluginPrivate for Telemetry {
                             custom_graphql_instruments,
                         )
                         .await;
-                        Self::update_metrics_on_response_events(
+                        Telemetry::update_metrics_on_response_events(
                             &ctx,
                             config,
                             field_level_instrumentation_ratio,
@@ -908,201 +1141,51 @@ impl PluginPrivate for Telemetry {
             .service(service)
             .boxed_clone()
     }
+}
 
-    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
-        let config = self.config.clone();
-        let config_map_res_first = config.clone();
+/// Layer type for [Telemetry::instrument_connector_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentConnectorLayer {
+    config: Arc<config::Conf>,
+    static_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
 
-        ServiceBuilder::new()
-            .instrument(move |req: &ExecutionRequest| {
-                let operation_kind = req.query_plan.query.operation.kind();
-
-                match operation_kind {
-                    OperationKind::Subscription => info_span!(
-                        EXECUTION_SPAN_NAME,
-                        "otel.kind" = "INTERNAL",
-                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                        "apollo_private.operation.subtype" =
-                            OperationSubType::SubscriptionRequest.as_str(),
-                    ),
-                    _ => info_span!(
-                        EXECUTION_SPAN_NAME,
-                        "otel.kind" = "INTERNAL",
-                        "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
-                    ),
-                }
-            })
-            .and_then(move |resp: ExecutionResponse| {
-                let config = config_map_res_first.clone();
-                async move {
-                    let resp = count_execution_errors(resp, &config.apollo.errors).await;
-                    Ok::<_, BoxError>(resp)
-                }
-            })
-            .service(service)
-            .boxed_clone()
+impl InstrumentConnectorLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        static_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_apollo_connector_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            static_connector_instruments,
+            static_apollo_connector_instruments,
+        }
     }
+}
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        let config = self.config.clone();
-        let conf = self.config.clone();
-        let subgraph_name = ByteString::from(name);
-        let name = name.to_owned();
-        let static_subgraph_instruments = self
-            .builtin_instruments
-            .read()
-            .subgraph_custom_instruments
-            .clone();
-        let static_apollo_subgraph_instruments = self
-            .builtin_instruments
-            .read()
-            .apollo_subgraph_instruments
-            .clone();
-        let static_cache_instruments = self
-            .builtin_instruments
-            .read()
-            .cache_custom_instruments
-            .clone();
-        ServiceBuilder::new()
-            .instrument(move |req: &SubgraphRequest| {
-                span_factory::create_subgraph(name.as_str(), req)
-            })
-            .map_request(move |req: SubgraphRequest| request_ftv1(req))
-            .map_response(move |resp| store_ftv1(&subgraph_name, resp))
-            .map_future_with_request_data(
-                move |sub_request: &SubgraphRequest| {
-                    let custom_attributes = config
-                        .instrumentation
-                        .spans
-                        .subgraph
-                        .attributes
-                        .on_request(sub_request);
-                    let custom_instruments = config
-                        .instrumentation
-                        .instruments
-                        .new_subgraph_instruments(static_subgraph_instruments.clone());
-                    custom_instruments.on_request(sub_request);
-                    let mut custom_events = config.instrumentation.events.new_subgraph_events();
-                    custom_events.on_request(sub_request);
+impl<S> tower::Layer<S> for InstrumentConnectorLayer
+where
+    S: tower::Service<
+            connector::request_service::Request,
+            Response = connector::request_service::Response,
+            Error = BoxError,
+        > + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = connector::request_service::BoxCloneService;
 
-                    let apollo_instruments: ApolloSubgraphInstruments = config
-                        .instrumentation
-                        .instruments
-                        .new_apollo_subgraph_instruments(
-                            static_apollo_subgraph_instruments.clone(),
-                            config.apollo.clone(),
-                        );
-                    apollo_instruments.on_request(sub_request);
-
-                    let custom_cache_instruments: CacheInstruments = config
-                        .instrumentation
-                        .instruments
-                        .new_cache_instruments(static_cache_instruments.clone());
-                    custom_cache_instruments.on_request(sub_request);
-
-                    (
-                        sub_request.context.clone(),
-                        custom_instruments,
-                        custom_attributes,
-                        custom_events,
-                        apollo_instruments,
-                        custom_cache_instruments,
-                    )
-                },
-                move |(
-                    context,
-                    custom_instruments,
-                    custom_attributes,
-                    mut custom_events,
-                    apollo_instruments,
-                    custom_cache_instruments,
-                ): (
-                    Context,
-                    SubgraphInstruments,
-                    Vec<KeyValue>,
-                    SubgraphEvents,
-                    ApolloSubgraphInstruments,
-                    CacheInstruments,
-                ),
-                      f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
-                    let conf = conf.clone();
-                    async move {
-                        let span = Span::current();
-                        span.set_span_dyn_attributes(custom_attributes);
-                        let result: Result<SubgraphResponse, BoxError> = f.await;
-
-                        match &result {
-                            Ok(resp) => {
-                                if resp.response.status() >= StatusCode::BAD_REQUEST {
-                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-                                } else {
-                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                                }
-                                span.set_span_dyn_attributes(
-                                    conf.instrumentation
-                                        .spans
-                                        .subgraph
-                                        .attributes
-                                        .on_response(resp),
-                                );
-                                apollo_instruments.on_response(resp);
-                                custom_cache_instruments.on_response(resp);
-                                custom_instruments.on_response(resp);
-                                custom_events.on_response(resp);
-                            }
-                            Err(err) => {
-                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-
-                                span.set_span_dyn_attributes(
-                                    conf.instrumentation
-                                        .spans
-                                        .subgraph
-                                        .attributes
-                                        .on_error(err, &context),
-                                );
-                                apollo_instruments.on_error(err, &context);
-                                custom_cache_instruments.on_error(err, &context);
-                                custom_instruments.on_error(err, &context);
-                                custom_events.on_error(err, &context);
-                            }
-                        }
-
-                        if let Ok(resp) = result {
-                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
-                        } else {
-                            result
-                        }
-                    }
-                },
-            )
-            .service(service)
-            .boxed_clone()
-    }
-
-    fn connector_request_service(
-        &self,
-        service: connector::request_service::BoxCloneService,
-        source_name: String,
-    ) -> connector::request_service::BoxCloneService {
+    fn layer(&self, service: S) -> Self::Service {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
-        let static_connector_instruments = self
-            .builtin_instruments
-            .read()
-            .connector_custom_instruments
-            .clone();
-        let static_apollo_connector_instruments = self
-            .builtin_instruments
-            .read()
-            .apollo_connector_instruments
-            .clone();
+        let static_connector_instruments = self.static_connector_instruments.clone();
+        let static_apollo_connector_instruments = self.static_apollo_connector_instruments.clone();
         ServiceBuilder::new()
-            .instrument(move |_req: &connector::request_service::Request| {
-                span_factory::create_connector(source_name.as_str())
+            .instrument(move |req: &connector::request_service::Request| {
+                span_factory::create_connector(req.connector.source_config_key().as_str())
             })
             .map_future_with_request_data(
                 move |request: &connector::request_service::Request| {
@@ -1151,10 +1234,7 @@ impl PluginPrivate for Telemetry {
                     ConnectorEvents,
                     Vec<KeyValue>,
                 ),
-                      f: BoxFuture<
-                    'static,
-                    Result<connector::request_service::Response, BoxError>,
-                >| {
+                      f| {
                     let conf = res_fn_config.clone();
                     async move {
                         let span = Span::current();
@@ -1194,89 +1274,342 @@ impl PluginPrivate for Telemetry {
             .service(service)
             .boxed_clone()
     }
+}
 
-    fn http_client_service(
-        &self,
-        _subgraph_name: &str,
-        service: crate::services::http::BoxCloneService,
-    ) -> crate::services::http::BoxCloneService {
+/// Layer type for [Telemetry::instrument_subgraph_layer].
+#[derive(Clone)]
+pub(crate) struct InstrumentSubgraphLayer {
+    config: Arc<config::Conf>,
+    static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+    static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl InstrumentSubgraphLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        static_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_apollo_subgraph_instruments: Arc<HashMap<String, StaticInstrument>>,
+        static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            static_subgraph_instruments,
+            static_apollo_subgraph_instruments,
+            static_cache_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for InstrumentSubgraphLayer
+where
+    S: tower::Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = subgraph::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
+        let static_subgraph_instruments = self.static_subgraph_instruments.clone();
+        let static_apollo_subgraph_instruments = self.static_apollo_subgraph_instruments.clone();
+        let static_cache_instruments = self.static_cache_instruments.clone();
 
         ServiceBuilder::new()
-            .layer(router_overhead::OverheadLayer::new())
-            .instrument(move |request: &crate::services::http::HttpRequest| {
-                let schema_uri = request.http_request.uri();
-                let host = schema_uri.host().unwrap_or_default();
-                let port = schema_uri.port_u16().unwrap_or_else(|| {
-                    let scheme = schema_uri.scheme_str();
-                    if scheme == Some("https") {
-                        443
-                    } else if scheme == Some("http") {
-                        80
-                    } else {
-                        0
-                    }
-                });
-
-                let path = schema_uri.path();
-                ::tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
-                    "otel.kind" = "CLIENT",
-                    "net.peer.name" = %host,
-                    "net.peer.port" = %port,
-                    "http.route" = %path,
-                    "http.url" = %schema_uri,
-                    "net.transport" = "ip_tcp",
-                )
+            .instrument(move |req: &SubgraphRequest| {
+                span_factory::create_subgraph(req.subgraph_name.as_str(), req)
             })
             .map_future_with_request_data(
-                move |request: &crate::services::http::HttpRequest| {
-                    let custom_span_attributes = req_fn_config
+                move |sub_request: &SubgraphRequest| {
+                    let custom_attributes = req_fn_config
                         .instrumentation
                         .spans
-                        .http_client
+                        .subgraph
                         .attributes
-                        .on_request(request);
+                        .on_request(sub_request);
+                    let custom_instruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_subgraph_instruments(static_subgraph_instruments.clone());
+                    custom_instruments.on_request(sub_request);
+                    let mut custom_events =
+                        req_fn_config.instrumentation.events.new_subgraph_events();
+                    custom_events.on_request(sub_request);
 
-                    (request.context.clone(), custom_span_attributes)
+                    let apollo_instruments: ApolloSubgraphInstruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_apollo_subgraph_instruments(
+                            static_apollo_subgraph_instruments.clone(),
+                            req_fn_config.apollo.clone(),
+                        );
+                    apollo_instruments.on_request(sub_request);
+
+                    let custom_cache_instruments: CacheInstruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_cache_instruments(static_cache_instruments.clone());
+                    custom_cache_instruments.on_request(sub_request);
+
+                    (
+                        sub_request.context.clone(),
+                        custom_instruments,
+                        custom_attributes,
+                        custom_events,
+                        apollo_instruments,
+                        custom_cache_instruments,
+                    )
                 },
-                move |(context, custom_span_attributes): (Context, Vec<KeyValue>),
-                      f: BoxFuture<
-                    'static,
-                    Result<crate::services::http::HttpResponse, BoxError>,
-                >| {
+                move |(
+                    context,
+                    custom_instruments,
+                    custom_attributes,
+                    mut custom_events,
+                    apollo_instruments,
+                    custom_cache_instruments,
+                ): (
+                    Context,
+                    SubgraphInstruments,
+                    Vec<KeyValue>,
+                    SubgraphEvents,
+                    ApolloSubgraphInstruments,
+                    CacheInstruments,
+                ),
+                      f| {
                     let conf = res_fn_config.clone();
                     async move {
                         let span = Span::current();
-                        span.set_span_dyn_attributes(custom_span_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
+                        let result: Result<SubgraphResponse, BoxError> = f.await;
 
-                        let result = f.await;
                         match &result {
-                            Ok(response) => {
+                            Ok(resp) => {
+                                if resp.response.status() >= StatusCode::BAD_REQUEST {
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+                                } else {
+                                    span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+                                }
                                 span.set_span_dyn_attributes(
                                     conf.instrumentation
                                         .spans
-                                        .http_client
+                                        .subgraph
                                         .attributes
-                                        .on_response(response),
+                                        .on_response(resp),
                                 );
+                                apollo_instruments.on_response(resp);
+                                custom_cache_instruments.on_response(resp);
+                                custom_instruments.on_response(resp);
+                                custom_events.on_response(resp);
                             }
                             Err(err) => {
+                                span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                                 span.set_span_dyn_attributes(
                                     conf.instrumentation
                                         .spans
-                                        .http_client
+                                        .subgraph
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                apollo_instruments.on_error(err, &context);
+                                custom_cache_instruments.on_error(err, &context);
+                                custom_instruments.on_error(err, &context);
+                                custom_events.on_error(err, &context);
                             }
                         }
-                        result
+
+                        if let Ok(resp) = result {
+                            Ok(count_subgraph_errors(resp, &conf.apollo.errors).await)
+                        } else {
+                            result
+                        }
                     }
                 },
             )
-            .service(service)
+            .service(inner)
             .boxed_clone()
+    }
+}
+
+impl Telemetry {
+    /// Returns a layer that emits per-request memory allocation metrics.
+    pub(crate) fn allocation_metrics_layer(&self) -> AllocationMetricsLayer {
+        AllocationMetricsLayer::new()
+    }
+
+    /// Returns a layer that instruments query plan execution with a span and error metrics.
+    pub(crate) fn instrument_execution_layer(&self) -> InstrumentExecutionLayer {
+        InstrumentExecutionLayer::new(self.config.clone())
+    }
+
+    /// Returns a layer that holds a router overhead subrequest guard while its inner service is in
+    /// progress, so that time spent waiting for subgraph or connector responses is not included in
+    /// the router overhead metrics.
+    pub(crate) fn overhead_subgraph_request_timing_layer(&self) -> router_overhead::OverheadLayer {
+        router_overhead::OverheadLayer::new()
+    }
+
+    /// Returns a layer that instruments an HTTP client service with an `http_request` span.
+    pub(crate) fn instrument_http_client_layer(&self) -> InstrumentHttpClientLayer {
+        InstrumentHttpClientLayer::new()
+    }
+
+    /// Returns a layer that applies user-configured custom attributes to the active span.
+    pub(crate) fn custom_instrument_http_client_layer(&self) -> CustomInstrumentHttpClientLayer {
+        CustomInstrumentHttpClientLayer::new(self.config.clone())
+    }
+
+    /// Returns a layer that instruments a subgraph service with both Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_subgraph_layer(&self) -> InstrumentSubgraphLayer {
+        let static_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .subgraph_custom_instruments
+            .clone();
+        let static_apollo_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_subgraph_instruments
+            .clone();
+        let static_cache_instruments = self
+            .builtin_instruments
+            .read()
+            .cache_custom_instruments
+            .clone();
+        InstrumentSubgraphLayer::new(
+            self.config.clone(),
+            static_subgraph_instruments,
+            static_apollo_subgraph_instruments,
+            static_cache_instruments,
+        )
+    }
+
+    /// Returns a layer that propagates FTV1 tracing headers to subgraph requests and stashes the
+    /// traces from the response for processing.
+    pub(crate) fn subgraph_ftv1_layer(&self) -> SubgraphFtv1Layer {
+        SubgraphFtv1Layer::new()
+    }
+
+    /// Returns a layer that instruments the router service with Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_router_layer(&self) -> InstrumentRouterLayer {
+        let static_router_instruments = self
+            .builtin_instruments
+            .read()
+            .router_custom_instruments
+            .clone();
+        InstrumentRouterLayer::new(
+            self.config.clone(),
+            self.supergraph_schema_id.clone(),
+            self.enabled_features.clone(),
+            self.field_level_instrumentation_ratio,
+            self.apollo_metrics_sender.clone(),
+            static_router_instruments,
+        )
+    }
+
+    /// Returns a layer that instruments the supergraph service with Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_supergraph_layer(&self) -> InstrumentSupergraphLayer {
+        let static_supergraph_instruments = self
+            .builtin_instruments
+            .read()
+            .supergraph_custom_instruments
+            .clone();
+        let static_graphql_instruments = self
+            .builtin_instruments
+            .read()
+            .graphql_custom_instruments
+            .clone();
+        InstrumentSupergraphLayer::new(
+            self.config.clone(),
+            self.apollo_metrics_sender.clone(),
+            self.enabled_features.clone(),
+            self.field_level_instrumentation_ratio,
+            static_supergraph_instruments,
+            static_graphql_instruments,
+        )
+    }
+
+    /// Returns a layer that instruments a connector request service with both Apollo and custom
+    /// instrumentation.
+    pub(crate) fn instrument_connector_layer(&self) -> InstrumentConnectorLayer {
+        let static_connector_instruments = self
+            .builtin_instruments
+            .read()
+            .connector_custom_instruments
+            .clone();
+        let static_apollo_connector_instruments = self
+            .builtin_instruments
+            .read()
+            .apollo_connector_instruments
+            .clone();
+        InstrumentConnectorLayer::new(
+            self.config.clone(),
+            static_connector_instruments,
+            static_apollo_connector_instruments,
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl PluginPrivate for Telemetry {
+    type Config = config::Conf;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        // Log whether we received previous configuration for testing
+        // In a followup PR we will be detecting if exporters need to be refreshed, and at this point
+        // this debug logging will disappear.
+        match &init.previous_config {
+            Some(_prev_config) => {
+                ::tracing::debug!("Telemetry plugin reload detected with previous configuration");
+            }
+            None => {
+                ::tracing::debug!(
+                    "Telemetry plugin initial startup without previous configuration"
+                );
+            }
+        }
+
+        let mut config = init.config;
+        config.instrumentation.spans.update_defaults();
+        config.instrumentation.instruments.update_defaults();
+        if let Err(err) = config.instrumentation.validate() {
+            ::tracing::warn!(
+                "Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events"
+            );
+        }
+
+        config.validate_per_exporter_samplers()?;
+        let field_level_instrumentation_ratio =
+            config.calculate_field_level_instrumentation_ratio()?;
+
+        let (activation, custom_endpoints, apollo_metrics_sender) =
+            reload::prepare(&init.previous_config, &config)?;
+
+        // Set up feature usage list
+        let full_config = init
+            .full_config
+            .as_ref()
+            .expect("Required full router configuration not found in telemetry plugin");
+        let enabled_features = Self::extract_enabled_features(full_config);
+        ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
+
+        Ok(Telemetry {
+            custom_endpoints,
+            apollo_metrics_sender,
+            supergraph_schema_id: init.supergraph_schema_id,
+            field_level_instrumentation_ratio,
+            activation: Mutex::new(Some(activation)),
+            builtin_instruments: RwLock::new(create_builtin_instruments(
+                &config.instrumentation.instruments,
+            )),
+            enabled_features,
+            config: Arc::new(config),
+        })
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -2109,14 +2442,13 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use serde_json::Value;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::json;
     use tower::Service;
+    use tower::ServiceBuilder;
     use tower::ServiceExt;
 
     use super::CustomTraceIdPropagator;
-    use super::EnabledFeatures;
     use super::Telemetry;
     use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
@@ -2136,6 +2468,7 @@ mod tests {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
+    use crate::plugins::test::PluginTestHarness;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2166,9 +2499,10 @@ mod tests {
     static TEST: once_cell::sync::Lazy<Arc<tokio::sync::Mutex<()>>> =
         once_cell::sync::Lazy::new(Default::default);
 
+    // TODO(@goto-bus-stop): this could perhaps use insta's redaction features instead?
     macro_rules! assert_prometheus_metrics {
         ($plugin:expr) => {{
-            let prometheus_metrics = get_prometheus_metrics($plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(&$plugin).await;
             let regexp = regex::Regex::new(
                 r#"process_executable_name="(?P<process>[^"]+)",?|service_name="(?P<service>[^"]+)",?"#,
             )
@@ -2181,29 +2515,7 @@ mod tests {
         }};
     }
 
-    async fn create_plugin_with_config(full_config: &str) -> Box<dyn DynPlugin> {
-        let full_config = serde_yaml::from_str::<Value>(full_config).expect("yaml must be valid");
-        let telemetry_config = full_config
-            .as_object()
-            .expect("must be an object")
-            .get("telemetry")
-            .expect("telemetry must be a root key");
-        let init = PluginInit::fake_builder()
-            .config(telemetry_config.clone())
-            .full_config(full_config)
-            .build()
-            .with_deserialized_config()
-            .expect("unable to deserialize telemetry config");
-
-        crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(init)
-            .await
-            .expect("unable to create telemetry plugin")
-    }
-
-    async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
+    async fn get_prometheus_metrics(plugin: &Telemetry) -> String {
         let web_endpoint = plugin
             .web_endpoints()
             .into_iter()
@@ -2228,7 +2540,7 @@ mod tests {
             .join("\n")
     }
 
-    async fn make_supergraph_request(plugin: &dyn DynPlugin) {
+    async fn make_supergraph_request(plugin: &Telemetry) {
         let (mock_service, mut handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
         let driver = tokio::spawn(async move {
@@ -2242,7 +2554,9 @@ mod tests {
                     .unwrap(),
             );
         });
-        let mut supergraph_service = plugin.supergraph_service(mock_service.boxed_clone());
+        let mut supergraph_service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_service);
         let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
         let _router_response = supergraph_service
             .ready()
@@ -2286,32 +2600,41 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_serialization() {
-        create_plugin_with_config(include_str!("testdata/config.router.yaml"))
+        PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!("testdata/config.router.yaml"))
+            .build()
             .with_metrics()
-            .await;
+            .await
+            .expect("test harness");
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_enabled_features() {
         // Explicitly enabled except response caching because entity caching and response caching are mutually exclusive
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_enabled.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_enabled.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature enabled when explicitly enabled"
         );
 
         // Explicitly enabled
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_enabled_response_cache.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_enabled_response_cache.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             features.response_cache,
             "Telemetry plugin should consider response cache feature enabled when explicitly enabled"
@@ -2322,12 +2645,15 @@ mod tests {
         );
 
         // Explicitly disabled
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_explicitly_disabled.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_explicitly_disabled.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when explicitly disabled"
@@ -2338,12 +2664,15 @@ mod tests {
         );
 
         // Default Values
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_all_features_defaults.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_all_features_defaults.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when all values are defaulted"
@@ -2354,45 +2683,45 @@ mod tests {
         );
 
         // APQ enabled when default enabled with redis config defined
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_apq_enabled_partial_defaults.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature enabled when top-level enabled flag is defaulted and redis config is defined"
         );
 
         // APQ disabled when default enabled with redis config NOT defined
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
-        ))
-        .with_metrics()
-        .await;
-        let features = enabled_features(plugin.as_ref());
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/full_config_apq_disabled_partial_defaults.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
+        let features = &plugin.enabled_features;
         assert!(
             !features.distributed_apq_cache,
             "Telemetry plugin should consider apq feature disabled when redis cache is not enabled"
         );
     }
 
-    fn enabled_features(plugin: &dyn DynPlugin) -> &EnabledFeatures {
-        &plugin
-            .as_any()
-            .downcast_ref::<Telemetry>()
-            .expect("telemetry plugin")
-            .enabled_features
-    }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_metrics_ok() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
-            make_supergraph_request(plugin.as_ref()).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
+            make_supergraph_request(&plugin).await;
 
             assert_counter!(
                 "http.request",
@@ -2411,9 +2740,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_supergraph_metrics_bad_request() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
@@ -2433,8 +2764,9 @@ mod tests {
                         .unwrap(),
                 );
             });
-            let mut bad_request_supergraph_service =
-                plugin.supergraph_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_supergraph_service = ServiceBuilder::new()
+                .layer(plugin.instrument_supergraph_layer())
+                .service(mock_bad_request_service);
             let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
             let _router_response = bad_request_supergraph_service
                 .ready()
@@ -2464,9 +2796,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_router_instruments() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_instruments.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<RouterRequest, RouterResponse>();
@@ -2484,8 +2818,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_router_service = ServiceBuilder::new()
+                .layer(plugin.instrument_router_layer())
+                .service(mock_bad_request_service);
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2545,10 +2880,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_router_instruments_with_requirement_level() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/custom_instruments_level.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/custom_instruments_level.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<RouterRequest, RouterResponse>();
@@ -2566,8 +2904,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_router_service =
-                plugin.router_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_router_service = ServiceBuilder::new()
+                .layer(plugin.instrument_router_layer())
+                .service(mock_bad_request_service);
             let router_req = RouterRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2639,9 +2978,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_supergraph_instruments() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/custom_instruments.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
@@ -2659,8 +3000,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_supergraph_service =
-                plugin.supergraph_service(mock_bad_request_service.boxed_clone());
+            let mut bad_request_supergraph_service = ServiceBuilder::new()
+                .layer(plugin.instrument_supergraph_layer())
+                .service(mock_bad_request_service);
             let supergraph_req = SupergraphRequest::fake_builder()
                 .header("x-custom", "TEST")
                 .header("conditional-custom", "X")
@@ -2748,10 +3090,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_subgraph_instruments_level() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/custom_instruments_level.router.yaml"
-            ))
-            .await;
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!(
+                    "testdata/custom_instruments_level.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -2780,8 +3125,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", mock_bad_request_service.boxed_clone());
+            let mut bad_request_subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_bad_request_service);
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2856,10 +3202,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_custom_subgraph_instruments() {
         async {
-            let plugin = Box::new(
-                create_plugin_with_config(include_str!("testdata/custom_instruments.router.yaml"))
-                    .await,
-            );
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!("testdata/custom_instruments.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_bad_request_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -2888,8 +3235,9 @@ mod tests {
                     );
                 }
             });
-            let mut bad_request_subgraph_service =
-                plugin.subgraph_service("test", mock_bad_request_service.boxed_clone());
+            let mut bad_request_subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_bad_request_service);
             let sub_req = http::Request::builder()
                 .method("POST")
                 .uri("http://test")
@@ -2962,11 +3310,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_field_instrumentation_sampler_with_preview_datadog_agent_sampling() {
-        let plugin = create_plugin_with_config(include_str!(
-            "testdata/config.field_instrumentation_sampler.router.yaml"
-        ))
-        .with_metrics()
-        .await;
+        let plugin = PluginTestHarness::<Telemetry>::builder()
+            .config(include_str!(
+                "testdata/config.field_instrumentation_sampler.router.yaml"
+            ))
+            .build()
+            .with_metrics()
+            .await
+            .expect("test harness");
 
         let ftv1_counter = Arc::new(AtomicUsize::new(0));
         let ftv1_counter_cloned = ftv1_counter.clone();
@@ -2994,8 +3345,9 @@ mod tests {
                 );
             }
         });
-        let mut request_supergraph_service =
-            plugin.supergraph_service(mock_request_service.boxed_clone());
+        let mut request_supergraph_service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_request_service);
 
         for _ in 0..10 {
             let supergraph_req = SupergraphRequest::fake_builder()
@@ -3026,9 +3378,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_metrics_ok() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_subgraph_service, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -3059,8 +3413,9 @@ mod tests {
                 );
             });
 
-            let mut subgraph_service =
-                plugin.subgraph_service("my_subgraph_name", mock_subgraph_service.boxed_clone());
+            let mut subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_subgraph_service);
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
                     http_ext::Request::fake_builder()
@@ -3102,9 +3457,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_metrics_http_error() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/custom_attributes.router.yaml"))
-                    .await;
+            let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+                .config(include_str!("testdata/custom_attributes.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let (mock_subgraph_service_in_error, mut handle) =
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
@@ -3117,10 +3474,9 @@ mod tests {
                 });
             });
 
-            let mut subgraph_service = plugin.subgraph_service(
-                "my_subgraph_name_error",
-                mock_subgraph_service_in_error.boxed_clone(),
-            );
+            let mut subgraph_service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_subgraph_service_in_error);
 
             let subgraph_req = SubgraphRequest::fake_builder()
                 .subgraph_request(
@@ -3160,8 +3516,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_wrong_endpoint() {
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/prometheus.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
 
             let mut web_endpoint = plugin
                 .web_endpoints()
@@ -3196,12 +3555,15 @@ mod tests {
     async fn it_test_prometheus_metrics() {
         let _guard = TEST.lock().await;
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/prometheus.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3212,14 +3574,17 @@ mod tests {
     async fn it_test_prometheus_metrics_custom_buckets() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_custom_buckets.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_custom_buckets.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
 
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3230,12 +3595,15 @@ mod tests {
     async fn it_test_prometheus_metrics_custom_buckets_for_specific_metrics() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_custom_buckets_specific_metrics.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             u64_histogram!("apollo.test.histo", "it's a test", 1u64);
             assert_prometheus_metrics!(plugin);
         }
@@ -3247,11 +3615,14 @@ mod tests {
     async fn it_test_prometheus_metrics_custom_view_drop() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_custom_view_drop.router.yaml"
-            ))
-            .await;
-            make_supergraph_request(plugin.as_ref()).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_custom_view_drop.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3266,16 +3637,19 @@ mod tests {
     async fn it_test_prometheus_metrics_with_cardinality_limit_config() {
         let _guard = TEST.lock().await;
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/prometheus_cardinality_limit.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/prometheus_cardinality_limit.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
 
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3286,12 +3660,15 @@ mod tests {
     async fn it_test_prometheus_metrics_units_are_included() {
         let _guard = TEST.lock().await;
         async {
-            let plugin =
-                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("testdata/prometheus.router.yaml"))
+                .build()
+                .await
+                .expect("test harness");
             plugin.activate();
             u64_histogram_with_unit!("apollo.test.histo1", "no unit", "{request}", 1u64);
             f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
-            make_supergraph_request(plugin.as_ref()).await;
+            make_supergraph_request(&plugin).await;
             assert_prometheus_metrics!(plugin);
         }
         .with_metrics()
@@ -3471,7 +3848,7 @@ mod tests {
         pub(crate) strategy: &'static str,
     }
 
-    async fn make_failed_demand_control_request(plugin: &dyn DynPlugin, cost_details: CostContext) {
+    async fn make_failed_demand_control_request(plugin: &Telemetry, cost_details: CostContext) {
         let (mock_service, mut handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
         let driver = tokio::spawn(async move {
@@ -3522,7 +3899,9 @@ mod tests {
             );
         });
 
-        let mut service = plugin.supergraph_service(mock_service.boxed_clone());
+        let mut service = ServiceBuilder::new()
+            .layer(plugin.instrument_supergraph_layer())
+            .service(mock_service);
         let router_req = SupergraphRequest::fake_builder().build().unwrap();
         let _router_response = service
             .ready()
@@ -3540,12 +3919,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_delta_filter() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_delta_filter.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/demand_control_delta_filter.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             make_failed_demand_control_request(
-                plugin.as_ref(),
+                &plugin,
                 CostContext {
                     estimated: 10.0,
                     actual: 8.0,
@@ -3564,12 +3946,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_result_filter() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_result_filter.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/demand_control_result_filter.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             make_failed_demand_control_request(
-                plugin.as_ref(),
+                &plugin,
                 CostContext {
                     estimated: 10.0,
                     actual: 0.0,
@@ -3588,12 +3973,15 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_demand_control_result_attributes() {
         async {
-            let plugin = create_plugin_with_config(include_str!(
-                "testdata/demand_control_result_attribute.router.yaml"
-            ))
-            .await;
+            let plugin = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!(
+                    "testdata/demand_control_result_attribute.router.yaml"
+                ))
+                .build()
+                .await
+                .expect("test harness");
             make_failed_demand_control_request(
-                plugin.as_ref(),
+                &plugin,
                 CostContext {
                     estimated: 10.0,
                     actual: 0.0,
