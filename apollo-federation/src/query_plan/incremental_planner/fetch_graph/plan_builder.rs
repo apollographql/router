@@ -103,7 +103,6 @@ impl FetchGraph {
         depth: &[u32],
         max_depth: u32,
     ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
-        let handled_conditions = Conditions::Boolean(true);
         let mut sequence: Vec<PlanNode> = Vec::new();
         let mut cost_sequence: Vec<QueryPlanCost> = Vec::new();
 
@@ -115,23 +114,42 @@ impl FetchGraph {
                 if depth[node_idx.index()] != d {
                     continue;
                 }
-                if let Some((plan_node, node_cost)) =
-                    self.node_to_plan_node(ctx, node_idx, &handled_conditions)?
-                {
+                if let Some((plan_node, node_cost)) = self.node_to_plan_node(ctx, node_idx)? {
                     parallel.push(plan_node);
                     parallel_cost += node_cost;
                 }
             }
 
+            // Top-level mutation fields execute serially, but root groups
+            // are merged per subgraph, so their interleaving is no longer
+            // representable. The entry point plans one top-level field per
+            // search, which keeps this layer to a single group; fail loudly
+            // rather than parallelize if that assumption is ever violated.
+            if d == 0 && ctx.root_kind != SchemaRootDefinitionKind::Query && parallel.len() > 1 {
+                return Err(FederationError::internal(format!(
+                    "cannot order {} root fetch groups under a {} operation",
+                    parallel.len(),
+                    ctx.root_kind,
+                )));
+            }
+
+            // Cost stages stay index-aligned with emitted plan stages: an
+            // eliminated layer (all nodes skipped) contributes no stage to
+            // either. The reported cost is the cost of the plan as built,
+            // which can be lower than the search-time bound when a layer
+            // collapses.
             match parallel.len() {
                 0 => {}
-                1 => sequence.push(parallel.pop().unwrap()),
-                _ => sequence.push(PlanNode::Parallel(crate::query_plan::ParallelNode {
-                    nodes: parallel,
-                })),
-            }
-            if parallel_cost > 0.0 {
-                cost_sequence.push(parallel_cost);
+                1 => {
+                    sequence.push(parallel.pop().unwrap());
+                    cost_sequence.push(parallel_cost);
+                }
+                _ => {
+                    sequence.push(PlanNode::Parallel(crate::query_plan::ParallelNode {
+                        nodes: parallel,
+                    }));
+                    cost_sequence.push(parallel_cost);
+                }
             }
         }
 
@@ -157,10 +175,17 @@ impl FetchGraph {
         &self,
         ctx: &mut PlanBuildContext<'_>,
         node_idx: NodeIndex,
-        handled_conditions: &Conditions,
     ) -> Result<Option<(PlanNode, QueryPlanCost)>, FederationError> {
         let node = &self.graph[node_idx];
         let is_entity = matches!(node.kind, FetchGroupKind::Entity { .. });
+        // Entity fetches resolve through _entities on the subgraph's Query
+        // root regardless of the surrounding operation; a root hop carries
+        // its own kind.
+        let node_root_kind = match &node.kind {
+            FetchGroupKind::Entity { .. } => SchemaRootDefinitionKind::Query,
+            FetchGroupKind::Root { .. } => ctx.root_kind,
+            FetchGroupKind::RootHop { root_kind, .. } => *root_kind,
+        };
         let subgraph_schema = ctx.query_graph.schema_by_source(&node.subgraph)?;
 
         // Parent type for the selection set; selections are materialized
@@ -198,8 +223,11 @@ impl FetchGraph {
         // Group-level @skip/@include: when every selection is gated by the
         // same variable conditions, hoist them out of the operation and
         // gate the fetch itself (ConditionNodes below). Execution can then
-        // skip the fetch entirely.
-        let group_conditions = selection_set.conditions()?.update_with(handled_conditions);
+        // skip the fetch entirely. Unlike the reference planner, no
+        // handled-conditions set is threaded through: the flat
+        // sequence-of-parallel shape never nests one fetch inside another
+        // fetch's ConditionNode, so every node self-gates.
+        let group_conditions = selection_set.conditions()?;
         if let Conditions::Boolean(false) = group_conditions {
             return Ok(None);
         }
@@ -217,8 +245,7 @@ impl FetchGraph {
 
         // 3. Materialize entity inputs from incoming edges.
         let (requires_selection, input_rewrites) = if is_entity {
-            let (sel, rewrites) =
-                self.materialize_entity_inputs(ctx, node_idx, &parent_type, handled_conditions)?;
+            let (sel, rewrites) = self.materialize_entity_inputs(ctx, node_idx, &parent_type)?;
             (Some(sel), rewrites)
         } else {
             (None, Vec::new())
@@ -232,7 +259,6 @@ impl FetchGraph {
         );
 
         // 5. Build the subgraph operation.
-        let subgraph_schema = ctx.query_graph.schema_by_source(&node.subgraph)?;
         let op_name = ctx.operation_name.as_ref().map(|name| {
             let c = ctx.operation_counter;
             ctx.operation_counter += 1;
@@ -250,7 +276,7 @@ impl FetchGraph {
         } else {
             operation_for_query_fetch(
                 subgraph_schema,
-                ctx.root_kind,
+                node_root_kind,
                 finalized_selection,
                 variable_definitions,
                 ctx.operation_directives,
@@ -275,7 +301,7 @@ impl FetchGraph {
             requires,
             operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name: op_name,
-            operation_kind: ctx.root_kind.into(),
+            operation_kind: node_root_kind.into(),
             input_rewrites: Arc::new(input_rewrites),
             output_rewrites,
             context_rewrites: Default::default(),
@@ -367,7 +393,6 @@ impl FetchGraph {
         ctx: &PlanBuildContext<'_>,
         node_idx: NodeIndex,
         parent_type: &CompositeTypeDefinitionPosition,
-        handled_conditions: &Conditions,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut per_type: IndexMap<CompositeTypeDefinitionPosition, SelectionSet> =
             IndexMap::default();
@@ -377,13 +402,13 @@ impl FetchGraph {
             for input in &edge.weight().inputs {
                 let input_type: CompositeTypeDefinitionPosition = ctx
                     .supergraph_schema
-                    .get_type(&input.source_type_name)?
+                    .get_type(input.source_type_name())?
                     .try_into()?;
                 let mut input_sel = SelectionSet::for_composite_type(
                     ctx.supergraph_schema.clone(),
                     input_type.clone(),
                 );
-                input_sel.add_selection_set(&input.conditions)?;
+                input_sel.add_selection_set(input.conditions())?;
                 let wrapped = wrap_input_selections(
                     ctx.supergraph_schema,
                     &input_type,
@@ -400,10 +425,10 @@ impl FetchGraph {
                     });
                 entry.add_local_selection_set(&wrapped)?;
 
-                if let Some(info) = &input.rewrite_info {
+                if let Some(info) = input.rewrite_info() {
                     let dest_schema = ctx.query_graph.schema_by_source(&info.dest_subgraph)?;
                     if let Some(r) = compute_input_rewrites_on_key_fetch(
-                        &input.source_type_name,
+                        input.source_type_name(),
                         &info.dest_type,
                         dest_schema,
                     )? {
@@ -415,9 +440,8 @@ impl FetchGraph {
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
-            let cleaned = remove_conditions_from_selection_set(selection_set, handled_conditions)?;
-            cleaned.validate(ctx.variable_definitions)?;
-            merged_selections.extend_ref(&cleaned.selections);
+            selection_set.validate(ctx.variable_definitions)?;
+            merged_selections.extend_ref(&selection_set.selections);
         }
         let result = SelectionSet {
             schema: ctx.supergraph_schema.clone(),
@@ -477,4 +501,191 @@ fn trim_requires(selection_set: &executable::SelectionSet) -> Vec<requires_selec
             executable::Selection::FragmentSpread(_) => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+
+    use super::super::InputContribution;
+    use super::*;
+    use crate::Supergraph;
+    use crate::query_graph::build_federated_query_graph;
+    use crate::query_plan::FetchDataPathElement;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::subgraph::Subgraph;
+
+    fn setup() -> (ValidFederationSchema, Arc<QueryGraph>) {
+        let s1 = Subgraph::parse_and_expand(
+            "S1",
+            "http://s1",
+            r#"
+            type Query { t: T }
+            type Mutation { m1: Int }
+            type T @key(fields: "k") { k: ID }
+            "#,
+        )
+        .expect("S1 parses");
+        let s2 = Subgraph::parse_and_expand(
+            "S2",
+            "http://s2",
+            r#"
+            type Mutation { m2: Int }
+            type T @key(fields: "k") { k: ID a: Int }
+            "#,
+        )
+        .expect("S2 parses");
+        let supergraph = Supergraph::compose(vec![&s1, &s2]).expect("composes");
+        let api = supergraph
+            .to_api_schema(Default::default())
+            .expect("api schema");
+        let qg = build_federated_query_graph(supergraph.schema.clone(), api, None, None)
+            .expect("query graph");
+        (supergraph.schema, Arc::new(qg))
+    }
+
+    fn mutation_pos() -> CompositeTypeDefinitionPosition {
+        CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!("Mutation"),
+        })
+    }
+
+    fn append_parsed_selection(
+        graph: &mut FetchGraph,
+        node: NodeIndex,
+        schema: &ValidFederationSchema,
+        parent: CompositeTypeDefinitionPosition,
+        text: &str,
+    ) {
+        let selection =
+            Arc::new(SelectionSet::parse(schema.clone(), parent, text).expect("selection parses"));
+        graph.append_selection(node, &super::super::SharedPath::new(), Some(&selection));
+    }
+
+    /// Top-level mutation fields must execute serially, but the fetch graph
+    /// merges root groups per subgraph and cannot represent interleaving.
+    /// Rather than silently emitting a ParallelNode, the builder must fail.
+    #[test]
+    fn multiple_mutation_roots_error_instead_of_parallel() {
+        let (supergraph_schema, qg) = setup();
+        let mut graph = FetchGraph::new();
+        let s1: Arc<str> = Arc::from("S1");
+        let s2: Arc<str> = Arc::from("S2");
+        let r1 = graph.get_or_create_root_group(&s1, mutation_pos());
+        let r2 = graph.get_or_create_root_group(&s2, mutation_pos());
+        let s1_schema = qg.schema_by_source(&s1).expect("S1 schema").clone();
+        let s2_schema = qg.schema_by_source(&s2).expect("S2 schema").clone();
+        append_parsed_selection(&mut graph, r1, &s1_schema, mutation_pos(), "m1");
+        append_parsed_selection(&mut graph, r2, &s2_schema, mutation_pos(), "m2");
+
+        let mut compression = SubgraphOperationCompression::Disabled;
+        let directives = DirectiveList::default();
+        let mut ctx = PlanBuildContext {
+            supergraph_schema: &supergraph_schema,
+            query_graph: &qg,
+            root_kind: SchemaRootDefinitionKind::Mutation,
+            variable_definitions: &[],
+            operation_directives: &directives,
+            operation_name: &None,
+            operation_compression: &mut compression,
+            operation_counter: 0,
+        };
+
+        assert!(
+            graph.to_query_plan(&mut ctx).is_err(),
+            "two mutation root groups cannot be ordered; the builder must not parallelize them",
+        );
+    }
+
+    /// Entity fetches always target the subgraph's Query root, whatever the
+    /// top-level operation kind is; only the root fetch carries the
+    /// operation's own kind. Also pins the two-layer materialized shape.
+    #[test]
+    fn entity_fetch_under_mutation_is_query_kind() {
+        let (supergraph_schema, qg) = setup();
+        let mut graph = FetchGraph::new();
+        let s1: Arc<str> = Arc::from("S1");
+        let s2: Arc<str> = Arc::from("S2");
+        let root = graph.get_or_create_root_group(&s1, mutation_pos());
+        let s1_schema = qg.schema_by_source(&s1).expect("S1 schema").clone();
+        let s2_schema = qg.schema_by_source(&s2).expect("S2 schema").clone();
+        append_parsed_selection(&mut graph, root, &s1_schema, mutation_pos(), "m1");
+
+        let entity = graph.add_entity_group(
+            &s2,
+            vec![FetchDataPathElement::Key(name!("t"), Default::default())],
+        );
+        let entity_parent: CompositeTypeDefinitionPosition = s2_schema
+            .entity_type()
+            .expect("entity type lookup")
+            .expect("S2 has entities")
+            .into();
+        append_parsed_selection(
+            &mut graph,
+            entity,
+            &s2_schema,
+            entity_parent,
+            "... on T { a }",
+        );
+
+        let t_pos: CompositeTypeDefinitionPosition = supergraph_schema
+            .get_type(&name!("T"))
+            .expect("T exists")
+            .try_into()
+            .expect("T is composite");
+        let key_conditions = Arc::new(
+            SelectionSet::parse(supergraph_schema.clone(), t_pos, "k").expect("key parses"),
+        );
+        graph.add_dependency(
+            root,
+            entity,
+            vec![InputContribution::Requires {
+                source_type_name: name!("T"),
+                conditions: key_conditions,
+            }],
+        );
+
+        let mut compression = SubgraphOperationCompression::Disabled;
+        let directives = DirectiveList::default();
+        let mut ctx = PlanBuildContext {
+            supergraph_schema: &supergraph_schema,
+            query_graph: &qg,
+            root_kind: SchemaRootDefinitionKind::Mutation,
+            variable_definitions: &[],
+            operation_directives: &directives,
+            operation_name: &None,
+            operation_compression: &mut compression,
+            operation_counter: 0,
+        };
+
+        let (plan, cost) = graph.to_query_plan(&mut ctx).expect("plan builds");
+        assert!(cost > 0.0);
+        let PlanNode::Sequence(seq) = plan.expect("non-empty plan") else {
+            panic!("expected a two-stage Sequence");
+        };
+        assert_eq!(seq.nodes.len(), 2);
+        let PlanNode::Fetch(root_fetch) = &seq.nodes[0] else {
+            panic!("expected root Fetch first");
+        };
+        assert_eq!(
+            root_fetch.operation_kind,
+            executable::OperationType::Mutation,
+            "root fetch carries the operation's kind",
+        );
+        let PlanNode::Flatten(flatten) = &seq.nodes[1] else {
+            panic!("expected Flatten(entity fetch) second");
+        };
+        let PlanNode::Fetch(entity_fetch) = flatten.node.as_ref() else {
+            panic!("expected entity Fetch inside Flatten");
+        };
+        assert_eq!(
+            entity_fetch.operation_kind,
+            executable::OperationType::Query,
+            "entity fetches target the subgraph Query root even under a mutation",
+        );
+        assert!(
+            !entity_fetch.requires.is_empty(),
+            "entity fetch carries the key representation requires",
+        );
+    }
 }
