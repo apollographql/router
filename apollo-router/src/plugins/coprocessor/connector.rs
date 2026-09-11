@@ -454,7 +454,10 @@ where
         return Ok(response);
     }
 
-    // Extract data from the transport result
+    // Extract data from the transport result. `None` means no HTTP call was made because the
+    // response came out of the router's response cache: there is no status or header set to
+    // report, so the payload says so explicitly rather than looking like a transport failure.
+    let served_from_cache = response.transport_result.is_none();
     let (headers_to_send, status_to_send) = match &response.transport_result {
         Some(Ok(TransportResponse::Http(http_response))) => {
             let headers = response_config
@@ -508,6 +511,7 @@ where
         .and_context(context_to_send)
         .and_status_code(status_to_send)
         .and_service_name(service_name_to_send)
+        .and_cache_hit(served_from_cache.then_some(true))
         .build();
 
     let payload_for_log =
