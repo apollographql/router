@@ -273,15 +273,8 @@ fn unknown_plugin_name_is_rejected_by_both_parsers() {
         .expect_err("the shared parser should reject it too");
 }
 
-/// Named difference: both parsers reject a document with duplicated top-level keys, but by
-/// different means and with different messages. Router's own YAML pre-pass (`yaml::parse`)
-/// rejects the duplicate before migration or schema validation ever run, with a message naming
-/// the duplicated key (`startup_reports_duplicate_keys_in_a_document_that_also_migrates` in
-/// `tests.rs`). The shared crate has no equivalent pre-pass of its own; `parse_yaml` calls
-/// `serde_yaml::from_str` directly, whose duplicate-key check produces a plain YAML syntax error
-/// instead. Neither accepts the document, so there is no silent-acceptance gap here -- only a
-/// wording difference for ROUTER-2104 to be aware of if anything downstream matches on router's
-/// current message text.
+/// Duplicate-key diagnostics differ: router reports "duplicated keys", while the shared
+/// parser reports serde_yaml's "duplicate entry" error.
 #[test]
 fn duplicate_top_level_keys_is_rejected_by_both_with_different_messages() {
     let text = include_str!("testdata/compat/duplicate_keys.yaml");
