@@ -92,8 +92,9 @@ pub(crate) fn validate_oci_reference(
 /// This struct does not change on router reloads - they are all sourced from CLI options.
 #[derive(Debug, Clone)]
 pub struct OciConfig {
-    /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
-    pub apollo_key: String,
+    /// The Apollo key: `<YOUR_GRAPH_API_KEY>`.
+    /// Only required (and present) when `reference` points at an Apollo-hosted registry.
+    pub apollo_key: Option<String>,
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
@@ -161,14 +162,32 @@ impl From<LicenseError> for OciError {
     }
 }
 
-fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
+/// Determine whether a resolved registry hostname belongs to Apollo's own registry.
+fn is_apollo_registry(server: &str) -> bool {
+    server
+        .strip_suffix('/')
+        .unwrap_or(server)
+        .ends_with(APOLLO_REGISTRY_ENDING)
+}
+
+/// Determine whether an (unparsed) OCI graph artifact reference points at an
+/// Apollo-hosted registry. Used to decide whether `APOLLO_KEY` is required.
+pub(crate) fn is_apollo_graph_artifact_reference(reference: &str) -> bool {
+    reference
+        .parse::<Reference>()
+        .is_ok_and(|r| is_apollo_registry(r.resolve_registry()))
+}
+
+fn build_auth(reference: &Reference, apollo_key: Option<&str>) -> RegistryAuth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')
         .unwrap_or_else(|| reference.resolve_registry());
 
     // Check if the server registry ends with apollographql.com
-    if server.ends_with(APOLLO_REGISTRY_ENDING) {
+    if is_apollo_registry(server)
+        && let Some(apollo_key) = apollo_key
+    {
         tracing::debug!("using registry authentication");
         return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
     }
@@ -385,7 +404,7 @@ impl OciConfig {
 /// Fetch the manifest digest (without fetching the full manifest) to detect changes
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
@@ -430,7 +449,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
 /// inferring the correct protocol, and calling the internal fetch function.
 pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
@@ -673,7 +692,7 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
 #[allow(dead_code)]
 async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
@@ -775,7 +794,7 @@ mod tests {
 
     fn mock_oci_config_with_reference(reference: String) -> OciConfig {
         OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: reference.clone(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
@@ -909,7 +928,7 @@ mod tests {
         let apollo_key = "test-api-key".to_string();
 
         // Call build_auth
-        let auth = build_auth(&reference, &apollo_key);
+        let auth = build_auth(&reference, Some(&apollo_key));
 
         // Check that it returns the correct RegistryAuth
         match auth {
@@ -922,6 +941,21 @@ mod tests {
     }
 
     #[test]
+    fn test_build_auth_apollo_registry_no_key() {
+        // An Apollo registry reference with no key falls through to the
+        // docker-credential/anonymous path rather than panicking.
+        let reference: Reference = "registry.apollographql.com/my-graph:latest"
+            .parse()
+            .unwrap();
+
+        let auth = build_auth(&reference, None);
+
+        if let RegistryAuth::Basic(username, _) = auth {
+            assert_ne!(username, APOLLO_REGISTRY_USERNAME);
+        }
+    }
+
+    #[test]
     fn test_build_auth_non_apollo_registry() {
         // Create a reference for a non-Apollo registry
         let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
@@ -930,12 +964,41 @@ mod tests {
         // Mock the docker_credential::get_credential function
         // Since we can't easily mock this in Rust without additional libraries,
         // we'll just verify that it doesn't return the Apollo registry auth
-        let auth = build_auth(&reference, &apollo_key);
+        let auth = build_auth(&reference, Some(&apollo_key));
 
         // Check that it doesn't return the Apollo registry auth
         if let RegistryAuth::Basic(username, _) = auth {
             assert_ne!(username, "apollo_registry");
         }
+    }
+
+    #[test]
+    fn test_build_auth_non_apollo_registry_no_key() {
+        // A non-Apollo registry reference with no APOLLO_KEY set should not
+        // require one; it falls through to docker-credential/anonymous auth.
+        let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
+
+        let auth = build_auth(&reference, None);
+
+        if let RegistryAuth::Basic(username, _) = auth {
+            assert_ne!(username, "apollo_registry");
+        }
+    }
+
+    #[test]
+    fn test_is_apollo_graph_artifact_reference() {
+        assert!(is_apollo_graph_artifact_reference(
+            "registry.apollographql.com/my-graph:latest"
+        ));
+        assert!(is_apollo_graph_artifact_reference(
+            "artifact.api.apollographql.com/my-graph:latest"
+        ));
+        assert!(!is_apollo_graph_artifact_reference(
+            "docker.io/library/alpine:latest"
+        ));
+        assert!(!is_apollo_graph_artifact_reference(
+            "ghcr.io/my-org/my-graph:latest"
+        ));
     }
 
     fn generate_manifest_annotations(launch_id: Option<&str>) -> BTreeMap<String, String> {
@@ -1468,7 +1531,7 @@ mod tests {
             .parse::<Reference>()
             .expect("url must be valid");
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -2009,7 +2072,7 @@ mod tests {
 
         // Create OciConfig with tag reference and hot-reload enabled
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -2045,7 +2108,7 @@ mod tests {
 
         // Create OciConfig with tag reference and hot-reload disabled
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
@@ -2071,7 +2134,7 @@ mod tests {
 
         // Create OciConfig with digest reference and hot-reload enabled
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: digest_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -2159,7 +2222,7 @@ mod tests {
 
         // Create OciConfig with digest reference and hot-reload disabled
         let oci_config_digest = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: digest_ref,
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
@@ -2390,7 +2453,7 @@ mod tests {
             .parse::<Reference>()
             .expect("url must be valid");
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
