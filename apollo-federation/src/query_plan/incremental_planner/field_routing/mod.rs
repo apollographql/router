@@ -3,13 +3,12 @@
 //! The planner walks the operation selection-by-selection ("pendings"),
 //! consulting the query graph for where each field can be resolved:
 //! - [`state`]: mutable search state (pending stack, checkpoints).
-//! - [`routing`]: enumerating and ranking options for a selection.
-//! - [`commit`]: applying a chosen option to the fetch graph.
 //! - [`conditions`]: condition satisfiability for @requires / @key.
 //! - [`requires`]: hop-edge inputs and condition paths.
 //!
-//! This file holds the search-space type and the
-//! [`BulbSearchSpace`] implementation.
+//! This file holds the search-space type. Routing enumeration, commit
+//! logic, and the BulbSearchSpace implementation build on this skeleton
+//! in later changes.
 
 mod conditions;
 mod requires;
@@ -46,9 +45,8 @@ pub(super) enum RoutingCacheKey {
     InlineFragment(Option<Name>),
 }
 
-/// Subgraph, type position, and schema at a query graph node.
+/// Type position and schema at a query graph node.
 pub(super) struct NodeSource {
-    pub(super) subgraph: Arc<str>,
     pub(super) type_pos: CompositeTypeDefinitionPosition,
     pub(super) schema: ValidFederationSchema,
 }
@@ -65,7 +63,6 @@ impl FieldRoutingSearchSpace {
     pub(super) fn node_source(&self, node: NodeIndex) -> Result<NodeSource, FederationError> {
         let data = self.query_graph.node_weight(node)?;
         Ok(NodeSource {
-            subgraph: data.source.clone(),
             type_pos: data.type_.clone().try_into()?,
             schema: self.query_graph.schema_by_source(&data.source)?.clone(),
         })
@@ -114,20 +111,17 @@ impl FieldRoutingSearchSpace {
     /// True when the subgraph resolves every field itself and none carries
     /// @requires (which draws on an entity representation and needs its own
     /// fetch). The graph-based check complements the schema-based one:
-    /// @external fields may still resolve at `node` when it is a
-    /// provides-copy created by an ancestor's @provides.
+    /// the schema check rejects @external fields, but they may still
+    /// resolve at `node` when it is a provides-copy created by an
+    /// ancestor's @provides, which only the query graph knows about.
     pub(super) fn can_resolve_in_place(
         &self,
         node: NodeIndex,
         conditions: &Arc<SelectionSet>,
         source: &NodeSource,
     ) -> Result<bool, FederationError> {
-        let satisfiable = self.can_satisfy(
-            conditions,
-            &source.type_pos,
-            &source.subgraph,
-            &source.schema,
-        ) || self.conditions_resolvable_at_node(node, conditions)?;
+        let satisfiable = self.can_satisfy(conditions, &source.type_pos, &source.schema)
+            || self.conditions_resolvable_at_node(node, conditions)?;
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
     }
 
@@ -161,8 +155,9 @@ impl FieldRoutingSearchSpace {
 pub(super) fn selection_label(selection: &Selection) -> String {
     match selection {
         Selection::Field(f) => f.field.field_position.to_string(),
-        Selection::InlineFragment(f) => {
-            format!("... on {:?}", f.inline_fragment.type_condition_position)
-        }
+        Selection::InlineFragment(f) => match &f.inline_fragment.type_condition_position {
+            Some(type_cond) => format!("... on {}", type_cond.type_name()),
+            None => "...".to_string(),
+        },
     }
 }
