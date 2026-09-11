@@ -246,6 +246,21 @@ fn difference_paths_resolve_object_keys_and_array_entries() {
     assert_eq!(first_difference(&identical, &identical), None);
 }
 
+/// Serializes both parsers' results and describes the first path where they disagree, or `None`
+/// when they match. Callers prefix the description with whatever identifies the input.
+fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Option<String> {
+    let router_json = serde_json::to_value(router).expect("Configuration serializes");
+    let shared_json = serde_json::to_value(shared).expect("Configuration serializes");
+    let path = first_difference(&router_json, &shared_json)?;
+    Some(format!(
+        "router's own pipeline and the shared parser disagree at `{path}`\n\
+         router:  {}\n\
+         shared:  {}",
+        router_json.pointer(&path).unwrap_or(&Value::Null),
+        shared_json.pointer(&path).unwrap_or(&Value::Null),
+    ))
+}
+
 /// Current-format inputs, and inputs migrated ahead of time exactly as a real deployment would
 /// migrate them, must produce the same effective settings through both parsers. A mismatch
 /// names the case and the configuration path where the two disagree.
@@ -264,17 +279,8 @@ fn effective_settings_agree_for_the_shared_corpus() {
                 case.name
             )
         });
-        let router_json = serde_json::to_value(&router).expect("Configuration serializes");
-        let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
-        if let Some(path) = first_difference(&router_json, &shared_json) {
-            panic!(
-                "[{}] router's own pipeline and the shared parser disagree at `{path}`\n\
-                 router:  {}\n\
-                 shared:  {}",
-                case.name,
-                router_json.pointer(&path).unwrap_or(&Value::Null),
-                shared_json.pointer(&path).unwrap_or(&Value::Null),
-            );
+        if let Some(mismatch) = settings_disagreement(&router, &shared) {
+            panic!("[{}] {mismatch}", case.name);
         }
     }
 }
@@ -867,10 +873,8 @@ fn telemetry_input_agrees_between_the_two_parsers() {
         .parse::<Configuration>(text)
         .expect("the shared parser accepts this telemetry input too");
 
-    let router_json = serde_json::to_value(&router).expect("Configuration serializes");
-    let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
-    if let Some(path) = first_difference(&router_json, &shared_json) {
-        panic!("telemetry input: router's own pipeline and the shared parser disagree at `{path}`");
+    if let Some(mismatch) = settings_disagreement(&router, &shared) {
+        panic!("telemetry input: {mismatch}");
     }
 }
 
@@ -915,13 +919,8 @@ fn effective_settings_agree_for_discovered_project_documents() {
         match shared_options.parse::<Configuration>(&doc.yaml) {
             Ok(shared) => {
                 compared += 1;
-                let router_json = serde_json::to_value(&router).expect("Configuration serializes");
-                let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
-                if let Some(path) = first_difference(&router_json, &shared_json) {
-                    unexpected.push(format!(
-                        "{}: router's own pipeline and the shared parser disagree at `{path}`",
-                        doc.path.display()
-                    ));
+                if let Some(mismatch) = settings_disagreement(&router, &shared) {
+                    unexpected.push(format!("{}: {mismatch}", doc.path.display()));
                 }
             }
             Err(error) => unexpected.push(format!(
@@ -984,13 +983,8 @@ fn schema_declared_top_level_defaults_agree_between_parsers() {
                 panic!("[{key}] the shared parser rejected the schema-declared default: {error}")
             });
 
-        let router_json = serde_json::to_value(&router).expect("Configuration serializes");
-        let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
-        if let Some(path) = first_difference(&router_json, &shared_json) {
-            panic!(
-                "[{key}] router's own pipeline and the shared parser disagree at `{path}` when \
-                 the document sets the schema's own declared default"
-            );
+        if let Some(mismatch) = settings_disagreement(&router, &shared) {
+            panic!("[{key}, set to the schema's own declared default] {mismatch}");
         }
     }
 
@@ -1030,13 +1024,8 @@ fn schema_derived_required_field_permutations_agree_between_parsers() {
                 )
             });
 
-        let router_json = serde_json::to_value(&router).expect("Configuration serializes");
-        let shared_json = serde_json::to_value(&shared).expect("Configuration serializes");
-        if let Some(path) = first_difference(&router_json, &shared_json) {
-            panic!(
-                "[capacity={capacity}, interval={interval}] router's own pipeline and the shared \
-                 parser disagree at `{path}`"
-            );
+        if let Some(mismatch) = settings_disagreement(&router, &shared) {
+            panic!("[capacity={capacity}, interval={interval}] {mismatch}");
         }
     }
 }
