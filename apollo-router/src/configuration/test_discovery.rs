@@ -1,8 +1,4 @@
-//! Finds the YAML router configurations checked into the project: integration fixtures,
-//! published examples, and the `router.yaml` snippets embedded in docs pages. Shared by
-//! [`super::tests::validate_project_config_files`], which validates each document through
-//! router's own loader, and [`super::compatibility`], which additionally runs each one through
-//! the shared `apollo-configuration` parser to compare effective settings.
+//! Finds router configuration fixtures, examples and YAML snippets in documentation.
 
 use std::collections::HashMap;
 use std::fs;
@@ -22,7 +18,8 @@ pub(crate) struct DiscoveredConfig {
 }
 
 /// Walks `.`, `../examples`, `../docs` and `../dockerfiles` for `router.yaml` / `*.router.yaml`
-/// files and, on Unix, `*_unix.router.yaml` files, plus ```` ```yaml title="router.yaml" ```` (or
+/// files and, on Unix, `router_unix.yaml` / `*.router_unix.yaml` files, plus
+/// ```` ```yaml title="router.yaml" ```` (or
 /// `title="router_unix.yaml"` on Unix) blocks inside `.mdx` docs. A block with extra attributes
 /// after the title, such as `novalidate`, is intentionally invalid or version-specific and is not
 /// discovered. A sibling `.skipconfigvalidation` marker file excludes a path from discovery
@@ -90,9 +87,7 @@ pub(crate) fn discover_project_configs() -> Vec<DiscoveredConfig> {
     discovered
 }
 
-/// The environment variables discovered documents' `${env.*}` placeholders reference. Mock these
-/// identically on both sides of a comparison so router's loader and the shared parser expand the
-/// same inputs.
+/// Synthetic values for the discovered documents' environment-variable placeholders.
 pub(crate) fn discovery_env_vars() -> HashMap<String, String> {
     [
         ("DATADOG_AGENT_HOST", "http://example.com"),
