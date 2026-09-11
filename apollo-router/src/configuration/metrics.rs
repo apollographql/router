@@ -298,10 +298,22 @@ impl InstrumentData {
             "$$[?(@.router.timeout)]",
             opt.router.rate_limit,
             "$.router.global_rate_limit",
+            opt.router.rate_limit.capacity,
+            "$.router.global_rate_limit.capacity",
+            opt.router.rate_limit.interval,
+            "$.router.global_rate_limit.interval",
             opt.subgraph.timeout,
             "$[?(@.all.timeout || @.subgraphs..timeout)]",
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
+            // Only the `all` (applied-to-every-subgraph) rate limit has a single capacity/interval
+            // pair. A per-subgraph override in `subgraphs.<name>` would need one attribute set per
+            // subgraph name, which is unbounded cardinality, so it is only reflected in the
+            // `opt.subgraph.rate_limit` presence boolean above.
+            opt.subgraph.rate_limit.capacity,
+            "$.all.global_rate_limit.capacity",
+            opt.subgraph.rate_limit.interval,
+            "$.all.global_rate_limit.interval",
             opt.subgraph.http2,
             "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
             opt.subgraph.compression,

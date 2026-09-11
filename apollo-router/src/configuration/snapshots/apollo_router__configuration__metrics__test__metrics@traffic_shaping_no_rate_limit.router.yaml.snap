@@ -12,14 +12,14 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.router.rate_limit: true
-          opt.router.rate_limit.capacity: 100
-          opt.router.rate_limit.interval: 1s
+          opt.router.rate_limit: false
+          opt.router.rate_limit.capacity: false
+          opt.router.rate_limit.interval: false
           opt.router.timeout: true
           opt.subgraph.compression: true
           opt.subgraph.deduplicate_query: true
           opt.subgraph.http2: true
-          opt.subgraph.rate_limit: true
-          opt.subgraph.rate_limit.capacity: 100
-          opt.subgraph.rate_limit.interval: 1s
+          opt.subgraph.rate_limit: false
+          opt.subgraph.rate_limit.capacity: false
+          opt.subgraph.rate_limit.interval: false
           opt.subgraph.timeout: true
