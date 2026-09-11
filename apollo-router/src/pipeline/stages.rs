@@ -261,6 +261,7 @@ fn build_connector_request_services(
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
+                .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })
