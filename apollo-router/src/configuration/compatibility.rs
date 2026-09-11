@@ -303,13 +303,8 @@ fn duplicate_top_level_keys_is_rejected_by_both_with_different_messages() {
     );
 }
 
-/// Named difference, and the reason the adapter above needs `parse_via_apollo_configuration`
-/// rather than a bare `options.parse::<Configuration>(text)` call: `populate_config_instruments`
-/// (`metrics.rs`) reads `Configuration::validated_yaml` to decide which `apollo.router.config.*`
-/// usage gauges to set. `validate_yaml_configuration` populates that field itself, after
-/// deserializing; `apollo_configuration::parse_yaml` only calls `Configuration::deserialize` and
-/// has no equivalent post-step, so a bare call leaves `validated_yaml` at `None` and every usage
-/// gauge would silently stop firing.
+/// Configuration-usage selectors read `validated_yaml`. The shared parser leaves it empty;
+/// `parse_via_apollo_configuration` supplies the expanded document for those selectors.
 #[test]
 fn configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml() {
     let text = "persisted_queries:\n  enabled: true\n";
