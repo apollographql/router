@@ -471,19 +471,37 @@ impl PluginPrivate for ResponseCache {
         }
 
         // Mirror the two startup checks above for the connector block.
-        if init.config.connector.all.ttl.is_none()
-            && init
+        //
+        // Stated over sources that can actually be cached, rather than only over the ones listed
+        // in `sources`. A source absent from that map is still cached — `is_source_enabled`
+        // treats `enabled` as default-true — and takes its TTL from `all`, so an empty or
+        // partially populated `sources` map must not be able to satisfy the check: without this,
+        // `connector: {all: {enabled: true, redis: {...}}}` and no `ttl` anywhere starts clean
+        // and every headerless response is held for the 24h fallback.
+        //
+        // Only required when connector Redis is configured, since nothing is cached otherwise.
+        // NB: the subgraph check above has the same shape and the same vacuity for an empty
+        // `subgraphs` map; that behavior ships today, so it is left alone here.
+        let connector_storage_configured = init.config.connector.all.redis.is_some()
+            || init
                 .config
                 .connector
                 .sources
                 .values()
-                .any(|s| s.ttl.is_none())
-        {
-            return Err(
-                "a TTL must be configured for all connector sources or globally"
-                    .to_string()
-                    .into(),
-            );
+                .any(|s| s.redis.is_some());
+        if connector_storage_configured && init.config.connector.all.ttl.is_none() {
+            let unlisted_sources_cached = init.config.connector.all.enabled.unwrap_or(true);
+            let listed_source_without_ttl =
+                init.config.connector.sources.iter().any(|(name, source)| {
+                    source.ttl.is_none() && init.config.connector.is_source_enabled(true, name)
+                });
+            if unlisted_sources_cached || listed_source_without_ttl {
+                return Err(
+                    "a TTL must be configured for all connector sources or globally"
+                        .to_string()
+                        .into(),
+                );
+            }
         }
 
         if init
