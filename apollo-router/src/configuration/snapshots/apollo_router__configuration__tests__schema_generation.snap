@@ -8846,7 +8846,7 @@ expression: "&schema"
         },
         "max_depth": {
           "default": null,
-          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
+          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -8856,7 +8856,7 @@ expression: "&schema"
         },
         "max_height": {
           "default": null,
-          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_HEIGHT_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging",
           "format": "uint32",
           "minimum": 0,
           "type": [
