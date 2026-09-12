@@ -3,6 +3,7 @@ mod limited;
 
 use std::error::Error;
 
+use apollo_federation::query_plan::query_planner::DEFAULT_MAX_NON_LOCAL_SELECTIONS;
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::StatusCode;
@@ -116,9 +117,15 @@ pub(crate) struct RouterLimitsConfig {
     /// query planning. Default: 10000000 (10 million).
     pub(crate) max_recursive_selections: u32,
 
-    /// If set to true (which is the default is dev mode),
-    /// requests that exceed a `max_*` limit are *not* rejected.
-    /// Instead they are executed normally, and a warning is logged.
+    /// Limit the query planner's estimate of non-local selections. Default: 100000.
+    /// Operations that exceed this limit receive HTTP 400 with GraphQL error code
+    /// `QUERY_PLAN_COMPLEXITY_EXCEEDED`, including in `warn_only` mode.
+    /// Setting `APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK=true` disables
+    /// the check, so this value has no effect.
+    pub(crate) max_non_local_selections: u64,
+
+    /// Execute requests that exceed `max_depth`, `max_height`, `max_aliases`,
+    /// `max_root_fields`, or `max_recursive_selections` and log a warning. Other limits remain enforced.
     pub(crate) warn_only: bool,
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
@@ -169,6 +176,7 @@ impl Default for RouterLimitsConfig {
             max_aliases: None,
 
             max_recursive_selections: 10_000_000,
+            max_non_local_selections: DEFAULT_MAX_NON_LOCAL_SELECTIONS,
             warn_only: false,
             http_max_request_bytes: 2_000_000,
             http1_max_request_headers: None,

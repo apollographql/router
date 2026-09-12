@@ -110,6 +110,12 @@ You can suppress or disable these error codes using [router customizations](/gra
 
 <PropertyList kind="errCodes">
 
+<Property name="QUERY_PLAN_COMPLEXITY_EXCEEDED">
+
+The router stopped planning because the operation exceeded a query-planning complexity limit. The response has a 400 HTTP status code. For the non-local selections limit, see [`max_non_local_selections`](/graphos/routing/security/request-limits#max_non_local_selections).
+
+</Property>
+
 <Property name="CANNOT_SEND_PQ_ID_AND_BODY">
 
 The operation was not executed because sending a persisted query ID and a
