@@ -62,6 +62,7 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
+mod apollo_configuration_parse;
 #[cfg(test)]
 mod compatibility;
 pub(crate) mod connector;
@@ -125,6 +126,16 @@ pub enum ConfigurationError {
 
     /// could not load certificate authorities: {error}
     CertificateAuthorities { error: String },
+
+    /// {0}
+    ApolloConfiguration(String),
+}
+
+impl From<apollo_configuration::ConfigError> for ConfigurationError {
+    fn from(error: apollo_configuration::ConfigError) -> Self {
+        // Render source labels as well as the error summary.
+        Self::ApolloConfiguration(format!("{:?}", miette::Report::new(error)))
+    }
 }
 
 impl From<proteus::Error> for ConfigurationError {

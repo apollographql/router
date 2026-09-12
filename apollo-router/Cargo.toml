@@ -60,6 +60,7 @@ mock_subgraphs_testing = []
 addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
+apollo-configuration = "0.6.2"
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
 apollo-redaction = { version = "0.3.1", features = ["schemars"] }
 async-compression = { version = "0.4.6", features = [
@@ -146,6 +147,7 @@ libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.18.0"
 mediatype = "0.21.0"
+miette = "7"
 mockall = "0.15.0"
 mime = "0.3.17"
 multer = "3.1.0"
@@ -301,7 +303,6 @@ tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], opti
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
 [dev-dependencies]
-apollo-configuration = "0.6.2"
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 ctor = "1.0.0"
 ecdsa = { version = "0.17.0", features = ["algorithm", "pem", "pkcs8"] }
@@ -318,7 +319,6 @@ insta.workspace = true
 maplit = "1.0.2"
 brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }
-miette = "7"
 mockall = "0.15.0"
 num-traits = "0.2.19"
 once_cell.workspace = true
