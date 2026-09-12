@@ -116,6 +116,11 @@ pub(crate) struct InstrumentsConfig {
 }
 
 const HTTP_SERVER_REQUEST_DURATION_METRIC: &str = "http.server.request.duration";
+// Named for parity with `http.server.request.duration`. This measures the router-side
+// "response ready" moment (status, headers, first chunk), not a client-observed time to
+// first byte, so it is deliberately not named `..._time_to_first_byte`.
+const HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC: &str =
+    "http.server.request.time_to_first_response";
 const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
@@ -198,6 +203,26 @@ impl InstrumentsConfig {
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
                         .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
+                        .build(),
+                ),
+            );
+        }
+
+        if self
+            .router
+            .attributes
+            .http_server_request_time_to_first_response
+            .is_enabled()
+        {
+            static_instruments.insert(
+                HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC.to_string(),
+                StaticInstrument::Histogram(
+                    meter
+                        .f64_histogram(HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC)
+                        .with_unit("s")
+                        .with_description(
+                            "Time from HTTP server request start to the first response byte.",
+                        )
                         .build(),
                 ),
             );
@@ -335,6 +360,40 @@ impl InstrumentsConfig {
                     attributes: Vec::new(),
                     selector: None,
                     selectors: match &self.router.attributes.http_server_request_duration {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            Some(attributes.clone())
+                        }
+                    },
+                    updated: false,
+                    _phantom: PhantomData,
+                }),
+            });
+        let http_server_request_time_to_first_response = self
+            .router
+            .attributes
+            .http_server_request_time_to_first_response
+            .is_enabled()
+            .then(|| CustomHistogram {
+                inner: Mutex::new(CustomHistogramInner {
+                    increment: Increment::Duration(Instant::now(), "s".to_string()),
+                    condition: Condition::True,
+                    histogram: Some(
+                        static_instruments
+                            .get(HTTP_SERVER_REQUEST_TIME_TO_FIRST_RESPONSE_METRIC)
+                            .expect(
+                                "cannot get static instrument for router; this should not happen",
+                            )
+                            .as_histogram()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to histogram for router; this should not happen",
+                            ),
+                    ),
+                    attributes: Vec::new(),
+                    selector: None,
+                    selectors: match &self.router.attributes.http_server_request_time_to_first_response {
                         DefaultedStandardInstrument::Bool(_)
                         | DefaultedStandardInstrument::Unset => None,
                         DefaultedStandardInstrument::Extendable { attributes } => {
@@ -494,6 +553,7 @@ impl InstrumentsConfig {
 
         RouterInstruments {
             http_server_request_duration,
+            http_server_request_time_to_first_response,
             http_server_request_body_size,
             http_server_response_body_size,
             http_server_active_requests,
@@ -1890,7 +1950,7 @@ fn value_to_f64(value: &opentelemetry::Value) -> Option<f64> {
 /// Convert a duration to f64 based on the specified unit.
 /// Supported units: "s" (seconds), "ms" (milliseconds), "us" (microseconds), "ns" (nanoseconds)
 /// Defaults to seconds for any other unit string.
-fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
+pub(crate) fn duration_to_f64(duration: std::time::Duration, unit: &str) -> f64 {
     match unit {
         "ms" => duration.as_secs_f64() * 1000.0,
         "us" => duration.as_micros() as f64,
@@ -2386,6 +2446,49 @@ where
                 _phantom: PhantomData,
             }),
         }
+    }
+}
+
+impl<A, T, Request, Response, EventResponse> CustomHistogram<Request, Response, EventResponse, A, T>
+where
+    A: Selectors<Request, Response, EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+{
+    /// Compute the response-time attributes for an `Increment::Duration` histogram and hand
+    /// off the histogram handle, attributes and the request-start `Instant` for *deferred*
+    /// recording — without recording the sample now.
+    ///
+    /// Used by `http.server.request.duration`, which must record the full request lifecycle
+    /// (through stream close / drop) rather than at response-ready. The histogram is taken
+    /// out of `self`, so a subsequent `on_response` / `Drop` becomes a no-op and the sample
+    /// is recorded exactly once by the returned payload.
+    ///
+    /// Returns `None` when the response-level condition fails or the histogram is absent, in
+    /// which case no sample should be recorded.
+    pub(crate) fn take_duration_recording(
+        &self,
+        response: &Response,
+    ) -> Option<(Histogram<f64>, Vec<KeyValue>, Instant, String)> {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_response(response) {
+            let _ = inner.histogram.take();
+            return None;
+        }
+        let attrs = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_response(response))
+            .unwrap_or_default();
+        extend_attributes(&mut inner.attributes, attrs);
+
+        let (start, unit) = match &inner.increment {
+            Increment::Duration(instant, unit) => (*instant, unit.clone()),
+            _ => return None,
+        };
+        let histogram = inner.histogram.take()?;
+        // Mark as updated so the `Drop` impl does not double-record.
+        inner.updated = true;
+        Some((histogram, inner.attributes.clone(), start, unit))
     }
 }
 
