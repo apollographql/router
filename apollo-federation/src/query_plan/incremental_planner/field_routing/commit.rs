@@ -22,13 +22,13 @@ use crate::query_plan::FetchDataPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 
-const CONDITION_DEPTH_LIMIT: u8 = 32;
 use super::NodeSource;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::HopKind;
 use super::routing::RoutingChoice;
 use super::selection_label;
+use super::state::CONDITION_DEPTH_LIMIT;
 use super::state::PendingSelection;
 use super::state::PlanState;
 
@@ -38,9 +38,6 @@ pub(super) struct CommitTarget {
     pub(super) fetch_node: NodeIndex,
     pub(super) op_path: SharedPath<Arc<OpPathElement>>,
     pub(super) response_path: SharedPath<FetchDataPathElement>,
-    /// True at the root of an entity fetch group (key hop or same-subgraph
-    /// @requires hop): children restart their type path there.
-    pub(super) entity_root: bool,
 }
 
 impl FieldRoutingSearchSpace {
@@ -56,9 +53,9 @@ impl FieldRoutingSearchSpace {
         let qg = &self.query_graph;
         let (_, target_qg_node) = qg.edge_endpoints(choice.edge_index())?;
 
-        // Reject unexpected edge transitions before any mutation, so a
-        // failed commit leaves nothing behind and the caller counts the
-        // drop.
+        // Reject unexpected edge transitions before any mutation. Later
+        // failures can leave partial mutations: callers must checkpoint
+        // immediately before and roll back on Err.
         let Some(response_path_elements) =
             self.response_path_for_edge(choice.edge_index(), &pending.selection)?
         else {
@@ -82,13 +79,7 @@ impl FieldRoutingSearchSpace {
         };
 
         // Pure half: assemble op and response paths for children.
-        let target = self.target_paths(
-            pending,
-            choice,
-            choice.hop_kind,
-            fetch_node,
-            response_path_elements,
-        )?;
+        let target = self.target_paths(pending, choice, fetch_node, response_path_elements)?;
 
         // Condition selections carry an ordering dependent: their consuming
         // group must run after every group they commit into. A would-be
@@ -189,7 +180,15 @@ impl FieldRoutingSearchSpace {
         );
         let source = self.node_source(pending.query_graph_node)?;
 
-        let key_locally_resolvable = match &choice.key_conditions {
+        // Every key is an entry key; the parent group outputs whatever
+        // enters the first group of the chain (the target's own key when
+        // there is no chain).
+        let first_key = choice
+            .intermediate_key_hops
+            .first()
+            .map_or(&choice.key_conditions, |hop| &hop.entry_key);
+
+        let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
                 self.can_resolve_in_place(pending.query_graph_node, key_conditions, &source)?
             }
@@ -198,7 +197,7 @@ impl FieldRoutingSearchSpace {
 
         // Key fields plus __typename, which identifies the entity type.
         let anchor_key = key_locally_resolvable
-            .then_some(choice.key_conditions.as_ref())
+            .then_some(first_key.as_ref())
             .flatten();
         self.append_entity_inputs(
             state,
@@ -210,10 +209,13 @@ impl FieldRoutingSearchSpace {
 
         let merge_at = self.pending_merge_at(state, pending);
 
-        // The group the key edge enters: for a chained hop, the FIRST
+        // The group the key edge enters: for a chained hop, the first
         // intermediate, not the final target.
         let (first_subgraph, first_dest_node) = match choice.intermediate_key_hops.first() {
-            Some(hop) => (&hop.target_subgraph, Some(hop.target_node)),
+            Some(hop) => (
+                &qg.node_weight(hop.target_node)?.source,
+                Some(hop.target_node),
+            ),
             None => (choice.target_subgraph(), None),
         };
 
@@ -225,7 +227,7 @@ impl FieldRoutingSearchSpace {
             pending.ordering_dependent(),
         );
 
-        let key_input = if let Some(key_conditions) = &choice.key_conditions {
+        let key_input = if let Some(key_conditions) = first_key {
             let dest_node = match first_dest_node {
                 Some(node) => node,
                 None => qg.edge_endpoints(choice.edge_index())?.0,
@@ -250,8 +252,8 @@ impl FieldRoutingSearchSpace {
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
         // they commit.
-        if !key_locally_resolvable && let Some(key_conditions) = &choice.key_conditions {
-            self.push_condition_pendings(state, pending, key_conditions, new_group)?;
+        if !key_locally_resolvable && let Some(key_conditions) = first_key.clone() {
+            self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
         }
 
         // Multi-hop key chain: walk through intermediate subgraphs,
@@ -273,18 +275,23 @@ impl FieldRoutingSearchSpace {
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
         let qg = &self.query_graph;
         let mut prev_group = first_group;
+        let mut last = None;
 
         for (i, hop) in choice.intermediate_key_hops.iter().enumerate() {
             let hop_node_data = qg.node_weight(hop.target_node)?;
             let hop_type_pos: CompositeTypeDefinitionPosition =
                 hop_node_data.type_.clone().try_into()?;
 
-            let is_last = i + 1 == choice.intermediate_key_hops.len();
-            let next_subgraph = if is_last {
-                choice.target_subgraph()
-            } else {
-                &choice.intermediate_key_hops[i + 1].target_subgraph
+            // This hop's group must output the key entering the next group:
+            // the next hop's entry key, or the target's for the last hop.
+            let (next_dest_node, exit_key) = match choice.intermediate_key_hops.get(i + 1) {
+                Some(next) => (next.target_node, &next.entry_key),
+                None => (
+                    qg.edge_endpoints(choice.edge_index())?.0,
+                    &choice.key_conditions,
+                ),
             };
+            let next_subgraph = &qg.node_weight(next_dest_node)?.source;
 
             let next_group = self.entity_group_avoiding_cycles(
                 state,
@@ -294,7 +301,7 @@ impl FieldRoutingSearchSpace {
                 pending.ordering_dependent(),
             );
 
-            if let Some(key_conds) = &hop.key_conditions {
+            if let Some(key_conds) = exit_key {
                 let hop_schema = qg.schema_by_source(&hop_node_data.source)?.clone();
                 let hop_source = NodeSource {
                     type_pos: hop_type_pos.clone(),
@@ -320,41 +327,35 @@ impl FieldRoutingSearchSpace {
                 }
             }
 
-            let hop_key_input = if let Some(key_conds) = &hop.key_conditions {
-                let dest_type: CompositeTypeDefinitionPosition = if is_last {
-                    let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
-                    qg.node_weight(field_source)?.type_.clone().try_into()?
-                } else {
-                    qg.node_weight(choice.intermediate_key_hops[i + 1].target_node)?
-                        .type_
-                        .clone()
-                        .try_into()?
-                };
-                Some(InputContribution::Key {
-                    source_type_name: hop_type_pos.type_name().clone(),
-                    conditions: key_conds.clone(),
-                    rewrite_info: InputRewriteInfo {
-                        dest_type,
-                        dest_subgraph: next_subgraph.clone(),
-                    },
-                })
-            } else {
-                None
+            let hop_key_input = match exit_key {
+                Some(key_conds) => {
+                    let dest_type: CompositeTypeDefinitionPosition =
+                        qg.node_weight(next_dest_node)?.type_.clone().try_into()?;
+                    Some(InputContribution::Key {
+                        source_type_name: hop_type_pos.type_name().clone(),
+                        conditions: key_conds.clone(),
+                        rewrite_info: InputRewriteInfo {
+                            dest_type,
+                            dest_subgraph: next_subgraph.clone(),
+                        },
+                    })
+                }
+                None => None,
             };
 
             let hop_edge = self.wire_key_edge(state, prev_group, next_group, hop_key_input);
-
-            if is_last {
-                return Ok((next_group, hop_edge));
-            }
+            last = Some((next_group, hop_edge));
             prev_group = next_group;
         }
 
-        unreachable!("intermediate_key_hops is non-empty")
+        last.ok_or_else(|| FederationError::internal("intermediate_key_hops is empty"))
     }
 
     /// Get or create the entity group for (subgraph, merge_at), falling
     /// back to a fresh group when reuse would create a dependency cycle.
+    /// The verdict only holds until an edge is added: callers must wire the
+    /// anchor->group edge before any other edge insertion (add_dependency's
+    /// debug assert backstops this).
     fn entity_group_avoiding_cycles(
         &self,
         state: &mut PlanState,
@@ -493,18 +494,17 @@ impl FieldRoutingSearchSpace {
         &self,
         pending: &PendingSelection,
         choice: &RoutingChoice,
-        hop: HopKind,
         fetch_node: NodeIndex,
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
         let qg = &self.query_graph;
-        let op_path = match hop {
+        let op_path = match choice.hop_kind {
             // Hops restart the op path at the new group's root: empty for
             // root hops; for key hops, `... on <ConcreteType>` (entity
             // fetches start from the _Entity union) plus any trailing
             // @skip/@include fragments.
             HopKind::RootHop | HopKind::KeyHop => {
-                let base = if hop == HopKind::RootHop {
+                let base = if choice.hop_kind == HopKind::RootHop {
                     SharedPath::new()
                 } else {
                     let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
@@ -561,7 +561,7 @@ impl FieldRoutingSearchSpace {
         // Hops restart the response path at the new fetch node's root.
         // Only direct choices continue from the pending's current position.
         let response_path = {
-            let mut rp = if hop == HopKind::Direct {
+            let mut rp = if choice.hop_kind == HopKind::Direct {
                 pending.path_in_fetch.clone()
             } else {
                 SharedPath::new()
@@ -576,7 +576,6 @@ impl FieldRoutingSearchSpace {
             fetch_node,
             op_path,
             response_path,
-            entity_root: choice.hop_kind != HopKind::Direct,
         })
     }
 

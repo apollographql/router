@@ -12,6 +12,10 @@ use crate::operation::Selection;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
 
+/// Cap on condition-resolution nesting, checked before each increment of
+/// [`ConditionScope::depth`].
+pub(super) const CONDITION_DEPTH_LIMIT: usize = 32;
+
 /// Condition bookkeeping for a pending selection that carries a
 /// @requires / @key field set.
 #[derive(Clone, Copy, Debug)]
