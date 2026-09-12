@@ -5,7 +5,6 @@
 pub(crate) mod selection_builder;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -478,19 +477,7 @@ impl FetchGraph {
 
     /// Whether `to` is reachable from `from` via directed edges.
     pub(crate) fn is_reachable(&self, from: NodeIndex, to: NodeIndex) -> bool {
-        let mut visited = HashSet::new();
-        let mut stack = vec![from];
-        while let Some(node) = stack.pop() {
-            if node == to {
-                return true;
-            }
-            if visited.insert(node) {
-                for edge in self.graph.edges_directed(node, Direction::Outgoing) {
-                    stack.push(edge.target());
-                }
-            }
-        }
-        false
+        petgraph::algo::has_path_connecting(&self.graph, from, to, None)
     }
 }
 
