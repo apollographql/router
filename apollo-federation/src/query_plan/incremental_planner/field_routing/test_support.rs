@@ -31,6 +31,7 @@ pub(super) fn search_space(subgraphs: &[(&str, &str)]) -> FieldRoutingSearchSpac
         query_graph: Arc::new(query_graph),
         supergraph_schema: schema,
         override_conditions: Default::default(),
+        disabled_subgraphs: Default::default(),
     }
 }
 

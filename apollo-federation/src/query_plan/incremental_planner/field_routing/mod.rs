@@ -12,6 +12,7 @@
 
 mod conditions;
 mod requires;
+mod routing;
 pub(super) mod state;
 #[cfg(test)]
 mod test_support;
@@ -51,6 +52,8 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) query_graph: Arc<QueryGraph>,
     pub(crate) supergraph_schema: ValidFederationSchema,
     pub(crate) override_conditions: OverrideConditions,
+    /// Subgraphs the caller disabled: enumeration never routes into them.
+    pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
 }
 
 impl FieldRoutingSearchSpace {
