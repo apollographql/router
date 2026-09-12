@@ -321,6 +321,9 @@ telemetry:
 - `apollo.router.limits.connector_response_size.exceeded` - A counter of connector responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.connector`.
   - `connector.source`: The source key (`subgraph_name.source_name`) whose response was aborted.
 
+- `apollo.router.limits.connector_mapping_errors.exceeded` - A counter of connector responses whose declared mapping errors were truncated because they exceeded the configured `max_mapping_errors` limit under `limits.connector`. The errors a mapping declares with `->withConnectorError` are themselves counted by `apollo.router.operations.error`, like any other error.
+  - `connector.source`: The source key (`subgraph_name.source_name`) whose errors were truncated.
+
 ## GraphOS Studio
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.

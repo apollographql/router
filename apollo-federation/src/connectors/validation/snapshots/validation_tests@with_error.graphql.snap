@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: result.errors
+input_file: apollo-federation/src/connectors/validation/test_data/with_error.graphql
+---
+[
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.noArguments` contains an invalid mapping for field `status`: Method ->withError requires exactly one argument, the value to record as the message, got 0",
+        locations: [
+            54:23..54:32,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.tooManyArguments` contains an invalid mapping for field `status`: Method ->withError(\"saw:\", @) requires exactly one argument, the value to record as the message, got 2",
+        locations: [
+            66:23..66:32,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.scalarConnectorError` contains an invalid mapping for field `status`: Method ->withConnectorError($(42)) requires a string message or an object with a `message`, got an integer",
+        locations: [
+            99:42..99:47,
+        ],
+    },
+    Message {
+        code: InvalidSelection,
+        message: "`@connect(selection:)` on `Query.misspelledMessageKey` contains an invalid mapping for field `status`: Method ->withConnectorError( { messge: \"typo\" } ) requires a string message or an object with a `message`, got an object with no `message`, only `messge`",
+        locations: [
+            111:42..111:60,
+        ],
+    },
+]

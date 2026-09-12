@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "& metrics.non_zero()"
+---
+- name: apollo.router.config.connector_limits
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.http_max_response_size: 5MiB
+          opt.max_mapping_errors: 100
+          opt.sources: true

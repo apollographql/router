@@ -611,6 +611,29 @@ impl<'schema> SelectionValidator<'schema> {
                         continue;
                     }
 
+                    // A field whose shape is an error means the mapping that
+                    // produces it is malformed — a method called wrongly, most
+                    // often. The shape functions already diagnosed it precisely
+                    // (`Error<"Method ->withError requires at least one
+                    // argument">`); without this arm that diagnosis is computed
+                    // and discarded, the selection type-checks, and the author
+                    // finds out only when a request runs and the mapping
+                    // silently produces nothing. Reported here rather than in
+                    // the terminal `ShapeCase::Error` arm below because an
+                    // error nested in an object never reaches that arm: the
+                    // walk treats a non-object field shape as a scalar leaf and
+                    // stops.
+                    if let ShapeCase::Error(shape::Error { message, .. }) = field_shape.case() {
+                        return Err(Message {
+                            code: Code::InvalidSelection,
+                            message: format!(
+                                "{} contains an invalid mapping for field `{field_name}`: {message}",
+                                self.coordinate,
+                            ),
+                            locations: self.get_shape_locations(field_shape.locations()),
+                        });
+                    }
+
                     let fields_by_type_name = type_ref.get_fields(field_name.as_str());
                     if fields_by_type_name.is_empty() {
                         return Err(Message {

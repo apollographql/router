@@ -1,0 +1,160 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+    messageOnly: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError("Unrecognized code")
+        """
+    )
+
+    structured: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withConnectorError({
+            message: "Field 'code' was not found"
+            extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+        })
+        """
+    )
+
+    redactedByConfig: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withConnectorError({
+            message: $config.verboseErrors->match([true, $.detail], [@, "An error occurred"])
+            extensions: { code: "INTERNAL_SERVER_ERROR" }
+        })
+        """
+    )
+
+    # INVALID - caught at composition: `with_error_shape` returns a
+    # `Shape::error`, which the selection walker now reports rather than
+    # treating the field as an ordinary scalar leaf.
+    noArguments: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError
+        """
+    )
+
+    # INVALID - caught at composition: the arity is exactly one, because the
+    # message is one value and a second argument has no meaning to fall back on.
+    tooManyArguments: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError("saw:", @)
+        """
+    )
+
+    graphQLErrorFromAString: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withConnectorError("Field 'code' was not found")
+        """
+    )
+
+    # NOT caught, and correctly so: the API response has no declared shape, so
+    # a path into it cannot be checked statically.
+    unknownFieldInArgument: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError(@.nonexistent)
+        """
+    )
+
+    # Caught: a literal number can never be a valid error argument.
+    scalarConnectorError: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withConnectorError($(42))
+        """
+    )
+
+    # Caught: a closed object literal with no `message`, which is the
+    # misspelled-key mistake as composition sees it.
+    misspelledMessageKey: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withConnectorError({ messge: "typo" })
+        """
+    )
+
+    # NOT caught, and a real limit rather than a correct one: the field shape
+    # of a `??` expression is a union, and the validator's per-field arm only
+    # matches a bare error shape, so a mistake inside the right-hand operand
+    # never surfaces here. That matters because `x ?? $(default)->withConnectorError(...)`
+    # is the idiomatic form. The runtime diagnostic is the backstop for it.
+    misspelledMessageKeyBehindCoalescing: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withConnectorError({ messge: "typo" })
+        """
+    )
+
+    # NOT caught either, and this one predates the type check above: an arity
+    # error is the oldest validation this method has, and it is invisible behind
+    # `??` for the same reason. The gap is the validator's, not the check's.
+    arityErrorBehindCoalescing: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withError()
+        """
+    )
+
+    # NOT caught, and correctly so: the argument comes from the API response,
+    # whose shape is unknown, so composition must not refuse it. The runtime
+    # check is what reports this one.
+    connectorErrorFromUnknownShape: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withConnectorError(whatever)
+        """
+    )
+}
+
+type T {
+    id: ID
+    status: String
+}

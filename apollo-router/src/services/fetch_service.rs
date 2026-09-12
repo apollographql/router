@@ -21,6 +21,7 @@ use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
+use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::fetch_service_handle_subscription;
 use crate::query_planner::FETCH_SPAN_NAME;
@@ -135,6 +136,7 @@ impl FetchService {
 
         let paths = variables.inverted_paths.clone();
         let operation = fetch_node.operation.as_parsed().cloned();
+        let declared_errors_context = context.clone();
 
         Box::pin(async move {
             let connector = schema
@@ -167,13 +169,21 @@ impl FetchService {
                 Ok(res) => res.response.into_parts(),
             };
 
-            let (value, errors) = fetch_node.response_at_path(
+            let (value, mut errors) = fetch_node.response_at_path(
                 &schema,
                 &current_dir,
                 paths,
                 response,
                 hoist_orphan_errors,
             );
+
+            // Errors a mapping declared with `->withConnectorError` are not execution
+            // errors. The fields they describe resolved. So they belong under
+            // the response's `extensions`, not in `errors`, and this is where
+            // they leave. It happens here rather than earlier because
+            // `response_at_path` has just given them client-resolvable paths.
+            ConnectorDeclaredErrors::take_marked(&declared_errors_context, &mut errors);
+
             Ok((value, errors))
         })
     }

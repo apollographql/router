@@ -64,8 +64,16 @@ fn map_method(
 
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
-            let (applied_opt, arg_errors) =
+            let (applied_opt, mut arg_errors) =
                 first_arg.apply_to_path(element, vars, &input_path, spec);
+            // ->map is index-preserving (a element that produces nothing becomes
+            // null rather than being dropped), so the input index is also the
+            // output index. Contrast ->filter, which deliberately does not do
+            // this: it renumbers, so an input index would name the wrong output
+            // element, and a coarser path beats a wrong one.
+            for error in &mut arg_errors {
+                error.prepend_output_segment(JSON::Number(i.into()));
+            }
             errors.extend(arg_errors);
             output.insert(i, applied_opt.unwrap_or(JSON::Null));
         }
