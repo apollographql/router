@@ -1,0 +1,46 @@
+---
+source: apollo-router/src/plugins/cache/tests.rs
+expression: response
+---
+{
+  "data": {
+    "currentUser": {
+      "allOrganizations": [
+        {
+          "id": "1",
+          "name": null
+        },
+        {
+          "id": "2",
+          "name": null
+        }
+      ]
+    }
+  },
+  "errors": [
+    {
+      "message": "subgraph mock not configured",
+      "path": [
+        "currentUser",
+        "allOrganizations",
+        0
+      ],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "orga"
+      }
+    },
+    {
+      "message": "subgraph mock not configured",
+      "path": [
+        "currentUser",
+        "allOrganizations",
+        1
+      ],
+      "extensions": {
+        "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+        "service": "orga"
+      }
+    }
+  ]
+}
