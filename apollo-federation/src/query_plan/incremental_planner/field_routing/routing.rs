@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use petgraph::graph::EdgeIndex;
@@ -35,32 +36,28 @@ pub(crate) struct RoutingChoice {
     pub(crate) target: RoutingTarget,
     /// How this choice reaches its target subgraph.
     pub(crate) hop_kind: HopKind,
-    /// @key fields to include in parent fetch (if key hop required).
+    /// @key fields entering the target group; the group before it must
+    /// output them. `None` for direct edges.
     pub(crate) key_conditions: Option<Arc<SelectionSet>>,
     /// Whether the current subgraph can satisfy the key conditions without
     /// an intermediate hop.
     pub(crate) conditions_locally_satisfiable: bool,
-    /// When the routed edge carries @requires conditions: whether the fetch
-    /// anchoring the field can select the condition fields in place. Commit
-    /// applies this verdict instead of re-deriving it. True when the edge
-    /// has no conditions.
+    /// Whether the anchoring fetch can select the edge's @requires
+    /// conditions in place; commit applies this verdict. True when the
+    /// edge has no conditions.
     pub(crate) requires_resolvable_in_place: bool,
-    /// When the field is only reachable through a multi-hop key chain,
-    /// this captures the intermediate hops in order. Commit creates a
-    /// chained sequence of entity groups, one per intermediate, before
-    /// the final hop that resolves the field.
+    /// Intermediate hops, in order, when the field is only reachable
+    /// through a multi-hop key chain.
     pub(crate) intermediate_key_hops: Vec<IntermediateKeyHop>,
 }
 
-/// One leg of a multi-hop key chain: a key resolution that lands at a
-/// node which doesn't have the target field but bridges toward one that
-/// does. `key_conditions` is the exit key, the fields this hop's group
-/// must output to key into the next group.
+/// One leg of a multi-hop key chain: an intermediate node and the key
+/// that enters it. Every key in a choice is an entry key; the previous
+/// group outputs whatever enters the next.
 #[derive(Clone, Debug)]
 pub(crate) struct IntermediateKeyHop {
-    pub(crate) target_subgraph: Arc<str>,
-    pub(crate) key_conditions: Option<Arc<SelectionSet>>,
     pub(crate) target_node: NodeIndex,
+    pub(crate) entry_key: Option<Arc<SelectionSet>>,
 }
 
 /// How a routing choice reaches its target subgraph.
@@ -90,8 +87,7 @@ impl RoutingChoice {
         }
     }
 
-    /// A same-subgraph entity re-entry resolving a field whose @requires
-    /// conditions cannot simply sit alongside it.
+    /// Same-subgraph entity re-entry for in-place-unresolvable @requires.
     fn self_key_hop(
         edge_index: EdgeIndex,
         target_subgraph: Arc<str>,
@@ -137,8 +133,6 @@ enum RoutingPreference {
     SelfRequiresHop,
     LocallySatisfiableKeyHop,
     RemoteKeyHop,
-    /// A 2+ hop key chain. Costs multiple entity fetches, so it ranks
-    /// below single remote hops.
     ChainedKeyHop,
 }
 
@@ -152,8 +146,8 @@ struct KeyHopCandidate {
 }
 
 impl KeyHopCandidate {
-    /// Locally satisfiable keys must never lose the per-subgraph dedup to a
-    /// cheaper-looking unsatisfiable key.
+    /// Satisfiable keys must never lose the dedup to a cheaper-looking
+    /// unsatisfiable one.
     fn dedup_rank(&self) -> (u8, usize) {
         let satisfiability = if self.conditions_local { 0 } else { 2 };
         (satisfiability, self.key_leaf_count)
@@ -214,11 +208,14 @@ impl FieldRoutingSearchSpace {
         Ok(())
     }
 
-    pub(super) fn key_hop_options(
+    /// Append cross-subgraph key-hop options. Chained hops are a last
+    /// resort, explored only when `options` is still empty afterward.
+    pub(super) fn append_key_hop_options(
         &self,
         pending_node: NodeIndex,
+        options: &mut Vec<RoutingChoice>,
         edge_finder: impl Fn(NodeIndex) -> Option<EdgeIndex>,
-    ) -> Result<Vec<RoutingChoice>, FederationError> {
+    ) -> Result<(), FederationError> {
         let current_node = self.query_graph.node_weight(pending_node)?;
         let current_source = current_node.source.clone();
         let source_type: Option<CompositeTypeDefinitionPosition> =
@@ -260,14 +257,12 @@ impl FieldRoutingSearchSpace {
             }
         }
 
-        let mut options = self.evaluate_hop_candidates(pending_node, &candidates)?;
+        options.extend(self.evaluate_hop_candidates(pending_node, &candidates)?);
 
-        // Only explore chained key hops when no committable single-hop
-        // reached the field; chained hops are strictly more expensive.
         if options.is_empty() {
             for (key_target, key_edge_idx) in need_chain {
                 let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
-                for option in self.chained_key_hop_options(
+                options.extend(self.chained_key_hop_options(
                     pending_node,
                     key_target,
                     key_edge,
@@ -275,21 +270,17 @@ impl FieldRoutingSearchSpace {
                     &source_type,
                     &source_schema,
                     &edge_finder,
-                )? {
-                    options.push(option);
-                }
+                )?);
                 if !options.is_empty() {
                     break;
                 }
             }
         }
-        Ok(options)
+        Ok(())
     }
 
-    /// Follow key edges transitively from a node that doesn't have the
-    /// target field, searching for a node that does. Produces multi-hop
-    /// routing choices whose `intermediate_key_hops` list captures the
-    /// full chain.
+    /// Follow key edges transitively toward a node with the target field,
+    /// producing multi-hop choices that capture the chain.
     #[allow(clippy::too_many_arguments)]
     fn chained_key_hop_options(
         &self,
@@ -307,80 +298,57 @@ impl FieldRoutingSearchSpace {
             (None, _, _) => true,
             _ => false,
         };
-
-        let first_intermediate_data = self.query_graph.node_weight(first_intermediate)?;
-        let first_hop = IntermediateKeyHop {
-            target_subgraph: first_intermediate_data.source.clone(),
-            key_conditions: first_key_edge.conditions.clone(),
-            target_node: first_intermediate,
-        };
-
         let mut visited: Vec<Arc<str>> = vec![
             origin_source.clone(),
-            first_intermediate_data.source.clone(),
+            self.query_graph
+                .node_weight(first_intermediate)?
+                .source
+                .clone(),
         ];
 
-        let mut frontier: Vec<(NodeIndex, Vec<IntermediateKeyHop>)> =
-            vec![(first_intermediate, vec![first_hop])];
+        // Breadth-first over key edges, each subgraph visited once, stop at
+        // the first level with hits: the returned chains are shortest.
+        // A frontier entry is the entry-keyed chain so far; the node being
+        // explored is its last hop's target. Chains are short
+        // (MAX_CHAIN_DEPTH) and few (one visit per subgraph), so plain vec
+        // clones are fine.
+        let mut frontier: VecDeque<Vec<IntermediateKeyHop>> =
+            VecDeque::from([vec![IntermediateKeyHop {
+                target_node: first_intermediate,
+                entry_key: first_key_edge.conditions.clone(),
+            }]]);
         let mut options = Vec::new();
 
-        while let Some((current, path)) = frontier.pop() {
-            if path.len() >= MAX_CHAIN_DEPTH {
+        while let Some(hops) = frontier.pop_front() {
+            let Some(current) = hops.last().map(|hop| hop.target_node) else {
+                continue;
+            };
+            if hops.len() >= MAX_CHAIN_DEPTH {
                 continue;
             }
-
-            for key_edge_idx in self.out_edge_indices(current) {
-                let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
-                if !matches!(key_edge.transition, QueryGraphEdgeTransition::KeyResolution) {
-                    continue;
-                }
-                let (_, next_target) = self.query_graph.edge_endpoints(key_edge_idx)?;
-                let next_target_data = self.query_graph.node_weight(next_target)?;
-                if visited.contains(&next_target_data.source)
-                    || self.disabled_subgraphs.contains(&next_target_data.source)
-                {
-                    continue;
-                }
-                visited.push(next_target_data.source.clone());
-
-                if let Some(found_edge_idx) = edge_finder(next_target) {
-                    let mut hops = path.clone();
-                    // Shift exit keys: each hop carries the conditions the next
-                    // group needs to enter, not the entry conditions this hop
-                    // was reached by.
-                    for i in 0..hops.len() - 1 {
-                        hops[i].key_conditions = hops[i + 1].key_conditions.clone();
-                    }
-                    let last = hops.last_mut().unwrap();
-                    last.key_conditions = key_edge.conditions.clone();
-
-                    trace!(
-                        chain_length = hops.len(),
-                        final_subgraph = %next_target_data.source,
-                        "found field via {}-hop key chain",
-                        hops.len() + 1,
-                    );
-
-                    options.push(RoutingChoice {
+            for next in self.chain_exits(current, &mut visited)? {
+                match edge_finder(next.target_node) {
+                    Some(found_edge) => options.push(RoutingChoice {
                         target: RoutingTarget::SubgraphEdge {
-                            edge_index: found_edge_idx,
-                            target_subgraph: next_target_data.source.clone(),
+                            edge_index: found_edge,
+                            target_subgraph: self
+                                .query_graph
+                                .node_weight(next.target_node)?
+                                .source
+                                .clone(),
                         },
                         hop_kind: HopKind::KeyHop,
-                        key_conditions: first_key_edge.conditions.clone(),
+                        key_conditions: next.entry_key,
                         conditions_locally_satisfiable: first_conditions_local,
                         requires_resolvable_in_place: self
-                            .requires_conditions_resolvable_in_place(origin_node, found_edge_idx)?,
-                        intermediate_key_hops: hops,
-                    });
-                } else {
-                    let mut extended = path.clone();
-                    extended.push(IntermediateKeyHop {
-                        target_subgraph: next_target_data.source.clone(),
-                        key_conditions: key_edge.conditions.clone(),
-                        target_node: next_target,
-                    });
-                    frontier.push((next_target, extended));
+                            .requires_conditions_resolvable_in_place(origin_node, found_edge)?,
+                        intermediate_key_hops: hops.clone(),
+                    }),
+                    None => {
+                        let mut extended = hops.clone();
+                        extended.push(next);
+                        frontier.push_back(extended);
+                    }
                 }
             }
             if !options.is_empty() {
@@ -390,10 +358,38 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
-    /// Build the dedup candidate for a single-hop key edge whose target has
-    /// the field. Satisfiability is computed here, before dedup, so a key
-    /// the state can produce is never collapsed into an unsatisfiable
-    /// same-subgraph rival.
+    /// Entry-keyed hops over key-resolution edges from `current` into
+    /// subgraphs not yet visited and not disabled; marks them visited.
+    fn chain_exits(
+        &self,
+        current: NodeIndex,
+        visited: &mut Vec<Arc<str>>,
+    ) -> Result<Vec<IntermediateKeyHop>, FederationError> {
+        let mut exits = Vec::new();
+        for key_edge_idx in self.out_edge_indices(current) {
+            let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
+            if !matches!(key_edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                continue;
+            }
+            let (_, target) = self.query_graph.edge_endpoints(key_edge_idx)?;
+            let subgraph = &self.query_graph.node_weight(target)?.source;
+            if visited.contains(subgraph) || self.disabled_subgraphs.contains(subgraph) {
+                continue;
+            }
+            visited.push(subgraph.clone());
+            exits.push(IntermediateKeyHop {
+                target_node: target,
+                entry_key: key_edge.conditions.clone(),
+            });
+        }
+        Ok(exits)
+    }
+
+    /// Dedup candidate for a single-hop key edge whose target has the
+    /// field. Satisfiability is computed before dedup so a producible key
+    /// never loses to an unsatisfiable same-subgraph rival. This verdict
+    /// is schema-static and weaker than commit's; @provides support adds
+    /// a dedup tier for provides-copies.
     fn single_hop_candidate(
         &self,
         found_edge_idx: EdgeIndex,
@@ -466,9 +462,8 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
-    /// Enumerate valid `RoutingChoice`s for a pending selection from its
-    /// current query graph node, covering same-subgraph resolution and
-    /// cross-subgraph key hops.
+    /// Enumerate `RoutingChoice`s for a pending selection at its query
+    /// graph node.
     pub(super) fn routing_options(
         &self,
         pending: &PendingSelection,
@@ -544,10 +539,9 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
-    /// Options for a field selection: the direct edge (if any) plus every
-    /// cross-subgraph key hop. Hops are enumerated even when a viable direct
-    /// edge exists, because hopping early can be cheaper than hopping per-child
-    /// later.
+    /// Options for a field: the direct edge (if any) plus key hops, which
+    /// are enumerated alongside a viable direct edge because hopping early
+    /// can beat hopping per-child later.
     pub(super) fn field_options(
         &self,
         pending: &PendingSelection,
@@ -572,10 +566,9 @@ impl FieldRoutingSearchSpace {
             }
         }
 
-        let hops = self.key_hop_options(pending.query_graph_node, |key_target| {
+        self.append_key_hop_options(pending.query_graph_node, &mut options, |key_target| {
             self.edge_for_field(key_target, &field_selection.field)
         })?;
-        options.extend(hops);
 
         Ok(options)
     }
@@ -634,10 +627,9 @@ impl FieldRoutingSearchSpace {
             type_condition = %type_cond.type_name(),
             "searching key hops for fragment downcast",
         );
-        let hops = self.key_hop_options(pending.query_graph_node, |key_target| {
+        self.append_key_hop_options(pending.query_graph_node, &mut options, |key_target| {
             self.edge_for_inline_fragment(key_target, &fragment_selection.inline_fragment)
         })?;
-        options.extend(hops);
         Ok(options)
     }
 
@@ -693,9 +685,8 @@ impl FieldRoutingSearchSpace {
         count
     }
 
-    /// True when the node has no reachable cross-subgraph edges: every
-    /// descendant field is local, so the entire subtree can be added in one
-    /// shot instead of field-by-field.
+    /// True when every descendant field is local, so the whole subtree
+    /// can be added in one shot.
     pub(super) fn is_fully_local(
         &self,
         query_graph_node: NodeIndex,
@@ -780,42 +771,25 @@ pub(super) fn selection_leaf_count(selection_set: &SelectionSet) -> usize {
 mod tests {
     use apollo_compiler::name;
 
+    use super::super::test_support;
     use super::*;
-    use crate::Supergraph;
-    use crate::query_graph::build_federated_query_graph;
-    use crate::subgraph::Subgraph;
 
     fn search_space() -> FieldRoutingSearchSpace {
-        let s1 = Subgraph::parse_and_expand(
-            "S1",
-            "http://s1",
-            r#"
-            type Query { t: T }
-            type T @key(fields: "k") { k: ID, x: Int }
-            "#,
-        )
-        .expect("S1 parses");
-        let s2 = Subgraph::parse_and_expand(
-            "S2",
-            "http://s2",
-            r#"
-            type T @key(fields: "k") { k: ID, y: Int }
-            "#,
-        )
-        .expect("S2 parses");
-        let supergraph = Supergraph::compose(vec![&s1, &s2]).expect("composes");
-        let api = supergraph
-            .to_api_schema(Default::default())
-            .expect("api schema");
-        let qg = build_federated_query_graph(supergraph.schema.clone(), api, None, None)
-            .expect("query graph");
-        FieldRoutingSearchSpace {
-            query_graph: Arc::new(qg),
-            supergraph_schema: supergraph.schema,
-            override_conditions: Default::default(),
-            inconsistent_abstract_types: Default::default(),
-            disabled_subgraphs: Default::default(),
-        }
+        test_support::search_space(&[
+            (
+                "S1",
+                r#"
+                type Query { t: T }
+                type T @key(fields: "k") { k: ID, x: Int }
+                "#,
+            ),
+            (
+                "S2",
+                r#"
+                type T @key(fields: "k") { k: ID, y: Int }
+                "#,
+            ),
+        ])
     }
 
     fn key_selection(space: &FieldRoutingSearchSpace, text: &str) -> Arc<SelectionSet> {
