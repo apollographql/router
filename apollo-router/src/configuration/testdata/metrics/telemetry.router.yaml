@@ -7,6 +7,10 @@ telemetry:
         enabled: true
         endpoint: default
     tracing:
+      common:
+        preview_datadog_agent_sampling: true
+      propagation:
+        datadog: true
       otlp:
         enabled: true
         endpoint: default
@@ -16,6 +20,13 @@ telemetry:
       datadog:
         enabled: true
         endpoint: default
+        enable_span_mapping: true
+        fixed_span_names: true
+        resource_mapping:
+          router: http.route
+        span_metrics:
+          supergraph: true
+        sampler: always_on
   instrumentation:
     spans:
       mode: spec_compliant
