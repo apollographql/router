@@ -251,7 +251,7 @@ tower.workspace = true
 tower-http = { version = "0.7.0", features = ["full"] }
 tower-service = "0.3.2"
 tracing = "0.1.40"
-tracing-core = "0.1.32"
+tracing-core = { version = "0.1.32", features = ["valuable"] }
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 url = { version = "2.5.4", features = ["serde"] }
@@ -294,6 +294,10 @@ log = "0.4.22"
 scopeguard = "1.2.0"
 tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
 blake3 = { version = "1.8.2", features = ["serde"] }
+
+[target.'cfg(tracing_unstable)'.dependencies]
+valuable = "0.1.1"
+valuable-serde = "0.1.1"
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
@@ -424,6 +428,11 @@ harness = false
 name = "planner"
 
 [lints.rust]
+
+# ROUTER-2100: `tracing_unstable` is set via RUSTFLAGS, not by a Cargo feature, so rustc
+# doesn't know it's a legitimate cfg name and warns on every `#[cfg(tracing_unstable)]`.
+# This registers it as expected without silencing the lint for anything else.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tracing_unstable)'] }
 
 # Compatibility with the 2024 edition, remove after switching to it:
 boxed-slice-into-iter = "warn"
