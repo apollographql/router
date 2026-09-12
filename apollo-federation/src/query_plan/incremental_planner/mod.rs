@@ -1,3 +1,36 @@
+//! Field-by-field query planner using BULB (Beam search Using Limited
+//! discrepancy Backtracking).
+//!
+//! The planner walks the operation one selection at a time, routing each
+//! field or inline fragment to a subgraph via the federated query graph.
+//! Each multi-option selection is a decision point; BULB revisits
+//! alternatives under a fuel budget that only starts burning once a first
+//! complete plan exists.
+//!
+//! # Architecture
+//!
+//! The system is layered bottom-up:
+//!
+//! - `bulb_search`: Generic beam search engine parameterized by a
+//!   `BulbSearchSpace` trait. Knows nothing about federation.
+//!
+//! - `shared_path`: Immutable, structurally-shared path segments used
+//!   by the fetch graph to track where selections sit in the response.
+//!
+//! - `fetch_graph`: Mutable graph of fetch groups (subgraph calls)
+//!   with an undo log for checkpoint/rollback during search. Each node
+//!   is a fetch group; edges encode data dependencies.
+//!
+//! - `field_routing`: The `BulbSearchSpace` implementation. Routes
+//!   selections through the query graph, enumerating subgraph edges and
+//!   key hops as options, committing choices into the fetch graph, and
+//!   managing the pending-selection stack.
+//!
+//! - This module: entry point (`build_bulb_plan`) that seeds the
+//!   initial state from the operation root and materializes the
+//!   finished fetch graph into a `QueryPlan`.
+//!
+
 pub mod bulb_search;
 pub(crate) mod fetch_graph;
 pub(crate) mod field_routing;
