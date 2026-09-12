@@ -31,6 +31,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::batching::BatchQuery;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::DEFAULT_BUFFER_SIZE;
@@ -104,6 +105,12 @@ pub struct Request {
 }
 
 impl Request {
+    pub(crate) fn is_part_of_batch(&self) -> bool {
+        self.context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+    }
+
     /// The original request made to the router, which produced this connector request.
     ///
     /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
@@ -159,7 +166,8 @@ pub struct Response {
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request.
+    /// The result of the transport request. `None` means no transport happened. Rather, the
+    /// response was served from the router's response cache.
     ///
     /// This is the raw transport outcome: HTTP status, headers and transport-level
     /// errors. Telemetry and downstream plugins read it, but the data returned to the
@@ -167,7 +175,7 @@ pub struct Response {
     /// changes. Rewriting the status or headers here therefore makes telemetry
     /// disagree with what the client actually receives unless you make the
     /// corresponding change through the mapped-response accessors.
-    pub transport_result: Result<TransportResponse, Error>,
+    pub transport_result: Option<Result<TransportResponse, Error>>,
 
     /// The mapped response, including any mapping problems encountered when processing
     /// the response. This is what is merged into the GraphQL response returned to the
@@ -262,7 +270,7 @@ impl Response {
         Self {
             context,
             subgraph_name,
-            transport_result: Err(error),
+            transport_result: Some(Err(error)),
             mapped_response,
         }
     }
@@ -289,7 +297,7 @@ impl Response {
         Response {
             context: request_context,
             subgraph_name,
-            transport_result: Err(Error::TransportFailure(message)),
+            transport_result: Some(Err(Error::TransportFailure(message))),
             mapped_response: MappedResponse::Error {
                 error,
                 key: request_key,
@@ -324,7 +332,7 @@ impl Response {
         Self {
             context,
             subgraph_name: String::new(),
-            transport_result: Ok(http_response.into()),
+            transport_result: Some(Ok(http_response.into())),
             mapped_response,
         }
     }
@@ -445,7 +453,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                     Ok(Response {
                         context: request.context,
                         subgraph_name: original_subgraph_name,
-                        transport_result: Ok(TransportResponse::MappingOnly),
+                        transport_result: Some(Ok(TransportResponse::MappingOnly)),
                         mapped_response: mapped,
                     })
                 }

@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 
+use apollo_federation::connectors::runtime::mapping::Problem;
 pub(super) use error::Error;
 use tokio_util::time::FutureExt;
 
 use super::cache_control::CacheControl;
+use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::cache_tag::CacheTag;
 use crate::plugins::response_cache::invalidation::InvalidationKind;
 use crate::plugins::response_cache::invalidation_labels::InvalidationLabels;
@@ -42,6 +44,15 @@ pub(super) struct Document {
     /// enabling CDN invalidation alone never silently changes what gets `ZADD`ed into Redis.
     pub(super) cdn_invalidation_tags: Vec<String>,
     pub(super) expire: Duration,
+    /// Which scope's index namespace this document's cache-tag entries are written under.
+    /// Defaults to [`CacheScope::Subgraph`]; connector store paths set [`CacheScope::Connector`].
+    pub(super) scope: CacheScope,
+    /// Connector response-mapping problems produced while mapping the response this document
+    /// holds, persisted so a later cache hit can replay them. Without this, mapping problems
+    /// would be reported once — on the request that missed — and then disappear for the whole
+    /// TTL, leaving `ConnectorSelector::ResponseMappingProblems` and the cache debugger showing
+    /// a clean connector for a response that has problems. Always empty on the subgraph path.
+    pub(super) mapping_problems: Vec<Problem>,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -57,6 +68,10 @@ pub(super) struct CacheEntry {
     /// endpoints; for CDNs, they're emitted as a header and separated by a delimiter, which are
     /// both configurable
     pub(super) invalidation_labels: Option<InvalidationLabels>,
+    /// Connector response-mapping problems recorded when this entry was stored. See
+    /// [`Document::mapping_problems`]; empty for subgraph entries and for entries stored before
+    /// mapping problems were persisted.
+    pub(super) mapping_problems: Vec<Problem>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for
@@ -168,18 +183,23 @@ pub(super) trait CacheStorage {
     }
 
     #[doc(hidden)]
-    async fn internal_invalidate_by_subgraph(&self, subgraph_name: &str) -> StorageResult<u64>;
+    async fn internal_invalidate_by_subgraph(
+        &self,
+        scope: CacheScope,
+        subgraph_name: &str,
+    ) -> StorageResult<u64>;
 
-    /// Invalidate all data associated with `subgraph_names`. Command will be timed out after
-    /// `self.invalidate_timeout()`.
+    /// Invalidate all data associated with `subgraph_names` within `scope`. Command will be
+    /// timed out after `self.invalidate_timeout()`.
     async fn invalidate_by_subgraph(
         &self,
+        scope: CacheScope,
         subgraph_name: &str,
         invalidation_kind: InvalidationKind,
     ) -> StorageResult<u64> {
         let now = Instant::now();
         let result = flatten_storage_error(
-            self.internal_invalidate_by_subgraph(subgraph_name)
+            self.internal_invalidate_by_subgraph(scope, subgraph_name)
                 .timeout(self.invalidate_timeout())
                 .await,
         );
@@ -191,21 +211,24 @@ pub(super) trait CacheStorage {
     #[doc(hidden)]
     async fn internal_invalidate(
         &self,
+        scope: CacheScope,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
     ) -> StorageResult<HashMap<String, u64>>;
 
     /// Invalidate all data associated with at least one of the `invalidation_keys` **and** at
-    /// least one of the `subgraph_names`. Command will be timed out after `self.invalidate_timeout()`.
+    /// least one of the `subgraph_names`, within `scope`. Command will be timed out after
+    /// `self.invalidate_timeout()`.
     async fn invalidate(
         &self,
+        scope: CacheScope,
         invalidation_keys: Vec<String>,
         subgraph_names: Vec<String>,
         invalidation_kind: InvalidationKind,
     ) -> StorageResult<HashMap<String, u64>> {
         let now = Instant::now();
         let result = flatten_storage_error(
-            self.internal_invalidate(invalidation_keys, subgraph_names)
+            self.internal_invalidate(scope, invalidation_keys, subgraph_names)
                 .timeout(self.invalidate_timeout())
                 .await,
         );

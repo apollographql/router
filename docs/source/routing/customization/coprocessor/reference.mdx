@@ -304,6 +304,23 @@ This value is present for coprocessor requests from the router's `SubgraphServic
 <tr>
 <td>
 
+##### `cacheHit`
+
+`boolean`
+
+</td>
+<td>
+
+Present and `true` when `stage` is `ConnectorResponse` and the response was served from the router's [response cache](/router/performance/caching/response-caching/) instead of an HTTP call to the API.
+
+Because no HTTP call was made, `statusCode` and `headers` are absent on such a response, and a status or headers your coprocessor returns for it are ignored. Use this property rather than the absence of `statusCode` to tell a cache hit from a failed request.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 ##### `statusCode`
 
 `number`
@@ -312,6 +329,8 @@ This value is present for coprocessor requests from the router's `SubgraphServic
 <td>
 
 The HTTP status code returned with a response.
+
+Absent on a `ConnectorResponse` that carries `cacheHit`, and on one whose request failed before a response was received.
 
 </td>
 </tr>
@@ -1014,3 +1033,24 @@ The following keys are populated by the demand control plugin:
 ```
 
 </ExpansionPanel>
+
+A response served from the router's response cache made no HTTP call, so it carries `cacheHit: true` and no `statusCode` or `headers`:
+
+```json
+{
+  "version": 1,
+  "stage": "ConnectorResponse",
+  "id": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+  "control": "continue",
+  "body": {
+    "data": {
+      "users": [
+        { "id": "1", "name": "Ada Lovelace" },
+        { "id": "2", "name": "Grace Hopper" }
+      ]
+    }
+  },
+  "serviceName": "my_subgraph_name.my_source_name",
+  "cacheHit": true
+}
+```
