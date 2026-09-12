@@ -3,9 +3,9 @@
 //!
 //! The planner walks the operation one selection at a time, routing each
 //! field or inline fragment to a subgraph via the federated query graph.
-//! It replaces the traversal-based planner's all-at-once approach with an
-//! incremental one: each selection is a decision point, and BULB explores
-//! alternatives only where the greedy choice is demonstrably suboptimal.
+//! Each multi-option selection is a decision point; BULB revisits
+//! alternatives under a fuel budget that only starts burning once a first
+//! complete plan exists.
 //!
 //! # Architecture
 //!
@@ -30,15 +30,6 @@
 //!   initial state from the operation root and materializes the
 //!   finished fetch graph into a `QueryPlan`.
 //!
-//! # Flow
-//!
-//! `build_bulb_plan` constructs a `FieldRoutingSearchSpace` and an
-//! initial `PlanState` (pending stack seeded from the operation root),
-//! then hands both to `bulb_search`. The search alternates between
-//! fast-forwarding (greedily committing single-option selections) and
-//! branching at multi-option decision points. When complete, the
-//! `FetchGraph` in the winning state is converted to a `QueryPlan` via
-//! the plan builder.
 
 pub mod bulb_search;
 pub(crate) mod fetch_graph;

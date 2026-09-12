@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 5c02b17a450f59464522762530ae346e3892168d
+# Composed from subgraphs with hash: 3a264141a54604c33d2d251a9dfb45ee22a7e16f
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -23,11 +23,11 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
 type Child
-  @join__type(graph: SUBGRAPHA)
-  @join__type(graph: SUBGRAPHB)
+  @join__type(graph: A)
+  @join__type(graph: B)
 {
-  value: Int @join__field(graph: SUBGRAPHA)
-  leaf: String @join__field(graph: SUBGRAPHB)
+  value: Int @join__field(graph: A)
+  leaf: String @join__field(graph: B)
 }
 
 input join__ContextArgument {
@@ -44,8 +44,8 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  SUBGRAPHA @join__graph(name: "SubgraphA", url: "none")
-  SUBGRAPHB @join__graph(name: "SubgraphB", url: "none")
+  A @join__graph(name: "a", url: "none")
+  B @join__graph(name: "b", url: "none")
 }
 
 scalar link__Import
@@ -63,16 +63,16 @@ enum link__Purpose {
 }
 
 type Parent
-  @join__type(graph: SUBGRAPHA, key: "id")
-  @join__type(graph: SUBGRAPHB, key: "id")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
 {
   id: ID!
   child: Child
 }
 
 type Query
-  @join__type(graph: SUBGRAPHA)
-  @join__type(graph: SUBGRAPHB)
+  @join__type(graph: A)
+  @join__type(graph: B)
 {
-  parent: Parent @join__field(graph: SUBGRAPHA)
+  parent: Parent @join__field(graph: A)
 }
