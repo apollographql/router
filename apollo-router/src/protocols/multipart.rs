@@ -72,6 +72,9 @@ pub(crate) struct Multipart {
     /// The telemetry counter stashed from context, used to record termination with
     /// configurable attributes.
     terminated_counter: Option<SubscriptionsTerminatedCounter>,
+    /// Subscription payloads serialized into the response stream, including error-only
+    /// termination notices. Heartbeats and the empty close sentinel are excluded.
+    events_sent: u64,
 }
 
 impl Multipart {
@@ -100,6 +103,7 @@ impl Multipart {
             creation_span: Span::current(),
             end_reason: None,
             terminated_counter: None,
+            events_sent: 0,
         }
     }
 
@@ -242,6 +246,7 @@ impl Drop for Multipart {
                 self.creation_span
                     .set_span_dyn_attribute(SUBSCRIPTION_END_REASON_KEY, reason.as_value());
                 self.emit_subscription_termination_metric(reason);
+                self.emit_events_sent_metric(reason);
             }
             EndReason::Defer(reason) => {
                 self.creation_span
@@ -257,6 +262,16 @@ impl Multipart {
         if let Some(counter) = &self.terminated_counter {
             counter.record(reason.as_str());
         }
+    }
+
+    fn emit_events_sent_metric(&self, reason: SubscriptionEndReason) {
+        u64_histogram_with_unit!(
+            "apollo.router.operations.subscriptions.events_sent",
+            "Number of subscription payloads written to the response stream over the subscription's lifetime",
+            "{event}",
+            self.events_sent,
+            reason = reason.as_str()
+        );
     }
 }
 
@@ -357,6 +372,8 @@ impl Stream for Multipart {
                             };
 
                             serde_json::to_writer(&mut buf, &response)?;
+                            // The empty close sentinel returns before serialization.
+                            self.events_sent += 1;
                         }
                         ProtocolMode::Defer => {
                             has_subgraph_errors =
@@ -570,6 +587,12 @@ mod tests {
                 "subgraph.name" = "test_subgraph",
                 "client.name" = ""
             );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                1u64,
+                "reason" = "server_close"
+            );
         }
         .with_metrics()
         .await;
@@ -619,6 +642,12 @@ mod tests {
                 "subgraph.name" = "test_subgraph",
                 "client.name" = ""
             );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                2u64,
+                "reason" = "server_close"
+            );
         }
         .with_metrics()
         .await;
@@ -659,6 +688,12 @@ mod tests {
                 "reason" = "server_close",
                 "subgraph.name" = "test_subgraph",
                 "client.name" = ""
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                0u64,
+                "reason" = "server_close"
             );
         }
         .with_metrics()
@@ -723,6 +758,12 @@ mod tests {
                 "subgraph.name" = "",
                 "client.name" = "test_client"
             );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                0u64,
+                "reason" = "heartbeat_delivery_failed"
+            );
         }
         .with_metrics()
         .await;
@@ -777,6 +818,12 @@ mod tests {
                 "subgraph.name" = "",
                 "client.name" = "test_client"
             );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                1u64,
+                "reason" = "client_disconnect"
+            );
         }
         .with_metrics()
         .await;
@@ -800,6 +847,7 @@ mod tests {
                             .extension_code("SUBSCRIPTION_SCHEMA_RELOAD")
                             .build(),
                     )
+                    .extension(SUBSCRIPTION_ERROR_EXTENSION_KEY, true)
                     .subscribed(false)
                     .build(),
             ];
@@ -829,6 +877,12 @@ mod tests {
                 "subgraph.name" = "",
                 "client.name" = ""
             );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                2u64,
+                "reason" = "schema_reload"
+            );
         }
         .with_metrics()
         .await;
@@ -853,6 +907,7 @@ mod tests {
                             .extension_code("SUBSCRIPTION_CONFIG_RELOAD")
                             .build(),
                     )
+                    .extension(SUBSCRIPTION_ERROR_EXTENSION_KEY, true)
                     .subscribed(false)
                     .build(),
             ];
@@ -882,6 +937,12 @@ mod tests {
                 "subgraph.name" = "",
                 "client.name" = ""
             );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                2u64,
+                "reason" = "config_reload"
+            );
         }
         .with_metrics()
         .await;
@@ -907,6 +968,7 @@ mod tests {
                             .extension_code("SUBSCRIPTION_MAX_LIFETIME_EXCEEDED")
                             .build(),
                     )
+                    .extension(SUBSCRIPTION_ERROR_EXTENSION_KEY, true)
                     .subscribed(false)
                     .build(),
             ];
@@ -935,6 +997,12 @@ mod tests {
                 "reason" = "max_lifetime",
                 "subgraph.name" = "",
                 "client.name" = ""
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                2u64,
+                "reason" = "max_lifetime"
             );
         }
         .with_metrics()
@@ -1496,6 +1564,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_events_sent_records_one_sample_per_lifetime() {
+        for event_count in [0u64, 2] {
+            async move {
+                let responses = (0..event_count).map(|_| {
+                    graphql::Response::builder()
+                        .data(serde_json_bytes::Value::String(ByteString::from("data")))
+                        .subscribed(true)
+                        .build()
+                });
+                let mut protocol =
+                    Multipart::new(stream::iter(responses), ProtocolMode::Subscription);
+
+                while let Some(chunk) = protocol.next().await {
+                    chunk.unwrap();
+                    assert_histogram_not_exists!(
+                        "apollo.router.operations.subscriptions.events_sent",
+                        u64
+                    );
+                }
+                assert_histogram_not_exists!(
+                    "apollo.router.operations.subscriptions.events_sent",
+                    u64
+                );
+
+                drop(protocol);
+
+                assert_histogram_count!(
+                    "apollo.router.operations.subscriptions.events_sent",
+                    1u64,
+                    "reason" = "server_close"
+                );
+                assert_histogram_sum!(
+                    "apollo.router.operations.subscriptions.events_sent",
+                    event_count,
+                    "reason" = "server_close"
+                );
+            }
+            .with_metrics()
+            .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_defer_mode_records_no_events_sent() {
+        async {
+            let (_guard, _layer) = setup_tracing();
+            let span = tracing::info_span!("test_span");
+            let _span_guard = span.enter();
+            let responses = vec![
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from("initial")))
+                    .has_next(true)
+                    .build(),
+                graphql::Response::builder()
+                    .data(serde_json_bytes::Value::String(ByteString::from(
+                        "deferred",
+                    )))
+                    .has_next(false)
+                    .build(),
+            ];
+            let gql_responses = stream::iter(responses);
+            let mut protocol = Multipart::new(gql_responses, ProtocolMode::Defer);
+
+            while protocol.next().await.is_some() {}
+
+            drop(protocol);
+            drop(_span_guard);
+            drop(span);
+
+            assert_histogram_not_exists!("apollo.router.operations.subscriptions.events_sent", u64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     async fn test_end_reason_subgraph_error() {
         async {
             // Test: Subscription terminated because the subgraph WebSocket connection
@@ -1544,6 +1688,12 @@ mod tests {
                 "reason" = "subgraph_error",
                 "subgraph.name" = "flaky_subgraph",
                 "client.name" = ""
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                1u64,
+                "reason" = "subgraph_error"
             );
         }
         .with_metrics()
@@ -1598,6 +1748,12 @@ mod tests {
                 "reason" = "subgraph_error",
                 "subgraph.name" = "error_subgraph",
                 "client.name" = ""
+            );
+
+            assert_histogram_sum!(
+                "apollo.router.operations.subscriptions.events_sent",
+                1u64,
+                "reason" = "subgraph_error"
             );
         }
         .with_metrics()

@@ -648,7 +648,25 @@ The `apollo.router.operations.subscriptions.terminated.client` metric includes `
 
 The `apollo.router.operations.subscriptions.terminated.subgraph` and `apollo.router.operations.subscriptions.terminated.client` metrics operate at different granularities. `terminated.subgraph` increments once per subgraph WebSocket closure, while `terminated.client` increments once per client that was listening on that connection. For example, if 5 clients are deduplicated onto a single subgraph WebSocket and the subgraph closes the connection, you'll see 1 `terminated.subgraph` event and 5 `terminated` events with `reason=server_close`. This means the `terminated` count can be significantly higher than `terminated.subgraph` — the ratio reflects your deduplication factor.
 
-#### Example: Monitor subscription health
+### Tracking events per subscription
+
+Use the `apollo.router.operations.subscriptions.events_sent` histogram to compare payload counts per client subscription by termination reason. See [subscription instruments](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#subscriptions) for counting rules and attributes.
+
+The default histogram buckets end at 10. To distinguish subscriptions with larger event counts, configure a view with boundaries suited to your traffic. For example:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: apollo.router.operations.subscriptions.events_sent
+            aggregation:
+              histogram:
+                buckets: [0, 1, 10, 100, 1000, 10000]
+```
+
+### Example: Monitor subscription health
 
 Use the `apollo.subscription.end_reason` attribute and subgraph counter metrics to monitor the health of your subscriptions:
 
