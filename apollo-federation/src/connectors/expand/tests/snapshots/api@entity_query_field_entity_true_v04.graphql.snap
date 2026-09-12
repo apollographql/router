@@ -1,0 +1,22 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_query_field_entity_true_v04.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  """
+  The intended way to make a `Query` field a reference resolver: `entity: true`.
+  This yields an `Explicit` entity resolver whose key is derived from `$args`, so
+  a resolvable `@key` on `Tractor` is correct here — the connector genuinely can
+  resolve the entity by its key. Contrast with `entity_query_field_v04`, where
+  `entity` is unset and no resolvable key should be emitted. See RH-1401.
+  """
+  tractor(id: ID!): Tractor
+}
+
+type Tractor {
+  id: ID!
+  name: String
+}
