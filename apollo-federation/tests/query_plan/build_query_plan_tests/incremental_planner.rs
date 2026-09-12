@@ -3,11 +3,15 @@ use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn incremental_config() -> QueryPlannerConfig {
+    incremental_config_with_fuel(100_000)
+}
+
+fn incremental_config_with_fuel(fuel: u64) -> QueryPlannerConfig {
     QueryPlannerConfig {
         incremental_planner: IncrementalPlannerConfig {
             enabled: true,
             beam_width: 4,
-            fuel: 100_000,
+            fuel,
             ..Default::default()
         },
         ..Default::default()
@@ -645,13 +649,7 @@ fn inc_mutation_multiple_fields_are_sequential() {
 /// churn it.
 #[test]
 fn inc_greedy_tiebreak_mistake_survives_without_fuel() {
-    let greedy_config = QueryPlannerConfig {
-        incremental_planner: IncrementalPlannerConfig {
-            fuel: 0,
-            ..incremental_config().incremental_planner
-        },
-        ..incremental_config()
-    };
+    let greedy_config = incremental_config_with_fuel(0);
     let planner = planner!(
         config = greedy_config,
         a: r#"
@@ -832,13 +830,7 @@ fn inc_greedy_tiebreak_mistake_is_corrected_by_backtracking() {
 
 #[test]
 fn inc_shareable_parent_hop_reaches_keyless_child_detail() {
-    let config = QueryPlannerConfig {
-        incremental_planner: IncrementalPlannerConfig {
-            fuel: 0,
-            ..incremental_config().incremental_planner
-        },
-        ..incremental_config()
-    };
+    let config = incremental_config_with_fuel(0);
     let planner = planner!(
         config = config,
         a: r#"
@@ -996,7 +988,7 @@ fn inc_cooperative_cancellation_stops_planning() {
 fn inc_keyless_child_behind_wrong_ranked_hop_recovered_by_search() {
     let planner = planner!(
         config = incremental_config(),
-        SubgraphA: r#"
+        a: r#"
         type Query {
             parent: Parent
         }
@@ -1010,7 +1002,7 @@ fn inc_keyless_child_behind_wrong_ranked_hop_recovered_by_search() {
             value: Int
         }
         "#,
-        SubgraphB: r#"
+        b: r#"
         type Parent @key(fields: "id") {
             id: ID!
             child: Child @shareable
@@ -1036,7 +1028,7 @@ fn inc_keyless_child_behind_wrong_ranked_hop_recovered_by_search() {
         @r###"
     QueryPlan {
       Sequence {
-        Fetch(service: "SubgraphA") {
+        Fetch(service: "a") {
           {
             parent {
               __typename
@@ -1045,7 +1037,7 @@ fn inc_keyless_child_behind_wrong_ranked_hop_recovered_by_search() {
           }
         },
         Flatten(path: "parent") {
-          Fetch(service: "SubgraphB") {
+          Fetch(service: "b") {
             {
               ... on Parent {
                 __typename
@@ -1073,17 +1065,8 @@ fn inc_keyless_child_behind_wrong_ranked_hop_recovered_by_search() {
 #[test]
 fn inc_fuel_zero_still_finds_complete_plan_for_keyless_child() {
     let planner = planner!(
-        config = {
-            QueryPlannerConfig {
-                incremental_planner: IncrementalPlannerConfig {
-                    enabled: true,
-                    fuel: 0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        },
-        SubgraphA: r#"
+        config = incremental_config_with_fuel(0),
+        a: r#"
         type Query {
             parent: Parent
         }
@@ -1097,7 +1080,7 @@ fn inc_fuel_zero_still_finds_complete_plan_for_keyless_child() {
             value: Int
         }
         "#,
-        SubgraphB: r#"
+        b: r#"
         type Parent @key(fields: "id") {
             id: ID!
             child: Child @shareable
@@ -1128,7 +1111,7 @@ fn inc_fuel_zero_still_finds_complete_plan_for_keyless_child() {
         "plan must fetch the stranded child field: {plan_str}"
     );
     assert!(
-        plan_str.contains("SubgraphB"),
+        plan_str.contains("b"),
         "plan must route through the key hop to reach `leaf`: {plan_str}"
     );
 }
@@ -1300,13 +1283,7 @@ fn inc_defer_falls_back_to_legacy_planner() {
 /// must accumulate across those searches rather than keep only the last.
 #[test]
 fn inc_mutation_statistics_accumulate_across_fields() {
-    let config = QueryPlannerConfig {
-        incremental_planner: IncrementalPlannerConfig {
-            fuel: 0,
-            ..incremental_config().incremental_planner
-        },
-        ..incremental_config()
-    };
+    let config = incremental_config_with_fuel(0);
     let planner = planner!(
         config = config,
         a: r#"
@@ -1334,5 +1311,125 @@ fn inc_mutation_statistics_accumulate_across_fields() {
         plan.statistics.evaluated_plan_count.get(),
         2,
         "each per-field greedy search evaluates one plan; the counts must sum",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Root hops and condition hoisting
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inc_query_field_root_hops_to_other_subgraph() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query {
+            nested: Query @shareable
+            a: Int
+          }
+        "#,
+        b: r#"
+          type Query {
+            b: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            nested {
+              b
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            nested {
+              __typename
+            }
+          }
+        },
+        Flatten(path: "nested") {
+          Fetch(service: "b") {
+            {
+              b
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn inc_fully_conditioned_fetch_hoists_multiple_variables() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query {
+            user: User
+          }
+
+          type User @key(fields: "id") {
+            id: ID!
+            name: String
+          }
+        "#,
+        b: r#"
+          type User @key(fields: "id") {
+            id: ID!
+            email: String
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query Op($a: Boolean!, $b: Boolean!) {
+            user {
+              name
+              email @include(if: $a) @skip(if: $b)
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            user {
+              __typename
+              name
+              id
+            }
+          }
+        },
+        Include(if: $a) {
+          Skip(if: $b) {
+            Flatten(path: "user") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
     );
 }
