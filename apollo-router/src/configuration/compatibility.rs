@@ -4,9 +4,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
-use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
 use apollo_configuration::expansion::MapVariables;
 use apollo_configuration::provenance::Injection;
@@ -14,6 +12,8 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::Configuration;
+use super::apollo_configuration_parse::apollo_configuration_options as router_options;
+use super::apollo_configuration_parse::parse_via_apollo_configuration;
 use super::expansion::Expansion;
 use super::expansion::Override;
 use super::expansion::ValueType;
@@ -29,26 +29,10 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 
-// Configuration's Deserialize implementation already runs its cross-field validation.
-impl apollo_configuration::Validate for Configuration {}
-impl apollo_configuration::Configuration for Configuration {}
-
 fn current_major_version() -> i64 {
     env!("CARGO_PKG_VERSION_MAJOR")
         .parse()
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
-}
-
-fn router_options() -> ParseYamlOptions {
-    // Cache the patched router schema across parses.
-    static SCHEMA: OnceLock<Value> = OnceLock::new();
-    let schema = SCHEMA
-        .get_or_init(|| {
-            serde_json::to_value(generate_config_schema())
-                .expect("router's configuration schema serializes")
-        })
-        .clone();
-    ParseYamlOptions::default().schema(schema)
 }
 
 /// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
@@ -457,23 +441,6 @@ fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
         adapted_shared.raw_yaml.as_deref(),
         "the adapter must reproduce the same raw_yaml router itself would have set"
     );
-}
-
-/// Parses settings, stores the expanded document in `validated_yaml` and keeps `text` in
-/// `raw_yaml`. Configure `options` and `expansion` with equivalent external inputs.
-fn parse_via_apollo_configuration(
-    text: &str,
-    options: &ParseYamlOptions,
-    expansion: &Expansion,
-) -> Result<Configuration, String> {
-    let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-    let expanded = expansion.expand(&raw).map_err(|error| error.to_string())?;
-    let mut config: Configuration = options
-        .parse(text)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))?;
-    config.validated_yaml = Some(expanded);
-    config.raw_yaml = Some(Arc::from(text));
-    Ok(config)
 }
 
 #[test]
