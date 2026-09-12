@@ -7,6 +7,8 @@ use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
 
+use crate::registry::OciConfig;
+use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
 use crate::uplink::UplinkConfig;
@@ -51,6 +53,12 @@ pub enum LicenseSource {
     /// Apollo uplink.
     #[display("Registry")]
     Registry(UplinkConfig),
+
+    /// An OCI registry (graph artifacts). The entitlement identifier is discovered from the graph
+    /// artifact manifest annotations, and the license artifact is fetched from the same registry
+    /// with the same graph API key.
+    #[display("OCI")]
+    OCI(OciConfig),
 }
 
 impl Default for LicenseSource {
@@ -151,6 +159,40 @@ impl LicenseSource {
                         })
                     })
                     .boxed()
+            }
+            LicenseSource::OCI(oci_config) => {
+                tracing::debug!("using oci as license source");
+                match create_oci_license_stream(oci_config) {
+                    Ok(stream) => stream
+                        .filter_map(|res| {
+                            future::ready(match res {
+                                // No entitlement identifier annotation on the graph artifact
+                                // manifest: run unlicensed, without error, until the graph is
+                                // republished with a manifest that carries it.
+                                Ok(None) => Some(License::default()),
+                                Ok(Some(jwt)) => match License::from_str(&jwt) {
+                                    Ok(license) => Some(license),
+                                    Err(err) => {
+                                        tracing::error!(
+                                            code = APOLLO_ROUTER_LICENSE_INVALID,
+                                            "failed to parse license fetched from oci registry: {}",
+                                            err
+                                        );
+                                        None
+                                    }
+                                },
+                                Err(e) => {
+                                    tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
+                                    None
+                                }
+                            })
+                        })
+                        .boxed(),
+                    Err(e) => {
+                        tracing::error!("failed to create OCI license stream: {}", e);
+                        stream::empty().boxed()
+                    }
+                }
             }
             LicenseSource::Env => {
                 // EXPERIMENTAL and not subject to semver.
