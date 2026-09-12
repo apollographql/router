@@ -550,7 +550,18 @@ async fn handle_graphql<RF: RouterFactory>(
     };
 
     match res {
-        Err(err) => internal_server_error(err),
+        Err(err) => {
+            // If the client went away while the router was still reading the
+            // request body or producing the response, the pipeline surfaces a
+            // connection-closed error here. That is a client cancellation, not a
+            // server fault, so report 499 (matching the CanceledRequest handling
+            // on the Ok path in RouterService) instead of an unconditional 500
+            // that inflates error-rate / SLO metrics.
+            if is_client_disconnected(err.as_ref()) {
+                return client_closed_request();
+            }
+            internal_server_error(err)
+        }
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
 
@@ -613,6 +624,54 @@ where
     let response = graphql::Response::builder().error(error).build();
 
     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!(response))).into_response()
+}
+
+/// Best-effort detection of a pipeline error caused by the client closing the
+/// connection (most commonly a request-body read that failed mid-stream). Walks
+/// the error source chain looking for a hyper incomplete-message/canceled error
+/// or an IO error indicating the peer went away.
+///
+/// NOTE (draft): the exact error taxonomy here needs maintainer input — the
+/// connection-closed error may be wrapped by tower/axum layers before it reaches
+/// this point, in which case a marker set at the failing `into_bytes` site would
+/// be more robust than downcasting.
+fn is_client_disconnected(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(err);
+    while let Some(e) = source {
+        if let Some(hyper_err) = e.downcast_ref::<hyper::Error>() {
+            if hyper_err.is_incomplete_message() || hyper_err.is_canceled() {
+                return true;
+            }
+        }
+        if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+            use std::io::ErrorKind::{BrokenPipe, ConnectionAborted, ConnectionReset, UnexpectedEof};
+            if matches!(
+                io_err.kind(),
+                BrokenPipe | ConnectionReset | ConnectionAborted | UnexpectedEof
+            ) {
+                return true;
+            }
+        }
+        source = e.source();
+    }
+    false
+}
+
+/// 499 Client Closed Request: the client disconnected before the router could
+/// finish handling the request. Mirrors the 499 the Ok path already returns for
+/// a CanceledRequest.
+fn client_closed_request() -> Response {
+    let error = graphql::Error::builder()
+        .message("client closed request")
+        .extension_code("CLIENT_CLOSED_REQUEST")
+        .build();
+    let response = graphql::Response::builder().error(error).build();
+
+    (
+        StatusCode::from_u16(499).expect("499 is not a standard status code but common enough"),
+        Json(json!(response)),
+    )
+        .into_response()
 }
 
 struct CancelHandler<'a> {
