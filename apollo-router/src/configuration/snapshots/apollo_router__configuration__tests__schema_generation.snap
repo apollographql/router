@@ -8173,6 +8173,11 @@ expression: "&schema"
           },
           "description": "Configures cooperative cancellation of query planning\n\nSee [`CooperativeCancellation`] for more details."
         },
+        "experimental_incremental_planning": {
+          "default": false,
+          "description": "Enables the experimental incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates. Deferred operations fall\nback to the default planner.",
+          "type": "boolean"
+        },
         "experimental_paths_limit": {
           "default": null,
           "description": "Before creating query plans, for each path of fields in the query we compute all the\npossible options to traverse that path via the subgraphs. Multiple options can arise because\nfields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions\nand interfaces) returned by fields sometimes require the query planner to traverse through\neach constituent object type. The number of options generated in this computation can grow\nlarge if the schema or query are sufficiently complex, and that will increase the time spent\nplanning.\n\nThis config allows specifying a per-path limit to the number of options considered. If any\npath's options exceeds this limit, query planning will abort and the operation will fail.\n\nThe default value is None, which specifies no limit.",
@@ -11639,6 +11644,7 @@ expression: "&schema"
               "mode": "measure",
               "timeout": null
             },
+            "experimental_incremental_planning": false,
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
             "warmed_up_queries": null
@@ -13237,6 +13243,7 @@ expression: "&schema"
             "mode": "measure",
             "timeout": null
           },
+          "experimental_incremental_planning": false,
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
           "warmed_up_queries": null
