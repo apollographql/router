@@ -106,9 +106,8 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
     // Mock blob
     let blob_digest = schema_layer.sha256_digest();
 
-    // Create license layer, so the router's LicenseSource::OCI path (which
-    // shares this same graph artifact reference with the schema) can fetch a
-    // valid entitlement, rather than retrying an always-failing fetch forever.
+    // Create license layer, so the router can reuse the schema's graph artifact
+    // reference to fetch an entitlement from the same mock server without conflict
     let license_layer = ImageLayer {
         data: mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS).into(),
         media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
@@ -238,9 +237,9 @@ async fn setup_mock_oci_server_with_tag(
     };
     let updated_blob_digest = updated_schema_layer.sha256_digest();
 
-    // Create license layer, so the router's LicenseSource::OCI path (which
-    // shares this same graph artifact reference with the schema) can fetch a
-    // valid entitlement, rather than retrying an always-failing fetch forever.
+    // Create license layer, so the router can reuse the schema's graph artifact
+    // reference to fetch an entitlement from the same mock server without conflict.
+    //
     // The same layer is reused across the initial and updated manifests: only
     // the schema is expected to change across a hot reload here.
     let license_layer = ImageLayer {
