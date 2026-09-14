@@ -22,9 +22,11 @@
 //! * Instruments should use non-prefixed units (i.e. By instead of MiBy) unless there is good
 //!   technical reason to not do so.
 //!
-//! NB: we have not yet modified the existing metrics because some metric exporters (notably
-//! Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
-//! change for customers.
+//! NB: some metric exporters (notably Prometheus) include the unit in the metric name, so
+//! migrating an existing metric to a `_with_unit!` macro is a breaking change for customers
+//! whose unit triggers a Prometheus name suffix (e.g. `s` → `_seconds`, `By` → `_bytes`). Router
+//! 3.x has migrated several such metrics as part of ROUTER-1777; see the router 3.x upgrade
+//! guide for the full list of renamed Prometheus metric names.
 //!
 //! ## Compatibility
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
@@ -183,8 +185,8 @@ impl Drop for HistogramTimerGuard {
     ///
     /// The duration is measured from when the guard was created to when it is dropped.
     fn drop(&mut self) {
-        self.histogram
-            .record(self.start.elapsed().as_secs_f64(), &self.attributes);
+        let elapsed = self.start.elapsed().as_secs_f64();
+        self.histogram.record(elapsed, &self.attributes);
     }
 }
 
@@ -1450,8 +1452,9 @@ macro_rules! metric {
             {
                 let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
                 let attrs: &[opentelemetry::KeyValue] = &$attrs;
-                instrument.$mutation($value, attrs);
-                $guard::new(instrument.clone(), $value, attrs)
+                let value: $ty = $value;
+                instrument.$mutation(value, attrs);
+                $guard::new(instrument.clone(), value, attrs)
             }
         }
     };

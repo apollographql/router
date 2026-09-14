@@ -309,9 +309,7 @@ async fn get_json_query_plan(query: &str) -> serde_json::Value {
             "include_subgraph_errors": {
                 "all": true
             },
-            "plugins": {
-                "experimental.expose_query_plan": true
-            }
+            "expose_query_plan": true
         }})
         .unwrap()
         .schema(SCHEMA)

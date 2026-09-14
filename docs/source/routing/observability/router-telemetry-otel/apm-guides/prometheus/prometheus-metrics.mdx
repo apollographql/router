@@ -15,9 +15,15 @@ For general metrics configuration, refer to [Router Metrics Configuration](/rout
 <Note>
 
 The Prometheus exporter replaces `.` characters with `_` in instrument names.
-For example, the [`apollo.router.cache.miss.time.count` instrument](/graphos/routing/observability/telemetry/instrumentation/standard-instruments#cache) is exported as `apollo_router_cache_miss_time_count` with the Prometheus exporter.
+For example, the [`apollo.router.cache.miss.time.count` instrument](/graphos/routing/observability/telemetry/instrumentation/standard-instruments#cache) is exported as `apollo_router_cache_miss_time_seconds_count` with the Prometheus exporter.
 
 </Note>
+
+## Prometheus name changes
+
+Router 3.x gave several duration and byte-count instruments a UCUM unit (`s` for durations, `By` for bytes). The Prometheus exporter appends a UCUM-derived suffix to the exported name when a unit is set, so this renamed a number of Prometheus metrics — for example, `apollo_router_cache_hit_time` became `apollo_router_cache_hit_time_seconds`.
+
+See the [router 3.x upgrade guide](/graphos/routing/upgrade/from-router-v2#renamed-prometheus-metrics) for the full list of renamed metrics and the steps to update dashboards, alerts, and recording rules.
 
 ## Prometheus configuration
 

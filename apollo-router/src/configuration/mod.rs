@@ -738,7 +738,7 @@ pub(crate) struct Supergraph {
 
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
-    pub(crate) experimental_log_on_broken_pipe: bool,
+    pub(crate) log_on_broken_pipe: bool,
 
     /// Determines how to handle queries which include additional fields of an input object.
     /// - `enforce` (default): rejects query
@@ -770,7 +770,7 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
-        experimental_log_on_broken_pipe: Option<bool>,
+        log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
@@ -786,7 +786,7 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
-            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            log_on_broken_pipe: log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
@@ -808,7 +808,7 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
-        experimental_log_on_broken_pipe: Option<bool>,
+        log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
@@ -824,7 +824,7 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
-            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            log_on_broken_pipe: log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),

@@ -271,9 +271,10 @@ impl PluginPrivate for FleetDetector {
                     // If the `SizeHint` gives us an exact value, we can use this for the
                     // metric and return without wrapping the request Body into a stream.
                     if let Some(size) = size_hint.exact() {
-                        u64_counter!(
+                        u64_counter_with_unit!(
                             "apollo.router.operations.request_size",
                             "Total number of request bytes from clients",
+                            "By",
                             size
                         );
                         return body;
@@ -282,9 +283,10 @@ impl PluginPrivate for FleetDetector {
                     // For streaming bodies, we need to wrap the stream and count bytes as we go
                     router::body::from_result_stream(body.into_data_stream().inspect(move |res| {
                         if let Ok(bytes) = res {
-                            u64_counter!(
+                            u64_counter_with_unit!(
                                 "apollo.router.operations.request_size",
                                 "Total number of request bytes from clients",
+                                "By",
                                 bytes.len() as u64
                             );
                         }
@@ -303,9 +305,10 @@ impl PluginPrivate for FleetDetector {
                         // If the `SizeHint` gives us an exact value, we can use this for the
                         // metric and return without wrapping the response Body into a stream.
                         if let Some(size) = size_hint.exact() {
-                            u64_counter!(
+                            u64_counter_with_unit!(
                                 "apollo.router.operations.response_size",
                                 "Total number of response bytes to clients",
+                                "By",
                                 size
                             );
                             return body;
@@ -315,9 +318,10 @@ impl PluginPrivate for FleetDetector {
                         router::body::from_result_stream(body.into_data_stream().inspect(
                             move |res| {
                                 if let Ok(bytes) = res {
-                                    u64_counter!(
+                                    u64_counter_with_unit!(
                                         "apollo.router.operations.response_size",
                                         "Total number of response bytes to clients",
+                                        "By",
                                         bytes.len() as u64
                                     );
                                 }
@@ -353,9 +357,10 @@ impl PluginPrivate for FleetDetector {
                         // metric and return without wrapping the request Body into a stream.
                         if let Some(size) = size_hint.exact() {
                             let sn = sn.clone();
-                            u64_counter!(
+                            u64_counter_with_unit!(
                                 "apollo.router.operations.fetch.request_size",
                                 "Total number of request bytes for subgraph fetches",
+                                "By",
                                 size,
                                 subgraph.name = sn.to_string()
                             );
@@ -367,9 +372,10 @@ impl PluginPrivate for FleetDetector {
                             move |res| {
                                 if let Ok(bytes) = res {
                                     let sn = sn.clone();
-                                    u64_counter!(
+                                    u64_counter_with_unit!(
                                         "apollo.router.operations.fetch.request_size",
                                         "Total number of request bytes for subgraph fetches",
+                                        "By",
                                         bytes.len() as u64,
                                         subgraph.name = sn.to_string()
                                     );
@@ -401,9 +407,10 @@ impl PluginPrivate for FleetDetector {
                                     move |res| {
                                         if let Ok(bytes) = res {
                                             let sn = sn.clone();
-                                            u64_counter!(
+                                            u64_counter_with_unit!(
                                             "apollo.router.operations.fetch.response_size",
                                             "Total number of response bytes for subgraph fetches",
+                                            "By",
                                             bytes.len() as u64,
                                             subgraph.name = sn.to_string()
                                         );

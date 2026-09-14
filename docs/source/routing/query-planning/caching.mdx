@@ -65,7 +65,7 @@ Additionally, the router can use the [persisted query list](/graphos/platform/se
 
 <MinVersionBadge version="Router v1.61.0" />
 
-With router v1.61.0+ and v2.x+, if you have enabled exposing query plans via `--dev` mode or `plugins.experimental.expose_query_plan: true`, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
+With router v1.61.0+ and v2.x+, if you have enabled exposing query plans via `--dev` mode or `expose_query_plan: true`, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
 
 - `true`: Returns a human-readable string and JSON blob of the query plan while still executing the query to fetch data.
 - `dry-run`: Generates the query plan and aborts without executing the query.

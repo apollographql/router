@@ -419,9 +419,10 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                 )
                 .await;
 
-            f64_histogram!(
+            f64_histogram_with_unit!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time, in seconds.",
+                "s",
                 start.elapsed().as_secs_f64()
             );
 
@@ -587,9 +588,10 @@ pub(crate) fn metric_query_planning_plan_duration(
     outcome: QueryPlanningOutcome,
     compute_job_type: ComputeJobType,
 ) {
-    f64_histogram!(
+    f64_histogram_with_unit!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
+        "s",
         elapsed,
         "planner" = planner,
         "outcome" = outcome,

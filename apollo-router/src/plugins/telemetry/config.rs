@@ -279,10 +279,8 @@ pub(crate) enum MetricAggregation {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
-    // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
-    // When deleting, put a #[serde(alias = "experimental_response_trace_id")] if we don't want to break things
     /// A way to expose trace id in response headers
-    #[serde(default, rename = "experimental_response_trace_id")]
+    #[serde(default, alias = "experimental_response_trace_id")]
     pub(crate) response_trace_id: ExposeTraceId,
     /// Propagation configuration
     pub(crate) propagation: Propagation,

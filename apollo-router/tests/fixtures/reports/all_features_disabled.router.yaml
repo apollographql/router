@@ -24,7 +24,7 @@ demand_control:
 telemetry:
   exporters:
     tracing:
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: true
         header_name: "my_trace_id"
       common:
