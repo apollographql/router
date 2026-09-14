@@ -12,16 +12,6 @@ use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
-use crate::error::FederationError;
-use crate::operation::Selection;
-use crate::operation::SelectionSet;
-use crate::query_graph::QueryGraphEdgeTransition;
-use crate::query_graph::QueryGraphNodeType;
-use crate::query_graph::graph_path::operation::OpPathElement;
-use crate::query_plan::FetchDataPathElement;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::SchemaRootDefinitionKind;
-
 use super::NodeSource;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
@@ -31,6 +21,15 @@ use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
 use super::state::PendingSelection;
 use super::state::PlanState;
+use crate::error::FederationError;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::query_plan::FetchDataPathElement;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 
 /// Where a committed selection's children begin: fetch node, operation
 /// path, and response path.
