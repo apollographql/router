@@ -30,14 +30,25 @@ pub(crate) const PIPELINING_COST: QueryPlanCost = 100.0;
 
 #[derive(Clone, Debug)]
 pub(crate) enum FetchGroupKind {
+    /// Fetch against a subgraph's root operation type, merged at the
+    /// response root.
     Root {
+        /// The subgraph's root operation type the fetch selects from.
         root_type: CompositeTypeDefinitionPosition,
     },
+    /// Entity fetch through `Query._entities`.
     Entity {
+        /// Response path where this fetch's results merge into the
+        /// overall response.
         merge_at: Vec<FetchDataPathElement>,
     },
+    /// Fetch against a subgraph's root operation type whose results merge
+    /// at a nested response path, e.g. a root-typed field reached mid-plan.
     RootHop {
+        /// The subgraph's root operation type the fetch selects from.
         root_type: CompositeTypeDefinitionPosition,
+        /// Response path where this fetch's results merge into the
+        /// overall response.
         merge_at: Vec<FetchDataPathElement>,
     },
 }
@@ -47,15 +58,22 @@ pub(crate) enum InputContribution {
     /// @key fields the parent sends to enter the child; drives input
     /// rewrites on the key fetch.
     Key {
+        /// Type of the entity in the parent subgraph the key fields are
+        /// selected from.
         source_type_name: Name,
+        /// The @key field selections the parent must provide.
         conditions: Arc<SelectionSet>,
+        /// Destination type and subgraph, for building the input rewrites.
         rewrite_info: InputRewriteInfo,
     },
     /// @requires condition fields riding an existing edge. Constructed by
     /// the requires support in a later change.
     #[allow(dead_code)]
     Requires {
+        /// Type of the entity in the parent subgraph the condition fields
+        /// are selected from.
         source_type_name: Name,
+        /// The @requires field selections the parent must provide.
         conditions: Arc<SelectionSet>,
     },
 }
@@ -87,16 +105,24 @@ impl InputContribution {
 }
 
 #[derive(Clone, Debug)]
+/// Where a key input lands, for computing @interfaceObject and renamed-type
+/// input rewrites on the child fetch.
 pub(crate) struct InputRewriteInfo {
+    /// The entity type as the destination subgraph knows it.
     pub(crate) dest_type: CompositeTypeDefinitionPosition,
+    /// Name of the subgraph the child fetch targets.
     pub(crate) dest_subgraph: Arc<str>,
 }
 
 /// Node weight in the FetchGraph.
 #[derive(Clone, Debug)]
 pub(crate) struct FetchNode {
+    /// Name of the subgraph this fetch is sent to.
     pub(crate) subgraph: Arc<str>,
+    /// Whether this is a root fetch, an entity (_entities) fetch, or a
+    /// root-typed hop nested inside the response.
     pub(crate) kind: FetchGroupKind,
+    /// Accumulates the subgraph operation's selection set, with undo support.
     pub(crate) selection_builder: SelectionBuilder,
 }
 
@@ -124,6 +150,9 @@ impl FetchNode {
 /// must send to the child.
 #[derive(Clone, Debug)]
 pub(crate) struct FetchEdgeWeight {
+    /// The key and requires contributions the parent's response provides as
+    /// entity representations for the child fetch. Empty for ordering-only
+    /// edges.
     pub(crate) inputs: Vec<InputContribution>,
 }
 
@@ -322,10 +351,7 @@ impl FetchGraph {
 
     /// Find the edge index for a directed edge from `parent` to `child`.
     pub(crate) fn find_edge(&self, parent: NodeIndex, child: NodeIndex) -> Option<EdgeIndex> {
-        self.graph
-            .edges_directed(parent, Direction::Outgoing)
-            .find(|e| e.target() == child)
-            .map(|e| e.id())
+        self.graph.find_edge(parent, child)
     }
 
     /// Create a parent->child dependency edge with the given inputs. The
@@ -344,6 +370,15 @@ impl FetchGraph {
             parent,
             child,
             self.graph[parent].subgraph,
+        );
+        // Callers reuse an existing edge rather than adding a parallel one;
+        // inputs on a duplicate edge would be invisible to lookups that stop
+        // at the first edge.
+        debug_assert!(
+            !self.has_edge(parent, child),
+            "duplicate edge {:?} -> {:?} in the fetch graph",
+            parent,
+            child,
         );
         let id = self
             .graph
@@ -459,7 +494,7 @@ impl FetchGraph {
             let d = self
                 .graph
                 .edges_directed(node, Direction::Incoming)
-                .map(|e| depth[e.source().index()] + 1)
+                .map(|e| depth[e.source().index()].saturating_add(1))
                 .max()
                 .unwrap_or(0);
             depth[node.index()] = d;
