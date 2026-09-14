@@ -2464,6 +2464,7 @@ fn inc_defer_cross_subgraph_produces_defer_plan() {
                 } =>
                 {
                   ... on T {
+                    __typename
                     y
                   }
                 }
