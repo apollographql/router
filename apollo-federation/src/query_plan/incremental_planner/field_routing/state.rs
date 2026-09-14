@@ -246,6 +246,7 @@ impl PlanState {
             dropped_fields: self.dropped_fields,
             condition_alias_ids: self.condition_alias_ids.clone(),
             effort: self.effort,
+            type_explosions: self.type_explosions,
         }
     }
 
