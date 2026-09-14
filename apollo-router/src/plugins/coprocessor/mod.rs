@@ -884,7 +884,7 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
+            .buffered("coprocessor.router") // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -972,6 +972,7 @@ impl SubgraphStage {
         let response_layer = (self.response != Default::default()).then_some({
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
+            let service_name = service_name.clone();
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
@@ -1026,7 +1027,7 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered() // XXX: Added during backpressure fixing
+            .buffered(format!("coprocessor.subgraph.{service_name}")) // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }

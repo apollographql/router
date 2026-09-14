@@ -2,6 +2,7 @@
 //! Layers that are specific to one plugin should not be placed in this module.
 use std::future::Future;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -101,7 +102,7 @@ pub trait ServiceBuilderExt<L>: Sized {
 
     /// Decide if processing should continue or not, and if not allow returning of a response.
     /// Unlike checkpoint it is possible to perform async operations in the callback. However
-    /// this requires that the service is `Clone`. This can be achieved using `.buffered()`.
+    /// this requires that the service is `Clone`. This can be achieved using `.buffered(name)`.
     ///
     /// This is useful for things like authentication where you need to make an external call to
     /// check if a request should proceed or not.
@@ -138,7 +139,7 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///         }
     ///         .boxed()
     ///     )
-    ///     .buffered()
+    ///     .buffered("example")
     ///     .service(service);
     /// # }
     /// ```
@@ -160,6 +161,10 @@ pub trait ServiceBuilderExt<L>: Sized {
     ///
     /// This is useful for making services `Clone` and `Send`
     ///
+    /// `name` identifies this buffer on the `apollo.router.buffer.*` metrics (see
+    /// [`crate::layers::unconstrained_buffer`]), so pick one that tells an operator which buffer
+    /// they are looking at.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -170,11 +175,14 @@ pub trait ServiceBuilderExt<L>: Sized {
     /// # use apollo_router::layers::ServiceBuilderExt;
     /// # fn test(service: supergraph::BoxService) {
     /// let _ = ServiceBuilder::new()
-    ///             .buffered()
+    ///             .buffered("example")
     ///             .service(service);
     /// # }
     /// ```
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>>;
+    fn buffered<Request>(
+        self,
+        name: impl Into<Arc<str>>,
+    ) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>>;
 
     /// Place a span around the request.
     ///
@@ -332,8 +340,11 @@ impl<L> ServiceBuilderExt<L> for ServiceBuilder<L> {
         ServiceBuilder::layer(self, layer)
     }
 
-    fn buffered<Request>(self) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>> {
-        self.layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
+    fn buffered<Request>(
+        self,
+        name: impl Into<Arc<str>>,
+    ) -> ServiceBuilder<Stack<UnconstrainedBufferLayer<Request>, L>> {
+        self.layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE, name))
     }
 }
 

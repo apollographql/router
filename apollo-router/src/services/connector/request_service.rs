@@ -29,6 +29,7 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
+use tower::load_shed::error::Overloaded;
 
 use crate::Context;
 use crate::error::FetchError;
@@ -332,8 +333,7 @@ impl Response {
 
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServiceFactory {
-    pub(crate) services:
-        Arc<HashMap<String, UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>>,
+    pub(crate) services: Arc<HashMap<String, BufferedWithLoadShed>>,
 }
 
 impl ConnectorRequestServiceFactory {
@@ -344,20 +344,20 @@ impl ConnectorRequestServiceFactory {
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
         for source in connector_sources.iter() {
-            let service = UnconstrainedBuffer::new(
-                plugins
-                    .iter()
-                    .rev()
-                    .fold(
-                        ConnectorRequestService {
-                            http_client_service_factory: http_client_service_factory.clone(),
-                        }
-                        .boxed(),
-                        |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-                    )
+            let plugin_chain = plugins
+                .iter()
+                .rev()
+                .fold(
+                    ConnectorRequestService {
+                        http_client_service_factory: http_client_service_factory.clone(),
+                    }
                     .boxed(),
-                DEFAULT_BUFFER_SIZE,
-            );
+                    |acc, (_, e)| e.connector_request_service(acc, source.clone()),
+                )
+                .boxed();
+
+            let buffer_name = format!("connector_request_service.{source}");
+            let service = buffered_with_load_shed(plugin_chain, DEFAULT_BUFFER_SIZE, buffer_name);
             map.insert(source.clone(), service);
         }
 
@@ -367,11 +367,86 @@ impl ConnectorRequestServiceFactory {
     }
 
     pub(crate) fn create(&self, source_name: String) -> BoxService {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services
             .get(&source_name)
             .map(|svc| svc.clone().boxed())
             .expect("We should always get a service, even if it is a blank/default one")
+    }
+}
+
+/// Wraps a connector request service in a buffer with its own `load_shed` immediately around
+/// it, so a full queue is reported to the caller as an [`overloaded_error`] instead of leaving
+/// the caller queued for however long it is prepared to wait.
+///
+/// A full queue at this bound means the router is already in serious trouble, so surfacing that
+/// to the caller now is a better trade than silent, unbounded backpressure.
+///
+/// This is a concrete [`Service`] rather than a `ServiceBuilder` combinator chain erased into a
+/// `dyn Service` object, because [`tower::util::BoxCloneService`] cannot be `Sync` and
+/// [`ConnectorRequestServiceFactory`] is shared across threads.
+///
+/// [`overloaded_error`]: crate::plugins::traffic_shaping::overloaded_error
+#[derive(Clone)]
+pub(crate) struct BufferedWithLoadShed {
+    inner:
+        tower::load_shed::LoadShed<UnconstrainedBuffer<Request, BoxFuture<'static, ServiceResult>>>,
+    buffer_name: Arc<str>,
+}
+
+fn buffered_with_load_shed(
+    inner: BoxService,
+    bound: usize,
+    buffer_name: impl Into<Arc<str>>,
+) -> BufferedWithLoadShed {
+    let buffer_name: Arc<str> = buffer_name.into();
+    BufferedWithLoadShed {
+        inner: tower::load_shed::LoadShed::new(UnconstrainedBuffer::new(
+            inner,
+            bound,
+            buffer_name.clone(),
+        )),
+        buffer_name,
+    }
+}
+
+impl tower::Service<Request> for BufferedWithLoadShed {
+    type Response = Response;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, ServiceResult>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let context = req.context.clone();
+        let response_key = req.key.clone();
+        let subgraph_name = req.connector.id.subgraph_name.to_string();
+        let buffer_name = self.buffer_name.clone();
+        let future = self.inner.call(req);
+        Box::pin(async move {
+            let response: ServiceResult = future.await;
+            match response {
+                Err(err) if err.is::<Overloaded>() => {
+                    u64_counter_with_unit!(
+                        "apollo.router.traffic_shaping.load_shed",
+                        "Number of requests the traffic-shaping layer shed",
+                        "{request}",
+                        1u64,
+                        subgraph.name = subgraph_name.clone(),
+                        buffer.name = buffer_name
+                    );
+                    Ok(Response::error_new(
+                        context,
+                        subgraph_name,
+                        Error::Overloaded,
+                        "Your request has been shed because the router is overloaded",
+                        response_key,
+                    ))
+                }
+                _ => response,
+            }
+        })
     }
 }
 
@@ -584,5 +659,139 @@ fn replace_subgraph_name(err: BoxError, connector: &Connector) -> BoxError {
             _ => inner,
         },
         Err(e) => e,
+    }
+}
+
+#[cfg(test)]
+mod buffered_with_load_shed_tests {
+    use std::future::poll_fn;
+
+    use apollo_compiler::name;
+    use apollo_federation::connectors::ConnectId;
+    use apollo_federation::connectors::ConnectSpec;
+    use apollo_federation::connectors::HttpJsonTransport;
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+    use tower::Service;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    /// Builds a minimal connector [`Request`] for a fake `test_subgraph.test_source` connector,
+    /// enough to drive it through [`buffered_with_load_shed`].
+    fn fake_request() -> Request {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some(SourceName::cast("test_source")),
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        });
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        Request {
+            context: Context::default(),
+            connector,
+            transport_request: HttpRequest {
+                inner: http::Request::builder().body(String::new()).unwrap(),
+                debug: Default::default(),
+            }
+            .into(),
+            key,
+            mapping_problems: Default::default(),
+            supergraph_request: Default::default(),
+            operation: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn reports_overloaded_when_the_queue_is_full() {
+        async {
+            // A connector service that blocks until the test releases it, so the buffer can be
+            // driven to genuinely full rather than relying on timing.
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            let gate_clone = gate.clone();
+            let inner = tower::service_fn(move |req: Request| {
+                let gate = gate_clone.clone();
+                async move {
+                    let _permit = gate.acquire().await.unwrap();
+                    Ok(Response::error_new(
+                        req.context,
+                        "test_subgraph".to_string(),
+                        Error::TransportFailure("not called".to_string()),
+                        "unused",
+                        req.key,
+                    ))
+                }
+            })
+            .boxed();
+
+            // Capacity 1: the worker holds 1 in-flight; 1 more can queue. A third makes the
+            // buffer genuinely full, so its own `load_shed` sheds it. Same shape as
+            // `full_buffer_should_still_cause_load_shedding` in `unconstrained_buffer.rs`.
+            let mut svc = buffered_with_load_shed(inner, 1, "test_connector_buffer");
+
+            // Request 1: accepted, worker picks it up and blocks at the gate.
+            // `call()` enqueues synchronously; dropping the response future only discards the
+            // response receiver — the request is already in the channel.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            drop(svc.call(fake_request()));
+
+            // Yield so the worker task runs and drains request 1 from the channel.
+            tokio::task::yield_now().await;
+
+            // Request 2: fills the channel while the worker is blocked on request 1.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            drop(svc.call(fake_request()));
+
+            // Request 3: the channel is now genuinely full. The buffer's own `load_shed` sheds
+            // it as `Error::Overloaded`, distinct from `Error::RateLimited`, and reports the
+            // shed on `apollo.router.traffic_shaping.load_shed`.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            let response = svc
+                .call(fake_request())
+                .await
+                .expect("shed responses are Ok, not Err");
+
+            assert!(matches!(response.transport_result, Err(Error::Overloaded)));
+
+            assert_counter!(
+                "apollo.router.traffic_shaping.load_shed",
+                1,
+                subgraph.name = "test_subgraph",
+                buffer.name = "test_connector_buffer"
+            );
+
+            // Release the gate so the worker can drain and the runtime can shut down cleanly.
+            gate.add_permits(2);
+        }
+        .with_metrics()
+        .await;
     }
 }

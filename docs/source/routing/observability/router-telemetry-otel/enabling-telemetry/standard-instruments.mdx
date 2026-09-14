@@ -321,6 +321,19 @@ telemetry:
 - `apollo.router.limits.connector_response_size.exceeded` - A counter of connector responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.connector`.
   - `connector.source`: The source key (`subgraph_name.source_name`) whose response was aborted.
 
+## Traffic shaping
+
+<Tip>
+
+[Learn more about traffic shaping.](/graphos/routing/performance/traffic-shaping)
+
+</Tip>
+
+- `apollo.router.traffic_shaping.load_shed` - Number of requests the traffic-shaping layer shed because a rate limit, concurrency limit, or an internal buffer's queue was full. Attributes:
+  - `subgraph.name`: The name of the subgraph the shed request was headed to. Present on subgraph-scoped sheds.
+  - `connector.source`: The source key (`subgraph_name.source_name`) the shed request was headed to. Present on connector-scoped sheds.
+  - `buffer.name`: The name of the buffer that shed the request. Present only when a full queue caused the shed, distinguishing it from a rate limit or concurrency limit.
+
 ## GraphOS Studio
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
@@ -342,6 +355,12 @@ telemetry:
   - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
   - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
   - `config.hash` - The hash of the configuration
+
+- `apollo.router.buffer.queue_is_full` - Number of times one of the router's internal buffers was polled for readiness and found its queue full. Each increment is one such poll, not one rejected request: a buffer can be polled several times for the same request while its queue is full, and a caller with nothing shedding above it just waits rather than being rejected. Attributes:
+  - `buffer.name`: The name of the buffer whose queue was full.
+
+- `apollo.router.buffer.closed` - Number of times one of the router's internal buffers was polled for readiness and found that its worker task had already stopped. A request this happens to is always lost. Attributes:
+  - `buffer.name`: The name of the buffer whose worker had stopped.
 
 ## Server
 

@@ -34,6 +34,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::load_shed::error::Overloaded;
 use tracing::Instrument;
 use tracing::instrument;
 
@@ -58,7 +59,6 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugins::file_uploads;
 use crate::plugins::limits::SubgraphResponseSizeLimit;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -1146,12 +1146,7 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
-    pub(crate) services: Arc<
-        HashMap<
-            String,
-            UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>,
-        >,
-    >,
+    pub(crate) services: Arc<HashMap<String, BufferedWithLoadShed>>,
 }
 
 impl SubgraphServiceFactory {
@@ -1173,14 +1168,13 @@ impl SubgraphServiceFactory {
                 ))
                 .service(maker.make())
                 .boxed();
-            let service = ServiceBuilder::new()
-                .layer(UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE))
-                .service(
-                    plugins
-                        .iter()
-                        .rev()
-                        .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc)),
-                );
+            let plugin_chain = plugins
+                .iter()
+                .rev()
+                .fold(inner_service, |acc, (_, e)| e.subgraph_service(&name, acc));
+
+            let buffer_name = format!("subgraph_service.{name}");
+            let service = buffered_with_load_shed(plugin_chain, DEFAULT_BUFFER_SIZE, buffer_name);
             map.insert(name, service);
         }
 
@@ -1190,8 +1184,82 @@ impl SubgraphServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
         self.services.get(name).map(|svc| svc.clone().boxed())
+    }
+}
+
+/// Wraps a subgraph service in a buffer with its own `load_shed` immediately around it, so a
+/// full queue is reported to the caller as an [`overloaded_error`] instead of leaving the caller
+/// queued for however long it is prepared to wait.
+///
+/// A full queue at this bound means the router is already in serious trouble, so surfacing that
+/// to the caller now is a better trade than silent, unbounded backpressure.
+///
+/// This is a concrete [`Service`] rather than a `ServiceBuilder` combinator chain erased into a
+/// `dyn Service` object, because [`tower::util::BoxCloneService`] cannot be `Sync` and
+/// [`SubgraphServiceFactory`] is shared across threads.
+///
+/// [`overloaded_error`]: crate::plugins::traffic_shaping::overloaded_error
+#[derive(Clone)]
+pub(crate) struct BufferedWithLoadShed {
+    inner: tower::load_shed::LoadShed<
+        UnconstrainedBuffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>,
+    >,
+    buffer_name: Arc<str>,
+}
+
+fn buffered_with_load_shed(
+    inner: subgraph::BoxService,
+    bound: usize,
+    buffer_name: impl Into<Arc<str>>,
+) -> BufferedWithLoadShed {
+    let buffer_name: Arc<str> = buffer_name.into();
+    BufferedWithLoadShed {
+        inner: tower::load_shed::LoadShed::new(UnconstrainedBuffer::new(
+            inner,
+            bound,
+            buffer_name.clone(),
+        )),
+        buffer_name,
+    }
+}
+
+impl Service<subgraph::Request> for BufferedWithLoadShed {
+    type Response = subgraph::Response;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, subgraph::ServiceResult>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: subgraph::Request) -> Self::Future {
+        let ctx = req.context.clone();
+        let subgraph_name = req.subgraph_name.clone();
+        let buffer_name = self.buffer_name.clone();
+        let future = self.inner.call(req);
+        Box::pin(async move {
+            let response: subgraph::ServiceResult = future.await;
+            match response {
+                Err(err) if err.is::<Overloaded>() => {
+                    u64_counter_with_unit!(
+                        "apollo.router.traffic_shaping.load_shed",
+                        "Number of requests the traffic-shaping layer shed",
+                        "{request}",
+                        1u64,
+                        subgraph.name = subgraph_name.clone(),
+                        buffer.name = buffer_name
+                    );
+                    Ok(SubgraphResponse::error_builder()
+                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                        .subgraph_name(subgraph_name)
+                        .error(crate::plugins::traffic_shaping::overloaded_error())
+                        .context(ctx)
+                        .build())
+                }
+                _ => response,
+            }
+        })
     }
 }
 
@@ -1219,6 +1287,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
+    use std::future::poll_fn;
     use std::net::SocketAddr;
     use std::str::FromStr;
     use std::sync::atomic::AtomicU32;
@@ -5330,5 +5399,82 @@ mod tests {
             .error(error)
             .build();
         assert_response_eq_ignoring_error_id!(expected, actual);
+    }
+
+    #[tokio::test]
+    async fn buffered_with_load_shed_reports_overloaded_when_the_queue_is_full() {
+        async {
+            // A subgraph service that blocks until the test releases it, so the buffer can be
+            // driven to genuinely full rather than relying on timing.
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            let gate_clone = gate.clone();
+            let inner = tower::service_fn(move |req: subgraph::Request| {
+                let gate = gate_clone.clone();
+                async move {
+                    let _permit = gate.acquire().await.unwrap();
+                    Ok(SubgraphResponse::fake_builder()
+                        .context(req.context)
+                        .build())
+                }
+            })
+            .boxed();
+
+            // Capacity 1: the worker holds 1 in-flight; 1 more can queue. A third makes the
+            // buffer genuinely full, so its own `load_shed` sheds it. Same shape as
+            // `full_buffer_should_still_cause_load_shedding` in `unconstrained_buffer.rs`.
+            let mut svc = buffered_with_load_shed(inner, 1, "test_subgraph_buffer");
+
+            let fake_request = || {
+                SubgraphRequest::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .build()
+            };
+
+            // Request 1: accepted, worker picks it up and blocks at the gate.
+            // `call()` enqueues synchronously; dropping the response future only discards the
+            // response receiver — the request is already in the channel.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            drop(svc.call(fake_request()));
+
+            // Yield so the worker task runs and drains request 1 from the channel.
+            tokio::task::yield_now().await;
+
+            // Request 2: fills the channel while the worker is blocked on request 1.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            drop(svc.call(fake_request()));
+
+            // Request 3: the channel is now genuinely full. The buffer's own `load_shed` sheds
+            // it with `overloaded_error`, distinct from a rate-limit or concurrency-limit
+            // response, and reports the shed on `apollo.router.traffic_shaping.load_shed`.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            let response = svc
+                .call(fake_request())
+                .await
+                .expect("shed responses are Ok, not Err");
+
+            assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+            assert_eq!(
+                Some("REQUEST_OVERLOADED"),
+                response
+                    .response
+                    .body()
+                    .errors
+                    .first()
+                    .and_then(|e| e.extensions.get("code"))
+                    .and_then(|c| c.as_str())
+            );
+
+            assert_counter!(
+                "apollo.router.traffic_shaping.load_shed",
+                1,
+                subgraph.name = "test",
+                buffer.name = "test_subgraph_buffer"
+            );
+
+            // Release the gate so the worker can drain and the runtime can shut down cleanly.
+            gate.add_permits(2);
+        }
+        .with_metrics()
+        .await;
     }
 }

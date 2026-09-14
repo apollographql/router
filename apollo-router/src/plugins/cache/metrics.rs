@@ -33,7 +33,7 @@ impl CacheMetricsService {
     ) -> subgraph::BoxService {
         tower::util::BoxService::new(CacheMetricsService {
             service: ServiceBuilder::new()
-                .buffered()
+                .buffered(format!("entity_cache_metrics.{name}"))
                 .service(service)
                 .boxed_clone(),
             name: Arc::new(name),

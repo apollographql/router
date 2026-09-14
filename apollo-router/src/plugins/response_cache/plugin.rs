@@ -629,7 +629,7 @@ impl PluginPrivate for ResponseCache {
                 })
                 .service(CacheService {
                     service: ServiceBuilder::new()
-                        .buffered()
+                        .buffered(format!("response_cache.{name}"))
                         .service(service)
                         .boxed_clone(),
                     entity_type: self.entity_type.clone(),

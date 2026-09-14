@@ -166,6 +166,7 @@ impl ConnectorStage {
             let response_config = self.response.clone();
             let coprocessor_url = response_config.url.clone().unwrap_or(default_url);
 
+            let service_name = service_name.clone();
             MapFutureWithRequestDataLayer::new(
                 |req: &request_service::Request| req.context.clone(),
                 move |context: Context, fut| {
@@ -224,7 +225,7 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
+            .buffered(format!("coprocessor.connector.{service_name}"))
             .service(service)
             .boxed()
     }

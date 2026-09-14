@@ -326,7 +326,7 @@ mod async_checkpoint_tests {
 
         let mut service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
-            .buffered()
+            .buffered("async_checkpoint_test")
             .service(svc);
 
         let _ = service_stack

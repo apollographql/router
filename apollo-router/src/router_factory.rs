@@ -81,8 +81,8 @@ impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
+            handler: EndpointHandler::Service(Handler::new(handler, &path)),
             path,
-            handler: EndpointHandler::Service(Handler::new(handler)),
         }
     }
 

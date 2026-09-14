@@ -160,6 +160,9 @@ pub enum Error {
     #[error("Gateway timeout")]
     GatewayTimeout,
 
+    #[error("Request overloaded")]
+    Overloaded,
+
     #[error("Connector error: {0}")]
     TransportFailure(String),
 }
@@ -186,6 +189,7 @@ impl Error {
             Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
             Self::RateLimited => "REQUEST_RATE_LIMITED",
             Self::GatewayTimeout => "GATEWAY_TIMEOUT",
+            Self::Overloaded => "REQUEST_OVERLOADED",
             Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
         }
     }

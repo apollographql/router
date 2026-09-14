@@ -10,6 +10,7 @@ mod deduplication;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_federation::connectors::runtime::errors::Error;
@@ -428,15 +429,16 @@ impl PluginPrivate for TrafficShaping {
                         .clone()
                 });
 
+            let buffer_name: Arc<str> = format!("traffic_shaping.subgraph.{name}").into();
+
             ServiceBuilder::new()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
-                    move |(ctx, subgraph_name), future| {
+                    move |(ctx, subgraph_name): (crate::Context, String), future| {
                         async {
                             let response: Result<SubgraphResponse, BoxError> = future.await;
                             match response {
                                 Err(err) if err.is::<Elapsed>() => {
-                                    // TODO add metrics
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::GATEWAY_TIMEOUT)
                                         .subgraph_name(subgraph_name)
@@ -445,7 +447,17 @@ impl PluginPrivate for TrafficShaping {
                                         .build())
                                 }
                                 Err(err) if err.is::<Overloaded>() => {
-                                    // TODO add metrics
+                                    // The buffer below has its own `load_shed` (see the second
+                                    // `map_future_with_request_data`/`load_shed` pair below), so
+                                    // any `Overloaded` reaching this outer mapper was shed by the
+                                    // rate limiter, never by the buffer.
+                                    u64_counter_with_unit!(
+                                        "apollo.router.traffic_shaping.load_shed",
+                                        "Number of requests the traffic-shaping layer shed",
+                                        "{request}",
+                                        1u64,
+                                        subgraph.name = subgraph_name.clone()
+                                    );
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::SERVICE_UNAVAILABLE)
                                         .subgraph_name(subgraph_name)
@@ -477,7 +489,44 @@ impl PluginPrivate for TrafficShaping {
                     }
                     req
                 })
-                .buffered()
+                // Wraps only the buffer immediately below, so its `Overloaded` is caught and
+                // attributed here instead of bubbling up to the outer mapper above, where it
+                // would have been indistinguishable from the rate limiter's own rejection.
+                .map_future_with_request_data(
+                    {
+                        let buffer_name = buffer_name.clone();
+                        move |req: &subgraph::Request| {
+                            (req.context.clone(), req.subgraph_name.clone(), buffer_name.clone())
+                        }
+                    },
+                    move |(ctx, subgraph_name, buffer_name): (crate::Context, String, Arc<str>),
+                          future| {
+                        async move {
+                            let response: Result<SubgraphResponse, BoxError> = future.await;
+                            match response {
+                                Err(err) if err.is::<Overloaded>() => {
+                                    u64_counter_with_unit!(
+                                        "apollo.router.traffic_shaping.load_shed",
+                                        "Number of requests the traffic-shaping layer shed",
+                                        "{request}",
+                                        1u64,
+                                        subgraph.name = subgraph_name.clone(),
+                                        buffer.name = buffer_name
+                                    );
+                                    Ok(SubgraphResponse::error_builder()
+                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                        .subgraph_name(subgraph_name)
+                                        .error(overloaded_error())
+                                        .context(ctx)
+                                        .build())
+                                }
+                                _ => response,
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .buffered(buffer_name)
                 .service(service)
                 .boxed()
         } else {
@@ -508,16 +557,22 @@ impl PluginPrivate for TrafficShaping {
                     .clone()
             });
 
+            let buffer_name: Arc<str> = format!("traffic_shaping.connector.{source_name}").into();
+
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &Request| {
-                        (
-                            req.context.clone(),
-                            req.key.clone(),
-                            req.connector.id.subgraph_name.to_string(),
-                        )
+                    {
+                        let source_name = source_name.clone();
+                        move |req: &Request| {
+                            (
+                                req.context.clone(),
+                                req.key.clone(),
+                                req.connector.id.subgraph_name.to_string(),
+                                source_name.clone(),
+                            )
+                        }
                     },
-                    move |(context, response_key, subgraph_name), future| {
+                    move |(context, response_key, subgraph_name, source_name), future| {
                         async {
                             let response: Result<Response, BoxError> = future.await;
                             match response {
@@ -533,6 +588,17 @@ impl PluginPrivate for TrafficShaping {
                                     Ok(response)
                                 }
                                 Err(err) if err.is::<Overloaded>() => {
+                                    // The buffer below has its own `load_shed` (see the second
+                                    // `map_future_with_request_data`/`load_shed` pair below), so
+                                    // any `Overloaded` reaching this outer mapper was shed by the
+                                    // rate limiter, never by the buffer.
+                                    u64_counter_with_unit!(
+                                        "apollo.router.traffic_shaping.load_shed",
+                                        "Number of requests the traffic-shaping layer shed",
+                                        "{request}",
+                                        1u64,
+                                        connector.source = source_name
+                                    );
                                     let response = Response::error_new(
                                         context,
                                         subgraph_name,
@@ -561,7 +627,52 @@ impl PluginPrivate for TrafficShaping {
                     }
                     req
                 })
-                .buffered()
+                // Wraps only the buffer immediately below, so its `Overloaded` is caught and
+                // attributed here instead of bubbling up to the outer mapper above, where it
+                // would have been indistinguishable from the rate limiter's own rejection.
+                .map_future_with_request_data(
+                    {
+                        let buffer_name = buffer_name.clone();
+                        let source_name = source_name.clone();
+                        move |req: &Request| {
+                            (
+                                req.context.clone(),
+                                req.key.clone(),
+                                req.connector.id.subgraph_name.to_string(),
+                                source_name.clone(),
+                                buffer_name.clone(),
+                            )
+                        }
+                    },
+                    move |(context, response_key, subgraph_name, source_name, buffer_name), future| {
+                        async move {
+                            let response: Result<Response, BoxError> = future.await;
+                            match response {
+                                Err(err) if err.is::<Overloaded>() => {
+                                    u64_counter_with_unit!(
+                                        "apollo.router.traffic_shaping.load_shed",
+                                        "Number of requests the traffic-shaping layer shed",
+                                        "{request}",
+                                        1u64,
+                                        connector.source = source_name,
+                                        buffer.name = buffer_name
+                                    );
+                                    let response = Response::error_new(
+                                        context,
+                                        subgraph_name,
+                                        Error::Overloaded,
+                                        "Your request has been shed because the router is overloaded",
+                                        response_key,
+                                    );
+                                    Ok(response)
+                                }
+                                _ => response,
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .buffered(buffer_name)
                 .service(service)
                 .boxed()
         } else {
@@ -637,6 +748,18 @@ fn rate_limit_error() -> graphql::Error {
     graphql::Error::builder()
         .message("Your request has been rate limited")
         .extension_code("REQUEST_RATE_LIMITED")
+        .build()
+}
+
+/// Response for a request shed because a traffic-shaping buffer's queue was full.
+///
+/// This is distinct from [`rate_limit_error`] and [`concurrency_limit_error`]: those responses
+/// mean a configured limit rejected the request, while this one means the router had more
+/// requests in flight than it could hold, independent of any limit the operator configured.
+pub(crate) fn overloaded_error() -> graphql::Error {
+    graphql::Error::builder()
+        .message("Your request has been shed because the router is overloaded")
+        .extension_code("REQUEST_OVERLOADED")
         .build()
 }
 
@@ -1151,6 +1274,18 @@ mod test {
             .expect("it responded");
 
         assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+        // A rate-limiter rejection keeps its established code, distinct from the
+        // `REQUEST_OVERLOADED` code a buffer rejection now uses.
+        assert_eq!(
+            Some("REQUEST_RATE_LIMITED"),
+            response
+                .response
+                .body()
+                .errors
+                .first()
+                .and_then(|e| e.extensions.get("code"))
+                .and_then(|c| c.as_str())
+        );
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 

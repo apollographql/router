@@ -603,7 +603,7 @@ impl PluggableSupergraphServiceBuilder {
             .layer(SubscriptionExecutionLayer::new(
                 configuration.notify.clone(),
             ))
-            .buffered()
+            .buffered("execution_service")
             .service(execution_service_factory.create())
             .boxed_clone();
 
@@ -630,6 +630,7 @@ impl PluggableSupergraphServiceBuilder {
                 )
                 .boxed(),
             DEFAULT_BUFFER_SIZE,
+            "supergraph_service",
         );
 
         Ok(SupergraphCreator {

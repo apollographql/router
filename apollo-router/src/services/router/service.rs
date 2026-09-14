@@ -26,6 +26,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::load_shed::error::Overloaded;
 use tower_service::Service;
 use tracing::Instrument;
 
@@ -118,7 +119,7 @@ impl RouterService {
             .layer(APQCachingLayer::new(apq_layer))
             .layer(ParseQueryLayer::new(query_analysis_layer))
             .layer(EnforceSafelistLayer::new(persisted_query_layer))
-            .buffered() // Makes the supergraph service cloneable
+            .buffered("router_service.supergraph") // Makes the supergraph service cloneable
             .service(supergraph_service)
             .boxed();
 
@@ -646,7 +647,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    sb: UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    sb: BufferedWithLoadShed,
     pipeline_handle: Arc<PipelineHandle>,
     /// The configuration used to create this router, stored for hot reload previous config extraction
     pub(crate) configuration: Arc<Configuration>,
@@ -725,19 +726,18 @@ impl RouterCreator {
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)
-        let sb = UnconstrainedBuffer::new(
-            ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
+        let router_pipeline = ServiceBuilder::new()
+            .layer(static_page.clone())
+            .service(
+                supergraph_creator
+                    .plugins()
+                    .iter()
+                    .rev()
+                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+            )
+            .boxed();
+
+        let sb = buffered_with_load_shed(router_pipeline, DEFAULT_BUFFER_SIZE, "router_service");
 
         Ok(Self {
             supergraph_creator,
@@ -764,5 +764,157 @@ impl RouterCreator {
 impl RouterCreator {
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {
         self.supergraph_creator.previous_cache()
+    }
+}
+
+/// Wraps the router pipeline in a buffer with its own `load_shed` immediately around it, so a
+/// full queue is reported to the caller as an [`overloaded_error`] instead of leaving the caller
+/// queued for however long it is prepared to wait.
+///
+/// A full queue at this bound means the router is already in serious trouble, so surfacing that
+/// to the caller now is a better trade than silent, unbounded backpressure.
+///
+/// This is a concrete [`Service`] rather than a `ServiceBuilder` combinator chain erased into a
+/// `dyn Service` object, because [`tower::util::BoxCloneService`] cannot be `Sync` and
+/// [`RouterCreator`] is shared across threads.
+///
+/// [`overloaded_error`]: crate::plugins::traffic_shaping::overloaded_error
+#[derive(Clone)]
+struct BufferedWithLoadShed {
+    inner: tower::load_shed::LoadShed<
+        UnconstrainedBuffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    >,
+    buffer_name: Arc<str>,
+}
+
+fn buffered_with_load_shed(
+    inner: router::BoxService,
+    bound: usize,
+    buffer_name: impl Into<Arc<str>>,
+) -> BufferedWithLoadShed {
+    let buffer_name: Arc<str> = buffer_name.into();
+    BufferedWithLoadShed {
+        inner: tower::load_shed::LoadShed::new(UnconstrainedBuffer::new(
+            inner,
+            bound,
+            buffer_name.clone(),
+        )),
+        buffer_name,
+    }
+}
+
+impl Service<router::Request> for BufferedWithLoadShed {
+    type Response = router::Response;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, router::ServiceResult>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: router::Request) -> Self::Future {
+        let ctx = req.context.clone();
+        let buffer_name = self.buffer_name.clone();
+        let future = self.inner.call(req);
+        Box::pin(async move {
+            let response: router::ServiceResult = future.await;
+            match response {
+                Err(err) if err.is::<Overloaded>() => {
+                    u64_counter_with_unit!(
+                        "apollo.router.traffic_shaping.load_shed",
+                        "Number of requests the traffic-shaping layer shed",
+                        "{request}",
+                        1u64,
+                        buffer.name = buffer_name
+                    );
+                    Ok(RouterResponse::error_builder()
+                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                        .error(crate::plugins::traffic_shaping::overloaded_error())
+                        .context(ctx)
+                        .build()
+                        .expect("should build overloaded response"))
+                }
+                _ => response,
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod buffered_with_load_shed_tests {
+    use std::future::poll_fn;
+
+    use super::*;
+    use crate::metrics::FutureMetricsExt;
+
+    #[tokio::test]
+    async fn reports_overloaded_when_the_queue_is_full() {
+        async {
+            // A router service that blocks until the test releases it, so the buffer can be
+            // driven to genuinely full rather than relying on timing.
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            let gate_clone = gate.clone();
+            let inner = tower::service_fn(move |req: router::Request| {
+                let gate = gate_clone.clone();
+                async move {
+                    let _permit = gate.acquire().await.unwrap();
+                    Ok(RouterResponse::fake_builder()
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                }
+            })
+            .boxed();
+
+            // Capacity 1: the worker holds 1 in-flight; 1 more can queue. A third makes the
+            // buffer genuinely full, so its own `load_shed` sheds it. Same shape as
+            // `full_buffer_should_still_cause_load_shedding` in `unconstrained_buffer.rs`.
+            let mut svc = buffered_with_load_shed(inner, 1, "test_router_buffer");
+
+            // Request 1: accepted, worker picks it up and blocks at the gate.
+            // `call()` enqueues synchronously; dropping the response future only discards the
+            // response receiver — the request is already in the channel.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            drop(svc.call(RouterRequest::fake_builder().build().unwrap()));
+
+            // Yield so the worker task runs and drains request 1 from the channel.
+            tokio::task::yield_now().await;
+
+            // Request 2: fills the channel while the worker is blocked on request 1.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            drop(svc.call(RouterRequest::fake_builder().build().unwrap()));
+
+            // Request 3: the channel is now genuinely full. The buffer's own `load_shed` sheds
+            // it with `overloaded_error`, and reports the shed on
+            // `apollo.router.traffic_shaping.load_shed`.
+            poll_fn(|cx| svc.poll_ready(cx)).await.unwrap();
+            let response = svc
+                .call(RouterRequest::fake_builder().build().unwrap())
+                .await
+                .expect("shed responses are Ok, not Err");
+
+            assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+            let body: serde_json::Value = serde_json::from_slice(
+                &crate::services::router::body::into_bytes(response.response)
+                    .await
+                    .expect("we have a body"),
+            )
+            .expect("our body is valid json");
+            assert_eq!(
+                "REQUEST_OVERLOADED",
+                body["errors"][0]["extensions"]["code"]
+            );
+
+            assert_counter!(
+                "apollo.router.traffic_shaping.load_shed",
+                1,
+                buffer.name = "test_router_buffer"
+            );
+
+            // Release the gate so the worker can drain and the runtime can shut down cleanly.
+            gate.add_permits(2);
+        }
+        .with_metrics()
+        .await;
     }
 }

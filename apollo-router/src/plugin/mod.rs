@@ -974,9 +974,11 @@ pub(crate) struct Handler {
 }
 
 impl Handler {
-    pub(crate) fn new(service: router::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxService, endpoint_path: &str) -> Self {
         Self {
-            service: ServiceBuilder::new().buffered().service(service),
+            service: ServiceBuilder::new()
+                .buffered(format!("plugin_endpoint.{endpoint_path}"))
+                .service(service),
         }
     }
 }
@@ -997,6 +999,6 @@ impl Service<router::Request> for Handler {
 
 impl From<router::BoxService> for Handler {
     fn from(original: router::BoxService) -> Self {
-        Self::new(original)
+        Self::new(original, "unknown")
     }
 }

@@ -42,6 +42,22 @@
 //! On a single-threaded runtime or contended scenario, this is the moment where all accumulated
 //! [`Overloaded`] errors will start to show up one after another in "waves".
 //!
+//! ## Metrics
+//!
+//! Every buffer is constructed with a name, reported on two counters attributed by
+//! `buffer.name`:
+//!
+//! - `apollo.router.buffer.queue_is_full` counts `poll_ready` calls that found the queue full.
+//!   Because the check runs inside [`unconstrained`], a `Pending` result here can only mean a
+//!   full queue, never a coop-budget artifact. It counts polls, not rejected requests: tower
+//!   re-polls `poll_ready` while a caller waits, and a wrapping [`LoadShed`] polls again on its
+//!   own retries, so one queued request can raise this counter more than once. Whether a
+//!   queue-full poll becomes a rejection depends on what wraps the buffer. A [`LoadShed`] turns
+//!   it into one. A plain caller just waits for capacity.
+//! - `apollo.router.buffer.closed` counts `poll_ready` calls that returned an error because the
+//!   buffer's worker task had already stopped. Every request this happens to is lost, since there
+//!   is no worker left to serve it.
+//!
 //! [`Pending`]: Poll::Pending
 //! [`Ready`]: Poll::Ready
 //! [`unconstrained`]: tokio::task::unconstrained
@@ -54,6 +70,7 @@
 use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
@@ -66,9 +83,10 @@ use tower_service::Service;
 /// Adds a [coop unconstrained](tokio::task::unconstrained) [`Buffer`] layer to a service.
 ///
 /// See the module documentation for more details.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct UnconstrainedBufferLayer<Request> {
     bound: usize,
+    name: Arc<str>,
     _p: PhantomData<fn(Request)>,
 }
 
@@ -79,9 +97,13 @@ impl<Request> UnconstrainedBufferLayer<Request> {
     /// backpressure is applied to callers.
     ///
     /// See [`Buffer::new`] for guidance on choosing a `bound`.
-    pub const fn new(bound: usize) -> Self {
+    ///
+    /// `name` identifies this buffer on the metrics described in the module documentation, so
+    /// pick one that tells an operator which buffer they are looking at.
+    pub fn new(bound: usize, name: impl Into<Arc<str>>) -> Self {
         UnconstrainedBufferLayer {
             bound,
+            name: name.into(),
             _p: PhantomData,
         }
     }
@@ -97,7 +119,7 @@ where
     type Service = UnconstrainedBuffer<Request, S::Future>;
 
     fn layer(&self, service: S) -> Self::Service {
-        UnconstrainedBuffer::new(service, self.bound)
+        UnconstrainedBuffer::new(service, self.bound, self.name.clone())
     }
 }
 
@@ -105,6 +127,7 @@ impl<Request> fmt::Debug for UnconstrainedBufferLayer<Request> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("UnconstrainedBufferLayer")
             .field("bound", &self.bound)
+            .field("name", &self.name)
             .finish()
     }
 }
@@ -123,6 +146,8 @@ pub struct UnconstrainedBuffer<Req, F> {
     /// The inner [`Buffer`] layer, which wraps the actual service and is responsible for
     /// buffering requests.
     inner: Buffer<Req, F>,
+    /// Identifies this buffer on the metrics described in the module documentation.
+    name: Arc<str>,
 }
 
 impl<Req, F> UnconstrainedBuffer<Req, F>
@@ -130,7 +155,10 @@ where
     F: 'static,
 {
     /// Creates a new `UnconstrainedBuffer` with the specified service and buffer capacity.
-    pub fn new<S>(service: S, bound: usize) -> Self
+    ///
+    /// `name` identifies this buffer on the metrics described in the module documentation, so
+    /// pick one that tells an operator which buffer they are looking at.
+    pub fn new<S>(service: S, bound: usize, name: impl Into<Arc<str>>) -> Self
     where
         S: Service<Req, Future = F> + Send + 'static,
         F: Send,
@@ -139,7 +167,10 @@ where
     {
         let inner = Buffer::new(service, bound);
 
-        Self { inner }
+        Self {
+            inner,
+            name: name.into(),
+        }
     }
 }
 
@@ -154,11 +185,37 @@ where
     type Future = ResponseFuture<F>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        std::pin::pin!(tokio::task::unconstrained(std::future::poll_fn(|cx| {
+        let result = std::pin::pin!(tokio::task::unconstrained(std::future::poll_fn(|cx| {
             self.inner.poll_ready(cx)
         })))
         .as_mut()
-        .poll(cx)
+        .poll(cx);
+
+        // The `unconstrained` wrapper above has already ruled out a coop-budget artifact, so
+        // a `Pending` here reflects the semaphore alone: the queue is genuinely full.
+        match &result {
+            Poll::Pending => {
+                u64_counter_with_unit!(
+                    "apollo.router.buffer.queue_is_full",
+                    "Number of times a router-internal buffer's queue was full when polled for readiness",
+                    "{poll}",
+                    1u64,
+                    buffer.name = self.name.clone()
+                );
+            }
+            Poll::Ready(Err(_)) => {
+                u64_counter_with_unit!(
+                    "apollo.router.buffer.closed",
+                    "Number of times a router-internal buffer's worker task had already stopped when polled for readiness",
+                    "{poll}",
+                    1u64,
+                    buffer.name = self.name.clone()
+                );
+            }
+            Poll::Ready(Ok(())) => {}
+        }
+
+        result
     }
 
     fn call(&mut self, request: Req) -> Self::Future {
@@ -174,6 +231,7 @@ where
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            name: self.name.clone(),
         }
     }
 }
@@ -224,7 +282,7 @@ mod tests {
     async fn coop_budget_exhaustion_should_not_cause_buffer_poll_ready_to_return_pending() {
         // Service chain: Buffer(1000) -> inner service
         let inner = tower::service_fn(|_: ()| async { Ok::<_, BoxError>("ok") });
-        let mut inner_buffered = UnconstrainedBuffer::new(inner, 1000);
+        let mut inner_buffered = UnconstrainedBuffer::new(inner, 1000, "test_budget");
 
         // Tries to reset the budget by yielding to the scheduler.
         tokio::task::yield_now().await;
@@ -302,7 +360,7 @@ mod tests {
     async fn coop_budget_exhaustion_should_not_cause_false_shedding() {
         // Service chain: LoadShed -> Buffer(1000) -> instant_service
         let inner = tower::service_fn(|_: ()| async { Ok::<_, BoxError>("ok") });
-        let inner_buffered = UnconstrainedBuffer::new(inner, 1000);
+        let inner_buffered = UnconstrainedBuffer::new(inner, 1000, "test_load_shed");
         let mut load_shed = LoadShed::new(inner_buffered);
 
         // Tries to reset the budget by yielding to the scheduler.
@@ -402,7 +460,7 @@ mod tests {
         });
 
         // Capacity 1: the worker holds 1 in-flight; 1 more can queue. A third makes the buffer full.
-        let inner_buffered = UnconstrainedBuffer::new(inner, 1);
+        let inner_buffered = UnconstrainedBuffer::new(inner, 1, "test_full_buffer");
         let mut load_shed = LoadShed::new(inner_buffered);
 
         // Request 1: accepted, worker picks it up and blocks at the gate.
@@ -450,6 +508,96 @@ mod tests {
         gate.add_permits(2);
     }
 
+    /// Confirms that a genuinely full queue is reported on `apollo.router.buffer.queue_is_full`,
+    /// attributed to the buffer's own name, once per `poll_ready` call that observes it.
+    #[tokio::test]
+    async fn it_records_queue_is_full_metric_when_the_buffer_has_no_capacity() {
+        use std::sync::Arc;
+
+        use tokio::sync::Semaphore;
+
+        use crate::metrics::FutureMetricsExt;
+
+        async {
+            // A gate that holds the inner service blocked until we release it.
+            let gate = Arc::new(Semaphore::new(0));
+            let gate_clone = gate.clone();
+
+            let inner = tower::service_fn(move |_: ()| {
+                let gate = gate_clone.clone();
+                async move {
+                    let _permit = gate.acquire().await.unwrap();
+                    Ok::<_, BoxError>("ok")
+                }
+            });
+
+            // Capacity 1: the worker holds 1 in-flight; 1 more can queue. A third poll finds the
+            // queue genuinely full.
+            let mut buffered = UnconstrainedBuffer::new(inner, 1, "test_queue_full_buffer");
+
+            poll_fn(|cx| buffered.poll_ready(cx)).await.unwrap();
+            drop(buffered.call(()));
+            tokio::task::yield_now().await;
+
+            poll_fn(|cx| buffered.poll_ready(cx)).await.unwrap();
+            drop(buffered.call(()));
+
+            // This third poll observes the queue full; `poll_ready` reports `Pending`.
+            poll_fn(|cx| {
+                assert!(matches!(buffered.poll_ready(cx), Poll::Pending));
+                Poll::Ready(())
+            })
+            .await;
+
+            assert_counter!(
+                "apollo.router.buffer.queue_is_full",
+                1,
+                buffer.name = "test_queue_full_buffer"
+            );
+
+            // Release the gate so the worker can drain and the runtime can shut down cleanly.
+            gate.add_permits(2);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Confirms that a buffer whose worker task has already stopped is reported on
+    /// `apollo.router.buffer.closed`, attributed to the buffer's own name, distinct from the
+    /// queue-full case: this is a `poll_ready` error, not a `Pending` result.
+    #[tokio::test]
+    async fn it_records_closed_metric_when_the_workers_task_is_gone() {
+        use crate::metrics::FutureMetricsExt;
+
+        async {
+            let inner = tower::service_fn(|_: ()| async { Ok::<_, BoxError>("ok") });
+
+            // Build the inner `Buffer` and its `Worker` directly so the worker can be dropped
+            // without ever being spawned, deterministically closing the channel `poll_ready`
+            // reads from — the same condition a panicked or aborted worker task would leave
+            // behind.
+            let (inner_buffer, worker) = tower::buffer::Buffer::pair(inner, 10);
+            drop(worker);
+
+            let mut buffered = UnconstrainedBuffer {
+                inner: inner_buffer,
+                name: Arc::from("test_closed_buffer"),
+            };
+
+            poll_fn(|cx| buffered.poll_ready(cx))
+                .await
+                .expect_err("the worker is gone, so poll_ready must report an error");
+
+            assert_counter!(
+                "apollo.router.buffer.closed",
+                1,
+                buffer.name = "test_closed_buffer"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
     /// Load-based test: ensure that shedding never happens under load with the
     /// real Buffer Worker loop.
     ///
@@ -490,9 +638,9 @@ mod tests {
         // The second flow is the one that is behind a `LoadShed` layer and will cause
         // an `Overloaded` error upon an attempt of awaiting on a `Service::call` future.
         let service = tower::service_fn(move |_: ()| async move { Ok::<_, BoxError>("ok") });
-        let inner_buffer = UnconstrainedBuffer::new(service, buffer_capacity);
+        let inner_buffer = UnconstrainedBuffer::new(service, buffer_capacity, "test_inner");
         let load_shed = LoadShed::new(inner_buffer);
-        let outer_buffer = UnconstrainedBuffer::new(load_shed, buffer_capacity);
+        let outer_buffer = UnconstrainedBuffer::new(load_shed, buffer_capacity, "test_outer");
 
         let mut shed = 0usize;
         let mut other_err = 0usize;
