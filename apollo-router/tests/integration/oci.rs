@@ -194,6 +194,80 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
     (mock_server, artifact_reference)
 }
 
+/// Helper function to set up a mock OCI registry server whose manifest carries
+/// only a schema layer — no entitlement layer at all. This is the artifact
+/// shape that a self-hosted, non-Apollo registry is expected to serve when it
+/// hasn't opted into Graph Artifacts-delivered licensing: the router should
+/// boot unlicensed rather than hang retrying a fetch that can never succeed.
+async fn setup_mock_oci_server_no_entitlement(schema_content: &str) -> (MockServer, String) {
+    let mock_server = MockServer::start().await;
+    let graph_id = "test-graph-id";
+
+    // Create schema layer
+    let schema_layer = ImageLayer {
+        data: schema_content.to_string().into(),
+        media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+
+    // Mock blob
+    let blob_digest = schema_layer.sha256_digest();
+
+    // Mock manifest — deliberately no entitlement layer
+    let oci_manifest = OciManifest::Image(OciImageManifest {
+        schema_version: 2,
+        media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+        config: Default::default(),
+        layers: vec![OciDescriptor {
+            media_type: schema_layer.media_type.clone(),
+            digest: blob_digest.clone(),
+            size: schema_layer.data.len().try_into().unwrap(),
+            urls: None,
+            annotations: None,
+            artifact_type: None,
+        }],
+        subject: None,
+        artifact_type: None,
+        annotations: None,
+    });
+    let manifest_digest: String = calculate_manifest_digest(&oci_manifest);
+
+    // Set up check endpoint
+    Mock::given(method("GET"))
+        .and(path("/v2/"))
+        .respond_with(ResponseTemplate::new(200).append_header("content-type", "application/json"))
+        .mount(&mock_server)
+        .await;
+
+    // Set up blob endpoint
+    Mock::given(method("GET"))
+        .and(path(format!("/v2/{}/blobs/{}", graph_id, blob_digest)))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(schema_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Set up manifest endpoint
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/manifests/{}",
+            graph_id, manifest_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let artifact_reference = format!("{}/{}@{}", mock_server.address(), graph_id, manifest_digest);
+    (mock_server, artifact_reference)
+}
+
 /// Helper function to set up a mock OCI registry server with tag-based references.
 /// The tag manifest endpoint (both HEAD and GET) serves the initial digest/manifest
 /// until explicitly told otherwise by the caller.
@@ -465,6 +539,39 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
         .await;
 
     router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// A graph artifact manifest with a schema layer but no entitlement layer 
+/// must not hang the router at startup. Therefore, OCI treats a missing 
+/// entitlement layer the same way Uplink does in its response: as
+/// `License::default()` (unlicensed), not a fetch failure.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_boots_unlicensed_without_entitlement_layer() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_mock_server, artifact_reference) =
+        setup_mock_oci_server_no_entitlement(LOCAL_SCHEMA).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([(
+            String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+            artifact_reference.into(),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    // Bounded by `assert_started`'s own timeout: this must not hang.
     router.assert_started().await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;
