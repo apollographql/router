@@ -297,10 +297,7 @@ where
         + std::marker::Send
         + 'static,
 {
-    #[expect(
-        clippy::result_large_err,
-        reason = "in practice the generic Self and error are not significantly different in size"
-    )]
+    #[allow(clippy::result_large_err)]
     pub(crate) async fn new(
         mut stream: S,
         id: String,
@@ -363,10 +360,7 @@ where
         })
     }
 
-    #[expect(
-        clippy::result_large_err,
-        reason = "function is infrequently used, ergonomics more important"
-    )]
+    #[allow(clippy::result_large_err)]
     pub(crate) async fn into_subscription(
         mut self,
         request: graphql::Request,

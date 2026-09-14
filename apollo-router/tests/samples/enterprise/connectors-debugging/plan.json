@@ -27,7 +27,7 @@
         "query": "query { post(id: 1) { id author { name } title } }"
       },
       "expected_response": {
-        "data": { "post": { "id": 1, "author": { "name": "Leanne Graham" }, "title": null } },
+        "data": { "post": { "id": "1", "author": { "name": "Leanne Graham" }, "title": null } },
         "extensions": {
           "apolloConnectorsDebugging": {
             "version": "2",

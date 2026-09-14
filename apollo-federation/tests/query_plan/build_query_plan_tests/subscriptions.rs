@@ -171,7 +171,8 @@ fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
         }
     "#);
 
-    let document = ExecutableDocument::parse_and_validate(
+    // apollo-compiler v2 catches @defer in subscriptions at parse time.
+    ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
         r#"
         subscription MySubscription {
@@ -186,11 +187,7 @@ fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
         "#,
         "trying_to_use_defer_with_a_subcription_results_in_an_error.graphql",
     )
-    .unwrap();
-
-    planner
-        .build_query_plan(&document, Some(name!(MySubscription)), Default::default())
-        .expect_err("should return an error");
+    .expect_err("@defer in subscription should be rejected at parse time");
 }
 
 #[test]

@@ -7,7 +7,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::resolvers::Execution;
-use apollo_compiler::resolvers::FieldError;
+use apollo_compiler::resolvers::ExecutionError;
 use apollo_compiler::resolvers::ObjectValue;
 use apollo_compiler::resolvers::ResolveInfo;
 use apollo_compiler::resolvers::ResolvedValue;
@@ -297,7 +297,7 @@ impl ObjectValue for RootResolver<'_> {
     fn resolve_field<'a>(
         &'a self,
         info: &'a ResolveInfo<'a>,
-    ) -> Result<ResolvedValue<'a>, FieldError> {
+    ) -> Result<ResolvedValue<'a>, ExecutionError> {
         if info.field_name() != "_entities" {
             let in_entity = false;
             return resolve_normal_field(
@@ -309,17 +309,17 @@ impl ObjectValue for RootResolver<'_> {
         }
         let entities = info.arguments()["representations"]
             .as_array()
-            .ok_or(FieldError {
+            .ok_or(ExecutionError {
                 message: "expected array `representations`".into(),
             })?
             .iter()
             .map(move |representation| {
-                let representation = representation.as_object().ok_or(FieldError {
+                let representation = representation.as_object().ok_or(ExecutionError {
                     message: "expected object `representations[n]`".into(),
                 })?;
                 let entity = self
                     .find_entities(representation)
-                    .ok_or_else(|| FieldError {
+                    .ok_or_else(|| ExecutionError {
                         message: format!(
                             "no mocked entity found for representation {representation:?}"
                         ),
@@ -353,7 +353,7 @@ impl ObjectValue for MockResolver<'_> {
     fn resolve_field<'a>(
         &'a self,
         info: &'a ResolveInfo<'a>,
-    ) -> Result<ResolvedValue<'a>, FieldError> {
+    ) -> Result<ResolvedValue<'a>, ExecutionError> {
         resolve_normal_field(self.response_extensions, self.in_entity, self.mocks, info)
     }
 }
@@ -371,10 +371,10 @@ fn resolve_normal_field<'a>(
     in_entity: bool,
     mocks: &'a JsonMap,
     info: &'a ResolveInfo<'a>,
-) -> Result<ResolvedValue<'a>, FieldError> {
+) -> Result<ResolvedValue<'a>, ExecutionError> {
     // TODO: find some way to vary response based on arguments?
     let field_name = info.field_name();
-    let mock = mocks.get(field_name).ok_or_else(|| FieldError {
+    let mock = mocks.get(field_name).ok_or_else(|| ExecutionError {
         message: format!("field '{field_name}' not found in mocked data"),
     })?;
     resolve_value(response_extensions, in_entity, mock, info)
@@ -385,7 +385,7 @@ fn resolve_value<'a>(
     in_entity: bool,
     mock: &'a JsonValue,
     info: &'a ResolveInfo<'a>,
-) -> Result<ResolvedValue<'a>, FieldError> {
+) -> Result<ResolvedValue<'a>, ExecutionError> {
     match mock {
         JsonValue::Object(map) => {
             if !in_entity && let Some(keys) = map.get("__cacheTags") {

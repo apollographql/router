@@ -1,8 +1,7 @@
-"The schema"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
-  query: TheQuery
+  query: Query
 }
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
@@ -45,45 +44,34 @@ directive @link(
 ) repeatable on SCHEMA
 
 scalar join__FieldSet
-scalar link__Import
 
 enum join__Graph {
-  SUBGRAPH1 @join__graph(name: "subgraph1", url: "http://localhost:4001/graphql")
+  MAIN
+    @join__graph(name: "main", url: "https://main.example.com/")
 }
+
+scalar link__Import
 
 enum link__Purpose {
   SECURITY
   EXECUTION
 }
 
-"""
-Root query type
-"""
-type TheQuery implements I @join__type(graph: SUBGRAPH1) {
+input UserBy
+  @oneOf
+  @join__type(graph: MAIN) {
+  id: ID
+  email: String
+}
+
+type Query
+  @join__type(graph: MAIN) {
+  userBy(by: UserBy!): User @join__field(graph: MAIN)
+}
+
+type User
+  @join__type(graph: MAIN) {
   id: ID!
-  ints: [[Int!]]! @deprecated(reason: "…")
-  url(arg: [In] = [{ b: 4, a: 2 }]): Url
-  union: U @deprecated
-}
-
-interface I @join__type(graph: SUBGRAPH1) {
-  id: ID!
-}
-
-input In @join__type(graph: SUBGRAPH1) {
-  a: Int! = 0 @deprecated
-  b: Int @deprecated
-}
-
-scalar Url @specifiedBy(url: "https://url.spec.whatwg.org/") @join__type(graph: SUBGRAPH1)
-
-union U @join__type(graph: SUBGRAPH1) = TheQuery | T
-
-type T @join__type(graph: SUBGRAPH1) {
-  enum: E @deprecated
-}
-
-enum E @join__type(graph: SUBGRAPH1) {
-  NEW
-  OLD @deprecated
+  name: String!
+  email: String!
 }

@@ -24,7 +24,7 @@
       "expected_response": {
         "data": {
           "post": {
-            "id": 1,
+            "id": "1",
             "author": {
               "name": "Leanne Graham"
             },

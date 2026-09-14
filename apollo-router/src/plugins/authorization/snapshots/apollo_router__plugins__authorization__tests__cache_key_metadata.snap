@@ -5,7 +5,7 @@ expression: response
 {
   "data": {
     "currentUser": {
-      "id": 1,
+      "id": "1",
       "name": null,
       "phone": "1234"
     }
