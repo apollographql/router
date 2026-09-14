@@ -292,11 +292,6 @@ impl Opt {
     /// 2. env APOLLO_ROUTER_LICENSE
     /// 3. graph artifact OCI registry (when a graph artifact reference is configured)
     /// 4. uplink
-    ///
-    /// Note: `oci_config()` still requires `apollo_key` to be set, so a
-    /// fully credential-less self-hosted router will error out here rather
-    /// than obtain a license. Removing that requirement is tracked
-    /// separately (ROUTER-1983) and is not handled by this precedence fix.
     pub(crate) fn license_source(
         &self,
         current_directory: &std::path::Path,
@@ -1272,11 +1267,6 @@ mod tests {
             // must resolve to OCI instead of silently falling through to no
             // license source, since only a graph artifact reference is
             // configured.
-            //
-            // Note: `oci_config()` still requires `apollo_key` to be set
-            // (it doubles as the OCI registry auth token) even for
-            // non-Apollo registries. Removing that requirement is tracked
-            // separately by ROUTER-1983 and is not part of this fix.
             let opt = Opt {
                 apollo_key: Some("registry-token".to_string()),
                 apollo_graph_ref: None,
