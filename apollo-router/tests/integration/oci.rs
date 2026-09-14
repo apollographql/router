@@ -545,8 +545,8 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
     Ok(())
 }
 
-/// A graph artifact manifest with a schema layer but no entitlement layer 
-/// must not hang the router at startup. Therefore, OCI treats a missing 
+/// A graph artifact manifest with a schema layer but no entitlement layer
+/// must not hang the router at startup. Therefore, OCI treats a missing
 /// entitlement layer the same way Uplink does in its response: as
 /// `License::default()` (unlicensed), not a fetch failure.
 #[tokio::test(flavor = "multi_thread")]
