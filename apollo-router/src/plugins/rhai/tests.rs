@@ -722,12 +722,12 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     if let Err(error) = call_rhai_function("process_subgraph_response_om_missing_message").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+        // The script threw a structured object (`throw #{...}`) but supplied neither `message`
+        // nor `body`, so there is no script-authored text to show the client: this falls back
+        // to the same redacted message as a genuine engine fault.
         assert_eq!(
             processed_error.message,
-            Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 268, position 5)'"
-                    .to_string()
-            )
+            Some("internal server error".to_string())
         );
     } else {
         // Test failed
@@ -975,6 +975,35 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 
     crate::plugin::test::await_mock_driver(driver).await;
     Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_fault_is_redacted_for_the_client_but_logged_in_full() -> Result<(), BoxError> {
+    async {
+        let (mock_service, handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+
+        let dyn_plugin = create_plugin("error_engine_fault.rhai").await?;
+        let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let req = SupergraphRequest::fake_builder()
+            .context(Context::new())
+            .build()?;
+
+        let mut response = service.ready().await?.call(req).await?;
+        assert_eq!(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            response.response.status()
+        );
+
+        let body = response.next_response().await.unwrap();
+        assert_eq!(body.errors.len(), 1);
+        assert_eq!(body.errors[0].message, "internal server error");
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        Ok(())
+    }
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
 }
 
 async fn test_supergraph_error_logging(script_name: &str) -> Result<(), BoxError> {

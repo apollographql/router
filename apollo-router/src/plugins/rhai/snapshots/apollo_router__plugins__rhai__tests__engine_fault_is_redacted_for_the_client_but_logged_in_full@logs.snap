@@ -1,0 +1,27 @@
+---
+source: apollo-router/src/plugins/rhai/tests.rs
+assertion_line: 1005
+expression: yaml
+---
+- fields: {}
+  level: ERROR
+  message: "rhai script execution failed: Function not found: this_function_does_not_exist () (line 20, position 5)"
+  span:
+    name: rhai_plugin
+    otel.kind: INTERNAL
+    rhai service: "supergraph :: Request"
+  spans:
+    - name: rhai_plugin
+      otel.kind: INTERNAL
+      rhai service: "supergraph :: Request"
+- fields: {}
+  level: ERROR
+  message: "map_request callback failed: ErrorDetails {\n    status: 500,\n    message: Some(\n        \"internal server error\",\n    ),\n    position: Some(\n        Position {\n            line: Some(\n                20,\n            ),\n            pos: Some(\n                5,\n            ),\n        },\n    ),\n    body: None,\n}"
+  span:
+    name: rhai_plugin
+    otel.kind: INTERNAL
+    rhai service: "supergraph :: Request"
+  spans:
+    - name: rhai_plugin
+      otel.kind: INTERNAL
+      rhai service: "supergraph :: Request"

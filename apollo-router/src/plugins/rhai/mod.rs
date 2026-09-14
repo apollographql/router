@@ -765,27 +765,54 @@ fn default_thrown_status_code() -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
+/// Client-facing message for a Rhai failure that carries no script-authored text. Matches the
+/// `internal server error` convention used for other internal failures (see
+/// `internal_server_error` in `axum_http_server_factory`); the diagnostic goes to the log instead.
+const REDACTED_ERROR_MESSAGE: &str = "internal server error";
+
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
-    let mut error_details = ErrorDetails {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: Some(format!("rhai execution error: '{error}'")),
-        position: None,
-        body: None,
+    let inner_error = error.unwrap_inner();
+
+    // A script's `throw` statement always produces `EvalAltResult::ErrorRuntime`. Every other
+    // variant - a type mismatch, an unknown function or variable, a stack overflow, an
+    // operation-count limit - is a fault in the engine or the script's logic that no `throw`
+    // can produce, so its diagnostic text never came from the script and is always safe to
+    // redact.
+    let EvalAltResult::ErrorRuntime(obj, pos) = inner_error else {
+        tracing::error!("rhai script execution failed: {error}");
+        return ErrorDetails {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: Some(REDACTED_ERROR_MESSAGE.to_string()),
+            position: Some((&error.position()).into()),
+            body: None,
+        };
     };
 
-    let inner_error = error.unwrap_inner();
-    // We only want to process runtime errors
-    if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
-        if let Ok(temp_error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
-            if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
-                error_details = temp_error_details;
-            } else {
-                error_details.status = temp_error_details.status;
-            }
+    if let Ok(mut error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
+        // The thrown value deserialized into `ErrorDetails`, which only happens for a script
+        // that explicitly threw a structured object (`throw #{ status: .., message: .., body:
+        // .. }`). Its status, message and body are the script's own choice and reach the
+        // client unchanged; a script that supplied neither message nor body gets the same
+        // redacted text as an engine fault, since there is no script-authored text to show.
+        if error_details.message.is_none() && error_details.body.is_none() {
+            error_details.message = Some(REDACTED_ERROR_MESSAGE.to_string());
         }
         error_details.position = Some(pos.into());
+        return error_details;
     }
-    error_details
+
+    // The thrown value is a bare scalar (typically a string). This is also how a script raises
+    // a custom, client-facing error deliberately (the documented `throw "message"` pattern), and
+    // it is indistinguishable at this point from a native binding's error string surfacing
+    // through the same `ErrorRuntime` variant - both are a plain string with no structure to
+    // tell them apart. Since a deliberate `throw "message"` must keep reaching the client
+    // unchanged, this case is passed through as before rather than guessed at.
+    ErrorDetails {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: Some(format!("rhai execution error: '{error}'")),
+        position: Some(pos.into()),
+        body: None,
+    }
 }
 
 /// Execute a Rhai callback for a pipeline service stage.
