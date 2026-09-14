@@ -1285,6 +1285,27 @@ mod tests {
         }
 
         #[test]
+        fn uses_oci_for_self_hosted_router_without_studio_credentials() {
+            // A self-hosted router pointed at its own OCI registry, with no
+            // apollo_key must resolve to OCI
+            let opt = Opt {
+                apollo_key: None,
+                apollo_graph_ref: Some("test-graph@current".to_string()),
+                graph_artifact_reference: Some(
+                    "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::OCI(_)),
+                "expected OCI license source, got {source:?}"
+            );
+        }
+
+        #[test]
         fn falls_back_to_uplink_when_no_graph_artifact_reference_is_set() {
             // A standard router (Studio credentials set, no graph artifact
             // reference) must fall back to Uplink, not fail at startup.
