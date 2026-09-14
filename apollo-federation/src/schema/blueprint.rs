@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::schema::Component;
 use apollo_compiler::ty;
 
 use crate::bail;
@@ -53,7 +53,7 @@ pub(crate) struct FederationBlueprint {}
 impl FederationBlueprint {
     pub(crate) fn on_missing_directive_definition(
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name != LINK_DIRECTIVE_NAME_IN_SPEC {
             return Ok(None);

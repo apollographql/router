@@ -1,8 +1,5 @@
-use std::ops::Deref;
-
 use apollo_compiler::Node;
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use indexmap::IndexMap;
 
@@ -64,15 +61,13 @@ impl FieldVisitor<InputObjectFieldDefinitionPosition>
         }
 
         if let Some(old_field) = r#type.fields.get(&field.field_name) {
-            if *old_field.deref().deref() != new_field {
+            if **old_field != new_field {
                 return Err(FederationError::internal(format!(
                     "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
                 )));
             }
         } else {
-            r#type
-                .fields
-                .insert(field.field_name, Component::new(new_field));
+            r#type.fields.insert(field.field_name, Node::new(new_field));
         }
 
         Ok(())

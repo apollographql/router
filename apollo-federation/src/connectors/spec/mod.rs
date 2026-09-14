@@ -9,10 +9,10 @@ use std::fmt::Display;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 pub use connect::ConnectHTTPArguments;
 pub(crate) use connect::extract_connect_directive_arguments;
 use itertools::Itertools;
@@ -46,7 +46,7 @@ pub(crate) struct ConnectLink {
     pub(crate) spec: ConnectSpec,
     pub(crate) source_directive_name: Name,
     pub(crate) connect_directive_name: Name,
-    pub(crate) directive: Component<Directive>,
+    pub(crate) directive: Node<Directive>,
     pub(crate) link: Link,
 }
 

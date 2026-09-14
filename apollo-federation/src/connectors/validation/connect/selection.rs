@@ -632,9 +632,7 @@ impl<'schema> SelectionValidator<'schema> {
                         });
                     }
 
-                    for (type_name, field_component) in fields_by_type_name.iter() {
-                        let field_def = &field_component.node;
-
+                    for (type_name, field_def) in fields_by_type_name.iter() {
                         // Shadowing the type_ref parameter with a concrete type reference.
                         let Some(type_ref) = SchemaTypeRef::new(self.schema, type_name) else {
                             continue;

@@ -258,10 +258,8 @@ impl LicenseEnforcementReport {
                             .flat_map(|def| match def {
                                 // To traverse additional directive locations, add match arms for the respective definition types required.
                                 ExtendedType::Object(object_type_def) => {
-                                    let directives_on_object = object_type_def
-                                        .directives
-                                        .get_all(&directive_name)
-                                        .map(|component| &component.node);
+                                    let directives_on_object =
+                                        object_type_def.directives.get_all(&directive_name);
                                     let directives_on_fields =
                                         object_type_def.fields.values().flat_map(|field| {
                                             field.directives.get_all(&directive_name)

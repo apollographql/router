@@ -9,8 +9,6 @@ use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Type;
@@ -281,7 +279,7 @@ impl Subgraph<Initial> {
             .schema_definition
             .make_mut()
             .directives
-            .push(Component::new(Directive {
+            .push(Node::new(Directive {
                 name: Identity::LINK_NAME,
                 arguments: vec![
                     Node::new(ast::Argument {
@@ -403,7 +401,7 @@ mod parser_backward_compatibility {
     }
 
     fn remove_duplicate_arguments_in_fields(
-        fields: &mut IndexMap<Name, Component<ast::FieldDefinition>>,
+        fields: &mut IndexMap<Name, Node<ast::FieldDefinition>>,
     ) {
         for (_, field) in fields {
             let unique_arguments = deduped_arguments(field.arguments.iter().cloned());
@@ -482,13 +480,13 @@ impl Subgraph<Expanded> {
             .iter_root_operations()
         {
             let default_name = default_operation_name(&op_type);
-            if op_name.name != default_name {
-                operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+            if *op_name != default_name {
+                operation_types_to_rename.insert(Name::clone(op_name), default_name.clone());
                 if self.schema().try_get_type(&default_name).is_some() {
                     return Err(SingleFederationError::root_already_used(
                         op_type,
                         default_name,
-                        op_name.name.clone(),
+                        Name::clone(op_name),
                     )
                     .into());
                 }
@@ -586,13 +584,13 @@ fn normalize_root_types_in_subgraph_schema(
     let mut operation_types_to_rename = HashMap::new();
     for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
         let default_name = default_operation_name(&op_type);
-        if op_name.name != default_name {
-            operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+        if *op_name != default_name {
+            operation_types_to_rename.insert(Name::clone(op_name), default_name.clone());
             if schema.try_get_type(&default_name).is_some() {
                 return Err(SingleFederationError::root_already_used(
                     op_type,
                     default_name,
-                    op_name.name.clone(),
+                    Name::clone(op_name),
                 )
                 .into());
             }
@@ -833,7 +831,7 @@ pub(crate) fn schema_as_fed2_subgraph(
         .schema_definition
         .make_mut()
         .directives
-        .push(Component::new(Directive {
+        .push(Node::new(Directive {
             name: link_name_in_schema,
             arguments: vec![
                 Node::new(ast::Argument {
@@ -1040,10 +1038,10 @@ impl FederationSchema {
         let query_root_type_name = if query_root_pos.try_get(self.schema()).is_none() {
             // If not present, add the default Query type with empty fields.
             EMPTY_QUERY_TYPE_SPEC.check_or_add(self, None)?;
-            query_root_pos.insert(self, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
+            query_root_pos.insert(self, EMPTY_QUERY_TYPE_SPEC.name.to_node(None))?;
             EMPTY_QUERY_TYPE_SPEC.name
         } else {
-            query_root_pos.get(self.schema())?.name.clone()
+            Name::clone(query_root_pos.get(self.schema())?)
         };
 
         let is_fed_1_subgraph = self.is_fed_1_subgraph();
@@ -1070,8 +1068,7 @@ impl FederationSchema {
         // Add or remove `Query._entities` (if applicable)
         if let Some(_entity_type) = self.entity_type()? {
             if entity_field_pos.try_get(self.schema()).is_none() {
-                entity_field_pos
-                    .insert(self, Component::new(self.entities_field_spec()?.into()))?;
+                entity_field_pos.insert(self, Node::new(self.entities_field_spec()?.into()))?;
             }
             // PORT_NOTE: JS version checks if the entity field definition's type is null when the
             //            definition is found, but the `type` field is not nullable in Rust.
@@ -1083,7 +1080,7 @@ impl FederationSchema {
 
         // Add `Query._service` (if not already present)
         if service_field_pos.try_get(self.schema()).is_none() {
-            service_field_pos.insert(self, Component::new(self.service_field_spec()?.into()))?;
+            service_field_pos.insert(self, Node::new(self.service_field_spec()?.into()))?;
         }
 
         Ok(())
@@ -1102,7 +1099,7 @@ impl FederationSchema {
             let key_directive_app = key_directive_app?;
             let target = key_directive_app.target();
             if let ObjectOrInterfaceTypeDefinitionPosition::Object(obj_ty) = target {
-                entity_members.insert(ComponentName::from(&obj_ty.type_name));
+                entity_members.insert(obj_ty.type_name.to_node(None));
             }
         }
 

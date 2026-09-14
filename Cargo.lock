@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "2.0.0-beta.0"
+version = "2.0.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f6d0efa38a950a9429c90ccb422a68f4a382e5b67abd5ff9a6b8885d787c84"
+checksum = "031ad1ba5d073dc231b63bfac51cea2f180f4280c41b766f4d6db0f57474841f"
 dependencies = [
  "ahash",
  "apollo-parser 0.9.0-beta.0",
@@ -231,7 +231,7 @@ name = "apollo-federation"
 version = "2.17.0"
 dependencies = [
  "ahash",
- "apollo-compiler 2.0.0-beta.0",
+ "apollo-compiler 2.0.0-beta.1",
  "apollo-federation",
  "apollo-parser 0.9.0-beta.0",
  "clap",
@@ -283,7 +283,7 @@ name = "apollo-federation-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler 2.0.0-beta.0",
+ "apollo-compiler 2.0.0-beta.1",
  "apollo-federation",
  "clap",
  "insta",
@@ -322,7 +322,7 @@ dependencies = [
  "addr2line 0.27.1",
  "ahash",
  "anyhow",
- "apollo-compiler 2.0.0-beta.0",
+ "apollo-compiler 2.0.0-beta.1",
  "apollo-environment-detector",
  "apollo-federation",
  "astral-tokio-tar",
@@ -509,11 +509,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.17.0-beta.0"
+version = "0.17.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c75e0aa74f34bd906db5b991ef9e4d8ea5c85011f333affd2ca11684366395b7"
+checksum = "431d7e72bc8589eccda45efffff858332e5cde5f19d104662f4cbdbaa1246532"
 dependencies = [
- "apollo-compiler 2.0.0-beta.0",
+ "apollo-compiler 2.0.0-beta.1",
  "apollo-parser 0.9.0-beta.0",
  "arbitrary",
  "indexmap 2.14.0",
@@ -6830,11 +6830,11 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.9.0-preview.0"
+version = "0.9.0-preview.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ac234112195c859e0acdd79d080ff8359e84d91025a0ecb802a548295f16168"
+checksum = "a6c933a5d2297ebd7891f4b84f26c62283380bd641814c34812b7f4385c07d32"
 dependencies = [
- "apollo-compiler 2.0.0-beta.0",
+ "apollo-compiler 2.0.0-beta.1",
  "indexmap 2.14.0",
  "serde_json",
  "serde_json_bytes",
