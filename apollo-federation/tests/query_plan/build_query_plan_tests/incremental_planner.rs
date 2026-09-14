@@ -2998,6 +2998,7 @@ fn inc_nested_defer_produces_nested_defer_nodes() {
           Deferred(depends: [0], path: "t") {
             Defer {
               Primary {
+                { y }:
                 Flatten(path: "t") {
                   Fetch(service: "Subgraph2") {
                     {
