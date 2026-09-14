@@ -9,4 +9,3 @@ limits:
     max_height: 2
     max_aliases: 2
     max_recursive_selections: 10000000
-    max_non_local_selections: 100000

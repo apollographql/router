@@ -269,9 +269,7 @@ impl InstrumentData {
             opt.parser.max_tokens,
             "$[?(@.parser_max_tokens)]",
             opt.request.max_size,
-            "$[?(@.http_max_request_bytes)]",
-            opt.operation.max_non_local_selections,
-            "$[?(@.max_non_local_selections)]"
+            "$[?(@.http_max_request_bytes)]"
         );
         populate_config_instrument!(
             apollo.router.config.apq,
@@ -638,6 +636,10 @@ impl InstrumentData {
             crate::query_planner::query_planner_service::non_local_selections_check_enabled()
                 .into(),
         );
+        attributes.insert(
+            "opt.security.non_local_selections_limit".to_string(),
+            crate::query_planner::query_planner_service::non_local_selections_limit_is_set().into(),
+        );
 
         self.data
             .insert("apollo.router.config.env".to_string(), (1, attributes));
@@ -742,6 +744,14 @@ mod test {
 
     #[test]
     fn test_env_metrics() {
+        // This snapshot includes `opt.security.non_local_selections_limit`. Pin it on this
+        // thread instead of relying on the environment being unset, so the snapshot stays
+        // correct if a future test sets the real variable for the process.
+        let _non_local_selections_limit = crate::query_planner::query_planner_service::non_local_selections_limit_test_override::set(
+            apollo_federation::query_plan::query_planner::DEFAULT_MAX_NON_LOCAL_SELECTIONS,
+            false,
+        );
+
         let mut data = InstrumentData::default();
         data.populate_cli_instrument();
         let _metrics: Metrics = data.into();

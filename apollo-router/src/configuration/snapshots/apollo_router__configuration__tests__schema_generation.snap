@@ -7119,7 +7119,6 @@ expression: "&schema"
             "max_aliases": null,
             "max_depth": null,
             "max_height": null,
-            "max_non_local_selections": 100000,
             "max_recursive_selections": 10000000,
             "max_root_fields": null,
             "parser_max_recursion": 500,
@@ -8864,13 +8863,6 @@ expression: "&schema"
             "integer",
             "null"
           ]
-        },
-        "max_non_local_selections": {
-          "default": 100000,
-          "description": "Limit the query planner's estimate of non-local selections. Default: 100000.\nOperations that exceed this limit receive HTTP 400 with GraphQL error code\n`QUERY_PLAN_COMPLEXITY_EXCEEDED`, including in `warn_only` mode.\nSetting `APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK=true` disables\nthe check, so this value has no effect.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         },
         "max_recursive_selections": {
           "default": 10000000,
