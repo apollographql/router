@@ -679,4 +679,250 @@ mod tests {
         .with_metrics()
         .await;
     }
+
+    mod subgraph_ftv1_layer {
+        use opentelemetry::Context as OtelContext;
+        use opentelemetry::trace::SpanContext;
+        use opentelemetry::trace::SpanId;
+        use opentelemetry::trace::TraceContextExt;
+        use opentelemetry::trace::TraceFlags;
+        use opentelemetry::trace::TraceId;
+        use opentelemetry::trace::TraceState;
+        use serde_json_bytes::json;
+        use tracing::Instrument;
+        use tracing_subscriber::layer::SubscriberExt;
+
+        use super::*;
+        use crate::plugins::telemetry::EnableSubgraphFtv1;
+        use crate::plugins::telemetry::SUBGRAPH_FTV1;
+        use crate::plugins::telemetry::otel;
+
+        const FTV1_HEADER_NAME: &str = "apollo-federation-include-trace";
+
+        const SUBGRAPH_NAME: &str = "test_subgraph";
+
+        /// Sets up tracing + otel and returns an arbitrary span. The `sampled` argument controls if
+        /// the span is sampled.
+        fn setup_tracing_span_with_sampled(
+            sampled: bool,
+        ) -> (tracing::subscriber::DefaultGuard, tracing::Span) {
+            let subscriber = tracing_subscriber::registry().with(otel::layer());
+            let guard = tracing::subscriber::set_default(subscriber);
+
+            // Create the span in a context with the right sampled flag
+            let span_context = SpanContext::new(
+                TraceId::from(42),
+                SpanId::from(42),
+                TraceFlags::default().with_sampled(sampled),
+                false,
+                TraceState::default(),
+            );
+            let _otel_guard = OtelContext::new()
+                .with_remote_span_context(span_context)
+                .attach();
+
+            let span = tracing::span!(tracing::Level::INFO, "test");
+            (guard, span)
+        }
+
+        fn context_with_ftv1() -> Context {
+            let context = Context::new();
+            context
+                .extensions()
+                .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
+            context
+        }
+
+        #[tokio::test]
+        async fn adds_ftv1_header_when_enabled_and_sampled() {
+            let (_subscriber_guard, span) = setup_tracing_span_with_sampled(true);
+            async {
+                let (mock_service, mut handle) =
+                    tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+                let driver = tokio::spawn(async move {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    assert_eq!(
+                        req.subgraph_request
+                            .headers()
+                            .get(FTV1_HEADER_NAME)
+                            .map(|v| v.to_str().unwrap()),
+                        Some("ftv1"),
+                        "FTV1 header should be set on the subgraph request"
+                    );
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .subgraph_name(SUBGRAPH_NAME)
+                            .build(),
+                    );
+                });
+
+                let mut service = ServiceBuilder::new()
+                    .layer(SubgraphFtv1Layer::new())
+                    .service(mock_service);
+                let request = SubgraphRequest::fake_builder()
+                    .subgraph_name(SUBGRAPH_NAME)
+                    .context(context_with_ftv1())
+                    .build();
+
+                service.ready().await.unwrap().call(request).await.unwrap();
+
+                crate::plugin::test::await_mock_driver(driver).await;
+            }
+            .instrument(span)
+            .await;
+        }
+
+        #[tokio::test]
+        async fn skips_ftv1_header_when_disabled() {
+            let (_subscriber_guard, span) = setup_tracing_span_with_sampled(true);
+            async {
+                let (mock_service, mut handle) =
+                    tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+                let driver = tokio::spawn(async move {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    assert!(
+                        req.subgraph_request
+                            .headers()
+                            .get(FTV1_HEADER_NAME)
+                            .is_none(),
+                        "FTV1 header should not be set when ftv1 is not enabled on the context"
+                    );
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .subgraph_name(SUBGRAPH_NAME)
+                            .build(),
+                    );
+                });
+
+                let mut service = ServiceBuilder::new()
+                    .layer(SubgraphFtv1Layer::new())
+                    .service(mock_service);
+                let request = SubgraphRequest::fake_builder()
+                    .subgraph_name(SUBGRAPH_NAME)
+                    .context(Context::new())
+                    .build();
+
+                service.ready().await.unwrap().call(request).await.unwrap();
+
+                crate::plugin::test::await_mock_driver(driver).await;
+            }
+            .instrument(span)
+            .await;
+        }
+
+        #[tokio::test]
+        async fn skips_ftv1_header_when_not_sampled() {
+            let (_subscriber_guard, span) = setup_tracing_span_with_sampled(false);
+            async {
+                let (mock_service, mut handle) =
+                    tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+                let driver = tokio::spawn(async move {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    assert!(
+                        req.subgraph_request
+                            .headers()
+                            .get(FTV1_HEADER_NAME)
+                            .is_none(),
+                        "FTV1 header should not be set when the span is not sampled"
+                    );
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .subgraph_name(SUBGRAPH_NAME)
+                            .build(),
+                    );
+                });
+
+                let mut service = ServiceBuilder::new()
+                    .layer(SubgraphFtv1Layer::new())
+                    .service(mock_service);
+                let request = SubgraphRequest::fake_builder()
+                    .subgraph_name(SUBGRAPH_NAME)
+                    .context(context_with_ftv1())
+                    .build();
+
+                service.ready().await.unwrap().call(request).await.unwrap();
+
+                crate::plugin::test::await_mock_driver(driver).await;
+            }
+            .instrument(span)
+            .await;
+        }
+
+        #[tokio::test]
+        async fn stores_response_trace_when_enabled() {
+            let (_subscriber_guard, span) = setup_tracing_span_with_sampled(true);
+            async {
+                let (mock_service, mut handle) =
+                    tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+                let driver = tokio::spawn(async move {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .subgraph_name(SUBGRAPH_NAME)
+                            .extension("ftv1", "encoded-trace")
+                            .build(),
+                    );
+                });
+
+                let mut service = ServiceBuilder::new()
+                    .layer(SubgraphFtv1Layer::new())
+                    .service(mock_service);
+                let request = SubgraphRequest::fake_builder()
+                    .subgraph_name(SUBGRAPH_NAME)
+                    .context(context_with_ftv1())
+                    .build();
+
+                let response = service.ready().await.unwrap().call(request).await.unwrap();
+
+                let stored = response
+                    .context
+                    .get_json_value(SUBGRAPH_FTV1)
+                    .expect("SUBGRAPH_FTV1 should be populated");
+                assert_eq!(stored, json!([[SUBGRAPH_NAME, "encoded-trace"]]));
+
+                crate::plugin::test::await_mock_driver(driver).await;
+            }
+            .instrument(span)
+            .await;
+        }
+
+        #[tokio::test]
+        async fn does_not_store_response_trace_when_not_enabled() {
+            let (_subscriber_guard, span) = setup_tracing_span_with_sampled(true);
+            async {
+                let (mock_service, mut handle) =
+                    tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
+                let driver = tokio::spawn(async move {
+                    let (req, responder) = handle.next_request().await.unwrap();
+                    responder.send_response(
+                        SubgraphResponse::fake_builder()
+                            .context(req.context)
+                            .subgraph_name(SUBGRAPH_NAME)
+                            .extension("ftv1", "encoded-trace")
+                            .build(),
+                    );
+                });
+
+                let mut service = ServiceBuilder::new()
+                    .layer(SubgraphFtv1Layer::new())
+                    .service(mock_service);
+                let request = SubgraphRequest::fake_builder()
+                    .subgraph_name(SUBGRAPH_NAME)
+                    .context(Context::new())
+                    .build();
+
+                let response = service.ready().await.unwrap().call(request).await.unwrap();
+
+                assert!(response.context.get_json_value(SUBGRAPH_FTV1).is_none());
+
+                crate::plugin::test::await_mock_driver(driver).await;
+            }
+            .instrument(span)
+            .await;
+        }
+    }
 }
