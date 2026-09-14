@@ -413,15 +413,8 @@ impl FetchGraph {
         &self.graph[node]
     }
 
-    /// Clone for saving a completed candidate; drops the undo log, which
-    /// snapshots never roll back.
     pub(crate) fn snapshot(&self) -> Self {
-        Self {
-            undo_log: Vec::new(),
-            graph: self.graph.clone(),
-            root_groups: self.root_groups.clone(),
-            entity_groups: self.entity_groups.clone(),
-        }
+        self.clone()
     }
 
     /// Whether `node` refers to a live node (false for placeholder
