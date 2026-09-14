@@ -1013,7 +1013,7 @@ async fn test_execution_error_counting() {
             ));
         });
 
-        let service = ServiceBuilder::new()
+        let mut service = ServiceBuilder::new()
             .layer(test_harness.instrument_execution_layer())
             .service(mock);
 
