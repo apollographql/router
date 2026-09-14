@@ -531,6 +531,10 @@ impl QueryPlannerService {
                             paths,
                             errors: self.authorization_config.error_config(),
                         };
+                        // It's annoying that the planner service has to care about this,
+                        // but it doesn't make sense to log these errors during warmup.
+                        // Since this is fixed architecturally in v3.x, we'll favor doing the
+                        // easy but messy thing in the v2.x line.
                         if !compute_job_type.is_warmup() {
                             unauthorized.log_unauthorized_paths();
                         }
