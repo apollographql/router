@@ -1331,6 +1331,7 @@ fn inc_query_field_root_hops_to_other_subgraph() {
         b: r#"
           type Query {
             b: Int
+            b2: Int
           }
         "#,
     );
@@ -1357,6 +1358,41 @@ fn inc_query_field_root_hops_to_other_subgraph() {
           Fetch(service: "b") {
             {
               b
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Sibling fields resolved through the same root hop share one fetch
+    // group instead of producing one fetch each.
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            nested {
+              b
+              b2
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            nested {
+              __typename
+            }
+          }
+        },
+        Flatten(path: "nested") {
+          Fetch(service: "b") {
+            {
+              b
+              b2
             }
           },
         },
