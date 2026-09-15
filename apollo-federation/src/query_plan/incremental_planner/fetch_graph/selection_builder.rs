@@ -140,6 +140,7 @@ impl SelectionBuilder {
         self.entries.truncate(cp.0);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,12 +225,12 @@ mod tests {
         // compatible, but the point is both must appear under the same key
         // for the compatibility check to work at all.
         assert!(
-            sigs_a.contains_key("/node/name"),
+            sigs_a.contains_key(&vec!["node".to_string(), "name".to_string()]),
             "builder A should key `name` at /node/name, got keys: {:?}",
             sigs_a.keys().collect::<Vec<_>>(),
         );
         assert!(
-            sigs_b.contains_key("/node/name"),
+            sigs_b.contains_key(&vec!["node".to_string(), "name".to_string()]),
             "builder B should key `name` at /node/name (not qualified by the type condition), got keys: {:?}",
             sigs_b.keys().collect::<Vec<_>>(),
         );
@@ -336,16 +337,29 @@ mod tests {
             .expect("no conflicting signatures");
 
         // The path element records the enclosing field itself.
-        assert_eq!(signatures.get("/node").map(String::as_str), Some("node"));
+        assert_eq!(
+            signatures
+                .get(&vec!["node".to_string()])
+                .map(String::as_str),
+            Some("node")
+        );
 
         // Inline fragments are transparent: fields inside them are keyed
         // by their response path without the type condition segment.
         assert_eq!(
-            signatures.get("/node/address").map(String::as_str),
+            signatures
+                .get(&vec!["node".to_string(), "address".to_string()])
+                .map(String::as_str),
             Some("address"),
         );
         assert_eq!(
-            signatures.get("/node/address/street").map(String::as_str),
+            signatures
+                .get(&vec![
+                    "node".to_string(),
+                    "address".to_string(),
+                    "street".to_string()
+                ])
+                .map(String::as_str),
             Some("street"),
         );
     }
@@ -421,6 +435,6 @@ mod tests {
             .field_signatures()
             .expect("single leaf has no conflicts");
         assert_eq!(signatures.len(), 1);
-        assert!(signatures.contains_key("/name"));
+        assert!(signatures.contains_key(&vec!["name".to_string()]));
     }
 }
