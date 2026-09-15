@@ -29,9 +29,9 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// ```
 ///
 /// The diagnostic is addressed to the **mapping author**: it reaches the
-/// connectors debugger and telemetry, and never a client. An error a schema
-/// author intends a client to read is declared with
-/// [`->withError`](super::WithErrorMethod) instead, which is a
+/// connectors debugger and the mapping-problems telemetry selectors, and
+/// never a client. An error a schema author intends a client to read is
+/// declared with [`->withError`](super::WithErrorMethod) instead, which is a
 /// separate method because it is a separate audience, not a separate spelling.
 ///
 /// # The argument

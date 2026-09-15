@@ -2,7 +2,7 @@
 
 Connector mappings can now report a problem without failing the field. Both methods return their input unchanged and record an error, so a mapping that recognizes a value it cannot vouch for can say so and still return the data. They differ in who reads the result.
 
-`->withProblem` records a diagnostic for the mapping author. It reaches the connectors debugger and telemetry, and never a client:
+`->withProblem` records a diagnostic for the mapping author. It reaches the connectors debugger and the mapping-problems telemetry selectors, and never a client:
 
 ```graphql
 @connect(
@@ -77,6 +77,8 @@ The method's name follows the response: what an author writes as `->withError` a
 
 Reporting is governed by [`include_subgraph_errors`](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion), under the name of the subgraph the connector belongs to, since these messages are written by that subgraph's schema author and can interpolate data from the API's response. **This includes the default**: with no `include_subgraph_errors` configuration, subgraph errors are redacted, and a connector's declared errors are omitted from the response along with them. Set `include_subgraph_errors: { all: true }`, or `true` for the connector's subgraph, to have them reported. A fully redacted subgraph's declared errors are omitted rather than replaced by a `Subgraph errors redacted` placeholder; short of full redaction, `redact_message` and the extension allow/deny lists apply exactly as they do to the `errors` array.
 
-The connector's `service` and `connector.coordinate` extensions are preserved alongside the author's fields. Both methods' messages also appear in the connectors debugger and telemetry, as all mapping messages do.
+The connector's `service` and `connector.coordinate` extensions are preserved alongside the author's fields.
+
+Both methods' messages appear in the connectors debugger, and in telemetry through the `connector_response_mapping_problems` selector, as all mapping problems do. A declared error is additionally counted by `apollo.router.operations.error` when `telemetry.apollo.errors.preview_extended_error_metrics` is enabled, with `service` naming the connector's subgraph and `code` the author's. It is deliberately not counted by `apollo.router.graphql_error`: the field it describes resolved, so the response carries no GraphQL error. A problem is never counted as an error by either instrument.
 
 By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10050 and [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160
