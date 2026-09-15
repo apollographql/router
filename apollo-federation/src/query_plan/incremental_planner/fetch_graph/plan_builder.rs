@@ -141,7 +141,7 @@ impl FetchGraph {
             match parallel.len() {
                 0 => {}
                 1 => {
-                    sequence.push(parallel.pop().expect("length checked"));
+                    sequence.extend(parallel);
                     cost_sequence.push(parallel_cost);
                 }
                 _ => {
@@ -161,7 +161,7 @@ impl FetchGraph {
 
         let plan = match sequence.len() {
             0 => None,
-            1 => Some(sequence.pop().expect("length checked")),
+            1 => sequence.into_iter().next(),
             _ => Some(PlanNode::Sequence(crate::query_plan::SequenceNode {
                 nodes: sequence,
             })),
@@ -268,13 +268,17 @@ impl FetchGraph {
         );
 
         // 5. Build the subgraph operation.
-        let op_name = ctx.operation_name.as_ref().map(|name| {
-            let c = ctx.operation_counter;
-            ctx.operation_counter += 1;
-            let subgraph = to_valid_graphql_name(&node.subgraph).unwrap_or("".into());
-            Name::new(&format!("{name}__{subgraph}__{c}"))
-                .expect("sanitized subgraph name produces a valid GraphQL name")
-        });
+        let op_name = ctx
+            .operation_name
+            .as_ref()
+            .map(|name| {
+                let c = ctx.operation_counter;
+                ctx.operation_counter += 1;
+                let subgraph = to_valid_graphql_name(&node.subgraph).unwrap_or("".into());
+                Name::new(&format!("{name}__{subgraph}__{c}"))
+                    .map_err(|e| FederationError::internal(e.to_string()))
+            })
+            .transpose()?;
         let operation = if is_entity {
             operation_for_entities_fetch(
                 subgraph_schema,
