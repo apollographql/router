@@ -178,10 +178,10 @@ impl FetchService {
             );
 
             // Errors a mapping declared with `->withError` are not execution
-            // errors — the fields they describe resolved — so they leave the
-            // `errors` array here, now that `response_at_path` has given them
-            // client-resolvable paths, and are reported under the response's
-            // `extensions` instead.
+            // errors. The fields they describe resolved. So they belong under
+            // the response's `extensions`, not in `errors`, and this is where
+            // they leave. It happens here rather than earlier because
+            // `response_at_path` has just given them client-resolvable paths.
             ConnectorDeclaredErrors::take_marked(&declared_errors_context, &mut errors);
 
             Ok((value, errors))

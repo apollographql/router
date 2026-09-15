@@ -938,16 +938,16 @@ mod tests {
         assert_eq!(arr[2], json!({"name": "Alice"}));
     }
 
-    /// Why a connector's `->withError` errors ride in the `errors` array as
-    /// far as the fetch service before being lifted into the response
-    /// `extensions`: this is the only place that turns the connector-local
-    /// path they are declared at into paths a client can resolve, and it does
-    /// it once per place the entity was fetched for.
+    /// A connector declares an error at a connector-local path, like
+    /// `_entities/0/balance`. Only this rewrite turns that into paths a client
+    /// can resolve, one per place the entity was fetched for. That is why
+    /// declared errors ride in the `errors` array this far before the fetch
+    /// service lifts them into the response `extensions`.
     ///
     /// Asserted here rather than in the connectors plugin because the rewrite
-    /// is the fetch node's, and a change to it — the entity branch dropping
-    /// extensions, say — would silently strip the marker and leave declared
-    /// errors sitting in `errors` where the spec says they must not be.
+    /// belongs to the fetch node. If the entity branch ever stopped copying
+    /// extensions, it would strip the marker that identifies these errors, and
+    /// they would stay in `errors` where the spec says they must not be.
     #[test]
     fn entity_fetch_rewrites_paths_of_connector_declared_errors() {
         let schema = test_schema();
