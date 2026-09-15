@@ -457,7 +457,7 @@ impl FieldRoutingSearchSpace {
                     key_edge,
                     key_target_node.source.clone(),
                     provides_anchor,
-                    (&source_type, &source_schema),
+                    (&current_source, &source_type, &source_schema),
                 )?;
                 KeyHopCandidate::insert_or_replace(&mut candidates, candidate);
             } else if !matches!(

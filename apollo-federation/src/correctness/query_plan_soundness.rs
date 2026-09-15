@@ -97,7 +97,13 @@ fn compute_response_shape_for_field_set(
     // Similar to `crate::schema::field_set::parse_field_set` function.
     let field_set =
         FieldSet::parse_and_validate(schema.schema(), parent_type, field_set, "field_set.graphql")?;
-    compute_response_shape_for_selection_set(schema, &field_set.selection_set)
+    let shape = compute_response_shape_for_selection_set(schema, &field_set.selection_set)?;
+    // Field arguments in @key/@requires field sets don't affect the
+    // response key, but the checker's shape model uses them in
+    // field_selection_key equality. Stripping at construction avoids
+    // merge failures when the same field appears with different arguments
+    // across @requires directives, and keeps comparators strict.
+    Ok(strip_field_arguments(&shape))
 }
 
 fn compute_response_shape_for_field_set_with_typename(
@@ -118,7 +124,8 @@ fn compute_response_shape_for_field_set_with_typename(
             )
         })?;
     selection_set.push(typename);
-    compute_response_shape_for_selection_set(schema, &selection_set)
+    let shape = compute_response_shape_for_selection_set(schema, &selection_set)?;
+    Ok(strip_field_arguments(&shape))
 }
 
 /// Used for FetchNode's `requires` field values
@@ -263,6 +270,9 @@ fn key_directive_matches(
         key_directive_application.fields,
     )?;
     // `condition`: the whole condition computed from the fetch query & subgraph schema.
+    // Both key_condition and require_condition already have arguments
+    // stripped (at construction time), so merge and comparison work on
+    // argument-free shapes.
     let mut condition = key_condition.clone();
     condition.merge_with(require_condition)?;
     // Check if `entity_require_shape` is a subset of `condition` in terms of response keys.
@@ -275,12 +285,16 @@ fn key_directive_matches(
         .into());
     }
     let final_require_shape = condition.add_boolean_conditions(boolean_clause);
+    // Both sides are stripped so the comparison works on response keys
+    // alone. The state may carry arguments from the actual plan that
+    // the condition (built from @key/@requires field sets) won't have.
+    let state_stripped = strip_field_arguments(state);
     // Note: The response shapes here start at the entity type, not at the query root type.
     compare_response_shapes_in_supergraph(
         context.supergraph_schema(),
         context.subgraphs_by_name(),
         &final_require_shape,
-        state,
+        &state_stripped,
     )
     .map_err(|e| {
         format!(
@@ -550,6 +564,49 @@ pub(crate) fn check_requires(
 //      name: String!
 //      sku: String! @requires(fields: "data(arg: 42)")
 //   }
+
+/// Remove all field arguments from a response shape, recursively.
+/// Used to normalize `@key`/`@requires` field sets before comparison,
+/// since the fetch node's `requires` items lack arguments while the
+/// schema-derived condition may include them.
+fn strip_field_arguments(shape: &ResponseShape) -> ResponseShape {
+    use apollo_compiler::executable::Field;
+
+    use super::response_shape::DefinitionVariant;
+    use super::response_shape::PossibleDefinitions;
+    use super::response_shape::PossibleDefinitionsPerTypeCondition;
+
+    fn strip_field(field: &Field) -> Field {
+        Field {
+            arguments: vec![],
+            ..field.clone()
+        }
+    }
+
+    let mut result = ResponseShape::new(shape.default_type_condition().clone());
+    for (key, defs) in shape.iter() {
+        let mut updated_defs = PossibleDefinitions::default();
+        for (type_cond, defs_per_type_cond) in defs.iter() {
+            let updated_key = strip_field(defs_per_type_cond.field_selection_key());
+            let updated_variants: Vec<_> = defs_per_type_cond
+                .conditional_variants()
+                .iter()
+                .map(|variant| {
+                    let updated_field = strip_field(variant.representative_field());
+                    let sub_rs = variant
+                        .sub_selection_response_shape()
+                        .map(strip_field_arguments);
+                    DefinitionVariant::new(variant.boolean_clause().clone(), updated_field, sub_rs)
+                })
+                .collect();
+            let updated_per_type =
+                PossibleDefinitionsPerTypeCondition::new(updated_key, updated_variants);
+            updated_defs.insert(type_cond.clone(), updated_per_type);
+        }
+        result.insert(key.clone(), updated_defs);
+    }
+    result
+}
 
 mod key_only_response_shape_compare {
     use super::super::response_shape::DefinitionVariant;
