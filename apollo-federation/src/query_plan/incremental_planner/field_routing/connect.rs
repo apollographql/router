@@ -11,6 +11,7 @@ use shape::ShapeCase;
 use tracing::trace;
 
 use super::super::fetch_graph::InputContribution;
+use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::commit::field_response_elements;
@@ -55,7 +56,6 @@ fn unwrap_list_shape(shape: &Shape) -> &Shape {
     shape
 }
 
-#[allow(dead_code)]
 impl FieldRoutingSearchSpace {
     /// Commit a routing choice that targets a connector. Connector fields
     /// are opaque to the planner — the connector resolves the field and its
@@ -76,10 +76,7 @@ impl FieldRoutingSearchSpace {
             coordinate = %connector.id.coordinate(),
             "committing connector choice",
         );
-        let current_node_data = self
-            .cached_query_graph
-            .query_graph
-            .node_weight(pending.query_graph_node)?;
+        let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
 
         let Selection::Field(field_sel) = &pending.selection else {
             // Connectors resolve fields, not inline fragments.
@@ -124,11 +121,13 @@ impl FieldRoutingSearchSpace {
                 let inputs = choice
                     .key_conditions
                     .iter()
-                    .map(|key_conditions| InputContribution {
+                    .map(|key_conditions| InputContribution::Key {
                         source_type_name: source.type_pos.type_name().clone(),
                         conditions: key_conditions.clone(),
-                        rewrite_info: None,
-                        condition_alias_rewrites: Vec::new(),
+                        rewrite_info: InputRewriteInfo {
+                            dest_type: source.type_pos.clone(),
+                            dest_subgraph: source_subgraph.clone(),
+                        },
                     })
                     .collect();
                 state
