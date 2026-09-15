@@ -579,7 +579,9 @@ async fn test_router_oci_boots_unlicensed_without_entitlement_layer() -> Result<
     // check explicitly that it is running unlicensed by confirming that the
     // router's state machine has logged this state transition
     if !router.log_contains("UpdateLicense(Unlicensed)") {
-        router.wait_for_log_message("UpdateLicense(Unlicensed)").await;
+        router
+            .wait_for_log_message("UpdateLicense(Unlicensed)")
+            .await;
     }
     router.execute_default_query().await;
     router.graceful_shutdown().await;
