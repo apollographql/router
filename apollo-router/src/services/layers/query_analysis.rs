@@ -259,6 +259,7 @@ impl QueryAnalysisLayer {
     /// - authorization details (required scopes, policies), if any
     /// - [`Arc`]`<`[`UsageReporting`]`>` if there was an error; normally, this would be populated
     ///   by the caching query planner, but we do not reach that code if we fail early here.
+    #[expect(clippy::result_large_err, reason = "err is smaller than ok")]
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,

@@ -87,7 +87,7 @@ impl Prepare {
                 replace_in_file!(
                     "./helm/chart/router/values.yaml",
                     "^  repository: ghcr.io/apollographql/router$",
-                    format!("  repository: ghcr.io/apollographql/nightly/router")
+                    "  repository: ghcr.io/apollographql/nightly/router".to_string()
                 );
 
                 // Update the version string for nightly builds
@@ -372,7 +372,7 @@ impl Prepare {
                 semver_heading,
                 version,
                 chrono::Utc::now().date_naive(),
-                &new_changelog,
+                new_changelog,
             ),
         );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;

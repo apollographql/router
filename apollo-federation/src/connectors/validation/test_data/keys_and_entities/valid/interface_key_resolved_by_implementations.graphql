@@ -1,0 +1,27 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"])
+  @source(name: "v1", http: { baseURL: "http://127.0.0.1:8000/" })
+
+# Entity resolution for an interface goes through its implementing objects, each of which carries
+# its own `@key`, so the interface key itself must not demand an entity connector.
+interface Node @key(fields: "id") {
+  id: ID!
+}
+
+type Query {
+  resources: [Resource!]!
+    @connect(source: "v1", http: { GET: "/resources" }, selection: "id name")
+
+  resource(id: ID!): Resource
+    @connect(
+      source: "v1"
+      http: { GET: "/resources/{$args.id}" }
+      selection: "id name"
+      entity: true
+    )
+}
+
+type Resource implements Node @key(fields: "id") {
+  id: ID!
+  name: String!
+}

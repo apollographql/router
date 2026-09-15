@@ -90,6 +90,7 @@ impl APQLayer {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[expect(clippy::result_large_err, reason = "err is smaller than ok")]
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -110,6 +111,7 @@ impl APQLayer {
 /// If the request contains only a hash, attempts to read the query from the APQ cache, and
 /// populates the query string in the request body.
 /// The request is rejected if the hash is not present in the cache.
+#[expect(clippy::result_large_err, reason = "err is smaller than ok")]
 async fn apq_request(
     cache: &DeduplicatingCache<String, String>,
     mut request: SupergraphRequest,
@@ -205,6 +207,7 @@ pub(crate) fn calculate_hash_for_query(query: &str) -> String {
 }
 
 /// Used when APQ is disabled. Rejects requests that try to use a persisted query hash anyways.
+#[expect(clippy::result_large_err, reason = "err is smaller than ok")]
 async fn disabled_apq_request(
     request: SupergraphRequest,
 ) -> Result<SupergraphRequest, SupergraphResponse> {

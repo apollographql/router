@@ -185,9 +185,7 @@ mod federation_directives {
         assert_eq!(hint.code(), "DIRECTIVE_COMPOSITION_INFO");
         assert_eq!(
             hint.message,
-            format!(
-                "Directive \"@apolloDirective\" should not be explicitly manually composed since it is a federation directive composed by default"
-            )
+            "Directive \"@apolloDirective\" should not be explicitly manually composed since it is a federation directive composed by default".to_string()
         );
     }
 
@@ -267,9 +265,7 @@ mod federation_directives {
         );
         assert_eq!(
             error.to_string(),
-            format!(
-                "Composing federation directive \"@apolloDirective\" in subgraph \"subgraphA\" is not supported"
-            )
+            "Composing federation directive \"@apolloDirective\" in subgraph \"subgraphA\" is not supported".to_string()
         );
     }
 

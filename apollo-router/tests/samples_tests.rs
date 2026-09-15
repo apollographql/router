@@ -64,14 +64,14 @@ fn lookup_dir(
                 let mut file = File::open(path.join("plan.json")).map_err(|e| {
                     format!(
                         "could not open file at path '{:?}': {e}",
-                        &path.join("plan.json")
+                        path.join("plan.json")
                     )
                 })?;
                 let mut s = String::new();
                 file.read_to_string(&mut s).map_err(|e| {
                     format!(
                         "could not read file at path: '{:?}': {e}",
-                        &path.join("plan.json")
+                        path.join("plan.json")
                     )
                 })?;
 
@@ -89,14 +89,14 @@ fn lookup_dir(
                 let mut file = File::open(path.join("plan.yaml")).map_err(|e| {
                     format!(
                         "could not open file at path '{:?}': {e}",
-                        &path.join("plan.yaml")
+                        path.join("plan.yaml")
                     )
                 })?;
                 let mut s = String::new();
                 file.read_to_string(&mut s).map_err(|e| {
                     format!(
                         "could not read file at path: '{:?}': {e}",
-                        &path.join("plan.yaml")
+                        path.join("plan.yaml")
                     )
                 })?;
 

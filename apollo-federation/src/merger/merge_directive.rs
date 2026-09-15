@@ -708,7 +708,7 @@ impl Merger {
                                     let key = format!(
                                         "{}.{}_{}",
                                         implementation,
-                                        &field_definition_position.field_name,
+                                        field_definition_position.field_name,
                                         access_control_directive
                                     );
                                     sources
@@ -734,7 +734,7 @@ impl Merger {
                                         let key = format!(
                                             "{}.{}_{}",
                                             other_interface,
-                                            &field_definition_position.field_name,
+                                            field_definition_position.field_name,
                                             access_control_directive
                                         );
                                         sources

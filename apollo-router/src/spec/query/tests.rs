@@ -7561,6 +7561,7 @@ fn test_error_path_works_across_inline_fragments() {
 
     assert!(query.contains_error_path(
         &None,
+        None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
         BooleanValues { bits: 0 }
     ));

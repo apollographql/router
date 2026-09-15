@@ -114,8 +114,8 @@ fn to_dot_federated(graph: &QueryGraph) -> Result<String, std::fmt::Error> {
         )
         .to_string();
 
-        writeln!(dot_str, r#"  subgraph "cluster_{}" {{"#, &cluster_name)?;
-        writeln!(dot_str, r#"    label = "Subgraph \"{}\"";"#, &cluster_name)?;
+        writeln!(dot_str, r#"  subgraph "cluster_{}" {{"#, cluster_name)?;
+        writeln!(dot_str, r#"    label = "Subgraph \"{}\"";"#, cluster_name)?;
         writeln!(dot_str, r#"    color = "black";"#)?;
         writeln!(dot_str, r#"    style = "";"#)?;
         dot_str.push_str(&s);

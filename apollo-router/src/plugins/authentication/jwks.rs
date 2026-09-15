@@ -273,19 +273,17 @@ impl Iterator for Iter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.list.pop() {
-                None => return None,
-                Some(config) => {
-                    let map = self.manager.jwks_map.read();
-                    if let Some(jwks) = map.get(&config.url) {
-                        return Some(JwkSetInfo {
-                            jwks: jwks.clone(),
-                            issuers: config.issuers.clone(),
-                            audiences: config.audiences.clone(),
-                            allow_missing_exp: config.allow_missing_exp,
-                            algorithms: config.algorithms.clone(),
-                        });
-                    }
+            {
+                let config = self.list.pop()?;
+                let map = self.manager.jwks_map.read();
+                if let Some(jwks) = map.get(&config.url) {
+                    return Some(JwkSetInfo {
+                        jwks: jwks.clone(),
+                        issuers: config.issuers.clone(),
+                        audiences: config.audiences.clone(),
+                        allow_missing_exp: config.allow_missing_exp,
+                        algorithms: config.algorithms.clone(),
+                    });
                 }
             }
         }

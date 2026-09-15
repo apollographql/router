@@ -47,7 +47,7 @@ async fn test_compute_backpressure_response() {
     assert!(
         latency < std::time::Duration::from_millis(100),
         "latency = {latency:?}, status = {:?}",
-        &response["status"]
+        response["status"]
     );
     insta::assert_yaml_snapshot!(response, @r###"
         status: 503
