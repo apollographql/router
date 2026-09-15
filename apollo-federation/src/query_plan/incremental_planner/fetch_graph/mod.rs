@@ -1798,7 +1798,12 @@ mod tests {
         let root = g.get_or_create_root_group(&sg, dummy_root_type());
         let entity = g.add_entity_group(&sg2, user_path(None));
         g.add_dependency(root, entity, vec![]);
-        let _root_hop = g.add_root_hop_group(&sg2, dummy_root_type(), vec![]);
+        let _root_hop = g.add_root_hop_group(
+            &sg2,
+            dummy_root_type(),
+            SchemaRootDefinitionKind::Query,
+            vec![],
+        );
 
         let display = format!("{g}");
         assert!(
@@ -1897,7 +1902,12 @@ mod tests {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
         let cp = g.checkpoint();
-        g.add_root_hop_group(&sg, dummy_root_type(), vec![]);
+        g.add_root_hop_group(
+            &sg,
+            dummy_root_type(),
+            SchemaRootDefinitionKind::Query,
+            vec![],
+        );
         assert_eq!(g.node_count(), 1);
         g.rollback(cp);
         assert_eq!(g.node_count(), 0);
