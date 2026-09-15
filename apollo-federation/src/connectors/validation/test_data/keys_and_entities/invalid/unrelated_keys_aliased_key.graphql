@@ -1,0 +1,34 @@
+# Same as `unrelated_keys.graphql`, but `@key` is imported under an alias. The `@key` scan has to
+# resolve the directive's name through the `@link` import rather than matching the spec name
+# literally, otherwise no keys are found at all and `MissingEntityConnector` silently stops firing.
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.10"
+    import: [{ name: "@key", as: "@primaryKey" }]
+  )
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
+
+type Query {
+  products: [Product]
+    @connect(
+      http: { GET: "http://myapi/products" }
+      selection: "id name store { id } seller { id }"
+    )
+}
+
+type Product {
+  id: ID!
+  name: String
+  store: Store
+  seller: Seller
+}
+
+# error
+type Store @primaryKey(fields: "id") {
+  id: ID!
+}
+
+# no error
+type Seller @primaryKey(fields: "id", resolvable: false) {
+  id: ID!
+}

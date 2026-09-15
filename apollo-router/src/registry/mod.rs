@@ -244,8 +244,8 @@ fn build_auth(reference: &Reference, apollo_key: Option<&str>) -> RegistryAuth {
     }
 }
 
-/// Fetch the manifest, extract the blob location, and fetch the blob.
-async fn fetch_oci_from_reference(
+/// Fetch the manifest, extract the blob location, and fetch the schema blob.
+async fn fetch_schema_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
     reference: &Reference,
@@ -479,9 +479,9 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
     }
 }
 
-/// Fetch an OCI bundle by parsing the graph artifact reference, building auth,
+/// Fetch a schema OCI bundle by parsing the graph artifact reference, building auth,
 /// inferring the correct protocol, and calling the internal fetch function.
-pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
+pub(crate) async fn fetch_schema_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
@@ -492,7 +492,7 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         auth == RegistryAuth::Anonymous
     );
 
-    match fetch_oci_from_reference(
+    match fetch_schema_from_reference(
         &mut Client::new(ClientConfig {
             protocol,
             ..Default::default()
@@ -528,7 +528,7 @@ pub(crate) fn create_oci_schema_stream(
     let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
 
     match (ref_type, oci_config.hot_reload) {
-        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_from_oci(oci_config))),
+        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_schema_from_oci(oci_config))),
         (OciReferenceType::Tag, false) => Err(anyhow::anyhow!(
             "Tag references without --hot-reload are not yet supported."
         )),
@@ -538,7 +538,7 @@ pub(crate) fn create_oci_schema_stream(
         (OciReferenceType::Digest, false) => {
             let oci_config_clone = oci_config.clone();
             let stream = stream::once(async move {
-                fetch_oci(&oci_config_clone)
+                fetch_schema_oci(&oci_config_clone)
                     .await
                     .map(|oci_content| SchemaState {
                         sdl: oci_content.schema,
@@ -550,8 +550,8 @@ pub(crate) fn create_oci_schema_stream(
     }
 }
 
-/// Regularly fetch from OCI registry at the configured polling interval
-pub(crate) fn stream_from_oci(
+/// Regularly fetch the schema from OCI registry at the configured polling interval
+pub(crate) fn stream_schema_from_oci(
     oci_config: OciConfig,
 ) -> impl Stream<Item = Result<SchemaState, OciError>> {
     let (sender, receiver) = channel(2);
@@ -569,7 +569,7 @@ pub(crate) fn stream_from_oci(
                         // Digest changed, fetch the full schema
                         tracing::debug!("oci manifest digest changed, fetching schema");
 
-                        match fetch_oci(&oci_config).await {
+                        match fetch_schema_oci(&oci_config).await {
                             Ok(oci_result) => {
                                 tracing::debug!("fetched schema from oci registry");
                                 let schema_state = SchemaState {
@@ -591,7 +591,7 @@ pub(crate) fn stream_from_oci(
                                     polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
                                 }
 
-                                // Error logging is now handled in fetch_oci
+                                // Error logging is now handled in fetch_schema_oci
                                 if let Err(e) = sender.send(Err(err)).await {
                                     tracing::debug!(
                                         "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -1237,7 +1237,7 @@ mod tests {
     #[case::extra_layers(vec![schema_layer("test schema"), unrelated_layer()], Some("test schema"))]
     #[case::missing_layer(vec![unrelated_layer()], None)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_oci_from_reference_cases(
+    async fn fetch_schema_from_reference_cases(
         #[case] layers: Vec<ImageLayer>,
         #[case] expected_schema: Option<&str>,
     ) {
@@ -1247,7 +1247,7 @@ mod tests {
             ..Default::default()
         });
         let image_reference = setup_mocks(mock_server, layers, None).await;
-        let result = fetch_oci_from_reference(
+        let result = fetch_schema_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
             &image_reference,
@@ -2069,7 +2069,7 @@ mod tests {
     #[case::no_manifest_annotations(None, None)]
     #[case::manifest_without_launch_id(Some(generate_manifest_annotations(None)), None)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_launch_id_cases(
+    async fn stream_schema_from_oci_launch_id_cases(
         #[case] manifest_annotations: Option<BTreeMap<String, String>>,
         #[case] expected_launch_id: Option<String>,
     ) {
@@ -2082,7 +2082,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let results = stream_from_oci(oci_config)
+        let results = stream_schema_from_oci(oci_config)
             .take(1)
             .collect::<Vec<_>>()
             .await;
@@ -2098,7 +2098,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_digest_unchanged_no_fetch() {
+    async fn stream_schema_from_oci_digest_unchanged_no_fetch() {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
@@ -2161,7 +2161,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_from_oci(oci_config);
+        let mut stream = stream_schema_from_oci(oci_config);
 
         // first poll: digest is new, so schema should be fetched
         let first_result = stream.next().await;
@@ -2378,7 +2378,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_digest_changed_fetches_schema() {
+    async fn stream_schema_from_oci_digest_changed_fetches() {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
@@ -2469,7 +2469,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_from_oci(oci_config);
+        let mut stream = stream_schema_from_oci(oci_config);
 
         // first poll: digest1 is new, so schema1 should be fetched
         let first_result = stream.next().await;
@@ -2511,7 +2511,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_backoff_error_retry() {
+    async fn stream_schema_from_oci_backoff_error_retry() {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
@@ -2595,7 +2595,7 @@ mod tests {
         };
 
         let start_time = tokio::time::Instant::now();
-        let mut stream = stream_from_oci(oci_config);
+        let mut stream = stream_schema_from_oci(oci_config);
 
         // The stream should eventually succeed after the backoff period
         // Use a timeout to ensure the test completes

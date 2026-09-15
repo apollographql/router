@@ -2,7 +2,7 @@
 source: apollo-federation/tests/composition/connectors.rs
 expression: schema_string
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.4", for: EXECUTION) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_1_], args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]}) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_3_], args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_1_], args: {name: "v1", http: {baseURL: "http://v1"}}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_3_], args: {name: "v1", http: {baseURL: "http://v1", path: "", queryParams: ""}, errors: {message: "", extensions: ""}, isSuccess: ""}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/connect/v0.4", for: EXECUTION) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_1_], args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect", "@source"]}) @join__directive(name: "link", graphs: [WITH_CONNECTORS_V0_3_], args: {url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"]}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_1_], args: {name: "v1", http: {baseURL: "http://v1"}}) @join__directive(name: "source", graphs: [WITH_CONNECTORS_V0_3_], args: {name: "v1", http: {baseURL: "http://v1", path: "$(['v1'])", queryParams: "$({ locale: 'en' })"}, errors: {message: "error.message", extensions: "code: error.code"}, isSuccess: "$status->eq(200)"}) {
   query: Query
 }
 
@@ -54,8 +54,10 @@ input join__ContextArgument {
 }
 
 type Query @join__type(graph: WITH_CONNECTORS_V0_1_) @join__type(graph: WITH_CONNECTORS_V0_3_) {
-  widgets: [Widget!]! @join__field(graph: WITH_CONNECTORS_V0_1_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_1_], args: {source: "v1", http: {GET: "/widgets"}, selection: ""})
-  resources: [Resource!]! @join__field(graph: WITH_CONNECTORS_V0_3_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {source: "v1", http: {GET: "/resources"}, selection: ""})
+  widgets: [Widget!]! @join__field(graph: WITH_CONNECTORS_V0_1_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_1_], args: {source: "v1", http: {GET: "/widgets"}, selection: "id name"})
+  widget(id: ID!): Widget @join__field(graph: WITH_CONNECTORS_V0_1_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_1_], args: {source: "v1", http: {GET: "/widgets/{$args.id}"}, selection: "id name", entity: true})
+  resources: [Resource!]! @join__field(graph: WITH_CONNECTORS_V0_3_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {source: "v1", http: {GET: "/resources"}, selection: "id name"})
+  resource(id: ID!): Resource @join__field(graph: WITH_CONNECTORS_V0_3_) @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {source: "v1", http: {GET: "/resources/{$args.id}"}, selection: "id name", entity: true})
 }
 
 type Widget @join__type(graph: WITH_CONNECTORS_V0_1_, key: "id") {
@@ -63,7 +65,7 @@ type Widget @join__type(graph: WITH_CONNECTORS_V0_1_, key: "id") {
   name: String!
 }
 
-type Resource @join__type(graph: WITH_CONNECTORS_V0_3_, key: "id") @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {id: "conn_id", source: "v1", http: {GET: "/resources", path: "", queryParams: ""}, batch: {maxSize: 5}, errors: {message: "", extensions: ""}, isSuccess: "", selection: ""}) {
+type Resource @join__type(graph: WITH_CONNECTORS_V0_3_, key: "id") @join__directive(name: "connect", graphs: [WITH_CONNECTORS_V0_3_], args: {id: "conn_id", source: "v1", http: {GET: "/resources", path: "$(['v1'])", queryParams: "$({ locale: 'en' })"}, batch: {maxSize: 5}, errors: {message: "error.message", extensions: "code: error.code"}, isSuccess: "$status->eq(200)", selection: "id name"}) {
   id: ID!
   name: String!
 }
