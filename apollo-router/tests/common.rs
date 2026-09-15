@@ -1703,7 +1703,7 @@ impl IntegrationTest {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     #[allow(dead_code)]
