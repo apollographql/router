@@ -160,14 +160,13 @@ pub(crate) struct FetchEdgeWeight {
 /// methods and replayed in reverse by `rollback()`.
 #[derive(Clone, Debug)]
 enum FetchGraphOp {
-    /// A node was added. Undo: remove it and release its root_groups /
-    /// entity_groups entries (entity slots only when this node owns them;
-    /// node indices are recycled, so stale entries must never linger).
-    AddNode {
-        node_index: NodeIndex,
-        root_key: Option<Arc<str>>,
-        entity_key: Option<EntityGroupKey>,
-    },
+    /// A node was added. Undo: remove_node (StableDiGraph keeps indices
+    /// stable).
+    AddNode { node_index: NodeIndex },
+    /// A node claimed the reuse slot for its group key. Logged directly
+    /// after the claiming node's AddNode, so LIFO undo releases the slot
+    /// before removing the node. Undo: remove the entry.
+    RegisterGroup { key: GroupKey },
     /// An edge was added. Undo: remove_edge.
     AddEdge(EdgeIndex),
     /// An input was appended to an edge. Undo: pop last input.
@@ -179,8 +178,31 @@ enum FetchGraphOp {
     },
 }
 
-/// Index key for entity fetch group reuse.
-type EntityGroupKey = (Arc<str>, Vec<FetchDataPathElement>);
+/// Reuse-slot key for a fetch group, derived from the node itself by
+/// `group_key`. Root groups are shared per subgraph (one search plans one
+/// root kind, so the kind is not part of the key); entity and root-hop
+/// groups are shared per (subgraph, merge_at). One key type and one map
+/// keep registration, undo, and lookup on a single mechanism for all
+/// three kinds.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum GroupKey {
+    Root(Arc<str>),
+    Entity(Arc<str>, Vec<FetchDataPathElement>),
+    RootHop(Arc<str>, Vec<FetchDataPathElement>),
+}
+
+/// The reuse-slot key for a node.
+fn group_key(node: &FetchNode) -> GroupKey {
+    match &node.kind {
+        FetchGroupKind::Root { .. } => GroupKey::Root(node.subgraph.clone()),
+        FetchGroupKind::Entity { merge_at } => {
+            GroupKey::Entity(node.subgraph.clone(), merge_at.clone())
+        }
+        FetchGroupKind::RootHop { merge_at, .. } => {
+            GroupKey::RootHop(node.subgraph.clone(), merge_at.clone())
+        }
+    }
+}
 
 /// Opaque undo checkpoint: the undo log length at a point in time.
 #[derive(Clone, Debug)]
@@ -192,13 +214,10 @@ pub(crate) struct FetchGraphCheckpoint(usize);
 #[derive(Clone, Debug)]
 pub(crate) struct FetchGraph {
     graph: StableDiGraph<FetchNode, FetchEdgeWeight>,
-    /// Root groups keyed by subgraph name. One search plans one root kind,
-    /// so the kind is not part of the key; root hops never register here.
-    root_groups: HashMap<Arc<str>, NodeIndex>,
-    /// First-created entity group per (subgraph, merge_at), so group reuse
-    /// is a lookup instead of a node scan. The first node with a key owns
-    /// the slot; LIFO undo releases it with that node.
-    entity_groups: HashMap<EntityGroupKey, NodeIndex>,
+    /// First-created group per reuse-slot key, so group reuse is a lookup
+    /// instead of a node scan. The first node with a key owns the slot;
+    /// LIFO undo releases it with that node.
+    groups: HashMap<GroupKey, NodeIndex>,
     undo_log: Vec<FetchGraphOp>,
 }
 
@@ -206,8 +225,7 @@ impl FetchGraph {
     pub(crate) fn new() -> Self {
         Self {
             graph: StableDiGraph::new(),
-            root_groups: HashMap::new(),
-            entity_groups: HashMap::new(),
+            groups: HashMap::new(),
             undo_log: Vec::new(),
         }
     }
@@ -226,21 +244,11 @@ impl FetchGraph {
         );
         while self.undo_log.len() > cp.0 {
             match self.undo_log.pop().unwrap() {
-                FetchGraphOp::AddNode {
-                    node_index,
-                    root_key,
-                    entity_key,
-                } => {
+                FetchGraphOp::AddNode { node_index } => {
                     self.graph.remove_node(node_index);
-                    if let Some(key) = root_key {
-                        self.root_groups.remove(&key);
-                    }
-                    // A later duplicate node never claimed the slot.
-                    if let Some(key) = entity_key
-                        && self.entity_groups.get(&key) == Some(&node_index)
-                    {
-                        self.entity_groups.remove(&key);
-                    }
+                }
+                FetchGraphOp::RegisterGroup { key } => {
+                    self.groups.remove(&key);
                 }
                 FetchGraphOp::AddEdge(idx) => {
                     self.graph.remove_edge(idx);
@@ -260,26 +268,29 @@ impl FetchGraph {
         }
     }
 
-    /// Add a `FetchNode`, logging for rollback. `root_key` registers a
-    /// root group; entity nodes claim their `entity_groups` slot if free.
-    fn insert_node(&mut self, node: FetchNode, root_key: Option<Arc<str>>) -> NodeIndex {
-        let entity_key = match &node.kind {
-            FetchGroupKind::Entity { merge_at } => Some((node.subgraph.clone(), merge_at.clone())),
-            _ => None,
-        };
+    /// Add a `FetchNode`, logging for rollback. The node claims its reuse
+    /// slot if free; a duplicate for an occupied slot is added unregistered
+    /// so the owner's registration survives the duplicate's rollback.
+    fn insert_node(&mut self, node: FetchNode) -> NodeIndex {
+        let key = group_key(&node);
         let id = self.graph.add_node(node);
-        if let Some(key) = &root_key {
-            self.root_groups.insert(key.clone(), id);
+        self.undo_log.push(FetchGraphOp::AddNode { node_index: id });
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.groups.entry(key.clone()) {
+            slot.insert(id);
+            self.undo_log.push(FetchGraphOp::RegisterGroup { key });
         }
-        if let Some(key) = &entity_key {
-            self.entity_groups.entry(key.clone()).or_insert(id);
-        }
-        self.undo_log.push(FetchGraphOp::AddNode {
-            node_index: id,
-            root_key,
-            entity_key,
-        });
         id
+    }
+
+    /// The registered group for a key, if any. Registrations are released
+    /// in lock-step with node removal, so a live entry is a live node.
+    fn registered_group(&self, key: &GroupKey) -> Option<NodeIndex> {
+        let id = *self.groups.get(key)?;
+        debug_assert!(
+            self.graph.contains_node(id),
+            "groups slot points at a removed node; rollback cleanup is broken",
+        );
+        Some(id)
     }
 
     /// Get or create the root fetch group for a subgraph.
@@ -288,13 +299,13 @@ impl FetchGraph {
         subgraph: &Arc<str>,
         root_type: CompositeTypeDefinitionPosition,
     ) -> NodeIndex {
-        if let Some(&id) = self.root_groups.get(subgraph) {
+        if let Some(id) = self.registered_group(&GroupKey::Root(subgraph.clone())) {
             return id;
         }
-        self.insert_node(
-            FetchNode::new(subgraph.clone(), FetchGroupKind::Root { root_type }),
-            Some(subgraph.clone()),
-        )
+        self.insert_node(FetchNode::new(
+            subgraph.clone(),
+            FetchGroupKind::Root { root_type },
+        ))
     }
 
     /// Create a new entity fetch group.
@@ -303,10 +314,10 @@ impl FetchGraph {
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        self.insert_node(
-            FetchNode::new(subgraph.clone(), FetchGroupKind::Entity { merge_at }),
-            None,
-        )
+        self.insert_node(FetchNode::new(
+            subgraph.clone(),
+            FetchGroupKind::Entity { merge_at },
+        ))
     }
 
     pub(crate) fn add_root_hop_group(
@@ -315,16 +326,28 @@ impl FetchGraph {
         root_type: CompositeTypeDefinitionPosition,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        self.insert_node(
-            FetchNode::new(
-                subgraph.clone(),
-                FetchGroupKind::RootHop {
-                    root_type,
-                    merge_at,
-                },
-            ),
-            None,
-        )
+        self.insert_node(FetchNode::new(
+            subgraph.clone(),
+            FetchGroupKind::RootHop {
+                root_type,
+                merge_at,
+            },
+        ))
+    }
+
+    /// Get or create the root hop group for (subgraph, merge_at).
+    #[allow(dead_code)] // used by field routing in a later branch
+    pub(crate) fn get_or_create_root_hop_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        merge_at: Vec<FetchDataPathElement>,
+    ) -> NodeIndex {
+        let key = GroupKey::RootHop(subgraph.clone(), merge_at.clone());
+        if let Some(id) = self.registered_group(&key) {
+            return id;
+        }
+        self.add_root_hop_group(subgraph, root_type, merge_at)
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at).
@@ -333,15 +356,11 @@ impl FetchGraph {
         subgraph: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        let key = (subgraph.clone(), merge_at);
-        if let Some(&id) = self.entity_groups.get(&key) {
-            debug_assert!(
-                self.graph.contains_node(id),
-                "entity_groups slot points at a removed node; rollback cleanup is broken",
-            );
+        let key = GroupKey::Entity(subgraph.clone(), merge_at.clone());
+        if let Some(id) = self.registered_group(&key) {
             return id;
         }
-        self.add_entity_group(subgraph, key.1)
+        self.add_entity_group(subgraph, merge_at)
     }
 
     /// Whether a directed edge from `parent` to `child` exists.
@@ -526,7 +545,7 @@ mod tests {
         let graph = FetchGraph::new();
         assert_eq!(graph.node_count(), 0);
         assert_eq!(graph.edge_count(), 0);
-        assert!(graph.root_groups.is_empty());
+        assert!(graph.groups.is_empty());
     }
 
     #[test]
@@ -740,14 +759,51 @@ mod tests {
         let sg: Arc<str> = Arc::from("sg");
         g.get_or_create_root_group(&sg, dummy_root_type());
         assert_eq!(g.node_count(), 1);
-        assert!(g.root_groups.contains_key(&sg));
+        assert!(g.groups.contains_key(&GroupKey::Root(sg.clone())));
         g.rollback(cp);
         assert_eq!(g.node_count(), 0);
-        assert!(!g.root_groups.contains_key(&sg));
+        assert!(!g.groups.contains_key(&GroupKey::Root(sg.clone())));
 
         // Re-creating after rollback should work.
         g.get_or_create_root_group(&sg, dummy_root_type());
         assert_eq!(g.node_count(), 1);
+    }
+
+    /// A duplicate node for an occupied slot must not disturb the owner's
+    /// registration: the duplicate is added unregistered, and its rollback
+    /// leaves the owner both live and findable.
+    #[test]
+    fn rollback_of_duplicate_keyed_node_keeps_owner_registered() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let key = GroupKey::Root(sg.clone());
+        let owner = g.get_or_create_root_group(&sg, dummy_root_type());
+
+        let cp = g.checkpoint();
+        let duplicate = g.insert_node(FetchNode::new(
+            sg.clone(),
+            FetchGroupKind::Root {
+                root_type: dummy_root_type(),
+            },
+        ));
+        assert_ne!(owner, duplicate);
+        assert_eq!(g.groups.get(&key), Some(&owner));
+
+        g.rollback(cp);
+        assert_eq!(g.groups.get(&key), Some(&owner));
+        assert_eq!(g.get_or_create_root_group(&sg, dummy_root_type()), owner);
+    }
+
+    #[test]
+    fn get_or_create_root_hop_group_reuses_same_merge_at() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let a = g.get_or_create_root_hop_group(&sg, dummy_root_type(), user_path(None));
+        let b = g.get_or_create_root_hop_group(&sg, dummy_root_type(), user_path(None));
+        let c = g.get_or_create_root_hop_group(&sg, dummy_root_type(), vec![]);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_eq!(g.node_count(), 2);
     }
 
     #[test]
@@ -907,7 +963,7 @@ mod tests {
         let looked_up = g.get_or_create_entity_group(&sg, user_path(None));
         assert_ne!(
             looked_up, unrelated,
-            "stale entity_groups slot resolved to an unrelated node",
+            "stale groups slot resolved to an unrelated node",
         );
         let FetchGroupKind::Entity { merge_at } = &g.node(looked_up).kind else {
             panic!("expected an entity group");
