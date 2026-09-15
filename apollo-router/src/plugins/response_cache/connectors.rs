@@ -67,6 +67,7 @@ use crate::plugins::response_cache::cache_key::ConnectorCacheKeyEntity;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyRoot;
 use crate::plugins::response_cache::cache_key::hash_connector_additional_data;
 use crate::plugins::response_cache::cache_key::hash_operation;
+use crate::plugins::response_cache::cache_key::hash_operation_scoped;
 use crate::plugins::response_cache::cache_key::hash_selection;
 use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeyContext;
@@ -321,10 +322,12 @@ impl ConnectorCacheService {
             .as_ref()
             .and_then(|key| hash_private_id(&request.context, key));
 
-        // Build private query key for LRU tracking
+        // Build private query key for LRU tracking. The hash is scoped to this connector source so
+        // two sources with byte-identical operation text can't share (and poison) one entry in the
+        // plugin-wide "known private" LRU.
         let operation_str = request.operation.serialize().no_indent().to_string();
         let private_query_key = PrivateQueryKey {
-            query_hash: hash_operation(&operation_str),
+            query_hash: hash_operation_scoped(&source_name, &operation_str),
             has_private_id: private_id.is_some(),
         };
 
@@ -1349,16 +1352,26 @@ impl ConnectorRequestCacheService {
 
         let private_id = self.get_private_id(&request.context);
 
-        // Build operation hash early — needed for both cache key and private query LRU key
-        let operation_hash = request
+        // Serialize the operation once; used for both the cache-key hash and the private-query key.
+        let operation_str = request
             .operation
             .as_ref()
-            .map(|op| hash_operation(&op.serialize().no_indent().to_string()))
+            .map(|op| op.serialize().no_indent().to_string());
+        // Cache-key operation hash: source-independent (the source is its own cache-key segment).
+        // Unchanged from before — `None` (no operation) still hashes to the empty string.
+        let operation_hash = operation_str
+            .as_deref()
+            .map(hash_operation)
             .unwrap_or_default();
 
-        // Build private query key for LRU tracking
+        // Build private query key for LRU tracking. Scope the hash to this source so two sources
+        // with byte-identical operation text can't share (and poison) one entry in the plugin-wide
+        // "known private" LRU.
         let private_query_key = PrivateQueryKey {
-            query_hash: operation_hash.clone(),
+            query_hash: hash_operation_scoped(
+                &self.source_name,
+                operation_str.as_deref().unwrap_or_default(),
+            ),
             has_private_id: private_id.is_some(),
         };
 

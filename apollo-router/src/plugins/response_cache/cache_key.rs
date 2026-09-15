@@ -192,6 +192,22 @@ pub(super) fn hash_operation(operation: &str) -> String {
     hash_str(operation)
 }
 
+/// Hash a connector operation together with its source name, for the private-query LRU key.
+///
+/// The "known private" LRU (`PrivateQueryKey`) is shared across every subgraph and connector
+/// source. Folding the source name into the hash partitions that flag per source, so two sources
+/// whose entity-fetch operations have byte-identical text cannot poison each other's private flag.
+/// Kept separate from the cache key's `operation_hash` (which is intentionally source-independent —
+/// the source is already its own cache-key segment).
+pub(super) fn hash_operation_scoped(source_name: &str, operation: &str) -> String {
+    let mut digest = blake3::Hasher::new();
+    digest.update(source_name.as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.update(operation.as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.finalize().to_hex().to_string()
+}
+
 /// Hash a connector response-mapping selection for use in a connector root-field cache key.
 /// See [`ConnectorCacheKeyRoot::selection_hash`] for why the selection is part of the key.
 pub(super) fn hash_selection(selection: &str) -> String {
@@ -595,6 +611,29 @@ mod tests {
         let hash1 = hash_operation("query { users { id name } }");
         let hash2 = hash_operation("query { posts { id title } }");
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn hash_operation_scoped_partitions_by_source() {
+        let op = "query { user(id: \"1\") { id name } }";
+        // Same source + operation is stable; different sources with identical operation text
+        // produce different hashes, so they cannot collide in the shared private-query LRU.
+        assert_eq!(
+            hash_operation_scoped("a.api", op),
+            hash_operation_scoped("a.api", op)
+        );
+        assert_ne!(
+            hash_operation_scoped("a.api", op),
+            hash_operation_scoped("b.api", op)
+        );
+        // The source is genuinely part of the input, not merely appended text: a source/operation
+        // split must not alias another (the NUL separators guarantee this).
+        assert_ne!(
+            hash_operation_scoped("a.api", op),
+            hash_operation_scoped("a.ap", &format!("i{op}"))
+        );
+        // Scoped hashes are distinct from the unscoped cache-key hash of the same operation.
+        assert_ne!(hash_operation_scoped("a.api", op), hash_operation(op));
     }
 
     #[test]
