@@ -1575,9 +1575,11 @@ mod tests {
 
     /// Declared errors from a `->map` stay one-per-element rather than being
     /// collapsed by message the way mapping problems are, and each keeps the
-    /// element it came from in `connector.selectionPath`. This is the reason
-    /// they are capped rather than aggregated: aggregation groups array
-    /// indices together under `@`, which would erase exactly this.
+    /// element it came from in `connector.selectionPath`.
+    ///
+    /// Which is what makes aggregating them a design question rather than an
+    /// obvious win: aggregation groups array indices together under `@`, and
+    /// would erase exactly the per-element detail this asserts.
     #[test]
     fn declared_errors_from_a_list_are_not_collapsed_by_message() {
         let connector = make_connector(None, ConnectSpec::V0_5);
