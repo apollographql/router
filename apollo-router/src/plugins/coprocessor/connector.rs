@@ -454,9 +454,12 @@ where
         return Ok(response);
     }
 
-    // Extract data from the transport result
+    // Extract data from the transport result. `None` means no HTTP call was made because the
+    // response came out of the router's response cache: there is no status or header set to
+    // report, so the payload says so explicitly rather than looking like a transport failure.
+    let served_from_cache = response.transport_result.is_none();
     let (headers_to_send, status_to_send) = match &response.transport_result {
-        Ok(TransportResponse::Http(http_response)) => {
+        Some(Ok(TransportResponse::Http(http_response))) => {
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
@@ -479,7 +482,7 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        Ok(TransportResponse::MappingOnly) | Err(_) => (None, None),
+        None | Some(Ok(TransportResponse::MappingOnly)) | Some(Err(_)) => (None, None),
     };
 
     // Extract body from mapped response
@@ -508,6 +511,7 @@ where
         .and_context(context_to_send)
         .and_status_code(status_to_send)
         .and_service_name(service_name_to_send)
+        .and_cache_hit(served_from_cache.then_some(true))
         .build();
 
     let payload_for_log =
@@ -546,13 +550,14 @@ where
     if let Some(control) = co_processor_output.control {
         let new_status = control.get_http_status()?;
         // Update the transport result status if it was successful
-        if let Ok(TransportResponse::Http(ref mut http_response)) = response.transport_result {
+        if let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        {
             http_response.inner.status = new_status;
         }
     }
 
     if let Some(headers) = co_processor_output.headers
-        && let Ok(TransportResponse::Http(ref mut http_response)) = response.transport_result
+        && let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
     {
         http_response.inner.headers = internalize_header_map(headers)?;
     }

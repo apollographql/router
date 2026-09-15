@@ -302,7 +302,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
                             response.context.get::<_, String>("from-response").unwrap();
 
                         observed.transport_status_before = match &response.transport_result {
-                            Ok(TransportResponse::Http(http_response)) => {
+                            Some(Ok(TransportResponse::Http(http_response))) => {
                                 Some(http_response.inner.status.as_u16())
                             }
                             _ => None,
@@ -310,7 +310,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
 
                         // `transport_result` is writable: rewrite the status and
                         // add a header to the raw transport outcome.
-                        if let Ok(TransportResponse::Http(http_response)) =
+                        if let Some(Ok(TransportResponse::Http(http_response))) =
                             &mut response.transport_result
                         {
                             http_response.inner.status = http::StatusCode::IM_A_TEAPOT;
@@ -319,7 +319,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
                                 http::HeaderValue::from_static("yes"),
                             );
                         }
-                        if let Ok(TransportResponse::Http(http_response)) =
+                        if let Some(Ok(TransportResponse::Http(http_response))) =
                             &response.transport_result
                         {
                             observed.transport_status_after =
@@ -484,7 +484,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
                     let mut observed = observed.lock().unwrap();
 
                     observed.transport_status_before = match &response.transport_result {
-                        Ok(TransportResponse::Http(http_response)) => {
+                        Some(Ok(TransportResponse::Http(http_response))) => {
                             Some(http_response.inner.status.as_u16())
                         }
                         _ => None,
@@ -493,13 +493,13 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
                     // `transport_result` is writable here too. This does *not*
                     // change the client-visible error, which was already mapped
                     // from the original (404) status.
-                    if let Ok(TransportResponse::Http(http_response)) =
+                    if let Some(Ok(TransportResponse::Http(http_response))) =
                         &mut response.transport_result
                     {
                         http_response.inner.status = http::StatusCode::IM_A_TEAPOT;
                     }
                     observed.transport_status_after = match &response.transport_result {
-                        Ok(TransportResponse::Http(http_response)) => {
+                        Some(Ok(TransportResponse::Http(http_response))) => {
                             Some(http_response.inner.status.as_u16())
                         }
                         _ => None,
