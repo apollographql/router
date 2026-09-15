@@ -22,7 +22,7 @@ pub use apply_to::*;
 pub(crate) use lit_expr::LitExpr;
 pub(crate) use location::Ranged;
 pub use parser::*;
-// Pretty printing is used outside tests now: ->withError renders the syntax of
+// Pretty printing is used outside tests now: ->withProblem renders the syntax of
 // a call whose message it had to discard, so the author can find the expression
 // that was supposed to produce it.
 pub(crate) use pretty::*;
