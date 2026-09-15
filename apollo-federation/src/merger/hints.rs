@@ -1,10 +1,16 @@
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use strum::IntoEnumIterator;
+
+use crate::error::ConnectorsCode;
 use crate::supergraph::HintCodeDefinition;
 use crate::supergraph::HintLevel;
 
 #[derive(Clone, Debug)]
 pub enum HintCode {
+    /// A warning raised by the connectors (`@source`/`@connect`) subgraph validations.
+    ConnectorsHint(ConnectorsCode),
     InconsistentButCompatibleFieldType,
     InconsistentButCompatibleArgumentType,
     InconsistentDefaultValuePresence,
@@ -41,6 +47,7 @@ pub enum HintCode {
 impl HintCode {
     pub fn definition(&self) -> &'static HintCodeDefinition {
         match self {
+            HintCode::ConnectorsHint(code) => connectors_hint_definition(*code),
             HintCode::InconsistentButCompatibleFieldType => &INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE,
             HintCode::InconsistentButCompatibleArgumentType => {
                 &INCONSISTENT_BUT_COMPATIBLE_ARGUMENT_TYPE
@@ -108,6 +115,36 @@ impl HintCode {
     pub fn code(&self) -> &str {
         self.definition().code()
     }
+}
+
+/// Like the connectors error codes, connectors warnings reuse the connectors code enum rather than
+/// duplicating a [`HintCode`] variant per code.
+static CONNECTORS_HINT_DEFINITIONS: LazyLock<HashMap<ConnectorsCode, HintCodeDefinition>> =
+    LazyLock::new(|| {
+        ConnectorsCode::iter()
+            .map(|code| {
+                let definition = HintCodeDefinition::new(
+                    <&'static str>::from(code),
+                    HintLevel::Warn,
+                    "A connectors (`@source`/`@connect`) validation warning.",
+                );
+                (code, definition)
+            })
+            .collect()
+    });
+
+static UNKNOWN_CONNECTORS_HINT: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
+    HintCodeDefinition::new(
+        "UNKNOWN_CONNECTORS_WARNING",
+        HintLevel::Warn,
+        "A connectors (`@source`/`@connect`) validation warning with an unknown code.",
+    )
+});
+
+fn connectors_hint_definition(code: ConnectorsCode) -> &'static HintCodeDefinition {
+    CONNECTORS_HINT_DEFINITIONS
+        .get(&code)
+        .unwrap_or(&UNKNOWN_CONNECTORS_HINT)
 }
 
 pub(crate) static INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE: LazyLock<HintCodeDefinition> =
@@ -377,5 +414,22 @@ pub(crate) static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<HintCodeDe
             "INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE",
             HintLevel::Warn,
             "Interface key missing implementation type",
+        )
+    });
+
+pub(crate) static DEPRECATED_REASON_NULL: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
+    HintCodeDefinition::new(
+        "DEPRECATED_REASON_NULL",
+        HintLevel::Warn,
+        "`@deprecated(reason: null)` is invalid in the 2025 GraphQL spec; `reason: null` stripped for Router 3 compatibility",
+    )
+});
+
+pub(crate) static DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE: LazyLock<HintCodeDefinition> =
+    LazyLock::new(|| {
+        HintCodeDefinition::new(
+            "DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE",
+            HintLevel::Warn,
+            "Implementing field is `@deprecated` but interface field is not; invalid in the 2025 GraphQL spec",
         )
     });

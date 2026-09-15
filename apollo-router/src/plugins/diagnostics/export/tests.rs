@@ -966,17 +966,16 @@ async fn test_html_report_in_archive() {
         let path = entry.path().unwrap().to_string_lossy().to_string();
         if path == "diagnostics_report.html" {
             found_html_report = true;
-            let header = entry.header();
 
             // Verify it's a file
             assert!(
-                header.entry_type().is_file(),
+                entry.header().entry_type().is_file(),
                 "diagnostics_report.html should be a regular file"
             );
 
             // Verify it has content (HTML should be substantial)
             assert!(
-                header.size().unwrap() > 1000,
+                entry.effective_size() > 1000,
                 "diagnostics_report.html should have substantial content"
             );
         }
