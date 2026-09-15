@@ -941,6 +941,12 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         conditions: &SelectionSet,
     ) -> Result<bool, FederationError> {
+        let cache_key = (node, super::ArcKey::new(&conditions.selections));
+        if let Some(&cached) = self.caches.conditions_routable.borrow().get(&cache_key) {
+            return Ok(cached);
+        }
+        let guard_before = self.caches.guard_hits.get();
+        let mut result = true;
         for sel in conditions.selections.values() {
             let routable = match sel {
                 Selection::Field(field_sel) => self.condition_field_routable(node, field_sel)?,
@@ -949,10 +955,24 @@ impl FieldRoutingSearchSpace {
                 }
             };
             if !routable {
-                return Ok(false);
+                result = false;
+                break;
             }
         }
-        Ok(true)
+        // Cache when: (a) no guard was hit, so no circular paths
+        // influenced the answer; or (b) the result is false and guard
+        // hits occurred. Case (b) is safe because the guard only hides
+        // circular paths, and circular paths can never make conditions
+        // routable. A true result influenced by guard hits might be
+        // overly optimistic, so we do not cache that.
+        let no_guard_change = self.caches.guard_hits.get() == guard_before;
+        if no_guard_change || !result {
+            self.caches
+                .conditions_routable
+                .borrow_mut()
+                .insert(cache_key, result);
+        }
+        Ok(result)
     }
 
     fn condition_field_routable(
@@ -1022,14 +1042,19 @@ impl FieldRoutingSearchSpace {
             return Ok(false);
         }
         let Some(sub_ss) = sub_ss else {
-            return Ok(true);
+            // Leaf field: any hop with satisfiable conditions can deliver it.
+            return Ok(hops.iter().any(|h| !h.conditions_unroutable()));
         };
         for hop in hops {
-            if let Some(edge_idx) = hop.edge_index() {
-                let (_, target) = self.qg().edge_endpoints(edge_idx)?;
-                if self.conditions_routable(target, sub_ss)? {
-                    return Ok(true);
-                }
+            if hop.conditions_unroutable() {
+                continue;
+            }
+            let Some(edge_idx) = hop.edge_index() else {
+                continue;
+            };
+            let (_, target) = self.qg().edge_endpoints(edge_idx)?;
+            if self.conditions_routable(target, sub_ss)? {
+                return Ok(true);
             }
         }
         Ok(false)
