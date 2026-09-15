@@ -2583,13 +2583,15 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
         connector_index: Default::default(),
         check_for_cooperative_cancellation: None,
         disabled_subgraphs: Default::default(),
-        assigned_defer_labels: Default::default(),
+        client_labels: Default::default(),
     };
 
+    let mut naming = super::super::OperationNaming::new(false);
     let bulb = super::super::build_bulb_plan(
         &parameters,
         &selection_set,
         SchemaRootDefinitionKind::Query,
+        &mut naming,
         false,
     )
     .expect("bulb plan");
