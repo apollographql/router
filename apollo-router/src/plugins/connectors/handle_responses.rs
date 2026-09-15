@@ -33,7 +33,6 @@ use crate::json_ext::Path;
 use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
-use crate::plugins::limits::ConnectorMappingErrorLimit;
 use crate::plugins::limits::ConnectorResponseSizeLimit;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
@@ -194,7 +193,7 @@ where
             // If this errors, it will write to the debug context because it
             // has access to the raw bytes, so we can't write to it again
             // in any RawResponse::Error branches.
-            let mut mapped = match &deserialized_body {
+            let mapped = match &deserialized_body {
                 Err(error) => MappedResponse::Error {
                     error: error.as_ref().clone(),
                     key: response_key,
@@ -215,12 +214,6 @@ where
                     &connector.schema_subtypes_map,
                 ),
             };
-
-            // Applied here, in the router, rather than inside the mapping
-            // engine: the limit is operator configuration, and apollo-federation
-            // has no access to it. Applied after `apply_operation` so the count
-            // is of the errors that would actually have been sent.
-            truncate_mapping_errors(&mut mapped, context, &connector);
 
             if let Some(debug) = debug_context {
                 let mut debug_problems: Vec<Problem> = mapped.problems().to_vec();
@@ -270,64 +263,6 @@ where
         transport_result: result,
         mapped_response,
     }
-}
-
-/// The error code carried by the summary error that replaces mapping errors
-/// dropped by the `limits.connector.max_mapping_errors` limit.
-const TOO_MANY_MAPPING_ERRORS_CODE: &str = "CONNECTORS_TOO_MANY_ERRORS";
-
-/// Enforce `limits.connector.max_mapping_errors` on the errors a response
-/// mapping declared with `->withError`.
-///
-/// A `->withError` inside a `->map` records one error per element, so a mapping
-/// over a large API response can contribute an error per row. When an operator
-/// has set a limit, the excess is replaced by one summary error naming how many
-/// were dropped, so the truncation is visible in the response rather than
-/// silent. With no limit configured — the default — every declared error is
-/// reported, matching how the router treats subgraph errors.
-///
-/// The mapping's `problems` are left alone: they are already collapsed by
-/// message before reaching here, and they never leave the router, so the
-/// debugger and telemetry keep the full picture regardless of the limit.
-fn truncate_mapping_errors(mapped: &mut MappedResponse, context: &Context, connector: &Connector) {
-    let Some(ConnectorMappingErrorLimit(limit)) = context
-        .extensions()
-        .with_lock(|e| e.get::<ConnectorMappingErrorLimit>().copied())
-    else {
-        return;
-    };
-
-    let MappedResponse::Data { errors, key, .. } = mapped else {
-        return;
-    };
-
-    let total = errors.len();
-    if total <= limit {
-        return;
-    }
-
-    errors.truncate(limit);
-
-    let dropped = total - limit;
-    let mut overflow = RuntimeError::new(
-        format!(
-            "{dropped} more mapping errors were declared by this connector but not \
-             reported, out of {total} total, because the configured \
-             `limits.connector.max_mapping_errors` is {limit}"
-        ),
-        key,
-    )
-    .with_code(TOO_MANY_MAPPING_ERRORS_CODE);
-    overflow.subgraph_name = Some(connector.id.subgraph_name.clone());
-    overflow.coordinate = Some(connector.id.coordinate());
-    errors.push(overflow);
-
-    u64_counter!(
-        "apollo.router.limits.connector_mapping_errors.exceeded",
-        "Number of connector responses whose mapping errors were truncated because they exceeded the configured limit",
-        1,
-        "connector.source" = connector.source_config_key()
-    );
 }
 
 /// Build the client-facing form of one error a mapping declared with
@@ -543,14 +478,11 @@ mod tests {
     use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
     use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
     use crate::plugins::connectors::handle_responses::MappedResponse;
-    use crate::plugins::connectors::handle_responses::TOO_MANY_MAPPING_ERRORS_CODE;
     use crate::plugins::connectors::handle_responses::aggregate_responses;
     use crate::plugins::connectors::handle_responses::handle_raw_response;
     use crate::plugins::connectors::handle_responses::process_response;
-    use crate::plugins::connectors::handle_responses::truncate_mapping_errors;
     use crate::plugins::include_subgraph_errors::config::Config as IncludeSubgraphErrorsConfig;
     use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
-    use crate::plugins::limits::ConnectorMappingErrorLimit;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
@@ -867,70 +799,17 @@ mod tests {
         (mapped, connector)
     }
 
-    /// With no limit configured — the default — every declared error is
-    /// reported, the same way the router passes through every subgraph error.
+    /// Every error a mapping declares is reported. The router does not cap
+    /// them, the same way it does not cap the errors a subgraph returns, so a
+    /// `->withError` inside a `->map` over 250 rows contributes 250 errors.
     #[test]
-    fn mapping_errors_are_not_truncated_without_a_configured_limit() {
-        let (mut mapped, connector) = mapped_with_declared_errors(250);
-
-        truncate_mapping_errors(&mut mapped, &Context::new(), &connector);
+    fn every_declared_error_is_reported() {
+        let (mapped, _connector) = mapped_with_declared_errors(250);
 
         let MappedResponse::Data { errors, .. } = &mapped else {
             panic!("expected data, got: {mapped:?}");
         };
         assert_eq!(errors.len(), 250);
-    }
-
-    /// With a limit configured, the excess is replaced by one summary error, so
-    /// a client can tell the list was shortened rather than silently receiving
-    /// a partial picture.
-    #[test]
-    fn mapping_errors_are_truncated_to_the_configured_limit() {
-        let (mut mapped, connector) = mapped_with_declared_errors(250);
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|e| e.insert(ConnectorMappingErrorLimit(100)));
-
-        truncate_mapping_errors(&mut mapped, &context, &connector);
-
-        let MappedResponse::Data { errors, .. } = &mapped else {
-            panic!("expected data, got: {mapped:?}");
-        };
-        // 100 kept, plus the summary.
-        assert_eq!(errors.len(), 101);
-        let overflow = errors.last().unwrap();
-        assert_eq!(overflow.code(), TOO_MANY_MAPPING_ERRORS_CODE);
-        assert!(
-            overflow.message.starts_with("150 more mapping errors"),
-            "unexpected overflow message: {}",
-            overflow.message,
-        );
-    }
-
-    /// A response at or under the limit is untouched — no summary error is
-    /// appended when nothing was dropped.
-    #[test]
-    fn mapping_errors_at_the_limit_are_left_alone() {
-        let (mut mapped, connector) = mapped_with_declared_errors(100);
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|e| e.insert(ConnectorMappingErrorLimit(100)));
-
-        truncate_mapping_errors(&mut mapped, &context, &connector);
-
-        let MappedResponse::Data { errors, .. } = &mapped else {
-            panic!("expected data, got: {mapped:?}");
-        };
-        assert_eq!(errors.len(), 100);
-        assert!(
-            errors
-                .iter()
-                .all(|e| e.code() != TOO_MANY_MAPPING_ERRORS_CODE)
-        );
     }
 
     #[test]
