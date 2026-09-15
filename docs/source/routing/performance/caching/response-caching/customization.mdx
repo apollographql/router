@@ -177,6 +177,47 @@ fn supergraph_service(service) {
 }
 ```
 
+### Connector cache-key headers
+
+For Apollo Connectors, the set of client request headers that are folded into the cache key is an **explicit, required** configuration: `cache_key_headers`. Because a connector calls your REST API directly, the router cannot know which request headers cause your API to return a different response—so you must declare them. This field has no default: a connector cache configuration that omits it is rejected, so you cannot enable connector caching without first deciding which headers matter. Set it on `connector.all`, and on each source you list under `connector.sources`.
+
+```yaml title="router.yaml"
+response_cache:
+  enabled: true
+  connector:
+    all:
+      enabled: true
+      ttl: 5m
+      redis:
+        urls: ["redis://localhost:6379"]
+      # REQUIRED: the client request headers whose values distinguish cache entries.
+      cache_key_headers:
+        - x-user-id
+        - x-tenant
+    sources:
+      products.catalog_api:
+        # Per-source override; replaces (does not merge with) the `all` list for this source.
+        cache_key_headers:
+          - x-region
+```
+
+How it affects the cache:
+
+- Each listed header's values (matched case-insensitively; all values of a repeated header, in sorted order) become part of the cache key, so two requests that differ only in a listed header get separate cache entries.
+- A header that is **not** listed does not affect the cache key—two requests that differ only in an unlisted header share one cache entry.
+- An empty list (`cache_key_headers: []`) is a valid, explicit choice meaning "no request header distinguishes cache entries."
+
+<Caution>
+
+Choosing this list is a safety decision, and both directions have consequences:
+
+- **Omitting a header your API varies on is a data-disclosure risk.** If your REST API returns different data based on a header (for example, a per-user identity header) and you do not list it, one caller's cached response is served to another caller who sent a different value. List every request header that changes what your API returns—including any header you forward to the API via `@connect`'s `http.headers`.
+- **Listing a header that doesn't affect the response wastes cache.** Each distinct value of a listed header creates a separate entry, so including a high-cardinality header that has no effect on the response (for example, a per-request trace or correlation ID) fragments the cache and drives the hit rate toward zero.
+
+The goal is to list **exactly** the headers whose values change your API's response—no more, no fewer.
+
+</Caution>
+
 ### Example: Multi-tenant caching
 
 Cache different responses for each tenant based on a request header:

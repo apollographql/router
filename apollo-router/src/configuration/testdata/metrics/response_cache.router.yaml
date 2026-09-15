@@ -28,3 +28,4 @@ response_cache:
       redis:
         urls: ["redis://test"]
       ttl: 60s
+      cache_key_headers: []

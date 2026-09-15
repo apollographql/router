@@ -118,6 +118,14 @@ impl ConnectorCacheConfiguration {
         InvalidationIndexes::default()
     }
 
+    /// The configured cache-key header allow-list for `source_name`. A listed source carries its
+    /// own list; an unlisted source resolves to `all`. Always a concrete slice — the field is
+    /// required config (never optional), and an empty slice is the explicit "no request header
+    /// partitions the key" choice.
+    pub(super) fn cache_key_headers(&self, source_name: &str) -> &[Arc<str>] {
+        &self.get(source_name).cache_key_headers
+    }
+
     /// Returns whether caching is enabled for a specific connector source.
     pub(super) fn is_source_enabled(&self, plugin_enabled: bool, source_name: &str) -> bool {
         if !plugin_enabled {
@@ -133,21 +141,53 @@ impl ConnectorCacheConfiguration {
 
 /// Per connector source configuration for response caching
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct ConnectorCacheSource {
     /// Redis configuration
+    #[serde(default)]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses
+    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// Activates caching for this connector source, overrides the global configuration
+    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
+    /// The client request header names whose values are folded into this source's cache key.
+    ///
+    /// **Required** wherever connector caching is configured (on `all`, and on any listed source):
+    /// this field has no default, so a connector cache config that omits it is rejected. This is a
+    /// deliberate safety decision — the operator must consciously choose which request headers
+    /// distinguish one cached connector response from another before enabling the feature.
+    ///
+    /// Semantics:
+    /// - Header matching is case-insensitive; all values of a listed header (sorted) are hashed.
+    /// - An empty list (`[]`) is a valid, explicit choice meaning "no request header partitions
+    ///   the cache" — every caller with otherwise-equal inputs shares one entry.
+    /// - Any header your REST API varies its response on that is NOT listed here will cause
+    ///   different callers to share a cached response (a cross-user data-disclosure risk); any
+    ///   header listed here that does not affect the response needlessly fragments the cache.
+    ///
+    /// A listed source carries its own list (there is no inheritance from `all`); a source that is
+    /// not listed under `sources` resolves to the `all` value.
+    //
+    // `Arc<[Arc<str>]>` rather than the `Vec<String>` used elsewhere in this config: this list is
+    // read-only after deserialization (never resized or mutated), and the resolved value is cloned
+    // into a per-source tower service that tower itself clones on the hot path. `Arc` clones are a
+    // refcount bump instead of a heap copy of the strings, so the shared, immutable shape is both a
+    // better fit and cheaper here. (See `configuration::cors` for the same pattern.) This is a
+    // deliberate, localized departure from the surrounding `Vec`/`String` convention — keep it
+    // scoped to these cache-key-header fields unless you are converting a field for the same reason.
+    pub(crate) cache_key_headers: Arc<[Arc<str>]>,
+
     /// Context key used to separate cache sections per user
+    #[serde(default)]
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
+    #[serde(default)]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
 }
 
@@ -402,12 +442,14 @@ impl ConnectorCacheService {
             let private_id_exists = private_id.is_some();
             let is_debug = self.debug;
             let indexes = self.connectors_config.effective_indexes(&source_name);
-            // Snapshot the connector's referenced $context/$request.headers inputs for the cache
-            // key (request-scoped, shared by every representation in the batch).
+            // Snapshot the connector's referenced $context and operator-configured request headers
+            // for the cache key (request-scoped, shared by every representation in the batch).
+            let cache_key_headers = self.connectors_config.cache_key_headers(&source_name);
             let key_inputs = connector_key_inputs(
                 Some(connector),
                 &request.context,
                 request.supergraph_request.headers(),
+                cache_key_headers,
             );
             self.handle_entity_query(
                 request,
@@ -1170,6 +1212,15 @@ pub(super) struct ConnectorRequestCacheService {
     /// Resolved invalidation indexes for this connector source, gating which cache-tag layers
     /// are written on the store path (mirrors the subgraph path).
     pub(super) indexes: InvalidationIndexes,
+    /// Resolved allow-list of client header names folded into this source's cache key (see
+    /// [`ConnectorCacheConfiguration::cache_key_headers`]). Resolved once at construction because
+    /// this per-source service does not carry the full connector config.
+    //
+    // `Arc<[Arc<str>]>` (not `Vec<String>`): read-only after construction, and this service is a
+    // tower service that gets cloned on the request hot path, so cloning it should be a cheap
+    // refcount bump rather than a heap copy of the header names. See the matching note on
+    // `ConnectorCacheSource::cache_key_headers`.
+    pub(super) cache_key_headers: Arc<[Arc<str>]>,
 }
 
 impl Service<connector::request_service::Request> for ConnectorRequestCacheService {
@@ -1402,11 +1453,13 @@ impl ConnectorRequestCacheService {
         // Capture connector info for cache tag extraction before request is consumed
         let connector_synthetic_name = request.connector.id.synthetic_name();
 
-        // Snapshot the connector's referenced $context/$request.headers inputs for the cache key.
+        // Snapshot the connector's referenced $context and operator-configured request headers
+        // for the cache key.
         let key_inputs = connector_key_inputs(
             Some(request.connector.as_ref()),
             &request.context,
             request.supergraph_request.headers(),
+            &self.cache_key_headers,
         );
 
         // Build a variables object from the request inputs for hashing
@@ -1957,12 +2010,22 @@ struct CacheMetadata {
 /// Without this, two client requests that produce *different* upstream connector requests because
 /// a forwarded header or context value differs would resolve to the SAME cache key — a cross-user
 /// data leak.
+/// Build the request-scoped inputs (referenced `$context` keys + the operator-selected request
+/// headers) that partition a connector cache key.
+///
+/// `cache_key_headers` is the operator's REQUIRED allow-list of client header names to fold into
+/// the key (resolved from config; see [`ConnectorCacheConfiguration::cache_key_headers`]). Only
+/// these headers partition the key — a header the connector forwards or interpolates but that the
+/// operator did not list is deliberately absent, so it is the operator's responsibility to list
+/// every header their REST API varies its response on. `$context` keys are still derived
+/// automatically from the connector's own mapping references (those are internal, not client
+/// input, so there is no analogous over-partition/leak tradeoff to hand to the operator).
 fn connector_key_inputs(
     connector: Option<&apollo_federation::connectors::Connector>,
     context: &Context,
     headers: &http::HeaderMap,
+    cache_key_headers: &[Arc<str>],
 ) -> Value {
-    use apollo_federation::connectors::HeaderSource;
     use apollo_federation::connectors::Namespace;
 
     let Some(connector) = connector else {
@@ -1986,20 +2049,13 @@ fn connector_key_inputs(
         context_obj.insert(ByteString::from(key), value);
     }
 
-    // Used client-request headers by name (case-insensitive; all values, sorted):
-    // interpolated (`$request.headers.*` references) ...
-    let mut header_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    header_names.extend(connector.request_headers.iter().cloned());
-    header_names.extend(connector.response_headers.iter().cloned());
-    // ... plus forwarded (`headers: [{from: ...}]`); the upstream request copies the CLIENT
-    // header named by `from`, so that is the name whose values must partition the key.
-    if let Some(transport) = connector.transport.as_ref() {
-        for header in &transport.headers {
-            if let HeaderSource::From(from) = &header.source {
-                header_names.insert(from.as_str().to_string());
-            }
-        }
-    }
+    // The operator-configured client headers (case-insensitive; all values of each, sorted). A
+    // `BTreeSet` deduplicates and orders the names, and the label is lowercased, so the hashed
+    // shape is independent of config ordering and header-name casing.
+    let header_names: std::collections::BTreeSet<String> = cache_key_headers
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect();
     let mut headers_obj = serde_json_bytes::Map::new();
     for name in &header_names {
         let mut values: Vec<String> = headers
@@ -2081,34 +2137,23 @@ mod tests {
     /// inputs; interpolated (`$request.headers.*`) headers must too; static `value:` headers and
     /// unrelated request headers must NOT (no over-partitioning).
     #[test]
-    fn key_inputs_cover_forwarded_and_interpolated_headers_only() {
+    fn key_inputs_include_only_configured_headers() {
+        // The cache key folds in exactly the operator-configured request headers — no more, no
+        // less. A header the connector forwards or interpolates but that the operator did NOT
+        // list is deliberately absent (the operator owns that leak/over-partition tradeoff).
         use apollo_federation::connectors::Header;
         use apollo_federation::connectors::HeaderSource;
         use apollo_federation::connectors::OriginatingDirective;
 
+        // The connector forwards x-user and interpolates x-lang — neither of which is configured,
+        // to prove config (not the connector's own header usage) is what decides.
         let connector = test_connector(
-            vec![
-                // forwarded: upstream name differs from the client (`from`) name on purpose —
-                // the CLIENT name is what must be keyed
-                Header::from_values(
-                    "x-upstream-user".parse().unwrap(),
-                    HeaderSource::From("x-user".parse().unwrap()),
-                    OriginatingDirective::Connect,
-                ),
-                // static value: deployment-static, must NOT be keyed
-                Header::from_values(
-                    "x-static".parse().unwrap(),
-                    HeaderSource::Value(
-                        apollo_federation::connectors::header::HeaderValue::parse_with_spec(
-                            "fixed",
-                            apollo_federation::connectors::ConnectSpec::V0_1,
-                        )
-                        .unwrap(),
-                    ),
-                    OriginatingDirective::Source,
-                ),
-            ],
-            &["x-lang"], // interpolated via {$request.headers.x-lang}
+            vec![Header::from_values(
+                "x-upstream-user".parse().unwrap(),
+                HeaderSource::From("x-user".parse().unwrap()),
+                OriginatingDirective::Connect,
+            )],
+            &["x-lang"],
         );
 
         let context = Context::new();
@@ -2116,9 +2161,10 @@ mod tests {
         headers.insert("x-user", http::HeaderValue::from_static("alice"));
         headers.insert("x-lang", http::HeaderValue::from_static("fr"));
         headers.insert("x-unrelated", http::HeaderValue::from_static("noise"));
-        headers.insert("x-static", http::HeaderValue::from_static("client-noise"));
 
-        let inputs = connector_key_inputs(Some(&connector), &context, &headers);
+        // Configured uppercase to confirm case-insensitive matching + lowercased labeling.
+        let configured: Vec<Arc<str>> = vec!["X-User".into()];
+        let inputs = connector_key_inputs(Some(&connector), &context, &headers, &configured);
         let headers_obj = inputs
             .as_object()
             .unwrap()
@@ -2129,37 +2175,44 @@ mod tests {
 
         assert!(
             headers_obj.contains_key("x-user"),
-            "forwarded header (from:) must be keyed, got: {inputs:?}"
+            "configured header must be keyed (case-insensitively), got: {inputs:?}"
         );
         assert!(
-            headers_obj.contains_key("x-lang"),
-            "interpolated header must be keyed, got: {inputs:?}"
+            !headers_obj.contains_key("x-lang"),
+            "interpolated-but-unconfigured header must NOT be keyed, got: {inputs:?}"
         );
         assert!(
             !headers_obj.contains_key("x-unrelated"),
-            "unrelated header must not over-partition, got: {inputs:?}"
-        );
-        assert!(
-            !headers_obj.contains_key("x-static"),
-            "static value: header must not be keyed, got: {inputs:?}"
-        );
-        assert!(
-            !headers_obj.contains_key("x-upstream-user"),
-            "the upstream rename must not be keyed — the client `from` name is, got: {inputs:?}"
+            "unconfigured header must not partition, got: {inputs:?}"
         );
 
-        // Different forwarded value ⇒ different snapshot; unrelated header change ⇒ identical.
+        // Different value of a configured header ⇒ different snapshot.
         let mut headers_bob = headers.clone();
         headers_bob.insert("x-user", http::HeaderValue::from_static("bob"));
         assert_ne!(
             inputs,
-            connector_key_inputs(Some(&connector), &context, &headers_bob)
+            connector_key_inputs(Some(&connector), &context, &headers_bob, &configured)
         );
+        // Changing an unconfigured header ⇒ identical snapshot.
         let mut headers_noise = headers.clone();
-        headers_noise.insert("x-unrelated", http::HeaderValue::from_static("other"));
+        headers_noise.insert("x-lang", http::HeaderValue::from_static("de"));
         assert_eq!(
             inputs,
-            connector_key_inputs(Some(&connector), &context, &headers_noise)
+            connector_key_inputs(Some(&connector), &context, &headers_noise, &configured)
+        );
+
+        // An empty allow-list keys no header at all.
+        let empty = connector_key_inputs(Some(&connector), &context, &headers, &[]);
+        assert!(
+            empty
+                .as_object()
+                .unwrap()
+                .get("headers")
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .is_empty(),
+            "empty config must key no headers, got: {empty:?}"
         );
     }
 

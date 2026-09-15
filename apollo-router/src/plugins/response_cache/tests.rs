@@ -5324,6 +5324,9 @@ async fn create_connector_cache_factory(
                         "required_to_start": true,
                     },
                     "ttl": "10m",
+                    // Required config; default to keying no request headers. Tests that exercise
+                    // header partitioning override this via `extra_config`.
+                    "cache_key_headers": [],
                 }
             }
         }
@@ -5913,9 +5916,14 @@ async fn connector_forwarded_header_partitions_cache_key() {
     let uri = mock_server.uri();
     let namespace = Uuid::new_v4().to_string();
     let query = "query { me { id name } }";
+    // Configure x-user as a cache-key header: the required allow-list is what makes the key
+    // partition per user. x-unrelated is intentionally left out to prove it does not partition.
+    let header_cfg = serde_json_bytes::json!({
+        "response_cache": { "connector": { "all": { "cache_key_headers": ["x-user"] } } }
+    });
 
     // alice: miss + store
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let service = create_connector_cache_service(&uri, &namespace, Some(header_cfg.clone())).await;
     let request = make_connector_cache_request_with_header(query, "x-user", "alice");
     let response = service.oneshot(request).await.unwrap();
     let alice_context = response.context.clone();
@@ -5928,7 +5936,7 @@ async fn connector_forwarded_header_partitions_cache_key() {
     let me_after_alice = mock_requests_for_path(&mock_server, "/me").await;
 
     // bob: MUST miss (distinct key) and get bob's data — this was the F9 leak
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    let service = create_connector_cache_service(&uri, &namespace, Some(header_cfg.clone())).await;
     let request = make_connector_cache_request_with_header(query, "x-user", "bob");
     let response = service.oneshot(request).await.unwrap();
     let bob_context = response.context.clone();
@@ -5944,9 +5952,9 @@ async fn connector_forwarded_header_partitions_cache_key() {
         "bob's request must reach the REST API"
     );
 
-    // alice again, extra UNRELATED header: must be a cache hit (no REST call) — proves both
-    // per-user partitioning and no over-partitioning on unforwarded headers.
-    let service = create_connector_cache_service(&uri, &namespace, None).await;
+    // alice again, extra UNRELATED (unconfigured) header: must be a cache hit (no REST call) —
+    // proves both per-user partitioning and no over-partitioning on unconfigured headers.
+    let service = create_connector_cache_service(&uri, &namespace, Some(header_cfg.clone())).await;
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(Context::new())

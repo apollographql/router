@@ -2286,6 +2286,7 @@ expression: "&schema"
             }
           ],
           "default": {
+            "cache_key_headers": [],
             "enabled": null,
             "invalidation": null,
             "private_id": null,
@@ -2309,6 +2310,13 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Per connector source configuration for response caching",
       "properties": {
+        "cache_key_headers": {
+          "description": "The client request header names whose values are folded into this source's cache key.\n\n**Required** wherever connector caching is configured (on `all`, and on any listed source):\nthis field has no default, so a connector cache config that omits it is rejected. This is a\ndeliberate safety decision — the operator must consciously choose which request headers\ndistinguish one cached connector response from another before enabling the feature.\n\nSemantics:\n- Header matching is case-insensitive; all values of a listed header (sorted) are hashed.\n- An empty list (`[]`) is a valid, explicit choice meaning \"no request header partitions\n  the cache\" — every caller with otherwise-equal inputs shares one entry.\n- Any header your REST API varies its response on that is NOT listed here will cause\n  different callers to share a cached response (a cross-user data-disclosure risk); any\n  header listed here that does not affect the response needlessly fragments the cache.\n\nA listed source carries its own list (there is no inheritance from `all`); a source that is\nnot listed under `sources` resolves to the `all` value.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "enabled": {
           "default": null,
           "description": "Activates caching for this connector source, overrides the global configuration",
@@ -2362,6 +2370,9 @@ expression: "&schema"
           "description": "Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses"
         }
       },
+      "required": [
+        "cache_key_headers"
+      ],
       "type": "object"
     },
     "ConnectorConnectorLimitsConfiguration": {

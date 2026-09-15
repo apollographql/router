@@ -504,6 +504,11 @@ impl PluginPrivate for ResponseCache {
             }
         }
 
+        // NOTE: `cache_key_headers` is required by config deserialization (the field has no serde
+        // default), so a connector cache config that omits it is rejected before reaching here —
+        // no separate startup check is needed. An empty list is a valid explicit "no header
+        // partitions the cache key" choice.
+
         if init
             .config
             .connector
@@ -905,6 +910,12 @@ impl PluginPrivate for ResponseCache {
             .or_else(|| self.connectors.all.private_id.clone());
         let source_name_owned = source_name;
         let indexes = self.connectors.effective_indexes(&source_name_owned);
+        // Cheap `Arc` refcount bump (not a heap copy) of the source's resolved header list; the
+        // owned `Arc<[Arc<str>]>` is then equally cheap to clone as tower clones this service per
+        // request. The `cache_key_headers` accessor returns a slice for read-only callers, so we
+        // clone the shared `Arc` directly here where an owned value is needed.
+        let cache_key_headers =
+            Arc::clone(&self.connectors.get(&source_name_owned).cache_key_headers);
 
         let debug = self.debug;
 
@@ -924,6 +935,7 @@ impl PluginPrivate for ResponseCache {
                 private_queries: self.private_queries.clone(),
                 lru_size_instrument: self.lru_size_instrument.clone(),
                 indexes,
+                cache_key_headers,
             })
             .boxed()
     }
@@ -3956,6 +3968,46 @@ mod tests {
             .await
             .is_err(),
             "The plugin should not start properly if caching is enabled but no redis provided"
+        );
+    }
+
+    #[test]
+    fn connector_cache_key_headers_are_required() {
+        // A connector cache config that writes an `all` block but omits `cache_key_headers` must
+        // be rejected at deserialization: the field has no serde default, so caching cannot be
+        // configured without consciously choosing which request headers partition the key.
+        let missing: Result<super::Config, _> =
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "enabled": true,
+                "connector": {
+                    "all": {
+                        "enabled": true,
+                        "ttl": "10s",
+                        "redis": { "urls": ["redis://127.0.0.1:6379"] },
+                    }
+                }
+            }));
+        assert!(
+            missing.is_err(),
+            "connector cache config without cache_key_headers must be rejected"
+        );
+
+        // An empty list is a valid, explicit choice and parses.
+        let empty: Result<super::Config, _> =
+            serde_json_bytes::from_value(serde_json_bytes::json!({
+                "enabled": true,
+                "connector": {
+                    "all": {
+                        "enabled": true,
+                        "ttl": "10s",
+                        "redis": { "urls": ["redis://127.0.0.1:6379"] },
+                        "cache_key_headers": [],
+                    }
+                }
+            }));
+        assert!(
+            empty.is_ok(),
+            "an explicit empty cache_key_headers must be accepted, got: {empty:?}"
         );
     }
 
