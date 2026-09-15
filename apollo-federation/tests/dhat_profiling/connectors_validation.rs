@@ -10,17 +10,43 @@ fn valid_large_body() {
     const SCHEMA: &str = "src/connectors/validation/test_data/valid_large_body.graphql";
 
     // Bumped from 275_000 when connectors validation moved to run mid-expansion
-    // (`ConnectorsBlueprint::on_validation`), which put link expansion inside the profiled region.
+    // (`ConnectorsBlueprint::on_validation`), which put link expansion inside the profiled region,
+    // and from 420_000 when the GraphQL front end became `connectors::graphql_shapes`.
     //
-    // Measured ~380k, made up of ~192k for parsing and expansion (see
-    // `subgraph_expansion_profiling`, which measures exactly that half against the same fixture)
-    // and ~188k for validation. If this test regresses, check that one first: if it moved too, the
-    // cost is in expansion, not here.
+    // The profiled region covers parsing, expansion and validation. Of the pre-front-end 396k,
+    // roughly 192k is parsing and expansion (see `subgraph_expansion_profiling`, which measures
+    // exactly that half against the same fixture) and the rest is validation. If this test
+    // regresses, check that one first: if it moved too, the cost is in expansion, not here.
     //
     // `validate()` covers connectors validation *and* GraphQL/federation validation, which cannot
     // be measured apart now that they share a transition. Connectors validation dominates: adding
     // the GraphQL half moved the peak by well under 1k.
-    const MAX_BYTES: usize = 420_000;
+    //
+    // Measured against this fixture, before and after the front end moved in:
+    //
+    //              peak bytes   total blocks
+    //   before        395,940         58,730
+    //   after         450,627         59,307
+    //
+    // Peak live bytes grew 13.8% while allocation count moved 1.0%, which is the signature of more
+    // shape held live at once rather than more allocation traffic. The heap profile attributes it
+    // to node count, not to any one allocation getting bigger: GraphQL types now carry the shapes
+    // their schemas describe, so `ID` is a three-node `One<String, Int>` where the old walker made
+    // every scalar a single `Unknown`, and `[String]` is `One<List<One<String, null>>, null>`,
+    // where that walker wrapped the inner type once and left list elements no nullability of their
+    // own. Each node owns an `IndexSet<Location>` that allocates, since `Shape::cached_or_else`
+    // hands back its cached singleton only for an empty location list and this path always has
+    // real spans. Of the 55k, roughly 34k is those nodes and their locations, 14k is
+    // `Namespace::insert` propagating derived names over the bigger tree, and 5k is the member
+    // sets of the new unions.
+    //
+    // A sixth of that was avoidable and is gone: `graphql_shapes::Locator` memoizes each file's
+    // `SourceId`, which took the `graphql:<path>` strings live at peak from 4,744 bytes in 103
+    // blocks to 216 in 3.
+    //
+    // 500_000 is ~11% above the measured peak, the margin this file asks for. Note that 420_000
+    // gave only 6% over 395,940, so the guard was already tighter than stated before this change.
+    const MAX_BYTES: usize = 500_000;
     // Bumped from 27_000 once the fused-trie consumption infrastructure
     // landed: `compute_output_shape` now records into a `SelectionTrie`
     // baton on every recursive step, which roughly doubles allocation
