@@ -1238,6 +1238,8 @@ fn y_pending(
         defer_ref: None,
         context_anchor: Default::default(),
         parent_types: SharedPath::new(),
+        split_parent: None,
+        split_avoid: None,
     }
 }
 

@@ -421,6 +421,8 @@ mod tests {
             defer_ref: None,
             context_anchor: Default::default(),
             parent_types: SharedPath::new(),
+            split_parent: None,
+            split_avoid: None,
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state
