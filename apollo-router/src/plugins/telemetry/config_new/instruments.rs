@@ -3105,10 +3105,13 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
-                                    apollo_subgraph_instruments = Some(config.new_apollo_subgraph_instruments(
-                                        Arc::new(config.new_builtin_apollo_subgraph_instruments()),
-                                        apollo_config.clone()
-                                    ));
+                                    apollo_subgraph_instruments =
+                                        Some(config.new_apollo_subgraph_instruments(
+                                            Arc::new(
+                                                config.new_builtin_apollo_subgraph_instruments(),
+                                            ),
+                                            apollo_config.clone(),
+                                        ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -3121,22 +3124,27 @@ mod tests {
                                     let mut http_request = http::Request::new(graphql_request);
                                     *http_request.headers_mut() = convert_http_headers(headers);
 
-                                    let request = crate::plugins::telemetry::subgraph::Request::fake_builder()
-                                        .context(context.clone())
-                                        .subgraph_name(subgraph_name)
-                                        .and_operation_kind(operation_kind)
-                                        .subgraph_request(http_request)
-                                        .build();
+                                    let request =
+                                        crate::services::subgraph::Request::fake_builder()
+                                            .context(context.clone())
+                                            .subgraph_name(subgraph_name)
+                                            .and_operation_kind(operation_kind)
+                                            .subgraph_request(http_request)
+                                            .build();
 
-                                    let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                    let body =
+                                        serde_json::to_string(request.subgraph_request.body())
+                                            .expect("failed to serialize subgraph request body");
                                     let body_size = body.len();
-                                    request.context.extensions()
-                                        .with_lock(|lock| {
-                                            lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                        });
+                                    request.context.extensions().with_lock(|lock| {
+                                        lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                    });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
-                                    apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    apollo_subgraph_instruments
+                                        .as_mut()
+                                        .unwrap()
+                                        .on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
@@ -3147,23 +3155,26 @@ mod tests {
                                     errors,
                                     headers,
                                 } => {
-                                    let response = crate::plugins::telemetry::subgraph::Response::fake2_builder()
-                                        .context(context.clone())
-                                        .and_subgraph_name(subgraph_name)
-                                        .status_code(StatusCode::from_u16(status).expect("status"))
-                                        .and_data(data)
-                                        .errors(errors)
-                                        .extensions(extensions)
-                                        .headers(convert_headers(headers))
-                                        .build()
-                                        .unwrap();
+                                    let response =
+                                        crate::services::subgraph::Response::fake2_builder()
+                                            .context(context.clone())
+                                            .and_subgraph_name(subgraph_name)
+                                            .status_code(
+                                                StatusCode::from_u16(status).expect("status"),
+                                            )
+                                            .and_data(data)
+                                            .errors(errors)
+                                            .extensions(extensions)
+                                            .headers(convert_headers(headers))
+                                            .build()
+                                            .unwrap();
 
-                                    let body = serde_json::to_string(response.response.body()).expect("failed to serialize subgraph response body");
+                                    let body = serde_json::to_string(response.response.body())
+                                        .expect("failed to serialize subgraph response body");
                                     let body_size = body.len();
-                                    response.context.extensions()
-                                        .with_lock(|lock| {
-                                            lock.insert(SubgraphResponseBodySize(body_size as u64));
-                                        });
+                                    response.context.extensions().with_lock(|lock| {
+                                        lock.insert(SubgraphResponseBodySize(body_size as u64));
+                                    });
 
                                     subgraph_instruments
                                         .take()
@@ -3311,7 +3322,11 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
+                                            JSONSelection::parse_with_spec(
+                                                "$.data",
+                                                DEFAULT_CONNECT_SPEC,
+                                            )
+                                            .unwrap(),
                                         ),
                                     };
                                     let request = Request {
@@ -3334,7 +3349,10 @@ mod tests {
                                     apollo_connector_instruments = Some({
                                         let apollo_connector_instruments = config
                                             .new_apollo_connector_instruments(
-                                                Arc::new(config.new_builtin_apollo_connector_instruments()),
+                                                Arc::new(
+                                                    config
+                                                        .new_builtin_apollo_connector_instruments(),
+                                                ),
                                                 apollo_config.clone(),
                                             );
                                         apollo_connector_instruments.on_request(&request);
@@ -3352,7 +3370,11 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
+                                            JSONSelection::parse_with_spec(
+                                                "$.data",
+                                                DEFAULT_CONNECT_SPEC,
+                                            )
+                                            .unwrap(),
                                         ),
                                     };
                                     let mut http_response = http::Response::builder()
