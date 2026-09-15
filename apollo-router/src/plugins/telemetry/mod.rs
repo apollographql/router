@@ -167,6 +167,7 @@ pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
 pub(crate) mod resource;
+pub(crate) mod semconv_opt_in;
 pub(crate) mod span_ext;
 mod span_factory;
 pub(crate) mod tracing;

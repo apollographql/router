@@ -636,6 +636,12 @@ impl InstrumentData {
             crate::query_planner::query_planner_service::non_local_selections_check_enabled()
                 .into(),
         );
+        attributes.insert(
+            "opt.otel.semconv_stability_opt_in".to_string(),
+            crate::plugins::telemetry::semconv_opt_in::graphql_semconv_mode()
+                .as_str()
+                .into(),
+        );
 
         self.data
             .insert("apollo.router.config.env".to_string(), (1, attributes));
@@ -740,6 +746,13 @@ mod test {
 
     #[test]
     fn test_env_metrics() {
+        // This snapshot includes `opt.otel.semconv_stability_opt_in`, so it reads the mode a
+        // concurrent test may be overriding. Taking the same lock pins the value and serialises
+        // this test against the ones that set it.
+        let _semconv = crate::plugins::telemetry::semconv_opt_in::test_override::set(
+            crate::plugins::telemetry::semconv_opt_in::GraphqlSemconvMode::Unset,
+        );
+
         let mut data = InstrumentData::default();
         data.populate_cli_instrument();
         let _metrics: Metrics = data.into();
