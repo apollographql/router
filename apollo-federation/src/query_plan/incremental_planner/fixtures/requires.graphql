@@ -34,11 +34,12 @@ type Query
   @join__type(graph: B)
 {
   product: Product @join__field(graph: A)
+  productFromB: Product @join__field(graph: B)
 }
 
 type Product
   @join__type(graph: A, key: "id")
-  @join__type(graph: B, key: "id", extension: true)
+  @join__type(graph: B, key: "id")
 {
   id: ID!
   weight: Float @join__field(graph: A) @join__field(graph: B, external: true)
