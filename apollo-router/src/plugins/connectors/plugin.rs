@@ -135,6 +135,13 @@ impl Plugin for Connectors {
                             // fetch service has already lifted them out of the
                             // subgraph responses' `errors` and into the
                             // context; this is where they reach the client.
+                            //
+                            // The wrap is unconditional, where the debugger's
+                            // used to be gated on its header: a deferred fetch
+                            // can declare errors after the primary chunk has
+                            // been built, so no check on the context up front
+                            // can tell that a response will carry none. The
+                            // cost is one lock and one lookup per chunk.
                             let context = res.context.clone();
                             let (parts, stream) = res.response.into_parts();
 

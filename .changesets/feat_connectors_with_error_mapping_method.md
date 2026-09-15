@@ -31,6 +31,8 @@ Each method takes exactly one argument, and what that argument means is fixed by
 
 For `->withProblem`, a string is the message as written and any other value is JSON-encoded into it. For `->withError`, a string is the error's `message` and an object is `{ message, extensions }` taken as written; anything else is a mistake reported at composition or at request time rather than coerced, so a client never receives an error whose message reads `42`.
 
+Composition is also stricter for every mapping method, not only these two. A selection whose field shape is an error, which is what a method called with the wrong arguments produces, is now rejected at composition with the method's own diagnostic. Previously that diagnosis was computed and discarded, the selection type-checked, and the field silently produced nothing at request time. A subgraph carrying such a mapping composes today and will not after this change; the fix is the one the diagnostic names.
+
 Several errors about one value are several calls. Both methods pass their input through, so the chain composes them:
 
 ```
