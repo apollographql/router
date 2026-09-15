@@ -141,7 +141,7 @@ impl FetchGraph {
             match parallel.len() {
                 0 => {}
                 1 => {
-                    sequence.push(parallel.pop().unwrap());
+                    sequence.push(parallel.pop().expect("length checked"));
                     cost_sequence.push(parallel_cost);
                 }
                 _ => {
@@ -161,7 +161,7 @@ impl FetchGraph {
 
         let plan = match sequence.len() {
             0 => None,
-            1 => Some(sequence.pop().unwrap()),
+            1 => Some(sequence.pop().expect("length checked")),
             _ => Some(PlanNode::Sequence(crate::query_plan::SequenceNode {
                 nodes: sequence,
             })),
@@ -272,7 +272,8 @@ impl FetchGraph {
             let c = ctx.operation_counter;
             ctx.operation_counter += 1;
             let subgraph = to_valid_graphql_name(&node.subgraph).unwrap_or("".into());
-            Name::new(&format!("{name}__{subgraph}__{c}")).unwrap()
+            Name::new(&format!("{name}__{subgraph}__{c}"))
+                .expect("sanitized subgraph name produces a valid GraphQL name")
         });
         let operation = if is_entity {
             operation_for_entities_fetch(
