@@ -22,6 +22,8 @@ use super::state::CONDITION_DEPTH_LIMIT;
 use super::state::PendingSelection;
 use super::state::PlanState;
 use crate::error::FederationError;
+use crate::operation::Field;
+use crate::operation::FieldSelection;
 use crate::operation::HasSelectionKey;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
@@ -122,7 +124,9 @@ impl FieldRoutingSearchSpace {
             selection = %selection_label(&pending.selection),
             "dropping unresolvable selection",
         );
-        state.dropped_fields += 1;
+        if !pending.best_effort {
+            state.dropped_fields += 1;
+        }
     }
 
     /// Commit a root-type-resolution hop: creates a root-hop group in the
@@ -537,6 +541,13 @@ impl FieldRoutingSearchSpace {
     /// The fetch group a direct (non-hop) choice lands in: fields may
     /// create root groups on demand; inline fragments stay in the current
     /// group.
+    /// The fetch group a direct (non-hop) choice lands in: fields may create
+    /// root groups on demand ([`Self::field_fetch_node`]); inline fragments
+    /// stay in the current group. An @interfaceObject fake downcast
+    /// additionally pushes a best-effort concrete-`__typename` pending:
+    /// execution needs each object's CONCRETE typename to test the condition,
+    /// which the io subgraph cannot supply
+    /// ([`Self::push_interface_object_typename`]).
     fn direct_fetch_node(
         &self,
         state: &mut PlanState,
@@ -545,8 +556,47 @@ impl FieldRoutingSearchSpace {
     ) -> Result<NodeIndex, FederationError> {
         match &pending.selection {
             Selection::Field(_) => self.field_fetch_node(state, pending, choice),
-            Selection::InlineFragment(_) => Ok(pending.fetch_node),
+            Selection::InlineFragment(_) => {
+                let edge = self.query_graph.edge_weight(choice.edge_index())?;
+                if matches!(
+                    edge.transition,
+                    QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
+                ) {
+                    self.push_interface_object_typename(state, pending)?;
+                }
+                Ok(pending.fetch_node)
+            }
         }
+    }
+
+    /// @interfaceObject subgraph can only report the interface's typename:
+    /// execution needs each object's CONCRETE `__typename` to test the
+    /// condition. Push a `__typename` pending at the current position and
+    /// let the generic routing machinery satisfy it. The "not in this
+    /// subgraph" constraint is already encoded in the query graph:
+    /// @interfaceObject types get no `__typename` FieldCollection edge (see
+    /// `add_object_type_edges`), so the pending has no direct option here
+    /// and routes only via key hops to subgraphs owning the real interface.
+    fn push_interface_object_typename(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+    ) -> Result<(), FederationError> {
+        let source = self.node_source(pending.query_graph_node)?;
+        let supergraph_pos: CompositeTypeDefinitionPosition = self
+            .supergraph_schema
+            .get_type(source.type_pos.type_name())?
+            .try_into()?;
+        let typename = Selection::Field(Arc::new(FieldSelection {
+            field: Field::new_introspection_typename(
+                &self.supergraph_schema,
+                &supergraph_pos,
+                None,
+            ),
+            selection_set: None,
+        }));
+        state.push_pending(pending.fork(typename).into_best_effort());
+        Ok(())
     }
 
     /// The fetch group a directly-routed field lands in: the pending's own
