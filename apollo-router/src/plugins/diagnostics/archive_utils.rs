@@ -105,6 +105,6 @@ mod tests {
 
         let entry = entries.next().await.unwrap().unwrap();
         assert_eq!(entry.path().unwrap().to_str().unwrap(), "test.txt");
-        assert_eq!(entry.header().size().unwrap(), 13); // "Hello, World!" is 13 bytes
+        assert_eq!(entry.effective_size(), 13); // "Hello, World!" is 13 bytes
     }
 }
