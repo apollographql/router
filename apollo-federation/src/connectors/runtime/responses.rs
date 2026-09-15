@@ -615,6 +615,11 @@ impl MappedResponse {
                     )
                     .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
 
+                    // Alignment is by key value, never by position. The API may return
+                    // the batch in any order, include objects that were not requested,
+                    // or omit some that were. Each representation is matched to the
+                    // returned object carrying the same key; unmatched ones become Null.
+                    //
                     // Convert representations into keys for use in the map
                     let key_values = inputs.batch.iter().map(|v| {
                         key_selection
