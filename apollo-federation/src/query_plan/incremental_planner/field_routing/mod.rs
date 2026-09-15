@@ -277,11 +277,7 @@ impl FieldRoutingSearchSpace {
                     // inform this decision's scoring.
                     let mut lifted = false;
                     for index in (0..state.pending.len().saturating_sub(1)).rev() {
-                        if self
-                            .cached_routing_options(&state.pending[index])?
-                            .len()
-                            <= 1
-                        {
+                        if self.cached_routing_options(&state.pending[index])?.len() <= 1 {
                             state.lift_pending(index);
                             lifted = true;
                             break;

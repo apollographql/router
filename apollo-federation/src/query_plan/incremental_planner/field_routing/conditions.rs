@@ -113,7 +113,10 @@ impl FieldRoutingSearchSpace {
                     // unresolvable for the resolvability check, walked here
                     // for requires detection (over-approximating safely).
                     let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        match self.cached_query_graph.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
+                        match self
+                            .cached_query_graph
+                            .edge_for_inline_fragment(node, &frag_sel.inline_fragment)
+                        {
                             Some(edge) => self.qg().edge_endpoints(edge)?.1,
                             None if fail_on_unreachable => return Ok(false),
                             None => node,
