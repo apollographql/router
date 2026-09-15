@@ -1129,6 +1129,7 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            skip_validation: false,
         };
 
         let err = graph
@@ -1186,6 +1187,7 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            skip_validation: false,
         };
         assert!(
             graph.to_query_plan_with_defer(&mut ctx, None).is_err(),
@@ -1253,6 +1255,7 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            skip_validation: false,
         };
 
         let (plan, cost) = graph
@@ -1309,6 +1312,7 @@ mod tests {
             operation_name: &None,
             operation_compression: compression,
             operation_counter: 0,
+            skip_validation: false,
         }
     }
 
