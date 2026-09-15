@@ -576,10 +576,11 @@ async fn test_router_oci_boots_unlicensed_without_entitlement_layer() -> Result<
     // Bounded by `assert_started`'s own timeout: this must not hang
     router.assert_started().await;
     // Although the assertion above ensures that router did not hang on startup,
-    // check explicitly that it is running unlicensed
-    router
-        .wait_for_log_message("UpdateLicense(Unlicensed)")
-        .await;
+    // check explicitly that it is running unlicensed by confirming that the
+    // router's state machine has logged this state transition
+    if !router.log_contains("UpdateLicense(Unlicensed)") {
+        router.wait_for_log_message("UpdateLicense(Unlicensed)").await;
+    }
     router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
