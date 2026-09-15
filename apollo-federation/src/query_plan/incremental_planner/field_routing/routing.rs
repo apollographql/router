@@ -17,6 +17,10 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
+/// Longest key-hop chain the BFS explores before pruning. Five hops
+/// covers realistic federation graphs, where entities rarely need more
+/// than two or three intermediate key resolutions to reach a target
+/// subgraph.
 const MAX_CHAIN_DEPTH: usize = 5;
 
 /// Where a routing choice sends the field.
@@ -307,11 +311,13 @@ impl FieldRoutingSearchSpace {
         ];
 
         // Breadth-first over key edges, each subgraph visited once, stop at
-        // the first level with hits: the returned chains are shortest.
-        // A frontier entry is the entry-keyed chain so far; the node being
-        // explored is its last hop's target. Chains are short
-        // (MAX_CHAIN_DEPTH) and few (one visit per subgraph), so plain vec
-        // clones are fine.
+        // the first depth with hits so the returned chains are shortest.
+        // This can inadmissibly prune a longer chain whose key conditions
+        // are cheaper to resolve, but each extra hop adds a pipelined
+        // fetch, so the shorter chain is almost always cheaper in practice.
+        //
+        // Chains are short (MAX_CHAIN_DEPTH) and few (one visit per
+        // subgraph), so plain vec clones are fine.
         let mut frontier: VecDeque<Vec<IntermediateKeyHop>> =
             VecDeque::from([vec![IntermediateKeyHop {
                 target_node: first_intermediate,
