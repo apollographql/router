@@ -736,7 +736,7 @@ async fn fetch_license_from_reference(
         None => {
             // No entitlement layer on this artifact means no entitlement can be
             // fetched, so the router should boot unlicensed, not retry forever.
-            tracing::debug!("no entitlement layer found in oci manifest, treating as unlicensed");
+            tracing::info!("no entitlement layer found in oci manifest, treating as unlicensed");
             return Ok(License::default());
         }
     };
