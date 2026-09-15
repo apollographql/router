@@ -31,6 +31,12 @@ use crate::schema::position::SchemaRootDefinitionKind;
 pub(crate) const FETCH_COST: QueryPlanCost = 1000.0;
 pub(crate) const PIPELINING_COST: QueryPlanCost = 100.0;
 
+/// Cost multiplier for a fetch at the given pipeline depth: fetches that
+/// wait on longer parent chains cost more.
+pub(crate) fn pipelining_factor(depth: u32) -> QueryPlanCost {
+    (1.0f64).max(depth as f64 * PIPELINING_COST)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum FetchGroupKind {
     /// Fetch against a subgraph's root operation type, merged at the
@@ -520,23 +526,37 @@ impl FetchGraph {
     /// (longest parent chain). Recomputed per call; incremental caching is
     /// deferred until the search is proven correct.
     pub(crate) fn cost(&self) -> QueryPlanCost {
-        let Ok(order) = petgraph::algo::toposort(&self.graph, None) else {
+        let Ok(depth) = self.pipeline_depths() else {
             debug_assert!(false, "cycle in fetch graph");
             return f64::MAX;
         };
+        self.graph
+            .node_indices()
+            .map(|node| FETCH_COST * pipelining_factor(depth[node.index()]))
+            .sum()
+    }
+
+    /// Pipeline depth (longest parent chain) per node, indexed by node
+    /// index. Errors on a cyclic graph.
+    pub(crate) fn pipeline_depths(&self) -> Result<Vec<u32>, FederationError> {
+        let order = petgraph::algo::toposort(&self.graph, None).map_err(|cycle| {
+            let node = cycle.node_id();
+            let subgraph = &self.graph[node].subgraph;
+            FederationError::internal(format!(
+                "cycle in FetchGraph at node {:?} ({})",
+                node, subgraph,
+            ))
+        })?;
         let mut depth = vec![0u32; self.graph.node_bound()];
-        let mut total: QueryPlanCost = 0.0;
         for node in order {
-            let d = self
+            depth[node.index()] = self
                 .graph
                 .edges_directed(node, Direction::Incoming)
                 .map(|e| depth[e.source().index()].saturating_add(1))
                 .max()
                 .unwrap_or(0);
-            depth[node.index()] = d;
-            total += FETCH_COST * (1.0f64).max(d as f64 * PIPELINING_COST);
         }
-        total
+        Ok(depth)
     }
 
     /// Whether `to` is reachable from `from` via directed edges.
