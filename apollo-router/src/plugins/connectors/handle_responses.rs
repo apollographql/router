@@ -456,6 +456,7 @@ mod tests {
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
     use apollo_compiler::response::JsonValue;
+    use apollo_federation::connectors::ApplyToErrorKind;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -486,12 +487,32 @@ mod tests {
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
-    /// `->withError` has to be reachable from a connector schema, and the
+    /// `->withProblem` has to be reachable from a connector schema, and the
     /// `is_public()` gate that decides so cannot be observed from
     /// apollo-federation's own tests: `ArrowMethod::lookup` resolves every
     /// method under `cfg!(test)`, public or not. Here apollo-federation is a
     /// dependency compiled without `--test`, so the gate is live and demoting
-    /// `->withError` back to the `future` namespace fails this test.
+    /// `->withProblem` back to the `future` namespace fails this test.
+    #[test]
+    fn with_problem_is_available_to_connector_schemas() {
+        let selection =
+            JSONSelection::parse("id status: code->withProblem('unrecognized type code')").unwrap();
+
+        let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
+
+        // The value flows through untouched: ->withProblem records, never rewrites.
+        assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
+        assert_eq!(
+            errors.iter().map(|error| error.message()).collect_vec(),
+            vec!["unrecognized type code"],
+        );
+    }
+
+    /// The same gate, for the method that actually reaches clients. Worth its
+    /// own test rather than trusting the one above: `->withError` is
+    /// newer, its `is_public()` is a separate decision, and a connector schema
+    /// that cannot call it is the one failure that would make this whole
+    /// feature unreachable while every apollo-federation test still passed.
     #[test]
     fn with_error_is_available_to_connector_schemas() {
         let selection =
@@ -499,12 +520,14 @@ mod tests {
 
         let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
 
-        // The value flows through untouched: ->withError records, never rewrites.
         assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
         assert_eq!(
             errors.iter().map(|error| error.message()).collect_vec(),
             vec!["unrecognized type code"],
         );
+        // And it is the client-facing kind, which is the whole point of the
+        // method being reachable at all.
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Declared);
     }
 
     /// The customer-facing payload of a declared `->withError`: the author's
@@ -739,7 +762,7 @@ mod tests {
     /// mapping with a `->withError` inside a `->map` would produce.
     fn mapped_with_declared_errors(count: usize) -> (MappedResponse, Connector) {
         let selection =
-            JSONSelection::parse(r#"$.rows->map(@.code->withError("bad code:", @))"#).unwrap();
+            JSONSelection::parse(r#"$.rows->map(@.code->withError("bad code"))"#).unwrap();
         let response_key = ResponseKey::RootField {
             name: "rows".to_string(),
             inputs: Default::default(),
