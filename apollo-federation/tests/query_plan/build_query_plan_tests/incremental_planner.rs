@@ -1912,6 +1912,96 @@ fn inc_requires_rename_correctness_check() {
     );
 }
 
+/// Two fetches land in SubgraphA: the operation root, and a root hop under
+/// `computed`. The hop transitively depends on the root fetch through the
+/// @requires condition resolved in SubgraphB, so the two SubgraphA fetches
+/// can never merge or share a node despite hitting the same subgraph root.
+/// Guards root group and root hop reuse against creating a cycle here.
+#[test]
+fn inc_root_hop_after_requires_back_into_same_subgraph_stays_split() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+          type Query {
+            e: E
+            a: Int
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            data: Int
+          }
+        "#,
+        SubgraphB: r#"
+          type Query {
+            b: Int
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            data: Int @external
+            computed: Query @requires(fields: "data")
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            a
+            e {
+              computed {
+                a
+                b
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            a
+            e {
+              __typename
+              id
+              data
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on E {
+                __typename
+                id
+                data
+              }
+            } =>
+            {
+              ... on E {
+                computed {
+                  __typename
+                  b
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "e.computed") {
+          Fetch(service: "SubgraphA") {
+            {
+              a
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 /// A @requires chain that must route its condition field through a key
 /// hop into another subgraph before the dependent field can be fetched.
 #[test]
