@@ -42,11 +42,7 @@ fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> Field
     let query_graph =
         build_federated_query_graph(schema.clone(), api, None, None).expect("query graph");
     FieldRoutingSearchSpace {
-        cached_query_graph: CachedQueryGraph::new(
-            Arc::new(query_graph),
-            Default::default(),
-            Default::default(),
-        ),
+        cached_query_graph: CachedQueryGraph::new(Arc::new(query_graph), Default::default()),
         supergraph_schema: schema,
         override_conditions: Default::default(),
         inconsistent_abstract_types: Default::default(),
