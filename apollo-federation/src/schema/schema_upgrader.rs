@@ -24,6 +24,7 @@ use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
+use crate::composition::CompositionFailure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -37,6 +38,7 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
+use crate::supergraph::CompositionHint;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
@@ -982,7 +984,8 @@ fn inner_upgrade_subgraphs_if_necessary(
 }
 
 /// Upgrade subgraphs if necessary and validate the result.
-/// - Fed 2 input subgraphs are not upgraded.
+/// - Every subgraph is upgraded for federation 3 compatibility.
+/// - Fed 2 input subgraphs are not upgraded to fed 2 (they already are).
 /// - Also, normalizes root types if necessary.
 /// - Unchanged subgraphs are returned as-is.
 // PORT_NOTE: In JS, this returns upgraded subgraphs along with a set of messages about what changed.
@@ -990,35 +993,68 @@ fn inner_upgrade_subgraphs_if_necessary(
 #[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+) -> Result<Vec<Subgraph<Validated>>, CompositionFailure> {
     let mut errors: Vec<CompositionError> = vec![];
+    let mut hints: Vec<CompositionHint> = vec![];
+
+    // The federation 3 compatibility upgrade runs first, ahead of the fed1 -> fed2 upgrade and of
+    // every validation, because the constructs it rewrites are invalid under the GraphQL 2025 spec.
+    //
+    // Its hints are held here, keyed by subgraph, instead of travelling in the subgraph state:
+    // every transition below is fallible, and their `?`s would discard hints carried along. Each
+    // subgraph gets its own back once it reaches `Validated`; whatever is left over belongs to a
+    // subgraph that failed on the way there, and is reported with the errors.
+    let mut fed3_hints: IndexMap<String, Vec<CompositionHint>> = IndexMap::default();
     let subgraphs = subgraphs
         .into_iter()
-        .filter_map(|sg| match sg.normalize_root_types() {
-            Ok(s) => Some(s),
-            Err(e) => {
-                errors.extend(e.to_composition_errors());
-                None
+        .filter_map(|mut sg| {
+            let upgrade_hints = sg.apply_fed3_upgrade();
+            if !upgrade_hints.is_empty() {
+                fed3_hints.insert(sg.name.clone(), upgrade_hints);
+            }
+            match sg.normalize_root_types() {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    errors.extend(e.to_composition_errors());
+                    None
+                }
             }
         })
         .collect_vec();
 
     // Upgrade subgraphs (if necessary)
-    let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
+    let upgraded = match inner_upgrade_subgraphs_if_necessary(subgraphs) {
+        Ok(upgraded) => upgraded,
+        Err(upgrade_errors) => {
+            errors.extend(upgrade_errors);
+            return Err(CompositionFailure {
+                errors,
+                hints: into_hints(fed3_hints, vec![], hints),
+            });
+        }
+    };
 
-    // Apply fed3 compatibility transformations and validate
+    // Validate subgraphs. Expansion is a pure transformation, so every subgraph is validated here
+    // regardless of whether it was upgraded or normalized — the two arms differ only in which state
+    // they arrive in.
     let validated: Vec<Subgraph<Validated>> = upgraded
         .into_iter()
         .filter_map(|subgraph| {
-            let mut upgraded = match subgraph {
-                Either::Left(s) => s.assume_upgraded(),
-                Either::Right(s) => s,
+            let result = match subgraph {
+                Either::Left(s) => s.validate(),
+                Either::Right(s) => s.validate(),
             };
-            upgraded.apply_fed3_upgrade();
-            match upgraded.validate() {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    errors.extend(e.to_composition_errors());
+            match result {
+                Ok(mut s) => {
+                    if let Some(upgrade_hints) = fed3_hints.shift_remove(&s.name) {
+                        s.prepend_hints(upgrade_hints);
+                    }
+                    Some(s)
+                }
+                Err(failure) => {
+                    errors.extend(failure.errors);
+                    // Warnings raised beside the errors are still worth reporting.
+                    hints.extend(failure.hints);
                     None
                 }
             }
@@ -1028,8 +1064,33 @@ pub fn upgrade_subgraphs_if_necessary(
     if errors.is_empty() {
         Ok(validated)
     } else {
-        Err(errors)
+        // The validated subgraphs are dropped along with the hints they carry, so those are
+        // collected here too rather than lost to the failure.
+        Err(CompositionFailure {
+            errors,
+            hints: into_hints(fed3_hints, validated, hints),
+        })
     }
+}
+
+/// Flattens everything holding pre-merge hints into one list, in the order the hints were raised:
+/// the upgrade hints of subgraphs that never reached `Validated`, then the hints of those that did,
+/// then the ones raised beside validation errors.
+fn into_hints(
+    fed3_hints: IndexMap<String, Vec<CompositionHint>>,
+    validated: Vec<Subgraph<Validated>>,
+    validation_hints: Vec<CompositionHint>,
+) -> Vec<CompositionHint> {
+    fed3_hints
+        .into_values()
+        .flatten()
+        .chain(
+            validated
+                .into_iter()
+                .flat_map(|mut sg| sg.take_hints().into_iter()),
+        )
+        .chain(validation_hints)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1402,10 +1463,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let errors = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
-        assert_eq!(errors.len(), 1);
+        let failure = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
+        assert_eq!(failure.errors.len(), 1);
         assert_eq!(
-            errors[0].to_string(),
+            failure.errors[0].to_string(),
             r#"The @interfaceObject directive is used on type "A" in subgraph "s1", which requires other subgraphs to resolve its type name via an interface @key. However, @key on an interface in a federation 1 subgraph does not mean it can fulfill the __typename-resolution requirement that @interfaceObject depends on. For subgraph "s2", either upgrade them to federation 2 subgraphs or remove @key from the type."#
         );
     }

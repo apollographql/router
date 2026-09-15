@@ -25,6 +25,7 @@ use std::hash::Hasher;
 
 use apollo_compiler::Name;
 
+pub(crate) mod blueprint;
 pub mod expand;
 pub mod header;
 mod id;

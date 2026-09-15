@@ -143,6 +143,17 @@ impl From<ComputeJobType> for Priority {
     }
 }
 
+impl ComputeJobType {
+    pub(crate) fn is_warmup(&self) -> bool {
+        match self {
+            ComputeJobType::QueryParsingWarmup | ComputeJobType::QueryPlanningWarmup => true,
+            ComputeJobType::QueryParsing
+            | ComputeJobType::QueryPlanning
+            | ComputeJobType::Introspection => false,
+        }
+    }
+}
+
 impl_otel_value_from_static_str!(ComputeJobType);
 
 pub(crate) struct Job {

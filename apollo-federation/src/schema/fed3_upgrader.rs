@@ -623,4 +623,52 @@ mod tests {
             "Upgrade hints should precede merge hints, got: {hint_codes:?}"
         );
     }
+
+    /// The upgrade runs on every subgraph, whatever federation version it is written against, and
+    /// each transformation is reported exactly once — the hints reach the result through a single
+    /// channel, so a subgraph's hints must not be reported again by a later stage.
+    #[test]
+    fn reports_one_hint_per_subgraph_upgraded() {
+        // Fed1: reaches `Validated` through the fed1 -> fed2 upgrade.
+        let s1 = Subgraph::parse(
+            "s1",
+            "http://s1",
+            r#"
+                type Query {
+                    s1Field: String @deprecated(reason: null)
+                }
+            "#,
+        )
+        .expect("should parse s1 subgraph");
+        // Fed2: skips that upgrade.
+        let s2 = Subgraph::parse(
+            "s2",
+            "http://s2",
+            r#"
+                extend schema
+                    @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+                type Query {
+                    s2Field: String @deprecated(reason: null)
+                }
+            "#,
+        )
+        .expect("should parse s2 subgraph");
+
+        let result = crate::composition::compose(vec![s1, s2], CompositionOptions::default())
+            .expect("should compose test supergraph");
+        let hint_codes: Vec<_> = result
+            .hints()
+            .iter()
+            .map(|h| h.code().to_string())
+            .collect();
+        let reason_null_hints = hint_codes
+            .iter()
+            .filter(|code| *code == "DEPRECATED_REASON_NULL")
+            .count();
+        assert_eq!(
+            reason_null_hints, 2,
+            "Expected one DEPRECATED_REASON_NULL hint per subgraph, got: {hint_codes:?}"
+        );
+    }
 }
