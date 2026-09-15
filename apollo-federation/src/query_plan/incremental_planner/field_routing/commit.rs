@@ -1119,6 +1119,9 @@ impl FieldRoutingSearchSpace {
         let options = self.routing_options(pending)?;
         let mut alt_targets: Vec<NodeIndex> = Vec::new();
         for opt in options.iter() {
+            if opt.conditions_unroutable() {
+                continue;
+            }
             let Some(edge_index) = opt.edge_index() else {
                 continue;
             };
