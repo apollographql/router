@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 626b7fabc154f5bb1c9f3f9e66da7b4ab164e2b5
+# Composed from subgraphs with hash: 282e0197bfccae300ed40e88688496dc66a01825
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -61,4 +61,5 @@ type Query
   nested: Query @join__field(graph: A)
   a: Int @join__field(graph: A)
   b: Int @join__field(graph: B)
+  b2: Int @join__field(graph: B)
 }
