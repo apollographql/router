@@ -60,6 +60,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
     fn from(value: &'_ Box<next::FetchNode>) -> Self {
         let next::FetchNode {
             subgraph_name,
+            protocol: _,
             id,
             variable_usages,
             requires,
@@ -140,6 +141,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
     fn from(value: &'_ next::FetchNode) -> Self {
         let next::FetchNode {
             subgraph_name,
+            protocol: _,
             id: _,
             variable_usages,
             requires: _,
