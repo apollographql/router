@@ -2,6 +2,8 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with checkpoint / undo-log rollback.
 
+#[allow(dead_code)]
+pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
 use std::collections::HashMap;
@@ -24,9 +26,16 @@ use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 
 pub(crate) const FETCH_COST: QueryPlanCost = 1000.0;
 pub(crate) const PIPELINING_COST: QueryPlanCost = 100.0;
+
+/// Cost multiplier for a fetch at the given pipeline depth: fetches that
+/// wait on longer parent chains cost more.
+pub(crate) fn pipelining_factor(depth: u32) -> QueryPlanCost {
+    (1.0f64).max(depth as f64 * PIPELINING_COST)
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum FetchGroupKind {
@@ -47,6 +56,11 @@ pub(crate) enum FetchGroupKind {
     RootHop {
         /// The subgraph's root operation type the fetch selects from.
         root_type: CompositeTypeDefinitionPosition,
+        /// The root operation kind this hop resolves through. Carried per
+        /// hop rather than taken from the surrounding operation: a hop
+        /// through a subgraph's query root inside a mutation plan must
+        /// still build (and label) a query operation.
+        root_kind: SchemaRootDefinitionKind,
         /// Response path where this fetch's results merge into the
         /// overall response.
         merge_at: Vec<FetchDataPathElement>,
@@ -188,7 +202,11 @@ enum FetchGraphOp {
 enum GroupKey {
     Root(Arc<str>),
     Entity(Arc<str>, Vec<FetchDataPathElement>),
-    RootHop(Arc<str>, Vec<FetchDataPathElement>),
+    RootHop(
+        Arc<str>,
+        SchemaRootDefinitionKind,
+        Vec<FetchDataPathElement>,
+    ),
 }
 
 /// The reuse-slot key for a node.
@@ -198,9 +216,11 @@ fn group_key(node: &FetchNode) -> GroupKey {
         FetchGroupKind::Entity { merge_at } => {
             GroupKey::Entity(node.subgraph.clone(), merge_at.clone())
         }
-        FetchGroupKind::RootHop { merge_at, .. } => {
-            GroupKey::RootHop(node.subgraph.clone(), merge_at.clone())
-        }
+        FetchGroupKind::RootHop {
+            root_kind,
+            merge_at,
+            ..
+        } => GroupKey::RootHop(node.subgraph.clone(), *root_kind, merge_at.clone()),
     }
 }
 
@@ -324,30 +344,33 @@ impl FetchGraph {
         &mut self,
         subgraph: &Arc<str>,
         root_type: CompositeTypeDefinitionPosition,
+        root_kind: SchemaRootDefinitionKind,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
         self.insert_node(FetchNode::new(
             subgraph.clone(),
             FetchGroupKind::RootHop {
                 root_type,
+                root_kind,
                 merge_at,
             },
         ))
     }
 
-    /// Get or create the root hop group for (subgraph, merge_at).
+    /// Get or create the root hop group for (subgraph, root_kind, merge_at).
     #[allow(dead_code)] // used by field routing in a later branch
     pub(crate) fn get_or_create_root_hop_group(
         &mut self,
         subgraph: &Arc<str>,
         root_type: CompositeTypeDefinitionPosition,
+        root_kind: SchemaRootDefinitionKind,
         merge_at: Vec<FetchDataPathElement>,
     ) -> NodeIndex {
-        let key = GroupKey::RootHop(subgraph.clone(), merge_at.clone());
+        let key = GroupKey::RootHop(subgraph.clone(), root_kind, merge_at.clone());
         if let Some(id) = self.registered_group(&key) {
             return id;
         }
-        self.add_root_hop_group(subgraph, root_type, merge_at)
+        self.add_root_hop_group(subgraph, root_type, root_kind, merge_at)
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at).
@@ -503,23 +526,37 @@ impl FetchGraph {
     /// (longest parent chain). Recomputed per call; incremental caching is
     /// deferred until the search is proven correct.
     pub(crate) fn cost(&self) -> QueryPlanCost {
-        let Ok(order) = petgraph::algo::toposort(&self.graph, None) else {
+        let Ok(depth) = self.pipeline_depths() else {
             debug_assert!(false, "cycle in fetch graph");
             return f64::MAX;
         };
+        self.graph
+            .node_indices()
+            .map(|node| FETCH_COST * pipelining_factor(depth[node.index()]))
+            .sum()
+    }
+
+    /// Pipeline depth (longest parent chain) per node, indexed by node
+    /// index. Errors on a cyclic graph.
+    pub(crate) fn pipeline_depths(&self) -> Result<Vec<u32>, FederationError> {
+        let order = petgraph::algo::toposort(&self.graph, None).map_err(|cycle| {
+            let node = cycle.node_id();
+            let subgraph = &self.graph[node].subgraph;
+            FederationError::internal(format!(
+                "cycle in FetchGraph at node {:?} ({})",
+                node, subgraph,
+            ))
+        })?;
         let mut depth = vec![0u32; self.graph.node_bound()];
-        let mut total: QueryPlanCost = 0.0;
         for node in order {
-            let d = self
+            depth[node.index()] = self
                 .graph
                 .edges_directed(node, Direction::Incoming)
                 .map(|e| depth[e.source().index()].saturating_add(1))
                 .max()
                 .unwrap_or(0);
-            depth[node.index()] = d;
-            total += FETCH_COST * (1.0f64).max(d as f64 * PIPELINING_COST);
         }
-        total
+        Ok(depth)
     }
 
     /// Whether `to` is reachable from `from` via directed edges.
@@ -565,10 +602,21 @@ mod tests {
     fn add_root_hop_group_round_trips() {
         let mut graph = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
-        let node = graph.add_root_hop_group(&sg, dummy_root_type(), user_path(None));
-        let FetchGroupKind::RootHop { merge_at, .. } = &graph.node(node).kind else {
+        let node = graph.add_root_hop_group(
+            &sg,
+            dummy_root_type(),
+            SchemaRootDefinitionKind::Query,
+            user_path(None),
+        );
+        let FetchGroupKind::RootHop {
+            root_kind,
+            merge_at,
+            ..
+        } = &graph.node(node).kind
+        else {
             panic!("expected a root hop group");
         };
+        assert_eq!(*root_kind, SchemaRootDefinitionKind::Query);
         assert_eq!(merge_at, &user_path(None));
         assert_eq!(graph.merge_at(node), user_path(None));
         assert_eq!(graph.node(node).root_type(), Some(&dummy_root_type()),);
@@ -798,9 +846,10 @@ mod tests {
     fn get_or_create_root_hop_group_reuses_same_merge_at() {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
-        let a = g.get_or_create_root_hop_group(&sg, dummy_root_type(), user_path(None));
-        let b = g.get_or_create_root_hop_group(&sg, dummy_root_type(), user_path(None));
-        let c = g.get_or_create_root_hop_group(&sg, dummy_root_type(), vec![]);
+        let kind = SchemaRootDefinitionKind::Query;
+        let a = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, user_path(None));
+        let b = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, user_path(None));
+        let c = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, vec![]);
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_eq!(g.node_count(), 2);
