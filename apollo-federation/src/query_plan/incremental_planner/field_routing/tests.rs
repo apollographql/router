@@ -159,14 +159,14 @@ fn mutation_produces_sequential_plan() {
 }
 
 #[test]
-fn mutation_multiple_fields_are_sequential() {
+fn mutation_multiple_fields_are_not_merged() {
     let plan_str = plan_query(
         MUTATION_SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name } updateUser(id: "1", name: "Bob") { id name } }"#,
     );
     assert!(
         plan_str.contains("Sequence"),
-        "Multiple mutations should be sequenced: {plan_str}"
+        "Same-subgraph mutation fields get one fetch each, in sequence: {plan_str}"
     );
     assert!(
         plan_str.contains("createUser"),
