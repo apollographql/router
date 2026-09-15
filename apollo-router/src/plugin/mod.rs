@@ -48,6 +48,7 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::notification::Notify;
+use crate::services::connector::request_service as connector_request;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -515,19 +516,19 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// recompute the mapped response, so changing one without the other makes
     /// telemetry disagree with what the client receives.
     ///
-    /// [`Request::transport_request`]: crate::services::connector::request_service::Request::transport_request
-    /// [`Request::supergraph_request`]: crate::services::connector::request_service::Request::supergraph_request
-    /// [`Request::context`]: crate::services::connector::request_service::Request::context
-    /// [`Request::into_error_response`]: crate::services::connector::request_service::Request::into_error_response
-    /// [`Response::context`]: crate::services::connector::request_service::Response::context
-    /// [`Response::transport_result`]: crate::services::connector::request_service::Response::transport_result
-    /// [`Response::data`]: crate::services::connector::request_service::Response::data
-    /// [`Response::error`]: crate::services::connector::request_service::Response::error
+    /// [`Request::transport_request`]: connector_request::Request::transport_request
+    /// [`Request::supergraph_request`]: connector_request::Request::supergraph_request
+    /// [`Request::context`]: connector_request::Request::context
+    /// [`Request::into_error_response`]: connector_request::Request::into_error_response
+    /// [`Response::context`]: connector_request::Response::context
+    /// [`Response::transport_result`]: connector_request::Response::transport_result
+    /// [`Response::data`]: connector_request::Response::data
+    /// [`Response::error`]: connector_request::Response::error
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: connector_request::BoxCloneService,
         _source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> connector_request::BoxCloneService {
         service
     }
 
@@ -684,9 +685,9 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneService,
+        service: connector_request::BoxCloneService,
         _source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneService {
+    ) -> connector_request::BoxCloneService {
         service
     }
 
@@ -748,9 +749,9 @@ where
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: connector_request::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> connector_request::BoxCloneService {
         PluginUnstable::connector_request_service(self, service, source_name)
     }
 
@@ -817,9 +818,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneService,
+        service: connector_request::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneService;
+    ) -> connector_request::BoxCloneService;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -879,9 +880,9 @@ where
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneService,
+        service: connector_request::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneService {
+    ) -> connector_request::BoxCloneService {
         self.connector_request_service(service, source_name)
     }
 

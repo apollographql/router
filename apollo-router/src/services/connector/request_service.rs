@@ -44,35 +44,21 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::services::router;
 
-<<<<<<< HEAD
-pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-pub(crate) type ServiceResult = Result<Response, BoxError>;
-=======
-/// A boxed service making a single connector request. This is what
-/// [`PluginUnstable::connector_request_service`](crate::plugin::PluginUnstable::connector_request_service)
-/// receives and returns, so a plugin wraps this type to customize connector traffic.
-pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-
+/// A boxed service for making connector requests.
+pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 /// The result of a single connector request.
 pub type ServiceResult = Result<Response, BoxError>;
->>>>>>> origin/dev
 
 assert_impl_all!(Request: Send);
 assert_impl_all!(Response: Send);
 
 /// Request type for a single connector request
 #[derive(Debug)]
-<<<<<<< HEAD
-pub(crate) struct Request {
-    /// The request context
-    pub(crate) context: Context,
-=======
 pub struct Request {
     /// The request context, shared with the rest of the router pipeline for this
     /// operation. Readable and writable: a plugin may store values here for later
     /// stages, matching what the coprocessor `ConnectorRequest` stage can do.
     pub context: Context,
->>>>>>> origin/dev
 
     /// The connector associated with this request.
     //
@@ -154,17 +140,11 @@ impl Request {
 
 /// Response type for a connector
 #[derive(Debug)]
-<<<<<<< HEAD
-pub(crate) struct Response {
-    /// The request context
-    pub(crate) context: Context,
-=======
 pub struct Response {
     /// The request context, shared with the rest of the router pipeline for this
     /// operation. Readable and writable, matching what the coprocessor
     /// `ConnectorResponse` stage can do.
     pub context: Context,
->>>>>>> origin/dev
 
     /// Originating federation subgraph name for this connector call. Carried
     /// on the response (rather than passed through shared context) so parallel

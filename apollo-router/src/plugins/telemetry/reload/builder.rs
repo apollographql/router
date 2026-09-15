@@ -152,29 +152,6 @@ impl<'a> Builder<'a> {
         // and must be returned from the prepare phase.
         let mut builder = MetricsBuilder::new(self.config);
         builder.configure(&self.config.apollo)?;
-<<<<<<< HEAD
-=======
-        if !builder.meter_provider_builders.is_empty() {
-            // To avoid sending a high cardinality metric to our ingress (which ignores it anyhow),
-            // we throw the entity caching operations metric here. This is handled exceptionally
-            // until we move fully from entity caching to response caching which does NOT
-            // necessitate this as it does not touch the safe-listed `operations.*` namespace.
-            builder.with_view(
-                MeterProviderType::Apollo,
-                MetricView {
-                    name: String::from(CACHE_METRIC),
-                    rename: None,
-                    description: None,
-                    unit: None,
-                    aggregation: Some(crate::plugins::telemetry::config::MetricAggregation::Drop),
-                    allowed_attribute_keys: None,
-                    cardinality_limit: None,
-                }
-                .into_view_fn()?,
-            );
-        }
-
->>>>>>> origin/dev
         let (_, meter_providers, sender) = builder.build();
 
         self.activation.add_meter_providers(meter_providers);
