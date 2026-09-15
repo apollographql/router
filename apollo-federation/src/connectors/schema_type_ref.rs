@@ -82,7 +82,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     );
                 }
 
-                Shape::record(fields, [])
+                Shape::closed_record(fields, [])
             }
             ExtendedType::Scalar(s) => match s.name.as_str() {
                 "String" => Shape::string([]),
@@ -125,7 +125,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                 }),
                 [],
             ),
-            ExtendedType::InputObject(i) => Shape::record(
+            ExtendedType::InputObject(i) => Shape::closed_record(
                 i.fields
                     .iter()
                     .map(|(name, field)| {
