@@ -1,6 +1,6 @@
-//! Materializing the winning fetch graph into a query plan: a topological
-//! sort into depth layers, one subgraph operation per fetch group, and
-//! entity representations from edge inputs.
+//! Materializing the winning fetch graph into a query plan: dependency
+//! wavefronts of nested Sequence/Parallel nodes, one subgraph operation per
+//! fetch group, and entity representations from edge inputs.
 
 use std::sync::Arc;
 
@@ -10,15 +10,13 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use indexmap::IndexMap;
 use petgraph::Direction;
-use petgraph::algo::toposort;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::visit::NodeIndexable;
 
 use super::FETCH_COST;
 use super::FetchGraph;
 use super::FetchGroupKind;
-use super::PIPELINING_COST;
+use super::pipelining_factor;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::SelectionMap;
@@ -57,117 +55,290 @@ pub(crate) struct PlanBuildContext<'a> {
     pub(crate) operation_counter: u32,
 }
 
+/// A node that cannot be materialized yet because some parents are still
+/// unprocessed.
+struct UnhandledNode {
+    node: NodeIndex,
+    unhandled_parents: Vec<NodeIndex>,
+}
+
+/// Wavefront bookkeeping for dependency-order materialization: nodes whose
+/// parents are all processed, and nodes still waiting on some parents.
+struct ProcessingState {
+    next: Vec<NodeIndex>,
+    unhandled: Vec<UnhandledNode>,
+}
+
+impl ProcessingState {
+    fn empty() -> Self {
+        Self {
+            next: Vec::new(),
+            unhandled: Vec::new(),
+        }
+    }
+
+    fn of_ready_nodes(next: Vec<NodeIndex>) -> Self {
+        Self {
+            next,
+            unhandled: Vec::new(),
+        }
+    }
+
+    /// Merge sibling states from one wavefront. A node waiting in both keeps
+    /// only the parents unprocessed on both sides; each side has already
+    /// dropped the parent that discovered it, so an empty intersection means
+    /// every parent is processed and the node is ready.
+    fn merge_with(self, other: ProcessingState) -> ProcessingState {
+        let mut next = self.next;
+        for node in other.next {
+            if !next.contains(&node) {
+                next.push(node);
+            }
+        }
+
+        let mut other_unhandled = other.unhandled;
+        let mut unhandled = Vec::new();
+        for mut entry in self.unhandled {
+            if let Some(pos) = other_unhandled
+                .iter()
+                .position(|other_entry| other_entry.node == entry.node)
+            {
+                let other_entry = other_unhandled.remove(pos);
+                entry
+                    .unhandled_parents
+                    .retain(|parent| other_entry.unhandled_parents.contains(parent));
+            }
+            if entry.unhandled_parents.is_empty() {
+                if !next.contains(&entry.node) {
+                    next.push(entry.node);
+                }
+            } else {
+                unhandled.push(entry);
+            }
+        }
+        unhandled.extend(other_unhandled);
+
+        ProcessingState { next, unhandled }
+    }
+
+    /// Drop just-processed nodes from every waiting entry; entries with no
+    /// remaining parents become ready.
+    fn update_for_processed_nodes(self, processed: &[NodeIndex]) -> ProcessingState {
+        let mut next = self.next;
+        let mut unhandled = Vec::new();
+        for mut entry in self.unhandled {
+            entry
+                .unhandled_parents
+                .retain(|parent| !processed.contains(parent));
+            if entry.unhandled_parents.is_empty() {
+                if !next.contains(&entry.node) {
+                    next.push(entry.node);
+                }
+            } else {
+                unhandled.push(entry);
+            }
+        }
+        ProcessingState { next, unhandled }
+    }
+}
+
+/// Push onto a Sequence child list, splicing a nested Sequence's children
+/// in rather than nesting it.
+fn push_into_sequence(nodes: &mut Vec<PlanNode>, plan_node: PlanNode) {
+    match plan_node {
+        PlanNode::Sequence(inner) => nodes.extend(inner.nodes),
+        other => nodes.push(other),
+    }
+}
+
+/// Push onto a Parallel child list, splicing a nested Parallel's children
+/// in rather than nesting it.
+fn push_into_parallel(nodes: &mut Vec<PlanNode>, plan_node: PlanNode) {
+    match plan_node {
+        PlanNode::Parallel(inner) => nodes.extend(inner.nodes),
+        other => nodes.push(other),
+    }
+}
+
+/// None for no nodes, the node itself for one, a SequenceNode otherwise.
+fn reduce_sequence(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
+    match nodes.len() {
+        0 => None,
+        1 => nodes.pop(),
+        _ => Some(PlanNode::Sequence(crate::query_plan::SequenceNode {
+            nodes,
+        })),
+    }
+}
+
+/// None for no nodes, the node itself for one, a ParallelNode otherwise.
+fn reduce_parallel(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
+    match nodes.len() {
+        0 => None,
+        1 => nodes.pop(),
+        _ => Some(PlanNode::Parallel(crate::query_plan::ParallelNode {
+            nodes,
+        })),
+    }
+}
+
 impl FetchGraph {
-    /// Generate a PlanNode tree from the winning fetch graph.
+    /// Generate a PlanNode tree from the winning fetch graph. Nodes are
+    /// materialized in dependency wavefronts: sole-parented descendants nest
+    /// in a Sequence under their parent, independent branches run in
+    /// Parallel, and a node with parents in several branches is sequenced at
+    /// the level where its last parent's branch completes. This keeps a
+    /// fetch from waiting on unrelated fetches that merely share its depth.
     pub(crate) fn to_query_plan(
         &self,
         ctx: &mut PlanBuildContext<'_>,
     ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
-        let sorted = toposort(&self.graph, None).map_err(|cycle| {
-            let node = cycle.node_id();
-            let subgraph = &self.graph[node].subgraph;
-            FederationError::internal(format!(
-                "cycle in FetchGraph at node {:?} ({})",
-                node, subgraph,
-            ))
-        })?;
+        let depth = self.pipeline_depths()?;
 
-        if sorted.is_empty() {
+        let roots: Vec<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|node| {
+                self.graph
+                    .edges_directed(*node, Direction::Incoming)
+                    .next()
+                    .is_none()
+            })
+            .collect();
+        if roots.is_empty() {
             return Ok((None, 0.0));
         }
 
-        let mut depth = vec![0u32; self.graph.node_bound()];
-        let mut max_depth: u32 = 0;
-        for &node in &sorted {
-            let d = self
-                .graph
-                .edges_directed(node, Direction::Incoming)
-                .map(|e| depth[e.source().index()] + 1)
-                .max()
-                .unwrap_or(0);
-            depth[node.index()] = d;
-            if d > max_depth {
-                max_depth = d;
-            }
+        // Top-level mutation fields execute serially, but root groups are
+        // merged per subgraph, so their interleaving is no longer
+        // representable. The entry point plans one top-level field per
+        // search, which keeps this to a single root group; fail loudly
+        // rather than parallelize if that assumption is ever violated.
+        if ctx.root_kind != SchemaRootDefinitionKind::Query && roots.len() > 1 {
+            return Err(FederationError::internal(format!(
+                "cannot order {} root fetch groups under a {} operation",
+                roots.len(),
+                ctx.root_kind,
+            )));
         }
 
-        self.build_plan_for_nodes(ctx, &sorted, &depth, max_depth)
+        let mut cost: QueryPlanCost = 0.0;
+        let (sequence, state) = self.process_wavefronts(
+            ctx,
+            ProcessingState::of_ready_nodes(roots),
+            &depth,
+            &mut cost,
+        )?;
+        // pipeline_depths already rejected cycles, so leftovers mean the
+        // state bookkeeping lost track of a parent.
+        if !state.unhandled.is_empty() {
+            return Err(FederationError::internal(format!(
+                "{} fetch groups still waiting on parents after processing",
+                state.unhandled.len(),
+            )));
+        }
+        Ok((reduce_sequence(sequence), cost))
     }
 
-    /// Build a plan from a subset of nodes, grouping by depth into
-    /// parallel layers and sequencing those layers.
-    fn build_plan_for_nodes(
+    /// Sequence of parallel wavefronts: materialize every ready node, then
+    /// whatever those unblocked, until nothing is ready. Nodes still waiting
+    /// on parents in other branches are handed back in the returned state.
+    fn process_wavefronts(
         &self,
         ctx: &mut PlanBuildContext<'_>,
-        nodes: &[NodeIndex],
+        mut state: ProcessingState,
         depth: &[u32],
-        max_depth: u32,
-    ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
+        cost: &mut QueryPlanCost,
+    ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
         let mut sequence: Vec<PlanNode> = Vec::new();
-        let mut cost_sequence: Vec<QueryPlanCost> = Vec::new();
-
-        for d in 0..=max_depth {
-            let mut parallel: Vec<PlanNode> = Vec::new();
-            let mut parallel_cost: QueryPlanCost = 0.0;
-
-            for &node_idx in nodes {
-                if depth[node_idx.index()] != d {
-                    continue;
-                }
-                if let Some((plan_node, node_cost)) = self.node_to_plan_node(ctx, node_idx)? {
-                    parallel.push(plan_node);
-                    parallel_cost += node_cost;
-                }
+        while !state.next.is_empty() {
+            let (parallel, new_state) = self.process_ready_nodes(ctx, state, depth, cost)?;
+            if let Some(plan_node) = reduce_parallel(parallel) {
+                push_into_sequence(&mut sequence, plan_node);
             }
+            state = new_state;
+        }
+        Ok((sequence, state))
+    }
 
-            // Top-level mutation fields execute serially, but root groups
-            // are merged per subgraph, so their interleaving is no longer
-            // representable. The entry point plans one top-level field per
-            // search, which keeps this layer to a single group; fail loudly
-            // rather than parallelize if that assumption is ever violated.
-            if d == 0 && ctx.root_kind != SchemaRootDefinitionKind::Query && parallel.len() > 1 {
-                return Err(FederationError::internal(format!(
-                    "cannot order {} root fetch groups under a {} operation",
-                    parallel.len(),
-                    ctx.root_kind,
-                )));
+    /// Materialize one wavefront of ready nodes as parallel branches, each
+    /// with its sole-parented descendants nested beneath it.
+    fn process_ready_nodes(
+        &self,
+        ctx: &mut PlanBuildContext<'_>,
+        state: ProcessingState,
+        depth: &[u32],
+        cost: &mut QueryPlanCost,
+    ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
+        let mut parallel: Vec<PlanNode> = Vec::new();
+        // Waiting nodes carry forward so sibling branches' records of the
+        // same multi-parent child meet here; the child becomes ready at the
+        // merge level where its last parent's record arrives, which is also
+        // where the plan sequences it after all of them.
+        let mut merged = ProcessingState {
+            next: Vec::new(),
+            unhandled: state.unhandled,
+        };
+        for &node_idx in &state.next {
+            let (plan_node, node_state) = self.process_node(ctx, node_idx, depth, cost)?;
+            if let Some(plan_node) = plan_node {
+                push_into_parallel(&mut parallel, plan_node);
             }
+            merged = merged.merge_with(node_state);
+        }
+        Ok((parallel, merged.update_for_processed_nodes(&state.next)))
+    }
 
-            // Cost stages stay index-aligned with emitted plan stages: an
-            // eliminated layer (all nodes skipped) contributes no stage to
-            // either. The reported cost is the cost of the plan as built,
-            // which can be lower than the search-time bound when a layer
-            // collapses.
-            match parallel.len() {
-                0 => {}
-                1 => {
-                    sequence.extend(parallel);
-                    cost_sequence.push(parallel_cost);
-                }
-                _ => {
-                    sequence.push(PlanNode::Parallel(crate::query_plan::ParallelNode {
-                        nodes: parallel,
-                    }));
-                    cost_sequence.push(parallel_cost);
-                }
-            }
+    /// Materialize one node and, sequenced after it, every descendant only
+    /// it unblocks. Descendants with other unprocessed parents are handed
+    /// back in the state.
+    fn process_node(
+        &self,
+        ctx: &mut PlanBuildContext<'_>,
+        node_idx: NodeIndex,
+        depth: &[u32],
+        cost: &mut QueryPlanCost,
+    ) -> Result<(Option<PlanNode>, ProcessingState), FederationError> {
+        let plan_node = self
+            .node_to_plan_node(ctx, node_idx)?
+            .map(|(plan_node, node_cost)| {
+                *cost += node_cost * pipelining_factor(depth[node_idx.index()]);
+                plan_node
+            });
+
+        let state = self.state_for_children(node_idx);
+        if state.next.is_empty() {
+            return Ok((plan_node, state));
         }
 
-        let total_cost: QueryPlanCost = cost_sequence
-            .iter()
-            .enumerate()
-            .map(|(i, &stage)| stage * (1.0f64).max(i as f64 * PIPELINING_COST))
-            .sum();
+        let (descendants, new_state) = self.process_wavefronts(ctx, state, depth, cost)?;
+        let mut sequence = Vec::from_iter(plan_node);
+        sequence.extend(descendants);
+        Ok((reduce_sequence(sequence), new_state))
+    }
 
-        let plan = match sequence.len() {
-            0 => None,
-            1 => sequence.into_iter().next(),
-            _ => Some(PlanNode::Sequence(crate::query_plan::SequenceNode {
-                nodes: sequence,
-            })),
-        };
-
-        Ok((plan, total_cost))
+    /// Classify a just-processed node's children: sole-parented children are
+    /// ready; the rest wait on their remaining parents.
+    fn state_for_children(&self, processed: NodeIndex) -> ProcessingState {
+        let mut state = ProcessingState::empty();
+        for edge in self.graph.edges_directed(processed, Direction::Outgoing) {
+            let child = edge.target();
+            let remaining: Vec<NodeIndex> = self
+                .graph
+                .edges_directed(child, Direction::Incoming)
+                .map(|e| e.source())
+                .filter(|parent| *parent != processed)
+                .collect();
+            if remaining.is_empty() {
+                state.next.push(child);
+            } else {
+                state.unhandled.push(UnhandledNode {
+                    node: child,
+                    unhandled_parents: remaining,
+                });
+            }
+        }
+        state
     }
 
     /// Convert a single FetchGraph node into a PlanNode.
@@ -224,9 +395,9 @@ impl FetchGraph {
         // same variable conditions, hoist them out of the operation and
         // gate the fetch itself (ConditionNodes below). Execution can then
         // skip the fetch entirely. Unlike the reference planner, no
-        // handled-conditions set is threaded through: the flat
-        // sequence-of-parallel shape never nests one fetch inside another
-        // fetch's ConditionNode, so every node self-gates.
+        // handled-conditions set is threaded through: descendants are
+        // sequenced after their parent rather than nested inside its
+        // ConditionNode, so every node self-gates.
         let group_conditions = selection_set.conditions()?;
         if let Conditions::Boolean(false) = group_conditions {
             return Ok(None);
@@ -350,9 +521,17 @@ impl FetchGraph {
     }
 
     /// Strip @skip/@include conditions, flatten unnecessary fragments, add
-    /// `__typename` on abstract types, and alias non-merging fields. Entity
-    /// fetches keep their top-level inline fragments (which delimit entity
-    /// cases 1:1 with requires items), flattening only within each fragment.
+    /// `__typename` on abstract types, and alias non-merging fields.
+    ///
+    /// Invariant: an entity fetch's top-level inline fragments are never
+    /// flattened, only their contents. Each top-level cast must stay the
+    /// exact type its representations name in `__typename` (as produced by
+    /// the edge inputs and their rewrites, e.g. an @interfaceObject or
+    /// @key'ed interface jump), because the subgraph matches
+    /// representations to these casts. Flattening can rewrite a fragment's
+    /// type condition, say narrowing an interface cast to its runtime
+    /// object types, which would desync the operation's entity cases from
+    /// the requires/representations built in materialize_entity_inputs.
     fn finalize_selection(
         selection_set: &SelectionSet,
         group_conditions: &Conditions,
@@ -544,6 +723,7 @@ mod tests {
             "S2",
             "http://s2",
             r#"
+            type Query { q2: Int }
             type Mutation { m2: Int }
             type T @key(fields: "k") { k: ID a: Int }
             "#,
@@ -756,6 +936,169 @@ mod tests {
         assert!(
             !entity_fetch.requires.is_empty(),
             "entity fetch carries the key representation requires",
+        );
+    }
+
+    fn query_pos() -> CompositeTypeDefinitionPosition {
+        CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: name!("Query"),
+        })
+    }
+
+    fn query_ctx<'a>(
+        supergraph_schema: &'a ValidFederationSchema,
+        qg: &'a Arc<QueryGraph>,
+        compression: &'a mut SubgraphOperationCompression,
+        directives: &'a DirectiveList,
+    ) -> PlanBuildContext<'a> {
+        PlanBuildContext {
+            supergraph_schema,
+            query_graph: qg,
+            root_kind: SchemaRootDefinitionKind::Query,
+            variable_definitions: &[],
+            operation_directives: directives,
+            operation_name: &None,
+            operation_compression: compression,
+            operation_counter: 0,
+        }
+    }
+
+    fn add_keyed_entity_dependency(
+        graph: &mut FetchGraph,
+        parent: NodeIndex,
+        entity: NodeIndex,
+        supergraph_schema: &ValidFederationSchema,
+    ) {
+        let t_pos: CompositeTypeDefinitionPosition = supergraph_schema
+            .get_type(&name!("T"))
+            .expect("T exists")
+            .try_into()
+            .expect("T is composite");
+        let key_conditions = Arc::new(
+            SelectionSet::parse(supergraph_schema.clone(), t_pos, "k").expect("key parses"),
+        );
+        graph.add_dependency(
+            parent,
+            entity,
+            vec![InputContribution::Requires {
+                source_type_name: name!("T"),
+                conditions: key_conditions,
+            }],
+        );
+    }
+
+    /// A dependency chain must nest under its own root rather than layer
+    /// globally: an unrelated root fetch runs in parallel with the whole
+    /// chain instead of gating its second link.
+    #[test]
+    fn independent_branch_does_not_gate_another_branches_chain() {
+        let (supergraph_schema, qg) = setup();
+        let mut graph = FetchGraph::new();
+        let s1: Arc<str> = Arc::from("S1");
+        let s2: Arc<str> = Arc::from("S2");
+        let s1_schema = qg.schema_by_source(&s1).expect("S1 schema").clone();
+        let s2_schema = qg.schema_by_source(&s2).expect("S2 schema").clone();
+
+        let r1 = graph.get_or_create_root_group(&s1, query_pos());
+        append_parsed_selection(&mut graph, r1, &s1_schema, query_pos(), "t { k }");
+        let r2 = graph.get_or_create_root_group(&s2, query_pos());
+        append_parsed_selection(&mut graph, r2, &s2_schema, query_pos(), "q2");
+
+        let entity = graph.add_entity_group(
+            &s2,
+            vec![FetchDataPathElement::Key(name!("t"), Default::default())],
+        );
+        let entity_parent: CompositeTypeDefinitionPosition = s2_schema
+            .entity_type()
+            .expect("entity type lookup")
+            .expect("S2 has entities")
+            .into();
+        append_parsed_selection(
+            &mut graph,
+            entity,
+            &s2_schema,
+            entity_parent,
+            "... on T { a }",
+        );
+        add_keyed_entity_dependency(&mut graph, r1, entity, &supergraph_schema);
+
+        let mut compression = SubgraphOperationCompression::Disabled;
+        let directives = DirectiveList::default();
+        let mut ctx = query_ctx(&supergraph_schema, &qg, &mut compression, &directives);
+
+        let (plan, _cost) = graph.to_query_plan(&mut ctx).expect("plan builds");
+        let PlanNode::Parallel(par) = plan.expect("non-empty plan") else {
+            panic!("expected top-level Parallel of independent branches");
+        };
+        assert_eq!(par.nodes.len(), 2);
+        let chain = par
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                PlanNode::Sequence(seq) => Some(seq),
+                _ => None,
+            })
+            .expect("one branch is the root->entity Sequence");
+        assert_eq!(chain.nodes.len(), 2);
+        assert!(matches!(chain.nodes[0], PlanNode::Fetch(_)));
+        assert!(matches!(chain.nodes[1], PlanNode::Flatten(_)));
+        assert!(
+            par.nodes.iter().any(|n| matches!(n, PlanNode::Fetch(_))),
+            "the unrelated root fetch is a plain parallel branch",
+        );
+    }
+
+    /// A node with parents in two different branches is sequenced after
+    /// both branches complete.
+    #[test]
+    fn multi_parent_node_sequences_after_all_parent_branches() {
+        let (supergraph_schema, qg) = setup();
+        let mut graph = FetchGraph::new();
+        let s1: Arc<str> = Arc::from("S1");
+        let s2: Arc<str> = Arc::from("S2");
+        let s1_schema = qg.schema_by_source(&s1).expect("S1 schema").clone();
+        let s2_schema = qg.schema_by_source(&s2).expect("S2 schema").clone();
+
+        let r1 = graph.get_or_create_root_group(&s1, query_pos());
+        append_parsed_selection(&mut graph, r1, &s1_schema, query_pos(), "t { k }");
+        let r2 = graph.get_or_create_root_group(&s2, query_pos());
+        append_parsed_selection(&mut graph, r2, &s2_schema, query_pos(), "q2");
+
+        let entity = graph.add_entity_group(
+            &s2,
+            vec![FetchDataPathElement::Key(name!("t"), Default::default())],
+        );
+        let entity_parent: CompositeTypeDefinitionPosition = s2_schema
+            .entity_type()
+            .expect("entity type lookup")
+            .expect("S2 has entities")
+            .into();
+        append_parsed_selection(
+            &mut graph,
+            entity,
+            &s2_schema,
+            entity_parent,
+            "... on T { a }",
+        );
+        add_keyed_entity_dependency(&mut graph, r1, entity, &supergraph_schema);
+        graph.add_ordering_dependency(r2, entity).expect("acyclic");
+
+        let mut compression = SubgraphOperationCompression::Disabled;
+        let directives = DirectiveList::default();
+        let mut ctx = query_ctx(&supergraph_schema, &qg, &mut compression, &directives);
+
+        let (plan, _cost) = graph.to_query_plan(&mut ctx).expect("plan builds");
+        let PlanNode::Sequence(seq) = plan.expect("non-empty plan") else {
+            panic!("expected Sequence of parents then join node");
+        };
+        assert_eq!(seq.nodes.len(), 2);
+        assert!(
+            matches!(&seq.nodes[0], PlanNode::Parallel(par) if par.nodes.len() == 2),
+            "both parent roots run in parallel first",
+        );
+        assert!(
+            matches!(&seq.nodes[1], PlanNode::Flatten(_)),
+            "the multi-parent entity fetch runs after both",
         );
     }
 }
