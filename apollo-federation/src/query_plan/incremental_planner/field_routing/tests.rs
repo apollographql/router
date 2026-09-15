@@ -81,6 +81,9 @@ fn single_subgraph_query_produces_valid_plan() {
     );
 }
 
+/// Kitchen-sink A/B/C User supergraph covering cross-subgraph key hops,
+/// mutations, subscriptions, overrides, shareable fields, and three-way
+/// federation. Individual tests query only the subset they need.
 const CROSS_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/cross_subgraph.graphql");
 
 #[test]
@@ -131,11 +134,9 @@ fn root_typename_is_left_to_router_execution() {
     );
 }
 
-const SUBSCRIPTION_SCHEMA: &str = include_str!("../fixtures/subscription.graphql");
-
 #[test]
 fn subscription_produces_subscription_plan_node() {
-    let supergraph = Supergraph::new(SUBSCRIPTION_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(CROSS_SUBGRAPH_SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -165,12 +166,10 @@ fn subscription_produces_subscription_plan_node() {
     );
 }
 
-const MUTATION_SCHEMA: &str = include_str!("../fixtures/mutation.graphql");
-
 #[test]
 fn mutation_produces_sequential_plan() {
     let plan_str = plan_query(
-        MUTATION_SCHEMA,
+        CROSS_SUBGRAPH_SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name email } }"#,
     );
     assert!(
@@ -186,7 +185,7 @@ fn mutation_produces_sequential_plan() {
 #[test]
 fn mutation_multiple_fields_are_not_merged() {
     let plan_str = plan_query(
-        MUTATION_SCHEMA,
+        CROSS_SUBGRAPH_SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name } updateUser(id: "1", name: "Bob") { id name } }"#,
     );
     assert!(
@@ -203,8 +202,6 @@ fn mutation_multiple_fields_are_not_merged() {
     );
 }
 
-const SHAREABLE_DEAD_END_SCHEMA: &str = include_str!("../fixtures/shareable_dead_end.graphql");
-
 /// Repro for the "local edge suppresses a required key hop" gap: `profile`
 /// is shareable in A and B, but A's copy of `Profile` lacks `detail` and
 /// `Profile` has no key, so once `profile` is routed to A, `detail` is
@@ -213,7 +210,7 @@ const SHAREABLE_DEAD_END_SCHEMA: &str = include_str!("../fixtures/shareable_dead
 /// by BULB backtracking picking the hop.
 #[test_log::test]
 fn shareable_local_dead_end_reroutes_through_key_hop() {
-    let plan_str = plan_query(SHAREABLE_DEAD_END_SCHEMA, "{ user { profile { detail } } }");
+    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { profile { detail } } }");
     assert!(
         plan_str.contains("detail"),
         "Plan should fetch 'detail' via B: {plan_str}"
@@ -266,7 +263,7 @@ fn incomplete_plan_is_an_error_not_a_partial_plan() {
         },
         ..default_config()
     };
-    let supergraph = Supergraph::new(SHAREABLE_DEAD_END_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(CROSS_SUBGRAPH_SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -593,9 +590,6 @@ fn requires_fields_added_to_fetch() {
     );
 }
 
-const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
-    include_str!("../fixtures/requires_local_unsatisfiable.graphql");
-
 /// @requires on a field whose subgraph declares the required fields as
 /// @external: the query enters through B (which owns `shippingCost`
 /// requiring `weight`), but `weight` is only resolvable in A. The field
@@ -604,22 +598,19 @@ const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
 /// @external `weight` itself.
 #[test_log::test]
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
-    let plan_str = plan_query(
-        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
-        "{ product { shippingCost } }",
-    );
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ productFromB { shippingCost } }");
     insta::assert_snapshot!(plan_str, @r###"
         QueryPlan {
           Sequence {
             Fetch(service: "b") {
               {
-                product {
+                productFromB {
                   __typename
                   id
                 }
               }
             },
-            Flatten(path: "product") {
+            Flatten(path: "productFromB") {
               Fetch(service: "a") {
                 {
                   ... on Product {
@@ -634,7 +625,7 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
                 }
               },
             },
-            Flatten(path: "product") {
+            Flatten(path: "productFromB") {
               Fetch(service: "b") {
                 {
                   ... on Product {
@@ -682,11 +673,9 @@ fn requires_through_local_field_resolves_nested_parts() {
     );
 }
 
-const OVERRIDE_SCHEMA: &str = include_str!("../fixtures/override.graphql");
-
 #[test]
 fn static_override_routes_field_to_overriding_subgraph() {
-    let plan_str = plan_query(OVERRIDE_SCHEMA, "{ user { name nickname } }");
+    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name nickname } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name': {plan_str}"
@@ -1759,21 +1748,21 @@ type Query
 #[test]
 fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     let plan_str = plan_query(
-        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
-        "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingCost } } }",
+        REQUIRES_SCHEMA,
+        "query($v: Boolean!) { productFromB { ... on Product @include(if: $v) { shippingCost } } }",
     );
     insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
         Fetch(service: "b") {
           {
-            product {
+            productFromB {
               __typename
               id
             }
           }
         },
-        Flatten(path: "product") {
+        Flatten(path: "productFromB") {
           Fetch(service: "a") {
             {
               ... on Product {
@@ -1789,7 +1778,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
           },
         },
         Include(if: $v) {
-          Flatten(path: "product") {
+          Flatten(path: "productFromB") {
             Fetch(service: "b") {
               {
                 ... on Product {
@@ -1922,14 +1911,12 @@ fn defer_same_subgraph_produces_defer_node() {
     );
 }
 
-const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
-
 /// Multiple @defer siblings at the same level produce distinct deferred
 /// blocks inside a single Defer node.
 #[test]
 fn defer_sibling_blocks_produces_multiple_deferred() {
     let plan_str = plan_query_with_defer(
-        THREE_SUBGRAPH_SCHEMA,
+        CROSS_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email } ... @defer { address } } }",
     );
     assert!(
