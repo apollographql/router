@@ -3,6 +3,8 @@ schema
   @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
 {
   query: Query
+  mutation: Mutation
+  subscription: Subscription
 }
 
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
@@ -20,6 +22,7 @@ scalar join__FieldSet
 enum join__Graph {
   A @join__graph(name: "a", url: "http://a")
   B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")
 }
 
 scalar link__Import
@@ -31,15 +34,41 @@ enum link__Purpose {
 
 type Query
   @join__type(graph: A)
+  @join__type(graph: B)
 {
   user: User @join__field(graph: A)
+}
+
+type Mutation
+  @join__type(graph: A)
+{
+  createUser(name: String!): User @join__field(graph: A)
+  updateUser(id: ID!, name: String!): User @join__field(graph: A)
+}
+
+type Subscription
+  @join__type(graph: A)
+{
+  onUserCreated: User @join__field(graph: A)
 }
 
 type User
   @join__type(graph: A, key: "id")
   @join__type(graph: B, key: "id")
+  @join__type(graph: C, key: "id")
 {
   id: ID!
   name: String @join__field(graph: A)
   email: String @join__field(graph: B)
+  address: String @join__field(graph: C)
+  nickname: String @join__field(graph: A, override: "b")
+  profile: Profile @join__field(graph: A) @join__field(graph: B)
+}
+
+type Profile
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: Int
+  detail: String @join__field(graph: B)
 }
