@@ -329,6 +329,21 @@ impl field::Visit for EventFieldCollector {
             serde_json::Value::from(format!("{value:?}")),
         ));
     }
+
+    /// ROUTER-2100: without this, the trait's default implementation forwards to
+    /// `record_debug`, which renders the field as a flat Debug string instead of a
+    /// nested JSON object.
+    ///
+    /// Only compiled when the build sets `--cfg tracing_unstable`, which is what makes
+    /// `record_value` exist on `field::Visit` in the first place.
+    #[cfg(tracing_unstable)]
+    fn record_value(&mut self, field: &Field, value: valuable::Value<'_>) {
+        let name = field.name();
+        let name = name.strip_prefix("r#").unwrap_or(name);
+        let json = serde_json::to_value(valuable_serde::Serializable::new(value))
+            .unwrap_or_else(|_| serde_json::Value::from(format!("{value:?}")));
+        self.fields.push((name.to_owned(), json));
+    }
 }
 
 impl<S> EventFormatter<S> for Json
