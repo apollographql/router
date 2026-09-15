@@ -522,6 +522,7 @@ mod tests {
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
+    use insta::assert_snapshot;
     use itertools::Itertools;
     use serde_json_bytes::json;
 
@@ -604,6 +605,263 @@ mod tests {
             .extensions()
             .with_lock(|lock| lock.insert::<Arc<EffectiveConfig>>(Arc::new(effective)));
         context
+    }
+
+    /// Map `input` through `selection` as the root field `field`, the way a
+    /// connector response is mapped, and hand back the result for aggregation.
+    ///
+    /// The generic form of [`mapped_with_structured_declared_error`], for tests
+    /// that vary the selection rather than the configuration.
+    fn mapped_with_selection(
+        field: &str,
+        selection: &str,
+        input: serde_json_bytes::Value,
+    ) -> MappedResponse {
+        let response_key = ResponseKey::RootField {
+            name: field.to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse(selection).unwrap()),
+        };
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(account),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        let parts = http::Response::builder()
+            .status(200)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        handle_raw_response(
+            &input,
+            &parts,
+            response_key,
+            &connector,
+            &Context::new(),
+            &http::HeaderMap::new(),
+        )
+    }
+
+    /// Render one entry of `extensions.connectorErrors` as a client reads it,
+    /// with extension keys sorted.
+    ///
+    /// Sorted because the assertion is a snapshot: `extensions` is an
+    /// insertion-ordered map, and the insertion order is an implementation
+    /// detail of which layer stamped which key. A reordering is not a
+    /// behavior change and should not read as one in a diff.
+    fn render_reported_error(error: &serde_json_bytes::Value) -> String {
+        let object = error.as_object().expect("a reported error is an object");
+
+        let mut rendered = format!(
+            "    message: {}\n",
+            object
+                .get("message")
+                .and_then(|message| message.as_str())
+                .unwrap_or("(none)")
+        );
+        rendered.push_str(&format!(
+            "    path:    {}\n",
+            object
+                .get("path")
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "(none)".to_string())
+        ));
+
+        if let Some(extensions) = object.get("extensions").and_then(|ext| ext.as_object()) {
+            let mut keys: Vec<_> = extensions.keys().collect();
+            keys.sort();
+            for key in keys {
+                rendered.push_str(&format!(
+                    "    ext:     {} = {}\n",
+                    key.as_str(),
+                    extensions[key.as_str()]
+                ));
+            }
+        }
+        rendered
+    }
+
+    /// What a client actually receives, across the mapping shapes an author
+    /// writes and the `include_subgraph_errors` settings an operator sets.
+    ///
+    /// Review asked for copious snapshot coverage of the combinations, and a
+    /// grid is the right shape for it: the interesting failures are not "this
+    /// one case is wrong" but "these two cases should differ and don't", or
+    /// "this column changed when I only meant to change that row". Both are
+    /// visible at a glance here and invisible across thirty separate
+    /// assertions.
+    ///
+    /// Read as a table. Rows are what the mapping author wrote — a plain
+    /// field, a rename, a `??` default, a `->map` over rows, a chain, the
+    /// structured argument, `->withProblem` alone, and both methods together.
+    /// Columns are what the operator configured, including the default, which
+    /// omits everything.
+    ///
+    /// Each cell is the *client's* view, reached by running the whole travel
+    /// path: aggregation, then the fetch service's lift out of `errors`, then
+    /// the drain into `connectorErrors`. Stopping after aggregation would
+    /// snapshot the in-transit form, private marker and all.
+    ///
+    /// Three things worth watching in the output, because each was a bug or
+    /// nearly one: every reported error carries both `connector.coordinate`
+    /// and `connector.selectionPath`; `->withProblem` never contributes a row
+    /// at all; and `path` names the field the mapping *writes*, so the
+    /// rename's path says `balance` rather than `amount`.
+    #[test]
+    fn what_a_client_receives_across_mappings_and_configurations() {
+        let shapes: Vec<(&str, &str, &str, serde_json_bytes::Value)> = vec![
+            (
+                "plain field",
+                "account",
+                r#"status: code->withError("Unrecognized code")"#,
+                json!({ "code": 7 }),
+            ),
+            (
+                "renamed field, `??` default",
+                "account",
+                r#"balance: amount ?? $("0")->withError("Amount was missing")"#,
+                json!({ "id": "acct-1" }),
+            ),
+            (
+                "one error per element, inside `->map`",
+                "rows",
+                r#"$.rows->map(@.code->withError("bad code"))"#,
+                json!({ "rows": [{ "code": 1 }, { "code": 2 }] }),
+            ),
+            (
+                "chained, two errors about one value",
+                "account",
+                r#"status: code->withError("first")->withError("second")"#,
+                json!({ "code": 7 }),
+            ),
+            (
+                "structured argument, author's code and extensions",
+                "account",
+                r#"balance: amount ?? $("<missing>")->withError({
+                    message: "Field 'amount' was not found"
+                    extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+                })"#,
+                json!({ "id": "acct-1" }),
+            ),
+            (
+                "`->withProblem` alone, which reaches no client",
+                "account",
+                r#"status: code->withProblem("Unrecognized code")"#,
+                json!({ "code": 7 }),
+            ),
+            (
+                "both methods on one value",
+                "account",
+                r#"status: code->withProblem("for the author")->withError("for the client")"#,
+                json!({ "code": 7 }),
+            ),
+        ];
+
+        let configs: Vec<(&str, serde_json::Value)> = vec![
+            (
+                "include_subgraph_errors: all: true",
+                serde_json::json!(true),
+            ),
+            (
+                "the default, which redacts subgraph errors",
+                serde_json::json!(false),
+            ),
+            (
+                "redact_message with an allow list",
+                serde_json::json!({
+                    "allow_extensions_keys": ["code", "service"],
+                    "redact_message": true,
+                }),
+            ),
+            (
+                "redact_message with a deny list",
+                serde_json::json!({
+                    "deny_extensions_keys": ["number"],
+                    "redact_message": true,
+                }),
+            ),
+        ];
+
+        let mut report = String::new();
+        for (shape_label, field, selection, input) in &shapes {
+            report.push_str(&format!("=== {shape_label}\n"));
+            report.push_str(&format!("    {}\n", selection.replace('\n', "\n    ")));
+
+            for (config_label, config) in &configs {
+                report.push_str(&format!("\n  --- {config_label}\n"));
+
+                let mapped = mapped_with_selection(field, selection, input.clone());
+                let context = included_subgraph_errors(config.clone());
+                let aggregated = aggregate_responses(vec![mapped], context.clone())
+                    .expect("aggregation succeeds");
+                let mut response = aggregated.response.into_body();
+
+                // The whole travel path, not just the first hop: declared
+                // errors ride in `errors` as far as the fetch service, which
+                // lifts them into the context, and the connectors plugin then
+                // drains them into `connectorErrors`. Snapshotting before the
+                // lift would record the private marker and an `errors` array
+                // no client ever sees.
+                ConnectorDeclaredErrors::take_marked(&context, &mut response.errors);
+                let reported = ConnectorDeclaredErrors::drain(&context);
+
+                report.push_str(&format!(
+                    "  data: {}\n",
+                    serde_json::to_string(&response.data).unwrap_or_default()
+                ));
+
+                // Anything still here is a spec violation — a resolved field
+                // with an execution error at its position — so it is rendered
+                // rather than ignored.
+                for leftover in &response.errors {
+                    report.push_str(&format!(
+                        "  LEFT IN `errors`: {} {:?}\n",
+                        leftover.message, leftover.extensions
+                    ));
+                }
+
+                match reported.as_ref().and_then(|value| value.as_array()) {
+                    None => report.push_str("  (nothing reported)\n"),
+                    Some(errors) => {
+                        for error in errors {
+                            report.push_str(&render_reported_error(error));
+                            report.push('\n');
+                        }
+                    }
+                }
+            }
+            report.push('\n');
+        }
+
+        assert_snapshot!(report);
     }
 
     /// A mapped response whose mapping resolved `balance` with a default and
