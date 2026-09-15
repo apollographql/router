@@ -32,10 +32,21 @@ use std::sync::Arc;
 /// assert_eq!(prefix.to_vec(), vec!["a", "b"]);
 /// assert_eq!(c.parent().to_vec(), prefix.to_vec());
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SharedPath<T> {
     head: Option<Arc<Node<T>>>,
     len: usize,
+}
+
+// Using #[derive] bounds T: Clone, but cloning only copies the Arc head,
+// so we implement manually to handle paths of non-Clone elements.
+impl<T> Clone for SharedPath<T> {
+    fn clone(&self) -> Self {
+        Self {
+            head: self.head.clone(),
+            len: self.len,
+        }
+    }
 }
 
 #[derive(Debug)]
