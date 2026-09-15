@@ -1,5 +1,6 @@
 //! Configuration schema generation and validation
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -47,19 +48,10 @@ pub(crate) enum Mode {
 }
 
 /// Validate config yaml against the generated json schema.
-/// This is a tricky problem, and the solution here is by no means complete.
-/// In the case that validation cannot be performed then it will let serde validate as normal. The
-/// goal is to give a good enough experience until more time can be spent making this better,
 ///
-/// The validation sequence is:
-/// 1. Parse the config into yaml
-/// 2. Create the json schema
-/// 3. Expand env variables
-/// 3. Validate the yaml against the json schema.
-/// 4. Convert the json paths from the error messages into nice error snippets. Makes sure to use the values from the original source document to prevent leaks of secrets etc.
-///
-/// There may still be serde validation issues later.
-///
+/// With `Mode::Upgrade`, apply migrations before expansion and validation. When a migration
+/// changes the document, diagnostic snippets and line numbers refer to the migrated YAML.
+/// Snippets use values from before expansion to avoid exposing expanded secrets.
 pub(crate) fn validate_yaml_configuration(
     raw_yaml: &str,
     expansion: Expansion,
@@ -107,6 +99,12 @@ pub(crate) fn validate_yaml_configuration(
         }
     });
 
+    // Keep diagnostic snippets and line numbers tied to the document being validated.
+    let mut diagnostic_source: Cow<str> = Cow::Borrowed(raw_yaml);
+
+    // Reject duplicate keys before serialization can collapse them.
+    let parsed_raw_yaml = super::yaml::parse(raw_yaml)?;
+
     if migration == Mode::Upgrade {
         let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
             .parse()
@@ -114,24 +112,36 @@ pub(crate) fn validate_yaml_configuration(
 
         let upgraded =
             upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
-        let expanded_yaml = expansion.expand(&upgraded)?;
-        if validator.is_valid(&expanded_yaml) {
-            yaml = upgraded;
-        } else {
+        if upgraded != yaml {
+            let migrated_yaml = serde_yaml::to_string(&upgraded).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: format!("failed to serialize migrated configuration: {error}"),
+                }
+            })?;
             tracing::warn!(
-                "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
-            )
+                "Run `router config upgrade` and save the output to update your file. \
+                 Migrations changed this configuration; error line numbers refer to the migrated YAML."
+            );
+            yaml = serde_yaml::from_str(&migrated_yaml).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: format!("failed to parse migrated configuration: {error}"),
+                }
+            })?;
+            diagnostic_source = Cow::Owned(migrated_yaml);
         }
     }
 
     let expanded_yaml = expansion.expand(&yaml)?;
-    let parsed_yaml = super::yaml::parse(raw_yaml)?;
+    let parsed_yaml = match &diagnostic_source {
+        Cow::Borrowed(_) => parsed_raw_yaml,
+        Cow::Owned(migrated_yaml) => super::yaml::parse(migrated_yaml)?,
+    };
     {
         let mut errors_it = validator.iter_errors(&expanded_yaml).peekable();
         if errors_it.peek().is_some() {
             // Validation failed, translate the errors into something nice for the user
             // We have to reparse the yaml to get the line number information for each error.
-            let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
+            let yaml_split_by_lines = diagnostic_source.split('\n').collect::<Vec<_>>();
 
             let mut errors = String::new();
 
