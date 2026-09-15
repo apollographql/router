@@ -89,16 +89,20 @@ impl SelectionBuilder {
     ///
     /// Returns `None` if any response path has more than one distinct
     /// field signature within this builder.
-    pub(super) fn field_signatures(&self) -> Option<HashMap<String, String>> {
+    pub(super) fn field_signatures(&self) -> Option<HashMap<Vec<String>, String>> {
+        // Keys are response paths as segment vectors rather than joined
+        // strings: client-provided argument values can contain any
+        // separator character, and the keys are only ever compared whole.
         fn record_selection_set(
-            out: &mut HashMap<String, String>,
-            prefix: &str,
+            out: &mut HashMap<Vec<String>, String>,
+            prefix: &[String],
             selections: &SelectionSet,
         ) -> bool {
             for sel in selections.selections.values() {
                 match sel {
                     Selection::Field(field_sel) => {
-                        let key = format!("{prefix}/{}", field_sel.field.response_name());
+                        let mut key = prefix.to_vec();
+                        key.push(field_sel.field.response_name().to_string());
                         if !try_insert(out, key.clone(), field_sel.field.to_string()) {
                             return false;
                         }
@@ -120,7 +124,11 @@ impl SelectionBuilder {
 
         /// Insert a field signature, returning false if a different
         /// signature already occupies the same key.
-        fn try_insert(map: &mut HashMap<String, String>, key: String, value: String) -> bool {
+        fn try_insert(
+            map: &mut HashMap<Vec<String>, String>,
+            key: Vec<String>,
+            value: String,
+        ) -> bool {
             match map.entry(key) {
                 std::collections::hash_map::Entry::Occupied(e) => *e.get() == value,
                 std::collections::hash_map::Entry::Vacant(e) => {
@@ -132,12 +140,7 @@ impl SelectionBuilder {
 
         let mut out = HashMap::new();
         for entry in &self.entries {
-            let prefix = entry
-                .path
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("/");
+            let prefix: Vec<String> = entry.path.iter().map(|e| e.to_string()).collect();
             if let Some(sels) = &entry.selections {
                 if !record_selection_set(&mut out, &prefix, sels) {
                     return None;

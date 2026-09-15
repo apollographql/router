@@ -785,7 +785,7 @@ impl FetchGraph {
     /// merged entity representation cannot satisfy both branches.
     fn bucket_by_merge_compatibility(&self, mergeable: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
         struct Bucket {
-            signatures: HashMap<String, String>,
+            signatures: HashMap<Vec<String>, String>,
             merge_at: Option<Vec<FetchDataPathElement>>,
             input_conditions: HashMap<Name, BTreeSet<String>>,
             nodes: Vec<NodeIndex>,
