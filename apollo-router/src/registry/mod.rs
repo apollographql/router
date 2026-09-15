@@ -610,7 +610,6 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
 
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<License, OciError>> + Send>>;
 
-#[allow(dead_code)]
 pub(crate) fn create_oci_license_stream(
     oci_config: OciConfig,
 ) -> Result<OciLicenseStream, anyhow::Error> {
@@ -620,7 +619,6 @@ pub(crate) fn create_oci_license_stream(
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
-#[allow(dead_code)]
 fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<License, OciError>> {
     let (sender, receiver) = channel(2);
 
@@ -689,7 +687,6 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
     ReceiverStream::new(receiver).boxed()
 }
 
-#[allow(dead_code)]
 async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
     let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
@@ -720,7 +717,6 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     }
 }
 
-#[allow(dead_code)]
 async fn fetch_license_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
@@ -733,9 +729,17 @@ async fn fetch_license_from_reference(
     let license_layer = manifest
         .layers
         .iter()
-        .find(|layer| layer.media_type == ENTITLEMENT_MEDIA_TYPE)
-        .ok_or_else(|| OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()))?
-        .clone();
+        .find(|layer| layer.media_type == ENTITLEMENT_MEDIA_TYPE);
+
+    let license_layer = match license_layer {
+        Some(layer) => layer.clone(),
+        None => {
+            // No entitlement layer on this artifact means no entitlement can be
+            // fetched, so the router should boot unlicensed, not retry forever.
+            tracing::info!("no entitlement layer found in oci manifest, treating as unlicensed");
+            return Ok(License::default());
+        }
+    };
 
     tracing::debug!("pulling oci blob for license layer");
     let license_blob_bytes = fetch_oci_blob(client, reference, &license_layer).await?;
@@ -1152,12 +1156,10 @@ mod tests {
         );
     }
 
-    fn assert_license_fetch_missing_layer(result: Result<License, OciError>) {
-        let err = result.expect_err("expected missing entitlements layer");
-        assert!(
-            matches!(err, OciError::LayerNotFound(_)),
-            "expected LayerNotFound, got {err:?}"
-        );
+    fn assert_license_fetch_returns_default_when_missing_layer(result: Result<License, OciError>) {
+        let license = result
+            .expect("missing entitlement layer should yield an unlicensed default, not an error");
+        assert_eq!(license.claims, License::default().claims);
     }
 
     fn assert_license_fetch_bad_utf8(result: Result<License, OciError>) {
@@ -1182,7 +1184,7 @@ mod tests {
         vec![license_layer(TEST_LICENSE_JWT), unrelated_layer()],
         assert_license_fetch_success
     )]
-    #[case::missing_layer(vec![unrelated_layer()], assert_license_fetch_missing_layer)]
+    #[case::missing_layer(vec![unrelated_layer()], assert_license_fetch_returns_default_when_missing_layer)]
     // 0xFF/0xFE are not valid UTF-8 start bytes.
     #[case::bad_utf8(vec![license_layer(vec![0xFF, 0xFE, 0xFD])], assert_license_fetch_bad_utf8)]
     #[case::bad_jwt(vec![license_layer("not a jwt")], assert_license_fetch_bad_jwt)]
