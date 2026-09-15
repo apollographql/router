@@ -417,7 +417,7 @@ pub fn handle_mapping_only_response(
 /// [`InputPath`](crate::connectors::json_selection::immutable::InputPath):
 /// where the mapping was reading in the *source* JSON, interleaved with
 /// `->method` markers for the methods it passed through. In a mapping like
-/// `balance: amount->withError(...)` that path says `amount` — the API's field
+/// `balance: amount->withError(...)` that path says `amount` — the API's
 /// — while the response path is `balance`. The two coincide only when the
 /// mapping happens to be a rename-free passthrough.
 ///
@@ -535,9 +535,10 @@ pub(super) fn map_response(
     // are the language's, addressed to the author. The split decides what
     // *additionally* travels to the client — it does not decide what reaches
     // the debugger, which is why `warnings` below still receives both kinds.
-    // `->withError` shipped as a debugger and telemetry feature, and mapping
-    // problems are what both of those read, so removing declared errors from
-    // them would be a regression dressed up as a feature.
+    // `->withProblem` is the debugger and telemetry feature, and mapping problems
+    // are what both of those read, so removing declared errors from them would
+    // be a regression dressed up as a feature: an author who declares a
+    // client-facing error still wants to see it while debugging.
     //
     // Selecting rather than partitioning, for the same reason: the errors are
     // needed twice, in two different shapes. Client-facing errors are built
@@ -548,9 +549,9 @@ pub(super) fn map_response(
     // availability is decided by `ArrowMethod::is_public`, and every method's
     // *behavior* is version-invariant — the rstest cases across V0_2..V0_5 in
     // the methods directory exist to assert exactly that. Gating this would
-    // make `->withError` mean two different things depending on a connector's
-    // `@link` URL, for a method that has never shipped and so has no earlier
-    // behavior to preserve. Writing `->withError` is itself the opt-in.
+    // make `->withError` mean two different things depending on a
+    // connector's `@link` URL, for a method that has never shipped and so has
+    // no earlier behavior to preserve. Writing it is itself the opt-in.
     let declared = apply_to_errors
         .iter()
         .filter(|error| error.kind() == ApplyToErrorKind::Declared)
@@ -562,13 +563,9 @@ pub(super) fn map_response(
         ProblemLocation::Selection,
     ));
 
-    // Every declared error is reported. The count is deliberately not capped:
-    // nothing else in the router truncates a response's errors (a subgraph
-    // returning thousands has them all passed through), and the feature exists
-    // so an author can record every defect they find — handing a client "and
-    // 400 more" would defeat that. The element count is already bounded
-    // upstream by the `http_max_response_size` connector limit, which is where
-    // an operator worried about response size sets a policy.
+    // Every declared error the mapping produced is built here, and none is
+    // dropped or summarized away, the same way the router passes through every
+    // error a subgraph returns.
     let errors = declared
         .iter()
         .map(|error| declared_error_to_runtime_error(error, &key, connector))
@@ -1346,7 +1343,7 @@ mod tests {
     }
 
     /// Surfacing a declared error to the client must not take it away from the
-    /// author. `->withError` shipped as a debugger and telemetry feature, and
+    /// author. `->withProblem` is the debugger and telemetry feature, and
     /// mapping problems are what both of those read, so a declared error has
     /// to appear in *both* places — the split decides what additionally
     /// reaches the client, not what stops reaching the debugger.
@@ -1534,19 +1531,14 @@ mod tests {
         );
     }
 
-    /// Every declared error is reported, however many there are. The feature
-    /// exists so an author can record every defect they find, so truncating
-    /// would quietly defeat the thing it was asked for — and nothing else in
-    /// the router truncates a response's errors either. Response size is an
-    /// operator policy, set upstream via the `http_max_response_size` connector
-    /// limit, not a constant hidden in the mapping layer.
+    /// No layer imposes a cap: every declared error the mapping produced is
+    /// built here, one per element, and none is summarized away. A mapping over
+    /// a large API response therefore contributes one error per row.
     #[test]
-    fn declared_errors_are_not_truncated() {
+    fn the_mapping_layer_does_not_truncate_declared_errors() {
         let connector = make_connector(None, ConnectSpec::V0_5);
-        let key = root_field_key_with_selection(
-            "rows",
-            r#"$.rows->map(@.code->withError("bad code:", @))"#,
-        );
+        let key =
+            root_field_key_with_selection("rows", r#"$.rows->map(@.code->withError("bad code"))"#);
 
         let row_count = 500;
         let rows = (0..row_count)
@@ -1583,10 +1575,8 @@ mod tests {
     #[test]
     fn declared_errors_from_a_list_are_not_collapsed_by_message() {
         let connector = make_connector(None, ConnectSpec::V0_5);
-        let key = root_field_key_with_selection(
-            "rows",
-            r#"$.rows->map(@.code->withError("bad code:", @))"#,
-        );
+        let key =
+            root_field_key_with_selection("rows", r#"$.rows->map(@.code->withError("bad code"))"#);
 
         let mut mapped = map_response(
             &connector,
@@ -1601,8 +1591,8 @@ mod tests {
         // Identical messages, still two errors — aggregation would have made
         // this one problem with a count of 2.
         assert_eq!(errors.len(), 2);
-        assert_eq!(errors[0].message, "bad code: 7");
-        assert_eq!(errors[1].message, "bad code: 7");
+        assert_eq!(errors[0].message, "bad code");
+        assert_eq!(errors[1].message, "bad code");
 
         // And each one still says which element it came from.
         let selection_paths = errors
