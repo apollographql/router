@@ -1419,7 +1419,7 @@ impl SubSelection {
     }
 
     /// Shape counterpart of [`Self::apply_selections_no_rebind`]: merge the
-    /// output shapes of each [`NamedSelection`] with [`Shape::all`] without
+    /// output shapes of each [`NamedSelection`] with [`Shape::merge`] without
     /// rebinding `$`. Callers pass the `dollar_shape` they want threaded.
     fn compute_selections_shape_no_rebind(
         &self,
@@ -1428,16 +1428,16 @@ impl SubSelection {
         dollar_shape: Shape,
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
-        let mut all_shape = Shape::unknown([]);
+        let mut merged_shape = Shape::unknown([]);
 
         for named_selection in self.selections.iter() {
-            // Simplifying as we go with Shape::all keeps all_shape relatively
+            // Simplifying as we go with Shape::merge keeps merged_shape relatively
             // small in the common case when all named_selection items return an
             // object shape, since those object shapes can all be merged
             // together into one object.
-            all_shape = Shape::all(
+            merged_shape = Shape::merge(
                 [
-                    all_shape,
+                    merged_shape,
                     named_selection.compute_output_shape(
                         context,
                         input_shape.clone(),
@@ -1450,15 +1450,15 @@ impl SubSelection {
             // If any named_selection item returns null instead of an object,
             // that nullifies the whole object and allows shape computation to
             // bail out early.
-            if all_shape.is_null() {
+            if merged_shape.is_null() {
                 break;
             }
         }
 
-        if all_shape.is_unknown() {
+        if merged_shape.is_unknown() {
             Shape::empty_object(locations)
         } else {
-            all_shape
+            merged_shape
         }
     }
 }
@@ -4119,10 +4119,10 @@ mod tests {
             .pretty_print(),
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
-            // it would have been if we knew that, where friends: List<{ id:
-            // $root.friend_ids.* }> (note the * meaning any array index),
+            // it would have been if we knew that, where friends: [...{ id:
+            // $root.friend_ids.* }] (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
-            // List, rather than the friends field?
+            // array, rather than the friends field?
             r#"{
   alias: {
     x: $root.*.arrayOfArrays.*.x,
