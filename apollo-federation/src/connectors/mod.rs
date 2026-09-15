@@ -27,6 +27,7 @@ use apollo_compiler::Name;
 
 pub(crate) mod blueprint;
 pub mod expand;
+mod graphql_shapes;
 pub mod header;
 mod id;
 mod json_selection;
