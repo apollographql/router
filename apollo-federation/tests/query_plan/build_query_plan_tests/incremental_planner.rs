@@ -1816,3 +1816,351 @@ type C
         result.as_ref().map(|p| p.to_string()).unwrap_or_default(),
     );
 }
+
+// ---------------------------------------------------------------------------
+// @requires: condition aliasing and cross-subgraph routing
+// ---------------------------------------------------------------------------
+
+// @requires chains alias required fields as __require_N_* in generated
+// operations; the correctness checker must accept these renames.
+// Based on: requires.rs::it_handles_simple_require_chain
+#[test]
+fn inc_requires_rename_correctness_check() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v: Int!
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            v: Int! @external
+            inner: Int! @requires(fields: "v")
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            inner: Int! @external
+            outer: Int! @requires(fields: "inner")
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              outer
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+              v
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                v
+              }
+            } =>
+            {
+              ... on T {
+                __require_0_inner: inner
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_inner: inner
+              }
+            } =>
+            {
+              ... on T {
+                outer
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Two fetches land in SubgraphA: the operation root, and a root hop under
+/// `computed`. The hop transitively depends on the root fetch through the
+/// @requires condition resolved in SubgraphB, so the two SubgraphA fetches
+/// can never merge or share a node despite hitting the same subgraph root.
+/// Guards root group and root hop reuse against creating a cycle here.
+#[test]
+fn inc_root_hop_after_requires_back_into_same_subgraph_stays_split() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+          type Query {
+            e: E
+            a: Int
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            data: Int
+          }
+        "#,
+        SubgraphB: r#"
+          type Query {
+            b: Int
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            data: Int @external
+            computed: Query @requires(fields: "data")
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            a
+            e {
+              computed {
+                a
+                b
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            a
+            e {
+              __typename
+              id
+              data
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on E {
+                __typename
+                id
+                data
+              }
+            } =>
+            {
+              ... on E {
+                computed {
+                  __typename
+                  b
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "e.computed") {
+          Fetch(service: "SubgraphA") {
+            {
+              a
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// A @requires chain that must route its condition field through a key
+/// hop into another subgraph before the dependent field can be fetched.
+#[test]
+fn inc_requires_routes_condition_via_key_hop() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        SubgraphB: r#"
+        type Product @key(fields: "id") {
+            id: ID!
+            weight: Float
+        }
+        "#,
+        SubgraphC: r#"
+        type Product @key(fields: "id") {
+            id: ID!
+            weight: Float @external
+            shippingEstimate: Float @requires(fields: "weight")
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            product {
+                shippingEstimate
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            product {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "product") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Flatten(path: "product") {
+          Fetch(service: "SubgraphC") {
+            {
+              ... on Product {
+                __typename
+                id
+                __require_0_weight: weight
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+// The user requests a parameterized field with one set of arguments while a
+// sibling's @requires needs the same field with different arguments. The
+// condition copy must carry a __require_N_ alias so it doesn't collide with
+// the user's selection. Without the alias the planner merges both into one
+// fetch and produces invalid GraphQL ("conflicting field arguments").
+// Reproduces the customer issue in TSH-23186.
+#[test]
+fn inc_user_field_argument_conflict_with_requires_condition() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int @external
+            x: Int @requires(fields: "p(arg: 1)")
+        }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker's KeyRenamer
+    // doesn't yet handle the case where the rename target (`p`) already
+    // exists with different arguments.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            t {
+                p(arg: 2)
+                x
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              p(arg: 2)
+              id
+              __require_0_p: p(arg: 1)
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_p: p
+              }
+            } =>
+            {
+              ... on T {
+                x
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}

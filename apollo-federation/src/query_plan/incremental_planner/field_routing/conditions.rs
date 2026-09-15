@@ -42,45 +42,73 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         conditions: &SelectionSet,
     ) -> Result<bool, FederationError> {
+        self.walk_conditions_graph(node, conditions, true)
+    }
+
+    /// Walk condition fields via graph edges. When `fail_on_unreachable` is
+    /// true, returns false if any field or typed fragment lacks an edge
+    /// (resolvability check); untyped fragments are transparent. When false,
+    /// skips missing fields, walks edgeless typed fragments at this node
+    /// (supertype spreads collect here), and returns true if any edge
+    /// carries conditions (requires detection).
+    fn walk_conditions_graph(
+        &self,
+        node: NodeIndex,
+        conditions: &SelectionSet,
+        fail_on_unreachable: bool,
+    ) -> Result<bool, FederationError> {
         for selection in conditions.selections.values() {
             match selection {
                 crate::operation::Selection::Field(field_sel) => {
                     if *field_sel.field.name() == TYPENAME_FIELD {
                         continue;
                     }
-                    let Some(edge) = self.edge_for_field(node, &field_sel.field) else {
-                        return Ok(false);
+                    let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) else {
+                        if fail_on_unreachable {
+                            return Ok(false);
+                        }
+                        continue;
                     };
                     // A field carrying @requires draws data from the entity
                     // representation; it cannot be selected in place.
-                    if self.query_graph.edge_weight(edge)?.conditions.is_some() {
-                        return Ok(false);
+                    if self.query_graph.edge_weight(edge_idx)?.conditions.is_some() {
+                        return Ok(!fail_on_unreachable);
                     }
                     if let Some(sub) = &field_sel.selection_set {
-                        let (_, tail) = self.query_graph.edge_endpoints(edge)?;
-                        if !self.conditions_resolvable_at_node(tail, sub)? {
-                            return Ok(false);
+                        let (_, tail) = self.query_graph.edge_endpoints(edge_idx)?;
+                        let sub_result =
+                            self.walk_conditions_graph(tail, sub, fail_on_unreachable)?;
+                        if sub_result != fail_on_unreachable {
+                            return Ok(sub_result);
                         }
                     }
                 }
                 crate::operation::Selection::InlineFragment(frag_sel) => {
+                    // A type-conditioned fragment without a downcast edge
+                    // (same-type or supertype spread) collects at this node:
+                    // unresolvable for the resolvability check, walked here
+                    // for requires detection (over-approximating safely).
                     let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        let Some(edge) =
-                            self.edge_for_inline_fragment(node, &frag_sel.inline_fragment)
-                        else {
-                            return Ok(false);
-                        };
-                        self.query_graph.edge_endpoints(edge)?.1
+                        match self.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
+                            Some(edge) => self.query_graph.edge_endpoints(edge)?.1,
+                            None if fail_on_unreachable => return Ok(false),
+                            None => node,
+                        }
                     } else {
                         node
                     };
-                    if !self.conditions_resolvable_at_node(target, &frag_sel.selection_set)? {
-                        return Ok(false);
+                    let sub_result = self.walk_conditions_graph(
+                        target,
+                        &frag_sel.selection_set,
+                        fail_on_unreachable,
+                    )?;
+                    if sub_result != fail_on_unreachable {
+                        return Ok(sub_result);
                     }
                 }
             }
         }
-        Ok(true)
+        Ok(fail_on_unreachable)
     }
 
     /// Do any fields in `conditions` (recursively) carry @requires at
@@ -92,41 +120,7 @@ impl FieldRoutingSearchSpace {
         node: NodeIndex,
         conditions: &SelectionSet,
     ) -> Result<bool, FederationError> {
-        for selection in conditions.selections.values() {
-            match selection {
-                crate::operation::Selection::Field(field_sel) => {
-                    if let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) {
-                        if self.query_graph.edge_weight(edge_idx)?.conditions.is_some() {
-                            return Ok(true);
-                        }
-                        if let Some(sub) = &field_sel.selection_set {
-                            let (_, tail) = self.query_graph.edge_endpoints(edge_idx)?;
-                            if self.conditions_have_requires(tail, sub)? {
-                                return Ok(true);
-                            }
-                        }
-                    }
-                }
-                crate::operation::Selection::InlineFragment(frag_sel) => {
-                    // A type-conditioned fragment without a downcast edge
-                    // (same-type or supertype spread) collects at this node;
-                    // checking here over-approximates safely for unrelated
-                    // conditions (fields without edges are ignored anyway).
-                    let target = if frag_sel.inline_fragment.type_condition_position.is_some() {
-                        match self.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
-                            Some(edge) => self.query_graph.edge_endpoints(edge)?.1,
-                            None => node,
-                        }
-                    } else {
-                        node
-                    };
-                    if self.conditions_have_requires(target, &frag_sel.selection_set)? {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-        Ok(false)
+        self.walk_conditions_graph(node, conditions, false)
     }
 
     /// Filter key conditions to the subset the source subgraph can resolve.

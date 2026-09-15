@@ -24,6 +24,7 @@ use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
+use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlanCost;
@@ -628,6 +629,17 @@ impl FetchGraph {
                         rewrites.extend(r);
                     }
                 }
+                for (alias, original_name) in input.condition_alias_rewrites() {
+                    rewrites.push(Arc::new(FetchDataRewrite::KeyRenamer(
+                        crate::query_plan::FetchDataKeyRenamer {
+                            path: vec![FetchDataPathElement::Key(
+                                alias.clone(),
+                                Default::default(),
+                            )],
+                            rename_key_to: original_name.clone(),
+                        },
+                    )));
+                }
             }
         }
 
@@ -892,6 +904,7 @@ mod tests {
             vec![InputContribution::Requires {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
+                condition_alias_rewrites: Vec::new(),
             }],
         );
 

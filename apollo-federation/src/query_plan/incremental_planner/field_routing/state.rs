@@ -1,6 +1,7 @@
 //! Mutable BULB search state: the pending-selection stack, the fetch graph
 //! under construction, and O(1) checkpoint/rollback over both.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use petgraph::graph::NodeIndex;
@@ -136,6 +137,12 @@ pub(crate) struct PlanState {
     /// than decision counts. Used by the search's effort budget;
     /// deliberately not restored by `rollback`.
     pub(crate) effort: u64,
+    /// Interned ids for @requires condition-field aliases, keyed by the
+    /// serialized condition selection: identical conditions share an alias
+    /// so sibling entity fetches staging the same @requires can merge;
+    /// distinct conditions get distinct aliases. Append-only; NOT restored
+    /// on rollback (aliases only need to be stable, not predictable).
+    pub(crate) condition_alias_ids: BTreeMap<String, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -157,6 +164,7 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: 0,
             effort: 0,
+            condition_alias_ids: BTreeMap::new(),
         }
     }
 
@@ -192,6 +200,7 @@ impl PlanState {
             pending: self.pending.clone(),
             pending_undo: Vec::new(),
             dropped_fields: self.dropped_fields,
+            condition_alias_ids: self.condition_alias_ids.clone(),
             effort: self.effort,
         }
     }
