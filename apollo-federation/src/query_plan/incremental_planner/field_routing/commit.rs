@@ -148,16 +148,22 @@ impl FieldRoutingSearchSpace {
             ))
         })?;
 
-        let new_group = state.graph.add_root_hop_group(
+        let new_group = self.root_hop_group_avoiding_cycles(
+            state,
             choice.target_subgraph(),
             root_type,
             root_kind,
             merge_at,
+            pending.fetch_node,
+            pending.ordering_dependent(),
         );
 
-        let edge = state
-            .graph
-            .add_dependency(pending.fetch_node, new_group, Vec::new());
+        let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
+            Some(existing) => existing,
+            None => state
+                .graph
+                .add_dependency(pending.fetch_node, new_group, Vec::new()),
+        };
 
         Ok((new_group, edge))
     }
@@ -366,12 +372,51 @@ impl FieldRoutingSearchSpace {
         let group = state
             .graph
             .get_or_create_entity_group(subgraph, merge_at.clone());
+        if Self::group_reusable(state, group, anchor_fetch, ordering_dependent) {
+            return group;
+        }
+        state.graph.add_entity_group(subgraph, merge_at)
+    }
+
+    /// Get or create the root hop group for (subgraph, root_kind, merge_at),
+    /// falling back to a fresh group when reuse would create a dependency
+    /// cycle.
+    fn root_hop_group_avoiding_cycles(
+        &self,
+        state: &mut PlanState,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        root_kind: SchemaRootDefinitionKind,
+        merge_at: Vec<FetchDataPathElement>,
+        anchor_fetch: NodeIndex,
+        ordering_dependent: Option<NodeIndex>,
+    ) -> NodeIndex {
+        let group = state.graph.get_or_create_root_hop_group(
+            subgraph,
+            root_type.clone(),
+            root_kind,
+            merge_at.clone(),
+        );
+        if Self::group_reusable(state, group, anchor_fetch, ordering_dependent) {
+            return group;
+        }
+        state
+            .graph
+            .add_root_hop_group(subgraph, root_type, root_kind, merge_at)
+    }
+
+    /// Whether an existing group can take a dependency edge from
+    /// `anchor_fetch` without creating a cycle, and can still run before an
+    /// ordering dependent.
+    fn group_reusable(
+        state: &PlanState,
+        group: NodeIndex,
+        anchor_fetch: NodeIndex,
+        ordering_dependent: Option<NodeIndex>,
+    ) -> bool {
         let conflicts_with_dependent = ordering_dependent
             .is_some_and(|dep| group == dep || state.graph.is_reachable(dep, group));
-        if conflicts_with_dependent || state.graph.is_reachable(group, anchor_fetch) {
-            return state.graph.add_entity_group(subgraph, merge_at);
-        }
-        group
+        !conflicts_with_dependent && !state.graph.is_reachable(group, anchor_fetch)
     }
 
     /// Find or create the anchor->group dependency edge and attach the key
