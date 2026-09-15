@@ -29,11 +29,7 @@ pub(super) fn search_space(subgraphs: &[(&str, &str)]) -> FieldRoutingSearchSpac
     let query_graph =
         build_federated_query_graph(schema.clone(), api, None, None).expect("query graph");
     FieldRoutingSearchSpace {
-        cached_query_graph: CachedQueryGraph::new(
-            Arc::new(query_graph),
-            Default::default(),
-            Default::default(),
-        ),
+        cached_query_graph: CachedQueryGraph::new(Arc::new(query_graph), Default::default()),
         supergraph_schema: schema,
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
@@ -47,12 +43,14 @@ pub(super) fn node_for(
     type_name: &str,
 ) -> NodeIndex {
     space
-        .cached_query_graph.query_graph
+        .cached_query_graph
+        .query_graph
         .graph()
         .node_indices()
         .find(|&idx| {
             let node = space
-                .cached_query_graph.query_graph
+                .cached_query_graph
+                .query_graph
                 .node_weight(idx)
                 .expect("node weight exists");
             node.source.as_ref() == subgraph && node.type_.to_string() == type_name
