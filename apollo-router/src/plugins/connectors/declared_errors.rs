@@ -41,9 +41,6 @@
 //!
 //! [spec]: https://spec.graphql.org/draft/#sec-Errors.Execution-Errors
 
-use std::sync::Arc;
-
-use parking_lot::Mutex;
 use serde_json_bytes::Value;
 
 use crate::Context;
@@ -71,8 +68,14 @@ pub(crate) const CONNECTOR_ERRORS_EXTENSION_KEY: &str = "connectorErrors";
 /// produce these are spread across the query plan, and nothing between a fetch
 /// and the supergraph response carries data that is neither `data` nor
 /// `errors`.
-#[derive(Clone, Default)]
-pub(crate) struct ConnectorDeclaredErrors(Arc<Mutex<Vec<graphql::Error>>>);
+///
+/// A plain `Vec` and not an `Arc<Mutex<Vec<_>>>`, although the fetches writing
+/// to it do run concurrently under a parallel query-plan node: every access
+/// goes through `Context::extensions().with_lock`, which is already the mutual
+/// exclusion this needs. An inner lock would only avoid holding the context
+/// lock across a `Vec::extend`.
+#[derive(Default)]
+pub(crate) struct ConnectorDeclaredErrors(Vec<graphql::Error>);
 
 impl ConnectorDeclaredErrors {
     /// Moves every error marked with [`DECLARED_ERROR_MARKER`] out of `errors`
@@ -97,12 +100,11 @@ impl ConnectorDeclaredErrors {
             false
         });
 
-        context
-            .extensions()
-            .with_lock(|lock| lock.get_or_default_mut::<ConnectorDeclaredErrors>().clone())
-            .0
-            .lock()
-            .extend(declared);
+        context.extensions().with_lock(|lock| {
+            lock.get_or_default_mut::<ConnectorDeclaredErrors>()
+                .0
+                .extend(declared)
+        });
     }
 
     /// Removes and returns everything collected so far, as the value of the
@@ -111,10 +113,10 @@ impl ConnectorDeclaredErrors {
     /// Draining rather than reading, so a deferred response reports each error
     /// once, in the chunk the fetch that declared it completed for.
     pub(crate) fn drain(context: &Context) -> Option<Value> {
-        let collected = context
-            .extensions()
-            .with_lock(|lock| lock.get::<ConnectorDeclaredErrors>().cloned())?;
-        let errors = std::mem::take(&mut *collected.0.lock());
+        let errors = context.extensions().with_lock(|lock| {
+            lock.get_mut::<ConnectorDeclaredErrors>()
+                .map(|collected| std::mem::take(&mut collected.0))
+        })?;
         if errors.is_empty() {
             return None;
         }
