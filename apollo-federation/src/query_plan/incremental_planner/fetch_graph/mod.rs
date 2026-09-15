@@ -165,6 +165,9 @@ pub(crate) struct FetchNode {
     pub(crate) context_rewrites: Vec<FetchDataKeyRenamer>,
     /// @fromContext variable definitions added to the subgraph operation.
     pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
+    /// When set, this fetch is backed by a connector rather than a GraphQL
+    /// subgraph endpoint. Plan builder maps this to `FetchProtocol::Connector`.
+    pub(crate) connector: Option<Arc<crate::connectors::Connector>>,
 }
 
 impl FetchNode {
@@ -176,6 +179,7 @@ impl FetchNode {
             defer_ref: None,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
         }
     }
 
@@ -248,9 +252,14 @@ enum GroupKey {
     ),
 }
 
-/// The reuse-slot key for a node.
-fn group_key(node: &FetchNode) -> GroupKey {
-    match &node.kind {
+/// The reuse-slot key for a node. Connector-backed nodes have no key:
+/// each connector resolution is its own fetch and must never claim or be
+/// found in a reuse slot.
+fn group_key(node: &FetchNode) -> Option<GroupKey> {
+    if node.connector.is_some() {
+        return None;
+    }
+    Some(match &node.kind {
         FetchGroupKind::Root { .. } => {
             GroupKey::Root(node.subgraph.clone(), node.defer_ref.clone())
         }
@@ -269,7 +278,7 @@ fn group_key(node: &FetchNode) -> GroupKey {
             merge_at.clone(),
             node.defer_ref.clone(),
         ),
-    }
+    })
 }
 
 /// Opaque undo checkpoint: the undo log length at a point in time.
@@ -352,7 +361,9 @@ impl FetchGraph {
         let key = group_key(&node);
         let id = self.graph.add_node(node);
         self.undo_log.push(FetchGraphOp::AddNode { node_index: id });
-        if let std::collections::hash_map::Entry::Vacant(slot) = self.groups.entry(key.clone()) {
+        if let Some(key) = key
+            && let std::collections::hash_map::Entry::Vacant(slot) = self.groups.entry(key.clone())
+        {
             slot.insert(id);
             self.undo_log.push(FetchGraphOp::RegisterGroup { key });
         }
@@ -398,6 +409,7 @@ impl FetchGraph {
             defer_ref,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
         })
     }
 
@@ -415,6 +427,7 @@ impl FetchGraph {
             defer_ref,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
         })
     }
 
@@ -459,6 +472,45 @@ impl FetchGraph {
             return id;
         }
         self.add_root_hop_group(subgraph, root_type, root_kind, merge_at)
+    }
+
+    /// Create a root fetch group backed by a connector.
+    pub(crate) fn add_connector_root_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        connector: Arc<crate::connectors::Connector>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(FetchNode {
+            subgraph: subgraph.clone(),
+            kind: FetchGroupKind::Root { root_type },
+            selection_builder: SelectionBuilder::default(),
+            defer_ref,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
+            connector: Some(connector),
+        })
+    }
+
+    /// Create an entity fetch group backed by a connector. Never reused —
+    /// each connector entity resolution is its own node.
+    pub(crate) fn add_connector_entity_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        connector: Arc<crate::connectors::Connector>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(FetchNode {
+            subgraph: subgraph.clone(),
+            kind: FetchGroupKind::Entity { merge_at },
+            selection_builder: SelectionBuilder::default(),
+            defer_ref,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
+            connector: Some(connector),
+        })
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at, defer_ref).
