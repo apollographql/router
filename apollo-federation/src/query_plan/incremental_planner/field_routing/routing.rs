@@ -32,6 +32,16 @@ pub(crate) enum RoutingTarget {
         edge_index: EdgeIndex,
         target_subgraph: Arc<str>,
     },
+    /// Per-concrete-type explosion at an abstract position: field on an
+    /// abstract type with no direct FieldCollection edge decomposes into
+    /// per-concrete-type inline fragments. Only ever a forced fallback.
+    TypeExplosion,
+    /// Restructure an inline fragment with no routing options instead of
+    /// dropping it: commit runs the pass-through / vacuous-condition /
+    /// abstract-explosion chain, pushing replacement pendings and adding no
+    /// graph state. Only ever offered as the single (forced) choice when
+    /// normal enumeration yields nothing, so it never competes for score.
+    RestructureFragment,
 }
 
 /// A routing choice for a field: either a subgraph edge or a key hop.
@@ -96,6 +106,28 @@ pub(crate) enum HopKind {
 }
 
 impl RoutingChoice {
+    /// Non-edge fallback choice (type explosion or fragment restructuring).
+    fn fallback(target: RoutingTarget) -> Self {
+        debug_assert!(
+            matches!(
+                target,
+                RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment
+            ),
+            "fallback() is only for non-edge routing targets"
+        );
+        Self {
+            target,
+            hop_kind: HopKind::Direct,
+            key_conditions: None,
+            conditions_locally_satisfiable: true,
+            conditions_provided: false,
+            requires_resolvable_in_place: true,
+            self_entity_reentry: false,
+            conditions_unroutable: false,
+            intermediate_key_hops: Vec::new(),
+        }
+    }
+
     /// A direct edge in the current subgraph.
     fn direct(edge_index: EdgeIndex, target_subgraph: Arc<str>) -> Self {
         Self {
@@ -143,13 +175,26 @@ impl RoutingChoice {
             RoutingTarget::SubgraphEdge {
                 target_subgraph, ..
             } => target_subgraph,
+            RoutingTarget::TypeExplosion => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<type-explosion>"));
+                &LABEL
+            }
+            RoutingTarget::RestructureFragment => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<restructure>"));
+                &LABEL
+            }
         }
     }
 
-    /// Query graph edge index.
+    /// Query graph edge index. Panics on non-edge routing choices.
     pub(crate) fn edge_index(&self) -> EdgeIndex {
         match &self.target {
             RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
+            RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment => {
+                panic!("edge_index() called on a non-edge routing choice")
+            }
         }
     }
 }
@@ -168,6 +213,11 @@ enum RoutingPreference {
     /// the anchor already provides the full key, so every other hop is
     /// preferred.
     CircularKeyHop,
+    /// Restructure an inline fragment when normal enumeration yields nothing.
+    RestructureFragment,
+    /// Per-concrete-type explosion at an abstract position. Defers real
+    /// fetch cost to child fragments, so always ranked last.
+    TypeExplosion,
 }
 
 struct KeyHopCandidate {
@@ -597,7 +647,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
     ) -> Result<Vec<RoutingChoice>, FederationError> {
         let current_node_data = self.query_graph.node_weight(pending.query_graph_node)?;
-        let options = if matches!(
+        let mut options = if matches!(
             current_node_data.type_,
             QueryGraphNodeType::FederatedRootType(_)
         ) {
@@ -611,9 +661,21 @@ impl FieldRoutingSearchSpace {
                     self.fragment_options(pending, fragment_selection)?
                 }
             };
-            self.rank_options(&mut options, &current_node_data.source);
+            self.rank_options(&mut options);
             options
         };
+        if !self.disabled_subgraphs.is_empty() {
+            options.retain(|opt| !self.disabled_subgraphs.contains(opt.target_subgraph()));
+        }
+        // Zero options is not failure yet: the applicable fallback
+        // (fragment restructuring, or type explosion at an abstract field
+        // position) becomes the single forced choice, committed through the
+        // same backbone as every other option.
+        if options.is_empty()
+            && let Some(fallback) = self.fallback_option(pending)?
+        {
+            options.push(fallback);
+        }
         Ok(options)
     }
 
@@ -667,9 +729,18 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
-    /// Options for a field: the direct edge (if any) plus key hops, which
-    /// are enumerated alongside a viable direct edge because hopping early
-    /// can beat hopping per-child later.
+    /// Options for a field selection: the direct edge (if any) plus every
+    /// cross-subgraph key hop. Hops are enumerated even when a viable direct
+    /// edge exists, because hopping early can be cheaper than hopping per-child
+    /// later. Ranking keeps the direct edge first, so a greedy pass that later
+    /// strands a descendant relies on BULB backtracking to revisit the hop.
+    ///
+    /// At an abstract-type position whose concrete implementers have
+    /// cross-subgraph entity keys, per-concrete-type explosion is a
+    /// genuine alternative: a direct interface-level edge whose target strands
+    /// a descendant is otherwise a forced commit with no decision point to
+    /// backtrack into. Enumerating it (ranked last via Fallback preference)
+    /// makes the escape a normal search decision.
     pub(super) fn field_options(
         &self,
         pending: &PendingSelection,
@@ -702,6 +773,12 @@ impl FieldRoutingSearchSpace {
             &mut options,
             |key_target| self.edge_for_field(key_target, &field_selection.field),
         )?;
+
+        if !options.is_empty()
+            && self.abstract_type_has_cross_subgraph_keys(pending.query_graph_node)?
+        {
+            options.push(RoutingChoice::fallback(RoutingTarget::TypeExplosion));
+        }
 
         Ok(options)
     }
@@ -776,9 +853,84 @@ impl FieldRoutingSearchSpace {
     /// Order options best-first: @provides beats a direct local edge beats a
     /// same-subgraph re-entry beats a key hop whose conditions are locally
     /// satisfiable beats a remote hop.
-    pub(super) fn rank_options(&self, options: &mut [RoutingChoice], current_source: &Arc<str>) {
+    ///
+    /// Fallback when normal edge enumeration yields no options: fragment
+    /// restructuring for inline fragments, type explosion for fields on
+    /// abstract types.
+    /// Fallback when normal edge enumeration yields no options: fragment
+    /// restructuring for inline fragments, type explosion for fields on
+    /// abstract types.
+    fn fallback_option(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Option<RoutingChoice>, FederationError> {
+        match &pending.selection {
+            Selection::InlineFragment(_) => Ok(Some(RoutingChoice::fallback(
+                RoutingTarget::RestructureFragment,
+            ))),
+            Selection::Field(_) => {
+                let node_data = self.query_graph.node_weight(pending.query_graph_node)?;
+                let is_abstract = matches!(
+                    CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()),
+                    Ok(pos) if pos.is_abstract_type()
+                );
+                Ok(is_abstract.then(|| RoutingChoice::fallback(RoutingTarget::TypeExplosion)))
+            }
+        }
+    }
+
+    /// Whether any concrete implementer of the abstract type at `node` has a
+    /// cross-subgraph key edge. Type explosion is only useful when at least
+    /// one implementer can be routed to a different subgraph via an entity
+    /// key, so this gates the TypeExplosion fallback to avoid doubling the
+    /// BULB search tree at every abstract-type field.
+    fn abstract_type_has_cross_subgraph_keys(
+        &self,
+        node: NodeIndex,
+    ) -> Result<bool, FederationError> {
+        let node_data = self.query_graph.node_weight(node)?;
+        let current_source = &node_data.source;
+        let Ok(pos) = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()) else {
+            return Ok(false);
+        };
+        if !pos.is_abstract_type() {
+            return Ok(false);
+        }
+        let schema = self.query_graph.schema_by_source(current_source)?;
+        let runtime_types = schema.possible_runtime_types(pos)?;
+        for concrete_type in &runtime_types {
+            let type_name = &concrete_type.type_name;
+            let Ok(nodes) = self.query_graph.nodes_for_type(type_name) else {
+                continue;
+            };
+            for &concrete_node in nodes {
+                let concrete_data = self.query_graph.node_weight(concrete_node)?;
+                if &concrete_data.source != current_source {
+                    continue;
+                }
+                for edge_idx in self.out_edge_indices(concrete_node) {
+                    let edge = self.query_graph.edge_weight(edge_idx)?;
+                    if matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Order options best-first: @provides beats a direct local edge beats a
+    /// key hop whose conditions are locally satisfiable beats a remote hop.
+    pub(super) fn rank_options(&self, options: &mut [RoutingChoice]) {
         options.sort_by_key(|opt| {
-            let preference = if let Ok(edge) = self.query_graph.edge_weight(opt.edge_index()) {
+            let edge_index = match &opt.target {
+                RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
+                RoutingTarget::TypeExplosion => return (RoutingPreference::TypeExplosion, 0),
+                RoutingTarget::RestructureFragment => {
+                    return (RoutingPreference::RestructureFragment, 0);
+                }
+            };
+            let preference = if let Ok(edge) = self.query_graph.edge_weight(edge_index) {
                 match &edge.transition {
                     QueryGraphEdgeTransition::FieldCollection {
                         is_part_of_provides: true,
@@ -788,11 +940,6 @@ impl FieldRoutingSearchSpace {
                     _ if opt.self_entity_reentry => RoutingPreference::SelfRequiresHop,
                     _ if opt.conditions_unroutable => RoutingPreference::CircularKeyHop,
                     _ if !opt.intermediate_key_hops.is_empty() => RoutingPreference::ChainedKeyHop,
-                    _ if opt.hop_kind == HopKind::KeyHop
-                        && opt.target_subgraph() == current_source =>
-                    {
-                        RoutingPreference::SelfRequiresHop
-                    }
                     _ if opt.conditions_locally_satisfiable => {
                         RoutingPreference::LocallySatisfiableKeyHop
                     }
@@ -1125,7 +1272,7 @@ mod tests {
         };
 
         let mut options = vec![remote_hop, self_hop];
-        space.rank_options(&mut options, &current);
+        space.rank_options(&mut options);
         assert_eq!(
             options[0].target_subgraph(),
             &current,
