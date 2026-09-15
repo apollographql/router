@@ -574,8 +574,13 @@ fn inc_mutation_produces_sequential_plan() {
     );
 }
 
+/// Top-level mutation fields each get their own fetch, even when they
+/// resolve in the same subgraph. Unlike the legacy planner, which
+/// coalesces contiguous same-subgraph root fields into one fetch, this
+/// planner intentionally keeps one fetch per field: each field is its own
+/// search, and per-field fetches keep serial execution boundaries explicit.
 #[test]
-fn inc_mutation_multiple_fields_are_sequential() {
+fn inc_mutation_multiple_fields_are_not_merged() {
     let planner = planner!(
         config = incremental_config(),
         a: r#"
@@ -631,6 +636,66 @@ fn inc_mutation_multiple_fields_are_sequential() {
                   name
                   id
                 }
+              }
+            },
+          },
+        }
+        "###
+    );
+}
+
+/// The one-fetch-per-field shape is order-preserving by construction:
+/// same-subgraph fields interleaved with another subgraph's field stay
+/// three separate fetches in document order.
+#[test]
+fn inc_mutation_interleaved_subgraph_fields_stay_in_document_order() {
+    let planner = planner!(
+        config = incremental_config(),
+        a: r#"
+          type Query {
+            x: Int
+          }
+
+          type Mutation {
+            m1: Int
+            m2: Int
+          }
+        "#,
+        b: r#"
+          type Query {
+            y: Int
+          }
+
+          type Mutation {
+            m3: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            m1
+            m3
+            m2
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "a") {
+              {
+                m1
+              }
+            },
+            Fetch(service: "b") {
+              {
+                m3
+              }
+            },
+            Fetch(service: "a") {
+              {
+                m2
               }
             },
           },
