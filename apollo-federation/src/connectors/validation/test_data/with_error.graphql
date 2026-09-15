@@ -12,7 +12,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withError("Unrecognized code:", @)
+        status: code->withProblem("Unrecognized code")
         """
     )
 
@@ -42,7 +42,7 @@ type Query {
         """
     )
 
-    # INVALID - caught at composition: `with_error_shape` returns a
+    # INVALID - caught at composition: `with_problem_shape` returns a
     # `Shape::error`, which the selection walker now reports rather than
     # treating the field as an ordinary scalar leaf.
     noArguments: T
@@ -51,7 +51,29 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withError
+        status: code->withProblem
+        """
+    )
+
+    # INVALID - caught at composition: the arity is exactly one, because the
+    # message is one value and a second argument has no meaning to fall back on.
+    tooManyArguments: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withProblem("saw:", @)
+        """
+    )
+
+    graphQLErrorFromAString: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withError("Field 'code' was not found")
         """
     )
 
@@ -63,7 +85,71 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withError("saw:", @.nonexistent)
+        status: code->withProblem(@.nonexistent)
+        """
+    )
+
+    # Caught: a literal number can never be a valid error argument.
+    scalarConnectorError: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError($(42))
+        """
+    )
+
+    # Caught: a closed object literal with no `message`, which is the
+    # misspelled-key mistake as composition sees it.
+    misspelledMessageKey: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError({ messge: "typo" })
+        """
+    )
+
+    # NOT caught, and a real limit rather than a correct one: the field shape
+    # of a `??` expression is a union, and the validator's per-field arm only
+    # matches a bare error shape, so a mistake inside the right-hand operand
+    # never surfaces here. That matters because `x ?? $(default)->withError(...)`
+    # is the idiomatic form. The runtime diagnostic is the backstop for it.
+    misspelledMessageKeyBehindCoalescing: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withError({ messge: "typo" })
+        """
+    )
+
+    # NOT caught either, and this one predates the type check above: an arity
+    # error is the oldest validation this method has, and it is invisible behind
+    # `??` for the same reason. The gap is the validator's, not the check's.
+    arityErrorBehindCoalescing: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code ?? $("<missing>")->withProblem()
+        """
+    )
+
+    # NOT caught, and correctly so: the argument comes from the API response,
+    # whose shape is unknown, so composition must not refuse it. The runtime
+    # check is what reports this one.
+    connectorErrorFromUnknownShape: T
+    @connect(
+        source: "api"
+        http: { GET: "/t" }
+        selection: """
+        id
+        status: code->withError(whatever)
         """
     )
 }

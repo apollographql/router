@@ -614,7 +614,7 @@ impl<'schema> SelectionValidator<'schema> {
                     // A field whose shape is an error means the mapping that
                     // produces it is malformed — a method called wrongly, most
                     // often. The shape functions already diagnosed it precisely
-                    // (`Error<"Method ->withError requires at least one
+                    // (`Error<"Method ->withProblem requires at least one
                     // argument">`); without this arm that diagnosis is computed
                     // and discarded, the selection type-checks, and the author
                     // finds out only when a request runs and the mapping
