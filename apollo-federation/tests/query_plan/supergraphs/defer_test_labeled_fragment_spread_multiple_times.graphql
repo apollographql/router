@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 38218bc800a062dbfc0c55c25068cf4edd4da2f6
+# Composed from subgraphs with hash: f85c6c55a345b5ab5d65dc4d910cc04cb5ed219a
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -58,7 +58,8 @@ type Query
   @join__type(graph: SUBGRAPH1)
   @join__type(graph: SUBGRAPH2)
 {
-  t: T @join__field(graph: SUBGRAPH1)
+  a: T @join__field(graph: SUBGRAPH1)
+  b: T @join__field(graph: SUBGRAPH1)
 }
 
 type T
