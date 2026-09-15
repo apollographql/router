@@ -1082,8 +1082,14 @@ impl FieldRoutingSearchSpace {
                 break;
             }
         }
-        let guard_after = self.caches.guard_hits.get();
-        if guard_before == guard_after {
+        // Cache when: (a) no guard was hit, so no circular paths
+        // influenced the answer; or (b) the result is false and guard
+        // hits occurred. Case (b) is safe because the guard only hides
+        // circular paths, and circular paths can never make conditions
+        // routable. A true result influenced by guard hits might be
+        // overly optimistic, so we do not cache that.
+        let no_guard_change = self.caches.guard_hits.get() == guard_before;
+        if no_guard_change || !result {
             self.caches
                 .conditions_routable
                 .borrow_mut()
@@ -1153,9 +1159,13 @@ impl FieldRoutingSearchSpace {
             return Ok(false);
         }
         let Some(sub_ss) = sub_ss else {
-            return Ok(true);
+            // Leaf field: any hop with satisfiable conditions can deliver it.
+            return Ok(hops.iter().any(|h| !h.conditions_unroutable));
         };
         for hop in hops {
+            if hop.conditions_unroutable {
+                continue;
+            }
             let (_, target) = self.cached_query_graph.query_graph.edge_endpoints(hop.edge_index())?;
             if self.conditions_routable(target, sub_ss)? {
                 return Ok(true);
