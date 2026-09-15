@@ -358,7 +358,6 @@ impl FetchGraph {
     }
 
     /// Get or create the root hop group for (subgraph, root_kind, merge_at).
-    #[allow(dead_code)] // used by field routing in a later branch
     pub(crate) fn get_or_create_root_hop_group(
         &mut self,
         subgraph: &Arc<str>,
