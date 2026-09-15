@@ -578,6 +578,7 @@ mod tests {
                     .expect("expecting valid JSON"),
                 key: response_key(),
                 problems: mapping_problems,
+                declared_errors: vec![],
             },
         }
     }
@@ -625,6 +626,7 @@ mod tests {
                     .expect("expecting valid JSON"),
                 key: response_key(),
                 problems: vec![],
+                declared_errors: vec![],
             },
         }
     }
