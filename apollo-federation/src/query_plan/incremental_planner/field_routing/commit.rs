@@ -381,6 +381,7 @@ impl FieldRoutingSearchSpace {
     /// Get or create the root hop group for (subgraph, root_kind, merge_at),
     /// falling back to a fresh group when reuse would create a dependency
     /// cycle.
+    #[allow(clippy::too_many_arguments)]
     fn root_hop_group_avoiding_cycles(
         &self,
         state: &mut PlanState,
