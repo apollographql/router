@@ -303,12 +303,63 @@ fn declared_error_for_client(error: RuntimeError, context: &Context) -> Option<g
         return None;
     }
 
+    let coordinate = error.coordinate.clone();
     let mut error: graphql::Error = error.into();
+    stamp_connector_coordinate(&mut error, coordinate);
     IncludeSubgraphErrors::process_error(&config, &mut error);
     error
         .extensions
         .insert(DECLARED_ERROR_MARKER, Value::Bool(true));
     Some(error)
+}
+
+/// Stamp `connector.coordinate` onto a declared error.
+///
+/// The `connector` object inside a declared error's extensions is the
+/// router's, not the mapping author's: its job is to say which `@connect`
+/// produced the error and where in that mapping, so that a reader who wants to
+/// go and look has somewhere to go. This function is the one place that decides
+/// what it holds, and the coordinate it writes wins over anything already
+/// there — an author who writes `connector: { coordinate: ... }` in a
+/// `->withError` argument is describing a connector, not choosing what the
+/// router reports. Keys the router does not claim are left alone.
+///
+/// It exists because [`RuntimeError::extensions`] synthesizes
+/// `connector: { coordinate }` from the error's own field and then finishes
+/// with `extensions.extend(self.extensions.clone())`, which replaces whole
+/// keys. A declared error reaches that point already carrying
+/// `connector: { selectionPath }`, put there by `merge_extension` — which
+/// deep-merges precisely so defaults survive — and the extend undoes that one
+/// line later, taking the coordinate with it.
+///
+/// Repaired here, for declared errors alone, rather than by teaching
+/// [`RuntimeError::extensions`] to deep-merge: that method also serves
+/// `@connect(errors:)` and `map_error`, where an author's `extensions` mapping
+/// overwriting a default is documented behavior, and widening the merge there
+/// would change extensions this feature has no business touching.
+///
+/// Applied before [`IncludeSubgraphErrors::process_error`] so the coordinate is
+/// governed by the extension allow and deny lists exactly like every other
+/// extension, rather than smuggled past them.
+fn stamp_connector_coordinate(error: &mut graphql::Error, coordinate: Option<String>) {
+    let Some(coordinate) = coordinate else {
+        return;
+    };
+
+    let connector = error
+        .extensions
+        .entry("connector")
+        .or_insert_with(|| Value::Object(Map::new()));
+
+    // A non-object `connector` is replaced rather than merged into: whatever it
+    // was, it was not the report this is assembling.
+    if !connector.is_object() {
+        *connector = Value::Object(Map::new());
+    }
+
+    if let Value::Object(connector) = connector {
+        connector.insert("coordinate", Value::String(coordinate.into()));
+    }
 }
 
 pub(crate) fn aggregate_responses(
@@ -482,6 +533,7 @@ mod tests {
     use crate::plugins::connectors::handle_responses::aggregate_responses;
     use crate::plugins::connectors::handle_responses::handle_raw_response;
     use crate::plugins::connectors::handle_responses::process_response;
+    use crate::plugins::connectors::handle_responses::stamp_connector_coordinate;
     use crate::plugins::include_subgraph_errors::config::Config as IncludeSubgraphErrorsConfig;
     use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
     use crate::services::router;
@@ -672,6 +724,115 @@ mod tests {
         // The path resolves against the data above: `account` → `balance`,
         // the field the mapping writes, not `amount`, the field it reads.
         assert_eq!(error.get("path"), Some(&json!(["account", "balance"])));
+    }
+
+    /// The `connector` object is the router's to assemble, so the coordinate
+    /// it stamps is authoritative.
+    ///
+    /// A mapping author can write anything into a `->withError` argument's
+    /// `extensions`, including a `connector` object of their own. They are
+    /// describing a connector, not choosing what the router reports about it,
+    /// so a coordinate they supply does not survive — while keys the router
+    /// does not claim, theirs or `selectionPath`, are left where they are.
+    #[test]
+    fn the_router_owns_the_connector_extension_of_a_declared_error() {
+        let mut error = graphql::Error::builder()
+            .message("bad code")
+            .extension_code("CONNECTORS_MAPPING_ERROR")
+            .extension(
+                "connector",
+                json!({
+                    "coordinate": "somewhere:Else.entirely[9]",
+                    "selectionPath": "rows.0.code",
+                    "note": "an author's own field",
+                }),
+            )
+            .build();
+
+        stamp_connector_coordinate(&mut error, Some("subgraph:Query.rows[0]".to_string()));
+
+        let connector = error
+            .extensions
+            .get("connector")
+            .and_then(|connector| connector.as_object())
+            .expect("the connector extension");
+
+        assert_eq!(
+            connector.get("coordinate"),
+            Some(&json!("subgraph:Query.rows[0]")),
+            "the router's coordinate wins",
+        );
+        assert_eq!(
+            connector.get("selectionPath"),
+            Some(&json!("rows.0.code")),
+            "and nothing else in the object is disturbed",
+        );
+        assert_eq!(connector.get("note"), Some(&json!("an author's own field")));
+    }
+
+    /// With no `connector` extension to merge into, one is created — the
+    /// coordinate is reported either way.
+    #[test]
+    fn a_declared_error_with_no_connector_extension_gains_one() {
+        let mut error = graphql::Error::builder().message("bad code").build();
+
+        stamp_connector_coordinate(&mut error, Some("subgraph:Query.rows[0]".to_string()));
+
+        assert_eq!(
+            error.extensions.get("connector"),
+            Some(&json!({ "coordinate": "subgraph:Query.rows[0]" })),
+        );
+    }
+
+    /// A declared error names where it came from as well as what went wrong:
+    /// `service` for the subgraph, and `connector.coordinate` for the
+    /// `@connect` it was declared in.
+    ///
+    /// This is a regression test with a story. `RuntimeError::extensions`
+    /// synthesizes `connector: { coordinate }` and then lets the error's own
+    /// extensions overwrite whole keys, and a declared error arrives there
+    /// already carrying `connector: { selectionPath }` — so the coordinate was
+    /// being dropped, silently, in the one place a reader would go looking for
+    /// which connector to blame. Nothing caught it: the existing test that
+    /// reads the `connector` object asserts only `selectionPath`.
+    ///
+    /// Both keys are asserted together deliberately. The bug was one key
+    /// evicting the other, so a test that checks either alone would pass while
+    /// the object is still wrong.
+    #[test]
+    fn a_declared_error_names_its_connector_and_its_subgraph() {
+        // A `->withError` inside a `->map`, because that is the shape whose
+        // error carries a `selectionPath` — and the eviction only happens when
+        // both keys want the same object. `mapped_with_structured_declared_error`
+        // declares on a literal, whose input path is empty, so its `connector`
+        // object never had a selection path to collide with.
+        let (mapped, _connector) = mapped_with_declared_errors(1);
+        let aggregated = aggregate_responses(
+            vec![mapped],
+            included_subgraph_errors(serde_json::json!(true)),
+        )
+        .expect("aggregation succeeds");
+        let response = aggregated.response.into_body();
+
+        assert_eq!(response.errors.len(), 1);
+        let extensions = &response.errors[0].extensions;
+
+        assert_eq!(extensions.get("service"), Some(&json!("subgraph_name")));
+
+        let connector = extensions
+            .get("connector")
+            .and_then(|connector| connector.as_object())
+            .expect("the connector extension");
+        assert!(
+            connector.contains_key("coordinate"),
+            "the coordinate identifies which `@connect` declared this, and is \
+             the half that was being evicted; got: {connector:?}",
+        );
+        assert!(
+            connector.contains_key("selectionPath"),
+            "the selection path says where in the mapping it was declared; \
+             got: {connector:?}",
+        );
     }
 
     /// `include_subgraph_errors` governs these too. An operator who has said a
