@@ -562,6 +562,8 @@ async fn test_router_oci_boots_unlicensed_without_entitlement_layer() -> Result<
     let mut router = IntegrationTest::builder()
         .config(MIN_CONFIG)
         .env(HashMap::from([(
+            // A graph artifact reference in the config ensures that the
+            // Router goes through OCI for its license
             String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
             artifact_reference.into(),
         )]))
@@ -571,8 +573,13 @@ async fn test_router_oci_boots_unlicensed_without_entitlement_layer() -> Result<
         .await;
 
     router.start().await;
-    // Bounded by `assert_started`'s own timeout: this must not hang.
+    // Bounded by `assert_started`'s own timeout: this must not hang
     router.assert_started().await;
+    // Although the assertion above ensures that router did not hang on startup,
+    // check explicitly that it is running unlicensed
+    router
+        .wait_for_log_message("UpdateLicense(Unlicensed)")
+        .await;
     router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
