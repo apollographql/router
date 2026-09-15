@@ -196,7 +196,11 @@ enum FetchGraphOp {
 enum GroupKey {
     Root(Arc<str>),
     Entity(Arc<str>, Vec<FetchDataPathElement>),
-    RootHop(Arc<str>, SchemaRootDefinitionKind, Vec<FetchDataPathElement>),
+    RootHop(
+        Arc<str>,
+        SchemaRootDefinitionKind,
+        Vec<FetchDataPathElement>,
+    ),
 }
 
 /// The reuse-slot key for a node.
