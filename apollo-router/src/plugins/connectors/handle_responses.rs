@@ -453,7 +453,7 @@ fn log_connectors_event(
                     data: Value::Null,
                     key: response_key,
                     problems: vec![],
-                    errors: vec![],
+                    declared_errors: vec![],
                 },
             };
             if event.condition.evaluate_response(&response) {
@@ -1248,10 +1248,13 @@ mod tests {
     fn every_declared_error_is_reported() {
         let (mapped, _connector) = mapped_with_declared_errors(250);
 
-        let MappedResponse::Data { errors, .. } = &mapped else {
+        let MappedResponse::Data {
+            declared_errors, ..
+        } = &mapped
+        else {
             panic!("expected data, got: {mapped:?}");
         };
-        assert_eq!(errors.len(), 250);
+        assert_eq!(declared_errors.len(), 250);
     }
 
     #[test]

@@ -612,11 +612,12 @@ impl<'schema> SelectionValidator<'schema> {
                     }
 
                     // A field whose shape is an error means the mapping that
-                    // produces it is malformed — a method called wrongly, most
+                    // produces it is malformed: a method called wrongly, most
                     // often. The shape functions already diagnosed it precisely
-                    // (`Error<"Method ->withProblem requires at least one
-                    // argument">`); without this arm that diagnosis is computed
-                    // and discarded, the selection type-checks, and the author
+                    // (`Error<"Method ->withProblem requires exactly one
+                    // argument, the value to record as the message, got 0">`);
+                    // without this arm that diagnosis is computed and
+                    // discarded, the selection type-checks, and the author
                     // finds out only when a request runs and the mapping
                     // silently produces nothing. Reported here rather than in
                     // the terminal `ShapeCase::Error` arm below because an

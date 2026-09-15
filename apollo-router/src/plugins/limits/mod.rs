@@ -949,7 +949,7 @@ mod test {
                 data: Value::Null,
                 key: req.key.clone(),
                 problems: vec![],
-                errors: vec![],
+                declared_errors: vec![],
             },
         }
     }

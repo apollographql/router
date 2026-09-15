@@ -160,7 +160,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
         data,
         key,
         problems,
-        errors,
+        declared_errors,
     } = response
     else {
         return response;
@@ -171,7 +171,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
             data,
             key,
             problems,
-            errors,
+            declared_errors,
         };
     }
 
@@ -215,7 +215,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
         // though, and a mapping author debugging a shape violation wants to
         // see them, so they are demoted to problems rather than dropped.
         let mut problems = problems;
-        problems.extend(errors.into_iter().map(|declared| Problem {
+        problems.extend(declared_errors.into_iter().map(|declared| Problem {
             message: format!(
                 "Declared error not reported to the client because the response \
                  failed its shape check: {}",
@@ -236,7 +236,7 @@ fn check_response_shape(connector: &Connector, response: MappedResponse) -> Mapp
             data,
             key,
             problems,
-            errors,
+            declared_errors,
         }
     }
 }
@@ -566,7 +566,7 @@ pub(super) fn map_response(
     // Every declared error the mapping produced is built here, and none is
     // dropped or summarized away, the same way the router passes through every
     // error a subgraph returns.
-    let errors = declared
+    let declared_errors = declared
         .iter()
         .map(|error| declared_error_to_runtime_error(error, &key, connector))
         .collect::<Vec<_>>();
@@ -575,7 +575,7 @@ pub(super) fn map_response(
         key,
         data: res.unwrap_or_else(|| Value::Null),
         problems: warnings,
-        errors,
+        declared_errors,
     }
 }
 
@@ -712,7 +712,7 @@ pub enum MappedResponse {
         /// deliberately leaves them alone.
         ///
         /// [spec]: https://spec.graphql.org/draft/#sec-Errors.Execution-Errors
-        errors: Vec<RuntimeError>,
+        declared_errors: Vec<RuntimeError>,
     },
 }
 
@@ -726,7 +726,9 @@ impl MappedResponse {
     pub fn take_declared_errors(&mut self) -> Vec<RuntimeError> {
         match self {
             Self::Error { .. } => Vec::new(),
-            Self::Data { errors, .. } => std::mem::take(errors),
+            Self::Data {
+                declared_errors, ..
+            } => std::mem::take(declared_errors),
         }
     }
 
@@ -893,7 +895,7 @@ impl MappedResponse {
                     data,
                     key,
                     problems,
-                    errors,
+                    declared_errors,
                 },
                 Some(operation),
             ) => {
@@ -1034,7 +1036,7 @@ impl MappedResponse {
                     data,
                     key,
                     problems,
-                    errors,
+                    declared_errors,
                 }
             }
 
@@ -1197,7 +1199,7 @@ mod tests {
             },
             data: mapped_data,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = response.apply_operation(Some(&*operation), &Default::default());
@@ -1622,7 +1624,7 @@ mod tests {
             data: json!({"id": 1, "title": "First"}),
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1648,7 +1650,7 @@ mod tests {
             data: json!([{"id": 1}, {"id": 2}]),
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1674,7 +1676,7 @@ mod tests {
             data: Value::Null,
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1696,7 +1698,7 @@ mod tests {
             data: json!([{"id": 1}, {"id": 2}]),
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1719,7 +1721,7 @@ mod tests {
             data: Value::Null,
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);
@@ -1746,7 +1748,7 @@ mod tests {
             data: json!({"id": 1, "title": "First"}),
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         let result = super::check_response_shape(&connector, response);

@@ -233,7 +233,7 @@ mod tests {
                             .expect("expecting valid JSON"),
                         key: request.key.clone(),
                         problems: vec![],
-                        errors: vec![],
+                        declared_errors: vec![],
                     },
                 })
                 .await
@@ -323,7 +323,7 @@ mod tests {
                             .expect("expecting valid JSON"),
                         key: request.key.clone(),
                         problems: vec![],
-                        errors: vec![],
+                        declared_errors: vec![],
                     },
                 })
                 .await

@@ -93,19 +93,22 @@ pub(crate) fn count_connector_errors(
     response: &crate::services::connector::request_service::Response,
     errors_config: &ErrorsConfiguration,
 ) {
-    let MappedResponse::Data { errors, .. } = &response.mapped_response else {
+    let MappedResponse::Data {
+        declared_errors, ..
+    } = &response.mapped_response
+    else {
         // A failed response reports one error explaining the failure, which is
         // counted where every other connector error is: at the execution layer,
         // once it reaches the `errors` array.
         return;
     };
-    if errors.is_empty() {
+    if declared_errors.is_empty() {
         return;
     }
 
     // `RuntimeError::extensions` stamps `service` and the connector's
     // coordinate, so the counted attributes match what the client would see.
-    let errors: Vec<Error> = errors.iter().cloned().map(Into::into).collect();
+    let errors: Vec<Error> = declared_errors.iter().cloned().map(Into::into).collect();
     count_operation_errors(
         errors.iter(),
         &response.context,

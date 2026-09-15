@@ -2169,7 +2169,7 @@ mod tests {
             data: mapped_data.unwrap_or(Value::Null),
             key,
             problems: vec![],
-            errors: vec![],
+            declared_errors: vec![],
         };
 
         // Apply GraphQL operation aliases.

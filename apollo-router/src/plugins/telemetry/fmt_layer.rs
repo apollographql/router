@@ -962,7 +962,7 @@ connector:
                                 location: ProblemLocation::Selection,
                             },
                         ],
-                        errors: vec![],
+                        declared_errors: vec![],
                     },
                 };
                 connector_events.on_response(&connector_response);
@@ -1400,7 +1400,7 @@ subgraph:
                                 location: ProblemLocation::Selection,
                             },
                         ],
-                        errors: vec![],
+                        declared_errors: vec![],
                     },
                 };
                 connector_events.on_response(&connector_response);
