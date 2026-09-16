@@ -21,7 +21,6 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
-use petgraph::visit::EdgeRef;
 #[allow(unused_imports)]
 pub(crate) use state::PendingSelection;
 #[allow(unused_imports)]
@@ -117,15 +116,6 @@ impl FieldRoutingSearchSpace {
         let satisfiable = self.can_satisfy(conditions, &source.type_pos, &source.schema)
             || self.conditions_resolvable_at_node(node, conditions)?;
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
-    }
-
-    /// Outgoing edge indices from a query graph node, sorted and filtered.
-    pub(super) fn out_edge_indices(&self, node: NodeIndex) -> Vec<EdgeIndex> {
-        self.query_graph
-            .out_edges(node)
-            .into_iter()
-            .map(|edge_ref| edge_ref.id())
-            .collect()
     }
 
     /// Find the outgoing edge for a field at a query graph node.

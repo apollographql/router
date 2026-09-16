@@ -7,12 +7,12 @@ use super::super::shared_path::SharedPath;
 use crate::operation::DirectiveList;
 use crate::query_graph::graph_path::operation::OpPathElement;
 
-/// The trailing inline-fragment elements of `op_path` (after the last field)
-/// that carry @skip/@include conditions at the current position, which a key
-/// hop must carry into the entity fetch's op path or the hopped selections
-/// lose their gating. Only the condition directives are carried. Conditions
-/// before the last field are deliberately kept by neither helper: the
-/// parent fetch's data dependence already gates them.
+/// Trailing inline-fragment elements of `op_path` (after the last field)
+/// that carry @skip/@include, which a key hop must carry into the entity
+/// fetch's op path. Only condition directives are kept.
+///
+/// FIXME: non-trailing conditions are not propagated across key hops.
+/// See `non_trailing_skip_is_dropped`.
 pub(super) fn trailing_condition_fragments(
     op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Vec<Arc<OpPathElement>> {
@@ -111,6 +111,28 @@ mod tests {
         }))
     }
 
+    fn field_element() -> Arc<OpPathElement> {
+        let schema = apollo_compiler::schema::Schema::parse_and_validate(
+            "type Query { x: Int }",
+            "schema.graphql",
+        )
+        .expect("valid schema");
+        let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
+        Arc::new(OpPathElement::Field(crate::operation::Field {
+            schema,
+            field_position: crate::schema::position::FieldDefinitionPosition::Object(
+                ObjectTypeDefinitionPosition {
+                    type_name: name!("Query"),
+                }
+                .field(name!("x")),
+            ),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
     /// Only @skip/@include are Boolean conditions a key hop must replay
     /// into the entity fetch. A fragment carrying an unrelated directive
     /// (e.g. @defer) is not a condition, matching the filter used by
@@ -125,6 +147,23 @@ mod tests {
             trailing_condition_fragments(&other).len(),
             0,
             "a non-condition directive must not be treated as @skip/@include",
+        );
+    }
+
+    /// A @skip/@include before (not after) the last field is dropped.
+    /// The JS planner propagates all path conditions via OpGraphPathContext;
+    /// this helper only captures trailing ones, so a non-trailing condition
+    /// can be bypassed when a separate unconditional path satisfies the
+    /// same data dependency.
+    #[test]
+    fn non_trailing_skip_is_dropped() {
+        let path = SharedPath::new()
+            .pushed(fragment_with_directive("skip"))
+            .pushed(field_element());
+        assert_eq!(
+            trailing_condition_fragments(&path).len(),
+            0,
+            "known gap: non-trailing @skip is not propagated across key hops",
         );
     }
 }
