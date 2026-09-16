@@ -33,6 +33,7 @@ pub(super) fn search_space(subgraphs: &[(&str, &str)]) -> FieldRoutingSearchSpac
         supergraph_schema: schema,
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
+        connector_index: Default::default(),
     }
 }
 
