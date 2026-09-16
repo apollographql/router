@@ -393,7 +393,12 @@ impl InstrumentData {
             opt.spans.supergraph,
             "$..spans.supergraph",
             opt.tracing.common.sampler,
-            "$..tracing.common.sampler"
+            "$..tracing.common.sampler",
+            // BEGIN/END ROUTER-2060
+            opt.tracing
+                .propagation
+                .preserve_trace_context_on_subgraph_requests,
+            "$..tracing.propagation[?(@.preserve_trace_context_on_subgraph_requests==true)]"
         );
 
         populate_config_instrument!(
