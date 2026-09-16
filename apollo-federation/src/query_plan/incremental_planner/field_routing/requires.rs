@@ -81,6 +81,7 @@ mod tests {
     use apollo_compiler::name;
 
     use super::*;
+    use crate::operation::Field;
     use crate::operation::InlineFragment;
     use crate::operation::SelectionId;
     use crate::schema::ValidFederationSchema;
@@ -118,7 +119,7 @@ mod tests {
         )
         .expect("valid schema");
         let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
-        Arc::new(OpPathElement::Field(crate::operation::Field {
+        Arc::new(OpPathElement::Field(Field {
             schema,
             field_position: crate::schema::position::FieldDefinitionPosition::Object(
                 ObjectTypeDefinitionPosition {
