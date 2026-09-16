@@ -168,9 +168,23 @@ Limits the total number of selections encountered when recursively expanding fra
 
 The default value is `10000000` (10 million). This limit is available on all plans and does not require a license.
 
+### Non-local-selections limit
+
+The router estimates the work needed to plan an operation across subgraphs and rejects the operation if that estimate exceeds a limit. The estimate accounts for selections that require the planner to explore fetch options and the possible starting points for those options, so it can exceed the number of fields in the operation.
+
+When the estimate exceeds the limit, the router rejects the operation with a 400 HTTP status code and a GraphQL error with `"extensions": {"code": "QUERY_PLAN_COMPLEXITY_EXCEEDED"}`. The router enforces this limit in [`warn_only` mode](#warn_only-mode) too. This limit is available on all plans and does not require a license.
+
+Unlike the limits above, this one is not a YAML config option. The default is `100000`; set the `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT` environment variable to raise it for operations that legitimately exceed the default:
+
+```bash
+export APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT=250000
+```
+
+Setting the `APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK` environment variable to `true` disables this check entirely, leaving query planning without this protection.
+
 ### `warn_only` mode
 
-If you run your router in `warn_only` mode, operations that exceed defined limits are _not_ rejected. Instead, the router processes these operations as usual and emits a `WARN` trace that notes all exceeded limits, like so:
+In `warn_only` mode, the router executes operations that exceed `max_depth`, `max_height`, `max_aliases`, `max_root_fields`, or `max_recursive_selections` and emits a `WARN` trace with the exceeded limits:
 
 ```
 2023-03-15T19:08:23.123456Z WARN apollo_router::operation_limits: max_depth exceeded, max_depth: 3, current_op_depth: 5, operation: "query GetOwnerLocation {cat {owner {location {postalCode}}}}"
@@ -207,7 +221,7 @@ Whenever your router rejects a request because it exceeds an operation limit, th
 }
 ```
 
-If you run your router in [`warn_only` mode](#warn_only-mode), the router logs the limit violation but executes the operation as normal, returning a 200 status code with the expected response.
+In [`warn_only` mode](#warn_only-mode), violations of `max_depth`, `max_height`, `max_aliases`, `max_root_fields`, and `max_recursive_selections` allow execution to continue. Other limits, including the [non-local-selections limit](#non-local-selections-limit), still reject operations that exceed them.
 
 ### Using telemetry to set operation-based limits
 
