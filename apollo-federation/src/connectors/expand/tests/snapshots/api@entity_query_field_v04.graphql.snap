@@ -13,6 +13,12 @@ type Query {
   reference resolution through here, where `$args` is empty.
   """
   tractor(id: ID!): Tractor
+  """
+  A second non-entity root field that returns only `id`, so resolving `name`
+  forces an entity fetch. That fetch must land on the `$this` reference
+  resolver on `Tractor`, never on the `$args` connector above.
+  """
+  seed: Tractor
 }
 
 type Tractor {

@@ -3,7 +3,7 @@ source: apollo-federation/src/connectors/expand/tests/mod.rs
 expression: raw_sdl
 input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_query_field_v04.graphql
 ---
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/connect/v0.4", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_TRACTOR_0, CONNECTORS_TRACTOR_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"]}) {
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) @link(url: "https://specs.apollo.dev/connect/v0.4", for: EXECUTION) @join__directive(graphs: [CONNECTORS_QUERY_TRACTOR_0, CONNECTORS_QUERY_SEED_0, CONNECTORS_TRACTOR_0], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.4", import: ["@connect", "@source"]}) {
   query: Query
 }
 
@@ -50,16 +50,18 @@ input join__ContextArgument {
 scalar join__DirectiveArguments
 
 enum join__Graph {
+  CONNECTORS_QUERY_SEED_0 @join__graph(name: "connectors_Query_seed_0", url: "none")
   CONNECTORS_QUERY_TRACTOR_0 @join__graph(name: "connectors_Query_tractor_0", url: "none")
   CONNECTORS_TRACTOR_0 @join__graph(name: "connectors_Tractor_0", url: "none")
 }
 
-type Tractor @join__type(graph: CONNECTORS_QUERY_TRACTOR_0) @join__type(graph: CONNECTORS_TRACTOR_0, key: "id") {
-  id: ID! @join__field(graph: CONNECTORS_QUERY_TRACTOR_0, type: "ID!") @join__field(graph: CONNECTORS_TRACTOR_0, type: "ID!")
+type Tractor @join__type(graph: CONNECTORS_QUERY_SEED_0) @join__type(graph: CONNECTORS_QUERY_TRACTOR_0) @join__type(graph: CONNECTORS_TRACTOR_0, key: "id") {
+  id: ID! @join__field(graph: CONNECTORS_QUERY_SEED_0, type: "ID!") @join__field(graph: CONNECTORS_QUERY_TRACTOR_0, type: "ID!") @join__field(graph: CONNECTORS_TRACTOR_0, type: "ID!")
   name: String @join__field(graph: CONNECTORS_QUERY_TRACTOR_0, type: "String") @join__field(graph: CONNECTORS_TRACTOR_0, type: "String")
 }
 
-type Query @join__type(graph: CONNECTORS_QUERY_TRACTOR_0) @join__type(graph: CONNECTORS_TRACTOR_0) {
+type Query @join__type(graph: CONNECTORS_QUERY_SEED_0) @join__type(graph: CONNECTORS_QUERY_TRACTOR_0) @join__type(graph: CONNECTORS_TRACTOR_0) {
+  seed: Tractor @join__field(graph: CONNECTORS_QUERY_SEED_0, type: "Tractor")
   tractor(id: ID!): Tractor @join__field(graph: CONNECTORS_QUERY_TRACTOR_0, type: "Tractor")
   _: ID @inaccessible @join__field(graph: CONNECTORS_TRACTOR_0, type: "ID")
 }

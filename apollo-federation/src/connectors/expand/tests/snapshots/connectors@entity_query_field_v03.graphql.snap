@@ -216,6 +216,128 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_
             "connectors.v1 http: GET /tractors?id={$args.id}",
         ),
     },
+    "connectors_Query_seed_0": Connector {
+        id: ConnectId {
+            subgraph_name: "connectors",
+            source_name: Some(
+                "v1",
+            ),
+            named: None,
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.seed),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
+        },
+        transport: Some(
+            HttpJsonTransport {
+                source_template: Some(
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "http://127.0.0.1",
+                                    location: 0..16,
+                                },
+                            ),
+                        ],
+                    },
+                ),
+                connect_template: StringTemplate {
+                    parts: [
+                        Constant(
+                            Constant {
+                                value: "/seed",
+                                location: 0..5,
+                            },
+                        ),
+                    ],
+                },
+                method: Get,
+                headers: [],
+                body: None,
+                source_path: None,
+                source_query_params: None,
+                connect_path: None,
+                connect_query_params: None,
+            },
+        ),
+        selection: JSONSelection {
+            inner: Named(
+                SubSelection {
+                    selections: [
+                        NamedSelection {
+                            prefix: None,
+                            path: WithRange {
+                                node: Path(
+                                    PathSelection {
+                                        path: WithRange {
+                                            node: Key(
+                                                WithRange {
+                                                    node: Field(
+                                                        "id",
+                                                    ),
+                                                    range: Some(
+                                                        0..2,
+                                                    ),
+                                                },
+                                                WithRange {
+                                                    node: Empty,
+                                                    range: Some(
+                                                        2..2,
+                                                    ),
+                                                },
+                                            ),
+                                            range: Some(
+                                                0..2,
+                                            ),
+                                        },
+                                    },
+                                ),
+                                range: Some(
+                                    0..2,
+                                ),
+                            },
+                        },
+                    ],
+                    range: Some(
+                        0..2,
+                    ),
+                },
+            ),
+            spec: V0_3,
+        },
+        config: None,
+        max_requests: None,
+        entity_resolver: None,
+        spec: V0_3,
+        schema_subtypes_map: {
+            "_Entity": {
+                "Tractor",
+            },
+        },
+        request_headers: {},
+        response_headers: {},
+        request_variable_keys: {},
+        response_variable_keys: {},
+        batch_settings: None,
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            source_extensions: None,
+            connect_extensions: None,
+            connect_is_success: None,
+        },
+        output_type: Some(
+            Named(
+                "Tractor",
+            ),
+        ),
+        label: Label(
+            "connectors.v1 http: GET /seed",
+        ),
+    },
     "connectors_Tractor_0": Connector {
         id: ConnectId {
             subgraph_name: "connectors",

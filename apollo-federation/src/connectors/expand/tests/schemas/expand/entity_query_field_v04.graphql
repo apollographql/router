@@ -65,6 +65,13 @@ type Query
   reference resolution through here, where `$args` is empty.
   """
   tractor(id: ID!): Tractor @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "v1", http: {GET: "/tractors?id={$args.id}"}, selection: "id name"})
+
+  """
+  A second non-entity root field that returns only `id`, so resolving `name`
+  forces an entity fetch. That fetch must land on the `$this` reference
+  resolver on `Tractor`, never on the `$args` connector above.
+  """
+  seed: Tractor @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "v1", http: {GET: "/seed"}, selection: "id"})
 }
 
 type Tractor
