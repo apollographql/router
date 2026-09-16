@@ -61,6 +61,8 @@ type User @join__type(graph: CONNECTOR, key: "id") {
 
 scalar connect__JSONSelection @join__type(graph: CONNECTOR)
 
+scalar connect__Methods @join__type(graph: CONNECTOR)
+
 scalar connect__URLTemplate @join__type(graph: CONNECTOR)
 
 input connect__ConnectorErrors @join__type(graph: CONNECTOR) {

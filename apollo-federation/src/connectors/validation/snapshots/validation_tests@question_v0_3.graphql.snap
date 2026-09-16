@@ -1,9 +1,16 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", result.errors)"
+expression: result.errors
 input_file: apollo-federation/src/connectors/validation/test_data/question_v0_3.graphql
 ---
 [
+    Message {
+        code: UnknownMethodLegacySpec,
+        message: "`@connect(selection:)` calls `->d`, which is not a built-in method. Check the spelling — this call will produce no value at request time.",
+        locations: [
+            18:18..25:10,
+        ],
+    },
     Message {
         code: InvalidSelection,
         message: "`@connect(selection:)` on `Query.invalid_question_subselection` is not valid: nom::error::ErrorKind::Eof: ?",
