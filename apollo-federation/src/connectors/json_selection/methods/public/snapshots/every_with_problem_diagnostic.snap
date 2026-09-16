@@ -1,0 +1,20 @@
+---
+source: apollo-federation/src/connectors/json_selection/methods/public/with_problem.rs
+expression: report
+---
+no arguments
+  $->withProblem
+    [Diagnostic] Method ->withProblem requires exactly one argument, the value to record as the message, got 0
+
+two arguments
+  $->withProblem("a", "b")
+    [Diagnostic] Method ->withProblem("a", "b") requires exactly one argument, the value to record as the message, got 2
+
+an argument that produces nothing
+  $->withProblem(@.nope)
+    [Diagnostic] Property .nope not found in object
+    [Diagnostic] Method ->withProblem(@.nope) recorded no message because argument @.nope produced no value
+
+a non-string argument, which is serialized rather than refused
+  $->withProblem($(42))
+    [Diagnostic] 42

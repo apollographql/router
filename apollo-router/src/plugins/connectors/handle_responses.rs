@@ -30,6 +30,9 @@ use tracing::Span;
 use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
+use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
+use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
 use crate::plugins::limits::ConnectorResponseSizeLimit;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
@@ -262,15 +265,114 @@ where
     }
 }
 
+/// Build the client-facing form of one error a mapping declared with
+/// `->withError`, or `None` if `include_subgraph_errors` says this subgraph's
+/// errors must not reach clients.
+///
+/// The configuration is applied *here*, where the error is built, rather than
+/// on the way out. The redaction pass that governs the `errors` array runs at
+/// the supergraph response and these are no longer in that array by then — but
+/// the more useful reason is that an excluded error can simply not be built.
+/// Redacting one after the fact would leave `extensions.connectorErrors`
+/// carrying a row that says "Subgraph errors redacted" and nothing else, which
+/// tells a client only that something was withheld.
+///
+/// Everything short of exclusion is delegated to the same
+/// [`IncludeSubgraphErrors::process_error`] the `errors` array goes through, so
+/// `redact_message` and the extension allow/deny lists mean exactly what they
+/// mean everywhere else. The marker is added afterwards: an allow list would
+/// otherwise filter it out, and an error that loses its marker never leaves
+/// the `errors` array.
+///
+/// Telemetry is unaffected by the decision: the declared errors were counted at
+/// the connector, before this runs (see `count_connector_errors`), so an error
+/// withheld from clients still shows up in error metrics.
+///
+/// With no configuration published — which in a running router means the
+/// mandatory `include_subgraph_errors` plugin did not see this request — the
+/// error is dropped. Failing closed, because the alternative is a config that
+/// exists to keep subgraph text away from clients being bypassed by a code
+/// path that could not read it.
+fn declared_error_for_client(error: RuntimeError, context: &Context) -> Option<graphql::Error> {
+    let config = context
+        .extensions()
+        .with_lock(|lock| lock.get::<Arc<EffectiveConfig>>().cloned())?;
+
+    let subgraph_name = error.subgraph_name.clone()?;
+    if !config.for_subgraph(&subgraph_name).include_errors {
+        return None;
+    }
+
+    let coordinate = error.coordinate.clone();
+    let mut error: graphql::Error = error.into();
+    stamp_connector_coordinate(&mut error, coordinate);
+    IncludeSubgraphErrors::process_error(&config, &mut error);
+    error
+        .extensions
+        .insert(DECLARED_ERROR_MARKER, Value::Bool(true));
+    Some(error)
+}
+
+/// Stamp `connector.coordinate` onto a declared error.
+///
+/// The `connector` object inside a declared error's extensions is the
+/// router's, not the mapping author's: its job is to say which `@connect`
+/// produced the error and where in that mapping, so that a reader who wants to
+/// go and look has somewhere to go. This function is the one place that decides
+/// what it holds, and the coordinate it writes wins over anything already
+/// there — an author who writes `connector: { coordinate: ... }` in a
+/// `->withError` argument is describing a connector, not choosing what the
+/// router reports. Keys the router does not claim are left alone.
+///
+/// It exists because [`RuntimeError::extensions`] synthesizes
+/// `connector: { coordinate }` from the error's own field and then finishes
+/// with `extensions.extend(self.extensions.clone())`, which replaces whole
+/// keys. A declared error reaches that point already carrying
+/// `connector: { selectionPath }`, put there by `merge_extension` — which
+/// deep-merges precisely so defaults survive — and the extend undoes that one
+/// line later, taking the coordinate with it.
+///
+/// Repaired here, for declared errors alone, rather than by teaching
+/// [`RuntimeError::extensions`] to deep-merge: that method also serves
+/// `@connect(errors:)` and `map_error`, where an author's `extensions` mapping
+/// overwriting a default is documented behavior, and widening the merge there
+/// would change extensions this feature has no business touching.
+///
+/// Applied before [`IncludeSubgraphErrors::process_error`] so the coordinate is
+/// governed by the extension allow and deny lists exactly like every other
+/// extension, rather than smuggled past them.
+fn stamp_connector_coordinate(error: &mut graphql::Error, coordinate: Option<String>) {
+    let Some(coordinate) = coordinate else {
+        return;
+    };
+
+    let connector = error
+        .extensions
+        .entry("connector")
+        .or_insert_with(|| Value::Object(Map::new()));
+
+    // A non-object `connector` is replaced rather than merged into: whatever it
+    // was, it was not the report this is assembling.
+    if !connector.is_object() {
+        *connector = Value::Object(Map::new());
+    }
+
+    if let Value::Object(connector) = connector {
+        connector.insert("coordinate", Value::String(coordinate.into()));
+    }
+}
+
 pub(crate) fn aggregate_responses(
     responses: Vec<MappedResponse>,
-    _context: Context,
+    context: Context,
 ) -> Result<Response, HandleResponseError> {
     let mut data = serde_json_bytes::Map::new();
     let mut errors = Vec::new();
+    let mut declared = Vec::new();
     let count = responses.len();
 
-    for mapped in responses {
+    for mut mapped in responses {
+        declared.extend(mapped.take_declared_errors());
         mapped.add_to_data(&mut data, &mut errors, count)?;
     }
 
@@ -280,6 +382,11 @@ pub(crate) fn aggregate_responses(
         Value::Object(data)
     };
 
+    // The span reports the *request's* outcome, so it is failed when the
+    // request failed and not otherwise. Declared errors are excluded because
+    // nothing failed: the request succeeded and the mapping author chose to say
+    // something about its contents. They are still counted as errors, at the
+    // connector layer — see `count_connector_errors`.
     Span::current().record(
         OTEL_STATUS_CODE,
         if errors.is_empty() {
@@ -289,12 +396,25 @@ pub(crate) fn aggregate_responses(
         },
     );
 
+    // Declared errors ride in the `errors` array only as far as the fetch
+    // service, which lifts them back out. They travel that way — rather than
+    // straight to the context — because it is the only way they get a response
+    // path a client can use: `FetchNode::response_at_path` is what rewrites
+    // `_entities/0/balance` into the client paths the entity landed at, and it
+    // rewrites nothing else. See `DECLARED_ERROR_MARKER`.
+    let mut errors: Vec<graphql::Error> = errors.into_iter().map(Into::into).collect();
+    errors.extend(
+        declared
+            .into_iter()
+            .filter_map(|error| declared_error_for_client(error, &context)),
+    );
+
     Ok(Response {
         response: http::Response::builder()
             .body(
                 graphql::Response::builder()
                     .data(data)
-                    .errors(errors.into_iter().map(|e| e.into()).collect())
+                    .errors(errors)
                     .build(),
             )
             .unwrap(),
@@ -333,6 +453,7 @@ fn log_connectors_event(
                     data: Value::Null,
                     key: response_key,
                     problems: vec![],
+                    declared_errors: vec![],
                 },
             };
             if event.condition.evaluate_response(&response) {
@@ -386,6 +507,7 @@ mod tests {
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
     use apollo_compiler::response::JsonValue;
+    use apollo_federation::connectors::ApplyToErrorKind;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
     use apollo_federation::connectors::Connector;
@@ -400,21 +522,50 @@ mod tests {
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
+    use insta::assert_snapshot;
     use itertools::Itertools;
     use serde_json_bytes::json;
 
     use crate::Context;
     use crate::graphql;
+    use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
+    use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
+    use crate::plugins::connectors::handle_responses::MappedResponse;
+    use crate::plugins::connectors::handle_responses::aggregate_responses;
+    use crate::plugins::connectors::handle_responses::handle_raw_response;
     use crate::plugins::connectors::handle_responses::process_response;
+    use crate::plugins::connectors::handle_responses::stamp_connector_coordinate;
+    use crate::plugins::include_subgraph_errors::config::Config as IncludeSubgraphErrorsConfig;
+    use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
-    /// `->withError` has to be reachable from a connector schema, and the
+    /// `->withProblem` has to be reachable from a connector schema, and the
     /// `is_public()` gate that decides so cannot be observed from
     /// apollo-federation's own tests: `ArrowMethod::lookup` resolves every
     /// method under `cfg!(test)`, public or not. Here apollo-federation is a
     /// dependency compiled without `--test`, so the gate is live and demoting
-    /// `->withError` back to the `future` namespace fails this test.
+    /// `->withProblem` back to the `future` namespace fails this test.
+    #[test]
+    fn with_problem_is_available_to_connector_schemas() {
+        let selection =
+            JSONSelection::parse("id status: code->withProblem('unrecognized type code')").unwrap();
+
+        let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
+
+        // The value flows through untouched: ->withProblem records, never rewrites.
+        assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
+        assert_eq!(
+            errors.iter().map(|error| error.message()).collect_vec(),
+            vec!["unrecognized type code"],
+        );
+    }
+
+    /// The same gate, for the method that actually reaches clients. Worth its
+    /// own test rather than trusting the one above: `->withError` is
+    /// newer, its `is_public()` is a separate decision, and a connector schema
+    /// that cannot call it is the one failure that would make this whole
+    /// feature unreachable while every apollo-federation test still passed.
     #[test]
     fn with_error_is_available_to_connector_schemas() {
         let selection =
@@ -422,12 +573,688 @@ mod tests {
 
         let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
 
-        // The value flows through untouched: ->withError records, never rewrites.
         assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
         assert_eq!(
             errors.iter().map(|error| error.message()).collect_vec(),
             vec!["unrecognized type code"],
         );
+        // And it is the client-facing kind, which is the whole point of the
+        // method being reachable at all.
+        assert_eq!(errors[0].kind(), ApplyToErrorKind::Declared);
+    }
+
+    /// The customer-facing payload of a declared `->withError`: the author's
+    /// message, code and structured fields, intact, while the field it
+    /// accompanies still resolves.
+    ///
+    /// It leaves `aggregate_responses` in the subgraph response's `errors`,
+    /// marked — that is the ride to the fetch service, which is the only place
+    /// paths get rewritten — and this asserts both halves: the marker is on it
+    /// there, and `take_marked` lifts it back out, leaving nothing behind in
+    /// `errors` for a client to see as an execution error.
+    /// A `Context` carrying the effective `include_subgraph_errors`
+    /// configuration the mandatory plugin publishes for every request, built
+    /// from the same YAML shape an operator writes under `all:`.
+    fn included_subgraph_errors(config: serde_json::Value) -> Context {
+        let config: IncludeSubgraphErrorsConfig =
+            serde_json::from_value(serde_json::json!({ "all": config })).expect("valid config");
+        let effective: EffectiveConfig = config.try_into().expect("valid effective config");
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<Arc<EffectiveConfig>>(Arc::new(effective)));
+        context
+    }
+
+    /// Map `input` through `selection` as the root field `field`, the way a
+    /// connector response is mapped, and hand back the result for aggregation.
+    ///
+    /// The generic form of [`mapped_with_structured_declared_error`], for tests
+    /// that vary the selection rather than the configuration.
+    fn mapped_with_selection(
+        field: &str,
+        selection: &str,
+        input: serde_json_bytes::Value,
+    ) -> MappedResponse {
+        let response_key = ResponseKey::RootField {
+            name: field.to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse(selection).unwrap()),
+        };
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(account),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        let parts = http::Response::builder()
+            .status(200)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        handle_raw_response(
+            &input,
+            &parts,
+            response_key,
+            &connector,
+            &Context::new(),
+            &http::HeaderMap::new(),
+        )
+    }
+
+    /// Render one entry of `extensions.connectorErrors` as a client reads it,
+    /// with extension keys sorted.
+    ///
+    /// Sorted because the assertion is a snapshot: `extensions` is an
+    /// insertion-ordered map, and the insertion order is an implementation
+    /// detail of which layer stamped which key. A reordering is not a
+    /// behavior change and should not read as one in a diff.
+    fn render_reported_error(error: &serde_json_bytes::Value) -> String {
+        let object = error.as_object().expect("a reported error is an object");
+
+        let mut rendered = format!(
+            "    message: {}\n",
+            object
+                .get("message")
+                .and_then(|message| message.as_str())
+                .unwrap_or("(none)")
+        );
+        rendered.push_str(&format!(
+            "    path:    {}\n",
+            object
+                .get("path")
+                .map(|path| path.to_string())
+                .unwrap_or_else(|| "(none)".to_string())
+        ));
+
+        if let Some(extensions) = object.get("extensions").and_then(|ext| ext.as_object()) {
+            let mut keys: Vec<_> = extensions.keys().collect();
+            keys.sort();
+            for key in keys {
+                rendered.push_str(&format!(
+                    "    ext:     {} = {}\n",
+                    key.as_str(),
+                    extensions[key.as_str()]
+                ));
+            }
+        }
+        rendered
+    }
+
+    /// What a client actually receives, across the mapping shapes an author
+    /// writes and the `include_subgraph_errors` settings an operator sets.
+    ///
+    /// Review asked for copious snapshot coverage of the combinations, and a
+    /// grid is the right shape for it: the interesting failures are not "this
+    /// one case is wrong" but "these two cases should differ and don't", or
+    /// "this column changed when I only meant to change that row". Both are
+    /// visible at a glance here and invisible across thirty separate
+    /// assertions.
+    ///
+    /// Read as a table. Rows are what the mapping author wrote — a plain
+    /// field, a rename, a `??` default, a `->map` over rows, a chain, the
+    /// structured argument, `->withProblem` alone, and both methods together.
+    /// Columns are what the operator configured, including the default, which
+    /// omits everything.
+    ///
+    /// Each cell is the *client's* view, reached by running the whole travel
+    /// path: aggregation, then the fetch service's lift out of `errors`, then
+    /// the drain into `connectorErrors`. Stopping after aggregation would
+    /// snapshot the in-transit form, private marker and all.
+    ///
+    /// Three things worth watching in the output, because each was a bug or
+    /// nearly one: every reported error carries both `connector.coordinate`
+    /// and `connector.selectionPath`; `->withProblem` never contributes a row
+    /// at all; and `path` names the field the mapping *writes*, so the
+    /// rename's path says `balance` rather than `amount`.
+    #[test]
+    fn what_a_client_receives_across_mappings_and_configurations() {
+        let shapes: Vec<(&str, &str, &str, serde_json_bytes::Value)> = vec![
+            (
+                "plain field",
+                "account",
+                r#"status: code->withError("Unrecognized code")"#,
+                json!({ "code": 7 }),
+            ),
+            (
+                "renamed field, `??` default",
+                "account",
+                r#"balance: amount ?? $("0")->withError("Amount was missing")"#,
+                json!({ "id": "acct-1" }),
+            ),
+            (
+                "one error per element, inside `->map`",
+                "rows",
+                r#"$.rows->map(@.code->withError("bad code"))"#,
+                json!({ "rows": [{ "code": 1 }, { "code": 2 }] }),
+            ),
+            (
+                "chained, two errors about one value",
+                "account",
+                r#"status: code->withError("first")->withError("second")"#,
+                json!({ "code": 7 }),
+            ),
+            (
+                "structured argument, author's code and extensions",
+                "account",
+                r#"balance: amount ?? $("<missing>")->withError({
+                    message: "Field 'amount' was not found"
+                    extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+                })"#,
+                json!({ "id": "acct-1" }),
+            ),
+            (
+                "`->withProblem` alone, which reaches no client",
+                "account",
+                r#"status: code->withProblem("Unrecognized code")"#,
+                json!({ "code": 7 }),
+            ),
+            (
+                "both methods on one value",
+                "account",
+                r#"status: code->withProblem("for the author")->withError("for the client")"#,
+                json!({ "code": 7 }),
+            ),
+        ];
+
+        let configs: Vec<(&str, serde_json::Value)> = vec![
+            (
+                "include_subgraph_errors: all: true",
+                serde_json::json!(true),
+            ),
+            (
+                "the default, which redacts subgraph errors",
+                serde_json::json!(false),
+            ),
+            (
+                "redact_message with an allow list",
+                serde_json::json!({
+                    "allow_extensions_keys": ["code", "service"],
+                    "redact_message": true,
+                }),
+            ),
+            (
+                "redact_message with a deny list",
+                serde_json::json!({
+                    "deny_extensions_keys": ["number"],
+                    "redact_message": true,
+                }),
+            ),
+        ];
+
+        let mut report = String::new();
+        for (shape_label, field, selection, input) in &shapes {
+            report.push_str(&format!("=== {shape_label}\n"));
+            report.push_str(&format!("    {}\n", selection.replace('\n', "\n    ")));
+
+            for (config_label, config) in &configs {
+                report.push_str(&format!("\n  --- {config_label}\n"));
+
+                let mapped = mapped_with_selection(field, selection, input.clone());
+                let context = included_subgraph_errors(config.clone());
+                let aggregated = aggregate_responses(vec![mapped], context.clone())
+                    .expect("aggregation succeeds");
+                let mut response = aggregated.response.into_body();
+
+                // The whole travel path, not just the first hop: declared
+                // errors ride in `errors` as far as the fetch service, which
+                // lifts them into the context, and the connectors plugin then
+                // drains them into `connectorErrors`. Snapshotting before the
+                // lift would record the private marker and an `errors` array
+                // no client ever sees.
+                ConnectorDeclaredErrors::take_marked(&context, &mut response.errors);
+                let reported = ConnectorDeclaredErrors::drain(&context);
+
+                report.push_str(&format!(
+                    "  data: {}\n",
+                    serde_json::to_string(&response.data).unwrap_or_default()
+                ));
+
+                // Anything still here is a spec violation — a resolved field
+                // with an execution error at its position — so it is rendered
+                // rather than ignored.
+                for leftover in &response.errors {
+                    report.push_str(&format!(
+                        "  LEFT IN `errors`: {} {:?}\n",
+                        leftover.message, leftover.extensions
+                    ));
+                }
+
+                match reported.as_ref().and_then(|value| value.as_array()) {
+                    None => report.push_str("  (nothing reported)\n"),
+                    Some(errors) => {
+                        for error in errors {
+                            report.push_str(&render_reported_error(error));
+                            report.push('\n');
+                        }
+                    }
+                }
+            }
+            report.push('\n');
+        }
+
+        assert_snapshot!(report);
+    }
+
+    /// A mapped response whose mapping resolved `balance` with a default and
+    /// declared a structured error about it, from the subgraph
+    /// `subgraph_name`.
+    fn mapped_with_structured_declared_error() -> MappedResponse {
+        let selection = JSONSelection::parse(
+            r#"balance: amount ?? $("<missing>")->withError({
+                message: "Field 'amount' was not found"
+                extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+            })"#,
+        )
+        .unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "account".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(selection),
+        };
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(account),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        let parts = http::Response::builder()
+            .status(200)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        handle_raw_response(
+            &json!({ "id": "acct-1" }),
+            &parts,
+            response_key,
+            &connector,
+            &Context::new(),
+            &http::HeaderMap::new(),
+        )
+    }
+
+    #[test]
+    fn a_declared_error_reaches_the_response_extensions() {
+        let mapped = mapped_with_structured_declared_error();
+
+        let aggregated = aggregate_responses(
+            vec![mapped],
+            included_subgraph_errors(serde_json::json!(true)),
+        )
+        .expect("aggregation succeeds");
+        let mut response = aggregated.response.into_body();
+
+        // The field resolved with its default rather than being nulled out.
+        assert_eq!(
+            response.data,
+            Some(json!({ "account": { "balance": "<missing>" } })),
+        );
+
+        // In transit it looks like an error, but only to the fetch service:
+        // the marker is what tells that apart from a real one.
+        assert_eq!(response.errors.len(), 1);
+        assert_eq!(
+            response.errors[0].extensions.get(DECLARED_ERROR_MARKER),
+            Some(&json!(true)),
+        );
+
+        let context = Context::new();
+        ConnectorDeclaredErrors::take_marked(&context, &mut response.errors);
+
+        // Nothing is left for the client to see as an execution error...
+        assert!(response.errors.is_empty());
+
+        // ...and the client is still told why, under `extensions`.
+        let declared = ConnectorDeclaredErrors::drain(&context).expect("an error was collected");
+        let declared = declared.as_array().expect("an array");
+        assert_eq!(declared.len(), 1);
+        let error = &declared[0];
+
+        assert_eq!(
+            error.get("message"),
+            Some(&json!("Field 'amount' was not found"))
+        );
+        let extensions = error.get("extensions").expect("extensions");
+        assert_eq!(
+            extensions.get("code"),
+            Some(&json!("INTERNAL_SERVER_ERROR")),
+        );
+        assert_eq!(extensions.get("number"), Some(&json!(210099)));
+
+        // The marker was private to the hand-off and does not reach the client.
+        assert_eq!(extensions.get(DECLARED_ERROR_MARKER), None);
+
+        // The path resolves against the data above: `account` → `balance`,
+        // the field the mapping writes, not `amount`, the field it reads.
+        assert_eq!(error.get("path"), Some(&json!(["account", "balance"])));
+    }
+
+    /// The `connector` object is the router's to assemble, so the coordinate
+    /// it stamps is authoritative.
+    ///
+    /// A mapping author can write anything into a `->withError` argument's
+    /// `extensions`, including a `connector` object of their own. They are
+    /// describing a connector, not choosing what the router reports about it,
+    /// so a coordinate they supply does not survive — while keys the router
+    /// does not claim, theirs or `selectionPath`, are left where they are.
+    #[test]
+    fn the_router_owns_the_connector_extension_of_a_declared_error() {
+        let mut error = graphql::Error::builder()
+            .message("bad code")
+            .extension_code("CONNECTORS_MAPPING_ERROR")
+            .extension(
+                "connector",
+                json!({
+                    "coordinate": "somewhere:Else.entirely[9]",
+                    "selectionPath": "rows.0.code",
+                    "note": "an author's own field",
+                }),
+            )
+            .build();
+
+        stamp_connector_coordinate(&mut error, Some("subgraph:Query.rows[0]".to_string()));
+
+        let connector = error
+            .extensions
+            .get("connector")
+            .and_then(|connector| connector.as_object())
+            .expect("the connector extension");
+
+        assert_eq!(
+            connector.get("coordinate"),
+            Some(&json!("subgraph:Query.rows[0]")),
+            "the router's coordinate wins",
+        );
+        assert_eq!(
+            connector.get("selectionPath"),
+            Some(&json!("rows.0.code")),
+            "and nothing else in the object is disturbed",
+        );
+        assert_eq!(connector.get("note"), Some(&json!("an author's own field")));
+    }
+
+    /// With no `connector` extension to merge into, one is created — the
+    /// coordinate is reported either way.
+    #[test]
+    fn a_declared_error_with_no_connector_extension_gains_one() {
+        let mut error = graphql::Error::builder().message("bad code").build();
+
+        stamp_connector_coordinate(&mut error, Some("subgraph:Query.rows[0]".to_string()));
+
+        assert_eq!(
+            error.extensions.get("connector"),
+            Some(&json!({ "coordinate": "subgraph:Query.rows[0]" })),
+        );
+    }
+
+    /// A declared error names where it came from as well as what went wrong:
+    /// `service` for the subgraph, and `connector.coordinate` for the
+    /// `@connect` it was declared in.
+    ///
+    /// This is a regression test with a story. `RuntimeError::extensions`
+    /// synthesizes `connector: { coordinate }` and then lets the error's own
+    /// extensions overwrite whole keys, and a declared error arrives there
+    /// already carrying `connector: { selectionPath }` — so the coordinate was
+    /// being dropped, silently, in the one place a reader would go looking for
+    /// which connector to blame. Nothing caught it: the existing test that
+    /// reads the `connector` object asserts only `selectionPath`.
+    ///
+    /// Both keys are asserted together deliberately. The bug was one key
+    /// evicting the other, so a test that checks either alone would pass while
+    /// the object is still wrong.
+    #[test]
+    fn a_declared_error_names_its_connector_and_its_subgraph() {
+        // A `->withError` inside a `->map`, because that is the shape whose
+        // error carries a `selectionPath` — and the eviction only happens when
+        // both keys want the same object. `mapped_with_structured_declared_error`
+        // declares on a literal, whose input path is empty, so its `connector`
+        // object never had a selection path to collide with.
+        let (mapped, _connector) = mapped_with_declared_errors(1);
+        let aggregated = aggregate_responses(
+            vec![mapped],
+            included_subgraph_errors(serde_json::json!(true)),
+        )
+        .expect("aggregation succeeds");
+        let response = aggregated.response.into_body();
+
+        assert_eq!(response.errors.len(), 1);
+        let extensions = &response.errors[0].extensions;
+
+        assert_eq!(extensions.get("service"), Some(&json!("subgraph_name")));
+
+        let connector = extensions
+            .get("connector")
+            .and_then(|connector| connector.as_object())
+            .expect("the connector extension");
+        assert!(
+            connector.contains_key("coordinate"),
+            "the coordinate identifies which `@connect` declared this, and is \
+             the half that was being evicted; got: {connector:?}",
+        );
+        assert!(
+            connector.contains_key("selectionPath"),
+            "the selection path says where in the mapping it was declared; \
+             got: {connector:?}",
+        );
+    }
+
+    /// `include_subgraph_errors` governs these too. An operator who has said a
+    /// subgraph's errors must not reach clients has said it about the text a
+    /// mapping author wrote as well: it is the same subgraph's words, and it
+    /// can interpolate the same API data.
+    ///
+    /// Omitted rather than redacted. A redacted row in `connectorErrors` would
+    /// say only that something was withheld, and this is the default
+    /// configuration, so it would be what most routers emit.
+    #[test]
+    fn a_declared_error_is_omitted_when_the_subgraph_is_excluded() {
+        let aggregated = aggregate_responses(
+            vec![mapped_with_structured_declared_error()],
+            // `all: false`, which is also the default when the operator
+            // configures nothing.
+            included_subgraph_errors(serde_json::json!(false)),
+        )
+        .expect("aggregation succeeds");
+        let response = aggregated.response.into_body();
+
+        // The field still resolved with its default: excluding the error does
+        // not change the data.
+        assert_eq!(
+            response.data,
+            Some(json!({ "account": { "balance": "<missing>" } })),
+        );
+        // And nothing was built to carry onwards — not even a redacted row.
+        assert!(response.errors.is_empty());
+    }
+
+    /// Failing closed: with no effective configuration published — which in a
+    /// running router means the mandatory `include_subgraph_errors` plugin did
+    /// not see the request — nothing is reported. A config whose job is to
+    /// keep subgraph text away from clients must not be bypassed by a code
+    /// path that could not read it.
+    #[test]
+    fn a_declared_error_is_omitted_when_no_configuration_was_published() {
+        let aggregated = aggregate_responses(
+            vec![mapped_with_structured_declared_error()],
+            Context::new(),
+        )
+        .expect("aggregation succeeds");
+        let response = aggregated.response.into_body();
+
+        assert!(response.errors.is_empty());
+    }
+
+    /// Everything short of exclusion is the existing redaction, applied at
+    /// build time: `redact_message` replaces the author's message and the
+    /// extension lists filter the author's fields, exactly as they do for the
+    /// `errors` array. Asserted through the real `Config` so the
+    /// interpretation of the YAML is the shared one.
+    #[test]
+    fn a_declared_error_obeys_message_and_extension_redaction() {
+        let aggregated = aggregate_responses(
+            vec![mapped_with_structured_declared_error()],
+            included_subgraph_errors(serde_json::json!({
+                "deny_extensions_keys": ["number"],
+                "redact_message": true,
+            })),
+        )
+        .expect("aggregation succeeds");
+        let response = aggregated.response.into_body();
+
+        assert_eq!(response.errors.len(), 1);
+        let error = &response.errors[0];
+
+        // The author's message is gone...
+        assert_eq!(error.message, "Subgraph errors redacted");
+        // ...as is the denied extension...
+        assert_eq!(error.extensions.get("number"), None);
+        // ...while what the deny list did not name survives.
+        assert_eq!(
+            error.extensions.get("code"),
+            Some(&json!("INTERNAL_SERVER_ERROR")),
+        );
+
+        // The marker is added after redaction, so an allow list cannot strip
+        // it and strand a declared error in the `errors` array.
+        assert_eq!(
+            error.extensions.get(DECLARED_ERROR_MARKER),
+            Some(&json!(true)),
+        );
+    }
+
+    /// Build a `MappedResponse::Data` carrying `count` declared errors, as a
+    /// mapping with a `->withError` inside a `->map` would produce.
+    fn mapped_with_declared_errors(count: usize) -> (MappedResponse, Connector) {
+        let selection =
+            JSONSelection::parse(r#"$.rows->map(@.code->withError("bad code"))"#).unwrap();
+        let response_key = ResponseKey::RootField {
+            name: "rows".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(selection),
+        };
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_5,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(rows),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: ConnectorErrorsSettings::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+
+        let parts = http::Response::builder()
+            .status(200)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        let rows = (0..count)
+            .map(|index| json!({ "code": index }))
+            .collect::<Vec<_>>();
+
+        let mapped = handle_raw_response(
+            &json!({ "rows": rows }),
+            &parts,
+            response_key,
+            &connector,
+            &Context::new(),
+            &http::HeaderMap::new(),
+        );
+
+        (mapped, connector)
+    }
+
+    /// Every error a mapping declares is reported. The router does not cap
+    /// them, the same way it does not cap the errors a subgraph returns, so a
+    /// `->withError` inside a `->map` over 250 rows contributes 250 errors.
+    #[test]
+    fn every_declared_error_is_reported() {
+        let (mapped, _connector) = mapped_with_declared_errors(250);
+
+        let MappedResponse::Data {
+            declared_errors, ..
+        } = &mapped
+        else {
+            panic!("expected data, got: {mapped:?}");
+        };
+        assert_eq!(declared_errors.len(), 250);
     }
 
     #[test]
