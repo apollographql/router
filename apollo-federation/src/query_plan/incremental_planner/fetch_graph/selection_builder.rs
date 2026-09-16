@@ -144,6 +144,7 @@ impl SelectionBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operation::Selection;
 
     #[test]
     fn clone_of_empty_builder_is_empty() {

@@ -87,6 +87,8 @@ fn single_subgraph_query_produces_valid_plan() {
 /// mutations, subscriptions, overrides, shareable fields, and three-way
 /// federation. Individual tests query only the subset they need.
 const CROSS_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/cross_subgraph.graphql");
+const THREE_SUBGRAPH_SCHEMA: &str = CROSS_SUBGRAPH_SCHEMA;
+const MUTATION_SCHEMA: &str = CROSS_SUBGRAPH_SCHEMA;
 
 #[test]
 fn cross_subgraph_key_hop_produces_two_fetches() {
