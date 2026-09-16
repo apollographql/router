@@ -964,10 +964,10 @@ impl FieldRoutingSearchSpace {
         key: RoutingSiteKey,
         edge_finder: impl Fn(NodeIndex) -> Option<EdgeIndex>,
     ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
-        if provides_anchor.is_none() {
-            if let Some(cached) = self.caches.key_hops.borrow().get(&(node, key.clone())) {
-                return Ok(cached.clone());
-            }
+        if provides_anchor.is_none()
+            && let Some(cached) = self.caches.key_hops.borrow().get(&(node, key.clone()))
+        {
+            return Ok(cached.clone());
         }
         let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
         if !self
