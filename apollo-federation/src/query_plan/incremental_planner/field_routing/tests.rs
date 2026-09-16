@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::Supergraph;
 use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
@@ -2504,14 +2506,14 @@ fn bulb_test_parameters(
     schema: &str,
 ) -> (
     Supergraph,
-    std::sync::Arc<crate::query_graph::QueryGraph>,
+    Arc<crate::query_graph::QueryGraph>,
     crate::query_plan::query_planner::QueryPlanningStatistics,
 ) {
     let supergraph = Supergraph::new(schema).expect("supergraph parse");
     let api_schema = supergraph
         .to_api_schema(Default::default())
         .expect("api schema");
-    let query_graph = std::sync::Arc::new(
+    let query_graph = Arc::new(
         crate::query_graph::build_federated_query_graph(
             supergraph.schema.clone(),
             api_schema,
@@ -2550,8 +2552,8 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
     let parameters = QueryPlanningParameters {
         supergraph_schema: supergraph.schema.clone(),
         federated_query_graph: query_graph.clone(),
-        operation: std::sync::Arc::new(operation),
-        fetch_id_generator: std::sync::Arc::new(
+        operation: Arc::new(operation),
+        fetch_id_generator: Arc::new(
             crate::query_plan::fetch_dependency_graph::FetchIdGenerator::new(),
         ),
         head,
