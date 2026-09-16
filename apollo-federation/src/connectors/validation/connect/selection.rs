@@ -14,6 +14,7 @@ use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
+use shape::location::SourceId;
 
 use self::variables::VariableResolver;
 use super::Code;
@@ -26,7 +27,6 @@ use crate::connectors::PathSelection;
 use crate::connectors::SubSelection;
 use crate::connectors::expand::visitors::FieldVisitor;
 use crate::connectors::expand::visitors::GroupVisitor;
-use crate::connectors::graphql_shapes::source_file;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::json_selection::NamedSelection;
 use crate::connectors::json_selection::Ranged;
@@ -559,13 +559,13 @@ impl<'schema> SelectionValidator<'schema> {
     ) -> Vec<Range<LineColumn>> {
         shape_locations
             .into_iter()
-            .filter_map(|location| {
-                // GraphQL locations are `graphql:<path>` `SourceId::Other` values
-                // since shape 0.9.0; `source_file` returns `None` for the
-                // JSONSelection ids, which is how the two are told apart here.
-                if let Some(source) = source_file(self.schema, &location.source_id) {
-                    source.get_line_column_range(location.span.clone())
-                } else {
+            .filter_map(|location| match &location.source_id {
+                SourceId::GraphQL(file_id) => self
+                    .schema
+                    .sources
+                    .get(file_id)
+                    .and_then(|source| source.get_line_column_range(location.span.clone())),
+                SourceId::Other(_) => {
                     // JSONSelection location - convert to range in the selection string
                     subslice_location(self.node, location.span.clone(), self.schema)
                 }
@@ -604,22 +604,13 @@ impl<'schema> SelectionValidator<'schema> {
         type_ref: SchemaTypeRef<'schema>,
         shape: &Shape,
     ) -> Result<Vec<(Name, Name)>, Message> {
-        // Shape errors are carried as metadata rather than a dedicated
-        // `ShapeCase::Error` variant, so they ride on a shape that still has a
-        // partial structure. Report the first one and stop: descending into a
-        // structure we already know is partial would emit spurious
-        // `SelectedFieldNotFound`-style errors on top of the real failure.
-        //
-        // Returning `Ok(Vec::new())` here instead would credit no fields as
-        // seen, which does not suppress the diagnostic so much as replace it:
-        // the selected fields then look unresolved by any connector, and the
-        // reader is told the wrong thing about a different field.
-        if let Some(error) = shape.own_errors().next() {
-            return Err(Message {
-                code: Code::InvalidSelection,
-                message: error.message.clone(),
-                locations: self.get_shape_locations(shape.locations()),
-            });
+        // Shape errors are now carried as metadata rather than a dedicated
+        // `ShapeCase::Error` variant. A shape-processing failure is surfaced
+        // through other diagnostics; there is nothing to credit as seen here,
+        // and we must not descend into the (possibly partial) structure, as
+        // that could emit spurious `SelectedFieldNotFound`-style errors.
+        if shape.has_own_errors() {
+            return Ok(Vec::new());
         }
         match shape.case() {
             ShapeCase::Object { fields, .. } => {
