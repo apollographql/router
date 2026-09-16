@@ -1,0 +1,20 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+    widget: Widget
+        @connect(
+            source: "api"
+            http: { GET: "/widget" }
+            selection: "$->echo({x: 1})->first"
+        )
+}
+
+type Widget {
+    x: Int
+}
