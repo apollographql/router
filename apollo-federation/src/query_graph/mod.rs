@@ -698,18 +698,37 @@ impl QueryGraph {
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
-    /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
-        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
-            |edge_ref| {
+    /// in petgraph's unspecified iteration order. The sole definition of which edges
+    /// [`Self::out_edges`] and [`Self::out_edge_ids`] consider, so that the two cannot drift apart.
+    fn out_edges_unsorted(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = EdgeReference<'_, QueryGraphEdge>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter(|edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
                     && matches!(
                         edge_ref.weight().transition,
                         QueryGraphEdgeTransition::KeyResolution
                             | QueryGraphEdgeTransition::RootTypeResolution { .. }
                     ))
-            },
-        ))
+            })
+    }
+
+    /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
+    /// as they're rarely useful (currently only used by `@defer`).
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
+        Self::sorted_edges(self.out_edges_unsorted(node))
+    }
+
+    /// The same edges as [`Self::out_edges`], in the same order, as owned [`EdgeIndex`] values
+    /// rather than references borrowed from the graph. For callers that need to hold the list
+    /// across a mutation of the query graph, which an `EdgeReference` would forbid.
+    pub(crate) fn out_edge_ids(&self, node: NodeIndex) -> Vec<EdgeIndex> {
+        let mut edge_ids: Vec<EdgeIndex> = self.out_edges_unsorted(node).map(|e| e.id()).collect();
+        edge_ids.sort();
+        edge_ids
     }
 
     /// Edge iteration order is unspecified in petgraph, but appears to be
