@@ -8,6 +8,7 @@ pub(crate) mod selection_builder;
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -866,7 +867,7 @@ impl FetchGraph {
     /// merged entity representation cannot satisfy both branches.
     fn bucket_by_merge_compatibility(&self, mergeable: Vec<NodeIndex>) -> Vec<Vec<NodeIndex>> {
         struct Bucket {
-            signatures: HashMap<String, String>,
+            signatures: HashMap<Vec<String>, String>,
             merge_at: Option<Vec<FetchDataPathElement>>,
             input_conditions: HashMap<Name, BTreeSet<String>>,
             nodes: Vec<NodeIndex>,
@@ -929,9 +930,9 @@ impl FetchGraph {
         for edge in self.graph.edges_directed(node, Direction::Incoming) {
             for input in &edge.weight().inputs {
                 fingerprints
-                    .entry(input.source_type_name.clone())
+                    .entry(input.source_type_name().clone())
                     .or_default()
-                    .insert(input.conditions.to_string());
+                    .insert(input.conditions().to_string());
             }
         }
         fingerprints
@@ -1037,10 +1038,8 @@ impl FetchGraph {
 
     /// Merge nodes into a survivor, relocating edges and absorbing selections.
     fn merge_nodes_into(&mut self, survivor: NodeIndex, to_merge: &[NodeIndex]) {
-        // Removals and relocations below bypass the incremental depth
-        // bookkeeping. Merging runs once, post-search, so nothing rolls
-        // back past this.
-        self.depth_dirty = true;
+        // Merging runs once, post-search, so removals and edge relocations
+        // bypass the undo log.
         for &merged in to_merge {
             // Absorb selections from the merged node.
             let merged_builder = self.graph[merged].selection_builder.clone();
