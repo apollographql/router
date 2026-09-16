@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef as _;
 use tracing::trace;
 
 use super::FieldRoutingSearchSpace;
@@ -229,7 +230,7 @@ impl FieldRoutingSearchSpace {
         let mut candidates: Vec<KeyHopCandidate> = Vec::new();
         let mut need_chain: Vec<(NodeIndex, EdgeIndex)> = Vec::new();
 
-        for key_edge_idx in self.out_edge_indices(pending_node) {
+        for key_edge_idx in self.query_graph.out_edges(pending_node).into_iter().map(|e| e.id()) {
             let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
             if !matches!(
                 key_edge.transition,
@@ -372,7 +373,7 @@ impl FieldRoutingSearchSpace {
         visited: &mut Vec<Arc<str>>,
     ) -> Result<Vec<IntermediateKeyHop>, FederationError> {
         let mut exits = Vec::new();
-        for key_edge_idx in self.out_edge_indices(current) {
+        for key_edge_idx in self.query_graph.out_edges(current).into_iter().map(|e| e.id()) {
             let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
             if !matches!(key_edge.transition, QueryGraphEdgeTransition::KeyResolution) {
                 continue;
@@ -505,7 +506,7 @@ impl FieldRoutingSearchSpace {
         let Selection::Field(field_selection) = &pending.selection else {
             return Ok(options);
         };
-        for entry_edge_idx in self.out_edge_indices(pending.query_graph_node) {
+        for entry_edge_idx in self.query_graph.out_edges(pending.query_graph_node).into_iter().map(|e| e.id()) {
             let entry_edge = self.query_graph.edge_weight(entry_edge_idx)?;
             if !matches!(
                 entry_edge.transition,
@@ -603,7 +604,7 @@ impl FieldRoutingSearchSpace {
 
         // @interfaceObject fake downcast: the concrete type doesn't exist in
         // this subgraph.
-        for edge_idx in self.out_edge_indices(pending.query_graph_node) {
+        for edge_idx in self.query_graph.out_edges(pending.query_graph_node).into_iter().map(|e| e.id()) {
             let edge_weight = self.query_graph.edge_weight(edge_idx)?;
             if let QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } =
                 &edge_weight.transition
