@@ -9,6 +9,7 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::Configuration;
+use crate::registry::OciConfig;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::RhaiReload;
@@ -57,15 +58,18 @@ impl ConfigurationSource {
     pub(crate) fn into_stream(
         self,
         uplink_config: Option<UplinkConfig>,
+        oci_config: Option<OciConfig>,
     ) -> impl Stream<Item = Event> {
         match self {
             ConfigurationSource::Static(mut instance) => {
                 instance.uplink = uplink_config;
+                instance.oci = oci_config;
                 stream::iter(vec![UpdateConfiguration(instance.into())]).boxed()
             }
             ConfigurationSource::Stream(stream) => stream
                 .map(move |mut c| {
                     c.uplink = uplink_config.clone();
+                    c.oci = oci_config.clone();
                     UpdateConfiguration(Arc::new(c))
                 })
                 .boxed(),
@@ -85,12 +89,14 @@ impl ConfigurationSource {
                                     .filter_map(move |_| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
+                                        let oci_config = oci_config.clone();
                                         async move {
                                             match ConfigurationSource::read_config_async(&path)
                                                 .await
                                             {
                                                 Ok(mut configuration) => {
                                                     configuration.uplink = uplink_config.clone();
+                                                    configuration.oci = oci_config.clone();
                                                     Some(UpdateConfiguration(Arc::new(
                                                         configuration,
                                                     )))
@@ -131,6 +137,7 @@ impl ConfigurationSource {
                                 }
                             } else {
                                 configuration.uplink = uplink_config.clone();
+                                configuration.oci = oci_config.clone();
                                 stream::once(future::ready(UpdateConfiguration(Arc::new(
                                     configuration,
                                 ))))
@@ -184,7 +191,7 @@ mod tests {
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()))
+            .into_stream(Some(UplinkConfig::default()), None)
             .boxed();
 
         // First update is guaranteed
@@ -214,7 +221,7 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
         }
-        .into_stream(Some(UplinkConfig::default()));
+        .into_stream(Some(UplinkConfig::default()), None);
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -225,7 +232,7 @@ mod tests {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
         let mut stream = ConfigurationSource::File { path, watch: true }
-            .into_stream(Some(UplinkConfig::default()));
+            .into_stream(Some(UplinkConfig::default()), None);
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -238,7 +245,7 @@ mod tests {
         write_and_flush(&mut file, contents).await;
 
         let mut stream = ConfigurationSource::File { path, watch: false }
-            .into_stream(Some(UplinkConfig::default()));
+            .into_stream(Some(UplinkConfig::default()), None);
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
