@@ -12,6 +12,7 @@ use crate::Context;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::REPRESENTATIONS;
 use crate::plugins::response_cache::serde_blake3::Blake3Serializer;
@@ -50,7 +51,8 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
         // - query hash: specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{graphql_type}:hash:{query_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:{}:{subgraph_name}:type:{graphql_type}:hash:{query_hash}:data:{additional_data_hash}",
+            CacheScope::Subgraph.word()
         );
         if let Some(private_id) = private_id {
             let _ = write!(&mut key, ":{private_id}");
@@ -96,7 +98,8 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:{}:{subgraph_name}:type:{entity_type}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}",
+            CacheScope::Subgraph.word()
         );
 
         if let Some(private_id) = private_id {
@@ -138,7 +141,8 @@ impl<'a> ConnectorCacheKeyRoot<'a> {
         } = self;
 
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{graphql_type}:hash:{operation_hash}:selection:{selection_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:{}:{source_name}:type:{graphql_type}:hash:{operation_hash}:selection:{selection_hash}:data:{additional_data_hash}",
+            CacheScope::Connector.word()
         );
         if let Some(private_id) = private_id {
             let _ = write!(&mut key, ":{private_id}");
@@ -176,7 +180,8 @@ impl<'a> ConnectorCacheKeyEntity<'a> {
         };
 
         let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:connector:{source_name}:type:{entity_type}:representation:{hashed_representation}:hash:{operation_hash}:data:{additional_data_hash}"
+            "version:{RESPONSE_CACHE_VERSION}:{}:{source_name}:type:{entity_type}:representation:{hashed_representation}:hash:{operation_hash}:data:{additional_data_hash}",
+            CacheScope::Connector.word()
         );
 
         if let Some(private_id) = private_id {
