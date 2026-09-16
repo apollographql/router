@@ -284,18 +284,29 @@ impl FieldRoutingSearchSpace {
         // their conditions would recurse without progress, so they are
         // handled via locally_satisfiable_subset instead.
         if !key_locally_resolvable && let Some(key_conditions) = first_key.cloned() {
-            if matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
-                self.commit_circular_key_conditions(
-                    state,
-                    pending,
-                    &key_conditions,
-                    &source,
-                    pending.fetch_node,
-                    &pending.op_path,
-                    new_group,
-                )?;
-            } else {
-                self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
+            // Key data already delivered in the pending fetch's own entity
+            // representation is present in the merged response at this merge
+            // path before the new group runs, so there is nothing extra to
+            // fetch or order.
+            let rides_representation = state.graph.incoming_inputs_cover(
+                pending.fetch_node,
+                source.type_pos.type_name(),
+                &key_conditions,
+            );
+            if !rides_representation {
+                if matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
+                    self.commit_circular_key_conditions(
+                        state,
+                        pending,
+                        &key_conditions,
+                        &source,
+                        pending.fetch_node,
+                        &pending.op_path,
+                        new_group,
+                    )?;
+                } else {
+                    self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
+                }
             }
         }
 
