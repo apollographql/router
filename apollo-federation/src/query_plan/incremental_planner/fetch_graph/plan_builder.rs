@@ -959,11 +959,10 @@ impl FetchGraph {
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
-            let cleaned = remove_conditions_from_selection_set(selection_set, handled_conditions)?;
             if !ctx.skip_validation {
-                cleaned.validate(ctx.variable_definitions)?;
+                selection_set.validate(ctx.variable_definitions)?;
             }
-            merged_selections.extend_ref(&cleaned.selections);
+            merged_selections.extend_ref(&selection_set.selections);
         }
         let result = SelectionSet {
             schema: ctx.supergraph_schema.clone(),
