@@ -579,25 +579,23 @@ fn find_disabled_mode_rejection(
                 }
             }
             InvalidationRequest::CacheTag { scope, .. } => {
+                // The request states which scope it addresses (`subgraphs` => Subgraph via
+                // `subgraph_names`, `sources` => Connector), so gate on that scope's cache-tag
+                // index alone. Consulting the other scope would let its default-enabled indexes
+                // mask a disabled one — e.g. a connector `sources` request against a source with
+                // cache-tag invalidation disabled would otherwise pass because an unconfigured
+                // subgraph name falls back to `InvalidationIndexes::default()` (cache_tag: true).
                 let mut names = request.subgraph_names();
                 names.sort();
                 for name in names {
-                    let subgraph_enabled = effective_invalidation_indexes(config, &name)
-                        .is_enabled(IndexMode::CacheTag);
-                    // The connector side only vouches for a name when it actually has an
-                    // invalidation config that could apply to it; an entirely unconfigured
-                    // connector block must not un-reject subgraph-targeted requests.
-                    let connector_has_invalidation_config = connector_config
-                        .sources
-                        .get(&name)
-                        .is_some_and(|s| s.invalidation.is_some())
-                        || (connector_config.all.invalidation.is_some()
-                            && matches!(scope, CacheScope::Connector));
-                    let connector_enabled = connector_has_invalidation_config
-                        && connector_config
+                    let enabled = match scope {
+                        CacheScope::Subgraph => effective_invalidation_indexes(config, &name)
+                            .is_enabled(IndexMode::CacheTag),
+                        CacheScope::Connector => connector_config
                             .effective_indexes(&name)
-                            .is_enabled(IndexMode::CacheTag);
-                    if !subgraph_enabled && !connector_enabled {
+                            .is_enabled(IndexMode::CacheTag),
+                    };
+                    if !enabled {
                         return Some((name, kind_str));
                     }
                 }
@@ -1037,6 +1035,38 @@ indexes:
         assert_eq!(
             find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
             None
+        );
+    }
+
+    /// A connector-scoped cache_tag request whose source has the cache_tag index disabled must be
+    /// rejected (400). Regression for a masking bug: the subgraph side's cache_tag index defaults
+    /// to enabled for any name that isn't a configured subgraph, and the old check ORed the two
+    /// scopes, so a disabled connector index was never flagged.
+    #[test]
+    fn find_disabled_mode_rejection_flags_connector_cache_tag_when_disabled() {
+        let cfg = subgraph_config(None, None);
+        let connector_cfg = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                invalidation: Some(SubgraphInvalidationConfig {
+                    enabled: true,
+                    shared_key: "k".to_string(),
+                    // cache_tag deliberately absent → disabled.
+                    indexes: indexes_with(&[IndexMode::Subgraph, IndexMode::Type]),
+                }),
+                ..Default::default()
+            },
+            sources: HashMap::new(),
+        };
+        let mut subgraphs = std::collections::HashSet::new();
+        subgraphs.insert("graph.api".to_string());
+        let body = vec![InvalidationRequest::CacheTag {
+            scope: CacheScope::Connector,
+            subgraphs,
+            cache_tag: "homepage".to_string(),
+        }];
+        assert_eq!(
+            find_disabled_mode_rejection(&cfg, &connector_cfg, &body),
+            Some(("graph.api".to_string(), "cache_tag"))
         );
     }
 
