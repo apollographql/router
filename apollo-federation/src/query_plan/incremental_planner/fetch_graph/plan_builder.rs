@@ -996,6 +996,7 @@ mod tests {
             vec![InputContribution::Requires {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
+                condition_alias_rewrites: Vec::new(),
             }],
         );
     }
