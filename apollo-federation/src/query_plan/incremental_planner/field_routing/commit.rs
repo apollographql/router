@@ -1185,8 +1185,11 @@ impl FieldRoutingSearchSpace {
             .edge_for_field(source_node, field)
             .is_some();
         let field_name = field.field_position.field_name();
-        let hops = self.key_hops_guarded(
+        // No provides anchor: only which subgraphs hops reach matters here,
+        // which the anchor never changes.
+        let hops = self.cached_key_hops(
             source_node,
+            None,
             RoutingSiteKey::Field(field_name.clone()),
             |target| self.cached_query_graph.edge_for_field(target, field),
         )?;
