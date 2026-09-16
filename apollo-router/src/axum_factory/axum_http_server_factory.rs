@@ -550,7 +550,7 @@ async fn handle_graphql<RF: RouterFactory>(
     };
 
     match res {
-        Err(err) => internal_server_error(err),
+        Err(err) => service_error_response(err, experimental_log_on_broken_pipe),
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
 
@@ -592,6 +592,24 @@ async fn handle_graphql<RF: RouterFactory>(
             http::Response::from_parts(parts, body).into_response()
         }
     }
+}
+
+fn service_error_response(err: tower::BoxError, log_broken_pipe: bool) -> Response {
+    // Only inbound client-body disconnects are 499. Walking generic I/O kinds
+    // here would also match outbound coprocessor/subgraph connection resets.
+    if router::body::is_client_request_body_read_error(err.as_ref()) {
+        if log_broken_pipe {
+            tracing::error!("broken pipe: the client closed the connection");
+        }
+        return client_closed_request();
+    }
+    internal_server_error(err)
+}
+
+fn client_closed_request() -> Response {
+    // Match the existing CanceledRequest path: report 499. The client is already
+    // gone, so the body is for metrics/logs rather than a real client response.
+    router::body::client_closed_request_status().into_response()
 }
 
 fn internal_server_error<T>(err: T) -> Response
@@ -738,6 +756,193 @@ mod tests {
             tracing_core::LevelFilter::ERROR
         ))
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn body_read_client_disconnect_is_499() {
+        use tower::BoxError;
+
+        use crate::services::router;
+
+        let mut http_router = crate::TestHarness::builder()
+            .schema(include_str!("../testdata/supergraph.graphql"))
+            .build_http_service()
+            .await
+            .unwrap();
+
+        let body = router::body::from_result_stream(futures::stream::iter(vec![Err::<
+            bytes::Bytes,
+            BoxError,
+        >(
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "connection reset by peer",
+            )
+            .into(),
+        )]));
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap();
+
+        let response = http_router.call(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            router::body::client_closed_request_status()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn body_read_unrelated_error_is_still_500() {
+        use tower::BoxError;
+
+        use crate::services::router;
+
+        let mut http_router = crate::TestHarness::builder()
+            .schema(include_str!("../testdata/supergraph.graphql"))
+            .build_http_service()
+            .await
+            .unwrap();
+
+        let body = router::body::from_result_stream(futures::stream::iter(vec![Err::<
+            bytes::Bytes,
+            BoxError,
+        >(
+            std::io::Error::other("disk full").into(),
+        )]));
+
+        let request = http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap();
+
+        let response = http_router.call(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn backend_connection_reset_is_still_500() {
+        let err: tower::BoxError =
+            std::io::Error::new(std::io::ErrorKind::ConnectionReset, "coprocessor reset").into();
+        let response = service_error_response(err, false);
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn typed_client_body_read_error_is_499() {
+        use crate::services::router;
+
+        let io_err = std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset by peer",
+        );
+        let err = router::body::map_client_body_read_error(io_err);
+        let response = service_error_response(err, false);
+        assert_eq!(
+            response.status(),
+            router::body::client_closed_request_status()
+        );
+    }
+
+    // Transport-level counterpart to `body_read_client_disconnect_is_499`: a real HTTP/1.1
+    // client announces Content-Length, writes only a prefix of the body, then half-closes.
+    // Hyper surfaces that as an incomplete inbound body; the router must report nginx-style
+    // 499 rather than 500. The write half is shut down (not the whole socket) so this task
+    // can still read the status line.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn body_read_partial_content_length_disconnect_is_499() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use http_body_util::BodyExt;
+        use hyper::body::Incoming;
+        use hyper_util::rt::TokioExecutor;
+        use hyper_util::rt::TokioIo;
+        use tokio::io::AsyncReadExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio::sync::Mutex;
+
+        use crate::services::router;
+
+        let http_router = crate::TestHarness::builder()
+            .schema(include_str!("../testdata/supergraph.graphql"))
+            .build_http_service()
+            .await
+            .unwrap();
+        let http_router = Arc::new(Mutex::new(http_router));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+            let svc = hyper::service::service_fn(move |request: http::Request<Incoming>| {
+                let http_router = http_router.clone();
+                async move {
+                    let request =
+                        request.map(|incoming| incoming.map_err(axum::Error::new).boxed_unsync());
+                    http_router.lock().await.call(request).await
+                }
+            });
+            hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection(io, svc)
+                .await
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let partial = br#"{"query":"#;
+        let announced_len = 256;
+        let headers = format!(
+            "POST / HTTP/1.1\r\n\
+             Host: {addr}\r\n\
+             Accept: application/json\r\n\
+             Content-Type: application/json\r\n\
+             Content-Length: {announced_len}\r\n\
+             Connection: close\r\n\
+             \r\n"
+        );
+        client.write_all(headers.as_bytes()).await.unwrap();
+        client.write_all(partial).await.unwrap();
+        client.shutdown().await.unwrap();
+
+        let status_line = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 512];
+            loop {
+                let n = client.read(&mut tmp).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                if let Some(end) = buf.windows(2).position(|w| w == b"\r\n") {
+                    return String::from_utf8_lossy(&buf[..end]).into_owned();
+                }
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+        .await
+        .expect("router should respond after a partial-body disconnect");
+
+        let status_code = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse::<u16>().ok());
+        assert_eq!(
+            status_code,
+            Some(router::body::client_closed_request_status().as_u16()),
+            "expected nginx-style 499 from a Content-Length disconnect, got {status_line:?}"
+        );
+
+        let _ = server.await;
     }
 
     // Drive `http_router.call(...)` to its first `Pending` (which is what constructs the
