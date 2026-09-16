@@ -10,8 +10,13 @@ type Query {
   The intended way to make a `Query` field a reference resolver: `entity: true`.
   This yields an `Explicit` entity resolver whose key is derived from `$args`, so
   a resolvable `@key` on `Tractor` is correct here — the connector genuinely can
-  resolve the entity by its key. Contrast with `entity_query_field_v04`, where
-  `entity` is unset and no resolvable key should be emitted.
+  resolve the entity by its key.
+
+  This is the documented workaround, so it differs from `entity_query_field_v04`
+  in *both* of the ways that workaround requires: `entity: true` here, and no
+  type-level `@connect` reference resolver on `Tractor`. Either change alone is
+  not the workaround — leaving the type-level resolver in place would just give
+  `Tractor` two resolvable entity paths.
   """
   tractor(id: ID!): Tractor
 }

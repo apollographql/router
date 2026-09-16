@@ -1380,8 +1380,10 @@ mod helpers {
 
         /// If the type has @interfaceObject and it doesn't have a key at this point
         /// we'll need to add a key — this is a requirement for using @interfaceObject.
-        /// For now we'll just copy over keys from the original supergraph as resolvable: false
-        /// but we need to think through the implications of that.
+        /// Keys are copied over from the original supergraph as `resolvable: false`,
+        /// and only for @interfaceObject types. That is the specified behavior in both
+        /// expanders; see `Expander::copy_interface_object_keys` for why a resolvable
+        /// key here would be wrong.
         fn copy_interface_object_keys(
             &self,
             type_name: Name,
