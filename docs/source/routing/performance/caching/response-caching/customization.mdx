@@ -100,6 +100,7 @@ response_cache:
   connector:
     all:
       enabled: true
+      cache_key_headers: [] # Required: request headers to include in the cache key ([] = none)
       redis:
         urls: ["redis://..."]
     sources:
@@ -179,7 +180,7 @@ fn supergraph_service(service) {
 
 ### Connector cache-key headers
 
-For Apollo Connectors, the set of client request headers that are folded into the cache key is an **explicit, required** configuration: `cache_key_headers`. Because a connector calls your REST API directly, the router cannot know which request headers cause your API to return a different response—so you must declare them. This field has no default: a connector cache configuration that omits it is rejected, so you cannot enable connector caching without first deciding which headers matter. Set it on `connector.all`, and on each source you list under `connector.sources`.
+For Apollo Connectors, the set of client request headers that are folded into the cache key is an **explicit, required** configuration: `cache_key_headers`. Because a connector calls your REST API directly, the router cannot know which request headers cause your API to return a different response—so you must declare them. Set it on `connector.all`: the router refuses to start if connector caching is enabled and `all.cache_key_headers` is unset, so you cannot enable connector caching without first deciding which headers matter. A source listed under `connector.sources` inherits `all`'s value, or overrides it (including with an explicit empty list) by setting its own.
 
 ```yaml title="router.yaml"
 response_cache:
@@ -298,6 +299,7 @@ response_cache:
   connector:
     all:
       enabled: true
+      cache_key_headers: [] # Required: request headers to include in the cache key ([] = none)
       redis:
         urls: ["redis://..."]
     sources:
@@ -405,6 +407,7 @@ response_cache:
     all:
       enabled: true
       ttl: 24h
+      cache_key_headers: [] # Required: request headers to include in the cache key ([] = none)
     sources:
       "products.rest_api":
         ttl: 6h

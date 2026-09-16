@@ -75,12 +75,14 @@ response_cache:
     all:
       enabled: true
       ttl: 10m # Fallback TTL when responses don't include Cache-Control headers (optional; defaults to 24h)
+      cache_key_headers: [] # Required: request headers to include in the cache key ([] = none)
       redis:
         urls: ["redis://localhost:6379"]
       invalidation:
         enabled: true
         shared_key: ${env.INVALIDATION_SHARED_KEY}
-    # Configure overrides for specific connector sources
+    # Configure overrides for specific connector sources. A listed source inherits `all`'s
+    # cache_key_headers unless it sets its own.
     sources:
       "products.my_rest_api":
         ttl: 5m # Override TTL for this source

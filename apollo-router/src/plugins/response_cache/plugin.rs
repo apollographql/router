@@ -504,10 +504,31 @@ impl PluginPrivate for ResponseCache {
             }
         }
 
-        // NOTE: `cache_key_headers` is required by config deserialization (the field has no serde
-        // default), so a connector cache config that omits it is rejected before reaching here —
-        // no separate startup check is needed. An empty list is a valid explicit "no header
-        // partitions the cache key" choice.
+        // `cache_key_headers` is required on `all` wherever connector caching applies: the operator
+        // must consciously choose which request headers distinguish cached connector responses (an
+        // unlisted header your REST API varies on shares one caller's response with another). Same
+        // shape as the TTL check above, and per-source values inherit `all` when unset — so this
+        // only errors when a source that is actually cached (a default-enabled unlisted source, or
+        // a listed enabled source that also leaves it unset) has no resolved value. An empty list
+        // is a valid explicit "no header partitions the cache key" choice, so only `None` triggers
+        // this.
+        if connector_storage_configured && init.config.connector.all.cache_key_headers.is_none() {
+            let unlisted_sources_cached = init.config.connector.all.enabled.unwrap_or(true);
+            let listed_source_without_headers =
+                init.config.connector.sources.iter().any(|(name, source)| {
+                    source.cache_key_headers.is_none()
+                        && init.config.connector.is_source_enabled(true, name)
+                });
+            if unlisted_sources_cached || listed_source_without_headers {
+                return Err(
+                    "`cache_key_headers` must be configured on `response_cache.connector.all` (or \
+                     on each enabled connector source); set an empty list to include no request \
+                     headers in the cache key"
+                        .to_string()
+                        .into(),
+                );
+            }
+        }
 
         if init
             .config
@@ -910,12 +931,11 @@ impl PluginPrivate for ResponseCache {
             .or_else(|| self.connectors.all.private_id.clone());
         let source_name_owned = source_name;
         let indexes = self.connectors.effective_indexes(&source_name_owned);
-        // Cheap `Arc` refcount bump (not a heap copy) of the source's resolved header list; the
-        // owned `Arc<[Arc<str>]>` is then equally cheap to clone as tower clones this service per
-        // request. The `cache_key_headers` accessor returns a slice for read-only callers, so we
-        // clone the shared `Arc` directly here where an owned value is needed.
-        let cache_key_headers =
-            Arc::clone(&self.connectors.get(&source_name_owned).cache_key_headers);
+        // Resolve the source's header list (per-source override, else inherited from `all`) once at
+        // construction. The owned `Arc<[Arc<str>]>` is then a cheap refcount-bump clone as tower
+        // clones this service per request.
+        let cache_key_headers: Arc<[Arc<str>]> =
+            self.connectors.cache_key_headers(&source_name_owned).into();
 
         let debug = self.debug;
 
@@ -3971,43 +3991,35 @@ mod tests {
         );
     }
 
-    #[test]
-    fn connector_cache_key_headers_are_required() {
-        // A connector cache config that writes an `all` block but omits `cache_key_headers` must
-        // be rejected at deserialization: the field has no serde default, so caching cannot be
-        // configured without consciously choosing which request headers partition the key.
-        let missing: Result<super::Config, _> =
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "enabled": true,
-                "connector": {
-                    "all": {
-                        "enabled": true,
-                        "ttl": "10s",
-                        "redis": { "urls": ["redis://127.0.0.1:6379"] },
-                    }
+    #[tokio::test]
+    async fn connector_cache_key_headers_are_required() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        // An enabled, storage-backed connector `all` block with a TTL but no `cache_key_headers`:
+        // the startup validation must reject it (before any Redis connection is attempted). The
+        // field is an `Option` so this can't be a parse error — the requirement is enforced here.
+        let config: super::Config = serde_json_bytes::from_value(serde_json_bytes::json!({
+            "enabled": true,
+            "connector": {
+                "all": {
+                    "enabled": true,
+                    "ttl": "10s",
+                    "redis": { "urls": ["redis://127.0.0.1:6379"] },
                 }
-            }));
+            }
+        }))
+        .unwrap();
+        let result = ResponseCache::new(PluginInit::fake_new(
+            config,
+            Arc::new(valid_schema.to_string()),
+        ))
+        .await;
+        let err = match result {
+            Ok(_) => panic!("connector caching without cache_key_headers must fail to start"),
+            Err(e) => e,
+        };
         assert!(
-            missing.is_err(),
-            "connector cache config without cache_key_headers must be rejected"
-        );
-
-        // An empty list is a valid, explicit choice and parses.
-        let empty: Result<super::Config, _> =
-            serde_json_bytes::from_value(serde_json_bytes::json!({
-                "enabled": true,
-                "connector": {
-                    "all": {
-                        "enabled": true,
-                        "ttl": "10s",
-                        "redis": { "urls": ["redis://127.0.0.1:6379"] },
-                        "cache_key_headers": [],
-                    }
-                }
-            }));
-        assert!(
-            empty.is_ok(),
-            "an explicit empty cache_key_headers must be accepted, got: {empty:?}"
+            err.to_string().contains("cache_key_headers"),
+            "error should name the missing config, got: {err}"
         );
     }
 

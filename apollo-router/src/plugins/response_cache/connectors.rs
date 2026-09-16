@@ -124,7 +124,14 @@ impl ConnectorCacheConfiguration {
     /// required config (never optional), and an empty slice is the explicit "no request header
     /// partitions the key" choice.
     pub(super) fn cache_key_headers(&self, source_name: &str) -> &[Arc<str>] {
-        &self.get(source_name).cache_key_headers
+        // Per-source override if the listed source set it, otherwise inherit `all`. `all` is
+        // guaranteed `Some` whenever a source is actually cached (startup validation), so the final
+        // `unwrap_or_default` only yields an empty slice on non-caching paths.
+        self.sources
+            .get(source_name)
+            .and_then(|s| s.cache_key_headers.as_deref())
+            .or(self.all.cache_key_headers.as_deref())
+            .unwrap_or_default()
     }
 
     /// Returns whether caching is enabled for a specific connector source.
@@ -158,21 +165,23 @@ pub(crate) struct ConnectorCacheSource {
 
     /// The client request header names whose values are folded into this source's cache key.
     ///
-    /// **Required** wherever connector caching is configured (on `all`, and on any listed source):
-    /// this field has no default, so a connector cache config that omits it is rejected. This is a
-    /// deliberate safety decision — the operator must consciously choose which request headers
-    /// distinguish one cached connector response from another before enabling the feature.
+    /// **Required on `all`**: the router refuses to start if connector caching is enabled and
+    /// `all.cache_key_headers` is unset (see the plugin's startup validation). This is a deliberate
+    /// safety decision — the operator must consciously choose which request headers distinguish one
+    /// cached connector response from another before enabling the feature. Because a plain value
+    /// cannot express "unset" separately from "explicitly empty", the field is an `Option` and that
+    /// requirement is enforced at startup rather than at deserialization.
     ///
-    /// Semantics:
+    /// **Optional per source**: a listed source inherits `all`'s value when this is `None`
+    /// (omitted), or overrides it (including with an explicit empty list) when set.
+    ///
+    /// Semantics of the resolved list:
     /// - Header matching is case-insensitive; all values of a listed header (sorted) are hashed.
     /// - An empty list (`[]`) is a valid, explicit choice meaning "no request header partitions
     ///   the cache" — every caller with otherwise-equal inputs shares one entry.
     /// - Any header your REST API varies its response on that is NOT listed here will cause
     ///   different callers to share a cached response (a cross-user data-disclosure risk); any
     ///   header listed here that does not affect the response needlessly fragments the cache.
-    ///
-    /// A listed source carries its own list (there is no inheritance from `all`); a source that is
-    /// not listed under `sources` resolves to the `all` value.
     //
     // `Arc<[Arc<str>]>` rather than the `Vec<String>` used elsewhere in this config: this list is
     // read-only after deserialization (never resized or mutated), and the resolved value is cloned
@@ -181,7 +190,8 @@ pub(crate) struct ConnectorCacheSource {
     // better fit and cheaper here. (See `configuration::cors` for the same pattern.) This is a
     // deliberate, localized departure from the surrounding `Vec`/`String` convention — keep it
     // scoped to these cache-key-header fields unless you are converting a field for the same reason.
-    pub(crate) cache_key_headers: Arc<[Arc<str>]>,
+    #[serde(default)]
+    pub(crate) cache_key_headers: Option<Arc<[Arc<str>]>>,
 
     /// Context key used to separate cache sections per user
     #[serde(default)]
@@ -2250,6 +2260,70 @@ mod tests {
             },
             sources: source_map,
         }
+    }
+
+    #[test]
+    fn cache_key_headers_resolve_with_per_source_inheritance() {
+        let all_headers: Arc<[Arc<str>]> = vec![Arc::from("x-user")].into();
+        let config = ConnectorCacheConfiguration {
+            all: ConnectorCacheSource {
+                cache_key_headers: Some(all_headers),
+                ..Default::default()
+            },
+            sources: HashMap::from([
+                // Omitted → inherits `all`.
+                (
+                    "a.api".to_string(),
+                    ConnectorCacheSource {
+                        cache_key_headers: None,
+                        ..Default::default()
+                    },
+                ),
+                // Explicit empty → overrides to no headers.
+                (
+                    "b.api".to_string(),
+                    ConnectorCacheSource {
+                        cache_key_headers: Some(Vec::<Arc<str>>::new().into()),
+                        ..Default::default()
+                    },
+                ),
+                // Explicit list → overrides.
+                (
+                    "c.api".to_string(),
+                    ConnectorCacheSource {
+                        cache_key_headers: Some(vec![Arc::from("x-tenant")].into()),
+                        ..Default::default()
+                    },
+                ),
+            ]),
+        };
+
+        let names = |src| {
+            config
+                .cache_key_headers(src)
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names("a.api"),
+            vec!["x-user".to_string()],
+            "omitted inherits all"
+        );
+        assert!(
+            names("b.api").is_empty(),
+            "explicit empty overrides to none"
+        );
+        assert_eq!(
+            names("c.api"),
+            vec!["x-tenant".to_string()],
+            "explicit list overrides"
+        );
+        assert_eq!(
+            names("unlisted.api"),
+            vec!["x-user".to_string()],
+            "unlisted resolves to all"
+        );
     }
 
     #[test]

@@ -56,6 +56,7 @@ response_cache:
     all:
       enabled: true
       ttl: 60s # Default TTL for all connector sources
+      cache_key_headers: [] # Required: request headers to include in the cache key ([] = none)
       redis:
         urls: ["redis://localhost:6379"]
 ```
@@ -234,6 +235,7 @@ response_cache:
   connector:
     all:
       enabled: true
+      cache_key_headers: [] # Required: request headers to include in the cache key ([] = none)
       redis:
         urls: ["redis://..."]
       invalidation:
