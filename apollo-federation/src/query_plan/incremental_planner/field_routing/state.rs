@@ -136,6 +136,11 @@ pub(crate) struct PlanState {
     /// than decision counts. Used by the search's effort budget;
     /// deliberately not restored by `rollback`.
     pub(crate) effort: u64,
+    /// Monotonic count of forced-backtracking attempts across the whole
+    /// search. Capped by `FORCED_BACKTRACK_CAP` so unplannable operations
+    /// with no BULB alternatives stop retrying within the budget-free
+    /// greedy pass. Not restored by `rollback`.
+    pub(crate) forced_backtracks: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -157,6 +162,7 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: 0,
             effort: 0,
+            forced_backtracks: 0,
         }
     }
 
@@ -193,6 +199,7 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: self.dropped_fields,
             effort: self.effort,
+            forced_backtracks: self.forced_backtracks,
         }
     }
 
