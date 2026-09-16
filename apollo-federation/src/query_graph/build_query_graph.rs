@@ -290,13 +290,16 @@ impl BaseQueryGraphBuilder {
 
     /// Precompute which followup edges for a given edge are non-trivial.
     fn precompute_non_trivial_followup_edges(&mut self) -> Result<(), FederationError> {
+        let mut out_edges_cache = IndexMap::default();
         for edge in self.query_graph.graph.edge_indices() {
-            let edge_weight = self.query_graph.edge_weight(edge)?;
+            let edge_weight = self.query_graph.edge_weight(edge)?.clone();
             let (_, tail) = self.query_graph.edge_endpoints(edge)?;
-            let out_edges = self.query_graph.out_edges(tail);
+            let out_edges = out_edges_cache
+                .entry(tail)
+                .or_insert_with(|| self.query_graph.out_edge_ids(tail));
             let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
-            for followup_edge_ref in out_edges {
-                let followup_edge_weight = followup_edge_ref.weight();
+            for followup_edge in out_edges {
+                let followup_edge_weight = self.query_graph.edge_weight(*followup_edge)?;
                 match edge_weight.transition {
                     QueryGraphEdgeTransition::KeyResolution => {
                         // After taking a key from subgraph A to B, there is no point of following
@@ -356,7 +359,7 @@ impl BaseQueryGraphBuilder {
                     }
                     _ => {}
                 }
-                non_trivial_followups.push(followup_edge_ref.id());
+                non_trivial_followups.push(*followup_edge);
             }
             self.query_graph
                 .non_trivial_followup_edges
