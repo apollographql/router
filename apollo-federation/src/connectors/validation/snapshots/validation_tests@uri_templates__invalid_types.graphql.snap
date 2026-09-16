@@ -1,12 +1,12 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-expression: "format!(\"{:#?}\", result.errors)"
+expression: result.errors
 input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/invalid_types.graphql
 ---
 [
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<One<String, null>>, null>`",
+        message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<[...One<String, null>], null>`",
         locations: [
             8:16..8:29,
             10:47..10:50,
@@ -24,7 +24,7 @@ input_file: apollo-federation/src/connectors/validation/test_data/uri_templates/
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<List<One<String, null>>, null>`",
+        message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: expected union but received incompatible union\nDetails: `One<Float, Bool, String, null, None>` does not accept `One<[...One<String, null>], null>`",
         locations: [
             25:47..25:54,
         ],
