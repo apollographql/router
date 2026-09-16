@@ -458,6 +458,34 @@ impl FetchGraph {
         })
     }
 
+    /// Iterator over all inputs arriving at `node` from parent fetch
+    /// groups.
+    pub(crate) fn incoming_inputs(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = &InputContribution> {
+        self.graph
+            .edges_directed(node, Direction::Incoming)
+            .flat_map(|edge| edge.weight().inputs.iter())
+    }
+
+    /// Whether any incoming edge on `node` carries a key input whose
+    /// conditions are a superset of `conditions` for the given source type.
+    /// When true, the key data is already present in the entity
+    /// representation the fetch was reached by, so there is nothing extra
+    /// to fetch or order for those conditions.
+    pub(crate) fn incoming_inputs_cover(
+        &self,
+        node: NodeIndex,
+        source_type: &Name,
+        conditions: &SelectionSet,
+    ) -> bool {
+        self.incoming_inputs(node).any(|input| {
+            *input.source_type_name() == *source_type
+                && selection_contains(input.conditions(), conditions)
+        })
+    }
+
     /// Get a reference to an edge's weight.
     #[allow(dead_code)]
     pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
@@ -567,6 +595,52 @@ impl FetchGraph {
     pub(crate) fn is_reachable(&self, from: NodeIndex, to: NodeIndex) -> bool {
         petgraph::algo::has_path_connecting(&self.graph, from, to, None)
     }
+}
+
+/// Checks whether every top-level selection in `needed` is covered by a
+/// matching selection in `have`. Fields match by name with nested
+/// sub-selections contained recursively; inline fragments match by type
+/// condition. Conservative: a miss only means the caller falls back to
+/// routing the conditions.
+fn selection_contains(have: &SelectionSet, needed: &SelectionSet) -> bool {
+    use crate::operation::Selection;
+    needed
+        .selections
+        .values()
+        .all(|needed_sel| match needed_sel {
+            Selection::Field(needed_field) => {
+                if *needed_field.field.name() == crate::operation::TYPENAME_FIELD {
+                    return true;
+                }
+                have.selections.values().any(|have_sel| match have_sel {
+                    Selection::Field(have_field) => {
+                        have_field.field.name() == needed_field.field.name()
+                            && have_field.field.alias.is_none()
+                            && match (&needed_field.selection_set, &have_field.selection_set) {
+                                (Some(needed_sub), Some(have_sub)) => {
+                                    selection_contains(have_sub, needed_sub)
+                                }
+                                (None, _) => true,
+                                (Some(_), None) => false,
+                            }
+                    }
+                    Selection::InlineFragment(_) => false,
+                })
+            }
+            Selection::InlineFragment(needed_frag) => {
+                have.selections.values().any(|have_sel| match have_sel {
+                    Selection::InlineFragment(have_frag) => {
+                        have_frag.inline_fragment.type_condition_position
+                            == needed_frag.inline_fragment.type_condition_position
+                            && selection_contains(
+                                &have_frag.selection_set,
+                                &needed_frag.selection_set,
+                            )
+                    }
+                    Selection::Field(_) => false,
+                })
+            }
+        })
 }
 
 #[cfg(test)]

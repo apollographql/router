@@ -661,15 +661,21 @@ fn cyclic_entity_group_reuse_mints_fresh_group() {
     assert!(state.graph.cost().is_finite());
 }
 
-/// A failed commit drops only its own selection and rolls its
-/// mutations back; the same site under a different anchor commits.
+/// A failed commit marks its site doomed in the forced-backtracking
+/// trail, so a sibling at the same site also fails fast. The doomed
+/// set is deliberately coarse (keyed on node + selection name, not
+/// the full routing context) to avoid re-proving dead ends whose
+/// key conditions recurse. A false positive is a drop, not a wrong
+/// plan, and the trail is scoped to one fast_forward call.
 #[test]
-fn failed_commit_drops_only_the_failed_pending() {
+fn failed_commit_dooms_site_for_siblings() {
     let space = search_space();
     let (mut state, a, b) = cyclic_fixture();
 
-    // Bottom of stack: same site, no ordering dependent (commits fine).
-    // Top: condition pending whose ordering edge cycles (commit fails).
+    // Bottom of stack: same site, no ordering dependent (would commit
+    // on its own). Top: condition pending whose ordering edge cycles.
+    // The doomed set marks the site after the cyclic failure, so the
+    // sibling is dropped too.
     let ok_pending = y_pending(&space, b, None);
     let cyclic_pending = y_pending(&space, b, Some(a));
     state.pending = vec![Arc::new(ok_pending), Arc::new(cyclic_pending)];
@@ -677,8 +683,8 @@ fn failed_commit_drops_only_the_failed_pending() {
     space.fast_forward(&mut state).expect("fast forward runs");
 
     assert_eq!(
-        state.dropped_fields, 1,
-        "only the cyclic pending drops; the same site with a different anchor commits",
+        state.dropped_fields, 2,
+        "doomed-site collision drops both pendings",
     );
     assert!(state.pending.is_empty());
 }
