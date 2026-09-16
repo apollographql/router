@@ -1697,17 +1697,23 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn assert_log_contained(&self, msg: &str) {
+    pub fn log_contains(&self, msg: &str) -> bool {
         for line in &self.logs {
             if line.contains(msg) {
-                return;
+                return true;
             }
         }
+        false
+    }
 
-        panic!(
-            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
-            logs = self.logs.join("\n")
-        );
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
+        if !self.log_contains(msg) {
+            panic!(
+                "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+                logs = self.logs.join("\n")
+            );
+        }
     }
 
     #[allow(dead_code)]

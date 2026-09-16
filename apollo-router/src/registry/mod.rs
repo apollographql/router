@@ -92,8 +92,9 @@ pub(crate) fn validate_oci_reference(
 /// This struct does not change on router reloads - they are all sourced from CLI options.
 #[derive(Debug, Clone)]
 pub struct OciConfig {
-    /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
-    pub apollo_key: String,
+    /// The Apollo key: `<YOUR_GRAPH_API_KEY>`.
+    /// Only required (and present) when `reference` points at an Apollo-hosted registry.
+    pub apollo_key: Option<String>,
 
     /// OCI Compliant URL pointing to the release bundle
     pub reference: String,
@@ -161,14 +162,32 @@ impl From<LicenseError> for OciError {
     }
 }
 
-fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
+/// Determine whether a resolved registry hostname belongs to Apollo's own registry.
+fn is_apollo_registry(server: &str) -> bool {
+    server
+        .strip_suffix('/')
+        .unwrap_or(server)
+        .ends_with(APOLLO_REGISTRY_ENDING)
+}
+
+/// Determine whether an (unparsed) OCI graph artifact reference points at an
+/// Apollo-hosted registry. Used to decide whether `APOLLO_KEY` is required.
+pub(crate) fn is_apollo_graph_artifact_reference(reference: &str) -> bool {
+    reference
+        .parse::<Reference>()
+        .is_ok_and(|r| is_apollo_registry(r.resolve_registry()))
+}
+
+fn build_auth(reference: &Reference, apollo_key: Option<&str>) -> RegistryAuth {
     let server = reference
         .resolve_registry()
         .strip_suffix('/')
         .unwrap_or_else(|| reference.resolve_registry());
 
     // Check if the server registry ends with apollographql.com
-    if server.ends_with(APOLLO_REGISTRY_ENDING) {
+    if is_apollo_registry(server)
+        && let Some(apollo_key) = apollo_key
+    {
         tracing::debug!("using registry authentication");
         return RegistryAuth::Basic(APOLLO_REGISTRY_USERNAME.to_string(), apollo_key.to_string());
     }
@@ -191,8 +210,8 @@ fn build_auth(reference: &Reference, apollo_key: &str) -> RegistryAuth {
     }
 }
 
-/// Fetch the manifest, extract the blob location, and fetch the blob.
-async fn fetch_oci_from_reference(
+/// Fetch the manifest, extract the blob location, and fetch the schema blob.
+async fn fetch_schema_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
     reference: &Reference,
@@ -385,7 +404,7 @@ impl OciConfig {
 /// Fetch the manifest digest (without fetching the full manifest) to detect changes
 pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<String, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
 
     let client = Client::new(ClientConfig {
@@ -426,11 +445,11 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
     }
 }
 
-/// Fetch an OCI bundle by parsing the graph artifact reference, building auth,
+/// Fetch a schema OCI bundle by parsing the graph artifact reference, building auth,
 /// inferring the correct protocol, and calling the internal fetch function.
-pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
+pub(crate) async fn fetch_schema_oci(oci_config: &OciConfig) -> Result<OciContent, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
@@ -439,7 +458,7 @@ pub(crate) async fn fetch_oci(oci_config: &OciConfig) -> Result<OciContent, OciE
         auth == RegistryAuth::Anonymous
     );
 
-    match fetch_oci_from_reference(
+    match fetch_schema_from_reference(
         &mut Client::new(ClientConfig {
             protocol,
             ..Default::default()
@@ -475,7 +494,7 @@ pub(crate) fn create_oci_schema_stream(
     let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
 
     match (ref_type, oci_config.hot_reload) {
-        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_from_oci(oci_config))),
+        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_schema_from_oci(oci_config))),
         (OciReferenceType::Tag, false) => Err(anyhow::anyhow!(
             "Tag references without --hot-reload are not yet supported."
         )),
@@ -485,7 +504,7 @@ pub(crate) fn create_oci_schema_stream(
         (OciReferenceType::Digest, false) => {
             let oci_config_clone = oci_config.clone();
             let stream = stream::once(async move {
-                fetch_oci(&oci_config_clone)
+                fetch_schema_oci(&oci_config_clone)
                     .await
                     .map(|oci_content| SchemaState {
                         sdl: oci_content.schema,
@@ -497,8 +516,8 @@ pub(crate) fn create_oci_schema_stream(
     }
 }
 
-/// Regularly fetch from OCI registry at the configured polling interval
-pub(crate) fn stream_from_oci(
+/// Regularly fetch the schema from OCI registry at the configured polling interval
+pub(crate) fn stream_schema_from_oci(
     oci_config: OciConfig,
 ) -> impl Stream<Item = Result<SchemaState, OciError>> {
     let (sender, receiver) = channel(2);
@@ -516,7 +535,7 @@ pub(crate) fn stream_from_oci(
                         // Digest changed, fetch the full schema
                         tracing::debug!("oci manifest digest changed, fetching schema");
 
-                        match fetch_oci(&oci_config).await {
+                        match fetch_schema_oci(&oci_config).await {
                             Ok(oci_result) => {
                                 tracing::debug!("fetched schema from oci registry");
                                 let schema_state = SchemaState {
@@ -538,7 +557,7 @@ pub(crate) fn stream_from_oci(
                                     polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
                                 }
 
-                                // Error logging is now handled in fetch_oci
+                                // Error logging is now handled in fetch_schema_oci
                                 if let Err(e) = sender.send(Err(err)).await {
                                     tracing::debug!(
                                         "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
@@ -591,7 +610,6 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
 
 type OciLicenseStream = Pin<Box<dyn Stream<Item = Result<License, OciError>> + Send>>;
 
-#[allow(dead_code)]
 pub(crate) fn create_oci_license_stream(
     oci_config: OciConfig,
 ) -> Result<OciLicenseStream, anyhow::Error> {
@@ -601,7 +619,6 @@ pub(crate) fn create_oci_license_stream(
     Ok(Box::pin(stream_license_from_oci(oci_config)))
 }
 
-#[allow(dead_code)]
 fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<License, OciError>> {
     let (sender, receiver) = channel(2);
 
@@ -670,10 +687,9 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
     ReceiverStream::new(receiver).boxed()
 }
 
-#[allow(dead_code)]
 async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> {
     let reference: Reference = oci_config.reference.as_str().parse()?;
-    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let auth = build_auth(&reference, oci_config.apollo_key.as_deref());
     let protocol = oci_config.client_protocol();
 
     tracing::debug!(
@@ -701,7 +717,6 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     }
 }
 
-#[allow(dead_code)]
 async fn fetch_license_from_reference(
     client: &mut Client,
     auth: &RegistryAuth,
@@ -714,9 +729,17 @@ async fn fetch_license_from_reference(
     let license_layer = manifest
         .layers
         .iter()
-        .find(|layer| layer.media_type == ENTITLEMENT_MEDIA_TYPE)
-        .ok_or_else(|| OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()))?
-        .clone();
+        .find(|layer| layer.media_type == ENTITLEMENT_MEDIA_TYPE);
+
+    let license_layer = match license_layer {
+        Some(layer) => layer.clone(),
+        None => {
+            // No entitlement layer on this artifact means no entitlement can be
+            // fetched, so the router should boot unlicensed, not retry forever.
+            tracing::info!("no entitlement layer found in oci manifest, treating as unlicensed");
+            return Ok(License::default());
+        }
+    };
 
     tracing::debug!("pulling oci blob for license layer");
     let license_blob_bytes = fetch_oci_blob(client, reference, &license_layer).await?;
@@ -775,7 +798,7 @@ mod tests {
 
     fn mock_oci_config_with_reference(reference: String) -> OciConfig {
         OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: reference.clone(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
@@ -909,7 +932,7 @@ mod tests {
         let apollo_key = "test-api-key".to_string();
 
         // Call build_auth
-        let auth = build_auth(&reference, &apollo_key);
+        let auth = build_auth(&reference, Some(&apollo_key));
 
         // Check that it returns the correct RegistryAuth
         match auth {
@@ -922,6 +945,21 @@ mod tests {
     }
 
     #[test]
+    fn test_build_auth_apollo_registry_no_key() {
+        // An Apollo registry reference with no key falls through to the
+        // docker-credential/anonymous path rather than panicking.
+        let reference: Reference = "registry.apollographql.com/my-graph:latest"
+            .parse()
+            .unwrap();
+
+        let auth = build_auth(&reference, None);
+
+        if let RegistryAuth::Basic(username, _) = auth {
+            assert_ne!(username, APOLLO_REGISTRY_USERNAME);
+        }
+    }
+
+    #[test]
     fn test_build_auth_non_apollo_registry() {
         // Create a reference for a non-Apollo registry
         let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
@@ -930,12 +968,41 @@ mod tests {
         // Mock the docker_credential::get_credential function
         // Since we can't easily mock this in Rust without additional libraries,
         // we'll just verify that it doesn't return the Apollo registry auth
-        let auth = build_auth(&reference, &apollo_key);
+        let auth = build_auth(&reference, Some(&apollo_key));
 
         // Check that it doesn't return the Apollo registry auth
         if let RegistryAuth::Basic(username, _) = auth {
             assert_ne!(username, "apollo_registry");
         }
+    }
+
+    #[test]
+    fn test_build_auth_non_apollo_registry_no_key() {
+        // A non-Apollo registry reference with no APOLLO_KEY set should not
+        // require one; it falls through to docker-credential/anonymous auth.
+        let reference: Reference = "docker.io/library/alpine:latest".parse().unwrap();
+
+        let auth = build_auth(&reference, None);
+
+        if let RegistryAuth::Basic(username, _) = auth {
+            assert_ne!(username, "apollo_registry");
+        }
+    }
+
+    #[test]
+    fn test_is_apollo_graph_artifact_reference() {
+        assert!(is_apollo_graph_artifact_reference(
+            "registry.apollographql.com/my-graph:latest"
+        ));
+        assert!(is_apollo_graph_artifact_reference(
+            "artifact.api.apollographql.com/my-graph:latest"
+        ));
+        assert!(!is_apollo_graph_artifact_reference(
+            "docker.io/library/alpine:latest"
+        ));
+        assert!(!is_apollo_graph_artifact_reference(
+            "ghcr.io/my-org/my-graph:latest"
+        ));
     }
 
     fn generate_manifest_annotations(launch_id: Option<&str>) -> BTreeMap<String, String> {
@@ -1049,7 +1116,7 @@ mod tests {
     #[case::extra_layers(vec![schema_layer("test schema"), unrelated_layer()], Some("test schema"))]
     #[case::missing_layer(vec![unrelated_layer()], None)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn fetch_oci_from_reference_cases(
+    async fn fetch_schema_from_reference_cases(
         #[case] layers: Vec<ImageLayer>,
         #[case] expected_schema: Option<&str>,
     ) {
@@ -1059,7 +1126,7 @@ mod tests {
             ..Default::default()
         });
         let image_reference = setup_mocks(mock_server, layers, None).await;
-        let result = fetch_oci_from_reference(
+        let result = fetch_schema_from_reference(
             &mut client,
             &RegistryAuth::Anonymous,
             &image_reference,
@@ -1089,12 +1156,10 @@ mod tests {
         );
     }
 
-    fn assert_license_fetch_missing_layer(result: Result<License, OciError>) {
-        let err = result.expect_err("expected missing entitlements layer");
-        assert!(
-            matches!(err, OciError::LayerNotFound(_)),
-            "expected LayerNotFound, got {err:?}"
-        );
+    fn assert_license_fetch_returns_default_when_missing_layer(result: Result<License, OciError>) {
+        let license = result
+            .expect("missing entitlement layer should yield an unlicensed default, not an error");
+        assert_eq!(license.claims, License::default().claims);
     }
 
     fn assert_license_fetch_bad_utf8(result: Result<License, OciError>) {
@@ -1119,7 +1184,7 @@ mod tests {
         vec![license_layer(TEST_LICENSE_JWT), unrelated_layer()],
         assert_license_fetch_success
     )]
-    #[case::missing_layer(vec![unrelated_layer()], assert_license_fetch_missing_layer)]
+    #[case::missing_layer(vec![unrelated_layer()], assert_license_fetch_returns_default_when_missing_layer)]
     // 0xFF/0xFE are not valid UTF-8 start bytes.
     #[case::bad_utf8(vec![license_layer(vec![0xFF, 0xFE, 0xFD])], assert_license_fetch_bad_utf8)]
     #[case::bad_jwt(vec![license_layer("not a jwt")], assert_license_fetch_bad_jwt)]
@@ -1468,7 +1533,7 @@ mod tests {
             .parse::<Reference>()
             .expect("url must be valid");
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -1872,7 +1937,7 @@ mod tests {
     #[case::no_manifest_annotations(None, None)]
     #[case::manifest_without_launch_id(Some(generate_manifest_annotations(None)), None)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_launch_id_cases(
+    async fn stream_schema_from_oci_launch_id_cases(
         #[case] manifest_annotations: Option<BTreeMap<String, String>>,
         #[case] expected_launch_id: Option<String>,
     ) {
@@ -1885,7 +1950,7 @@ mod tests {
         .await;
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let results = stream_from_oci(oci_config)
+        let results = stream_schema_from_oci(oci_config)
             .take(1)
             .collect::<Vec<_>>()
             .await;
@@ -1901,7 +1966,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_digest_unchanged_no_fetch() {
+    async fn stream_schema_from_oci_digest_unchanged_no_fetch() {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
@@ -1964,7 +2029,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_from_oci(oci_config);
+        let mut stream = stream_schema_from_oci(oci_config);
 
         // first poll: digest is new, so schema should be fetched
         let first_result = stream.next().await;
@@ -2009,7 +2074,7 @@ mod tests {
 
         // Create OciConfig with tag reference and hot-reload enabled
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -2045,7 +2110,7 @@ mod tests {
 
         // Create OciConfig with tag reference and hot-reload disabled
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
@@ -2071,7 +2136,7 @@ mod tests {
 
         // Create OciConfig with digest reference and hot-reload enabled
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: digest_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -2159,7 +2224,7 @@ mod tests {
 
         // Create OciConfig with digest reference and hot-reload disabled
         let oci_config_digest = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: digest_ref,
             hot_reload: false,
             poll_interval: Duration::from_millis(10),
@@ -2181,7 +2246,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_digest_changed_fetches_schema() {
+    async fn stream_schema_from_oci_digest_changed_fetches() {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
@@ -2272,7 +2337,7 @@ mod tests {
             .expect("url must be valid");
         let oci_config = mock_oci_config_with_reference(image_reference.to_string());
 
-        let mut stream = stream_from_oci(oci_config);
+        let mut stream = stream_schema_from_oci(oci_config);
 
         // first poll: digest1 is new, so schema1 should be fetched
         let first_result = stream.next().await;
@@ -2314,7 +2379,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_oci_backoff_error_retry() {
+    async fn stream_schema_from_oci_backoff_error_retry() {
         let mock_server = &MockServer::start().await;
         let graph_id = "test-graph-id";
         let reference = "latest";
@@ -2390,7 +2455,7 @@ mod tests {
             .parse::<Reference>()
             .expect("url must be valid");
         let oci_config = OciConfig {
-            apollo_key: "test-api-key".to_string(),
+            apollo_key: Some("test-api-key".to_string()),
             reference: image_reference.to_string(),
             hot_reload: true,
             poll_interval: Duration::from_millis(10),
@@ -2398,7 +2463,7 @@ mod tests {
         };
 
         let start_time = tokio::time::Instant::now();
-        let mut stream = stream_from_oci(oci_config);
+        let mut stream = stream_schema_from_oci(oci_config);
 
         // The stream should eventually succeed after the backoff period
         // Use a timeout to ensure the test completes
