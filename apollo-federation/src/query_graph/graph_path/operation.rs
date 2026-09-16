@@ -2509,15 +2509,79 @@ mod tests {
     use apollo_compiler::Schema;
     use petgraph::stable_graph::EdgeIndex;
     use petgraph::stable_graph::NodeIndex;
+    use proptest::prelude::*;
 
     use crate::operation::Field;
+    use crate::operation::InlineFragment;
+    use crate::operation::SelectionId;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::operation::OpGraphPath;
     use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::operation::OpPath;
     use crate::query_graph::graph_path::operation::OpPathElement;
     use crate::schema::ValidFederationSchema;
     use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+
+    fn op_path_test_schema() -> ValidFederationSchema {
+        ValidFederationSchema::new(
+            Schema::parse_and_validate(
+                "type Query { t: T } type T { child: T id: ID! }",
+                "op-path-test.graphql",
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn op_path_field(
+        schema: &ValidFederationSchema,
+        type_name: &str,
+        field_name: &str,
+    ) -> Arc<OpPathElement> {
+        Arc::new(OpPathElement::Field(Field::from_position(
+            schema,
+            ObjectFieldDefinitionPosition {
+                type_name: Name::new(type_name).unwrap(),
+                field_name: Name::new(field_name).unwrap(),
+            }
+            .into(),
+        )))
+    }
+
+    fn op_path_fragment(
+        schema: &ValidFederationSchema,
+        type_name: Option<&str>,
+    ) -> Arc<OpPathElement> {
+        Arc::new(OpPathElement::InlineFragment(InlineFragment {
+            schema: schema.clone(),
+            parent_type_position: ObjectTypeDefinitionPosition {
+                type_name: Name::new("T").unwrap(),
+            }
+            .into(),
+            type_condition_position: type_name.map(|type_name| {
+                ObjectTypeDefinitionPosition {
+                    type_name: Name::new(type_name).unwrap(),
+                }
+                .into()
+            }),
+            directives: Default::default(),
+            selection_id: SelectionId::new(),
+        }))
+    }
+
+    fn op_path_element_kind(element: &OpPathElement) -> String {
+        match element {
+            OpPathElement::Field(field) => format!("field:{}", field.name()),
+            OpPathElement::InlineFragment(fragment) => {
+                fragment.type_condition_position.as_ref().map_or_else(
+                    || "fragment:*".to_string(),
+                    |position| format!("fragment:{}", position.type_name()),
+                )
+            }
+        }
+    }
 
     #[test]
     fn path_display() {
@@ -2583,5 +2647,89 @@ mod tests {
             path.to_string(),
             "Query(S1) --[t]--> T(S1) --[id]--> ID(S1)"
         );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        #[test]
+        fn op_path_filter_on_schema_matches_literal_element_filter(
+            codes in prop::collection::vec(0u8..5, 0..40),
+        ) {
+            let schema = op_path_test_schema();
+            let elements = codes
+                .iter()
+                .map(|code| match code % 5 {
+                    0 => op_path_field(&schema, "Query", "t"),
+                    1 => op_path_field(&schema, "T", "child"),
+                    2 => op_path_field(&schema, "T", "id"),
+                    3 => op_path_fragment(&schema, Some("T")),
+                    _ => op_path_fragment(&schema, Some("Missing")),
+                })
+                .collect::<Vec<_>>();
+            let path = OpPath(elements.clone());
+            let actual = path.filter_on_schema(&schema);
+            let actual_kinds = actual
+                .0
+                .iter()
+                .map(|element| op_path_element_kind(element))
+                .collect::<Vec<_>>();
+            let expected_kinds = elements
+                .iter()
+                .filter(|element| {
+                    !matches!(
+                        element.as_ref(),
+                        OpPathElement::InlineFragment(fragment)
+                            if fragment.type_condition_position.as_ref().is_some_and(
+                                |position| schema.get_type(position.type_name()).is_err()
+                            )
+                    )
+                })
+                .map(|element| op_path_element_kind(element))
+                .collect::<Vec<_>>();
+            prop_assert_eq!(actual_kinds, expected_kinds);
+        }
+
+        #[test]
+        fn concat_op_paths_removes_only_redundant_leading_fragment_run(
+            head_prefix in prop::collection::vec(0u8..3, 0..12),
+            redundant_fragments in 0usize..12,
+            tail_fields in prop::collection::vec(0u8..2, 0..12),
+        ) {
+            let schema = op_path_test_schema();
+            let mut head = head_prefix
+                .into_iter()
+                .map(|code| if code % 2 == 0 {
+                    op_path_field(&schema, "T", "child")
+                } else {
+                    op_path_fragment(&schema, Some("T"))
+                })
+                .collect::<Vec<_>>();
+            // `child` returns T, making an immediately following `... on T` redundant.
+            head.push(op_path_field(&schema, "T", "child"));
+            let mut tail = (0..redundant_fragments)
+                .map(|_| op_path_fragment(&schema, Some("T")))
+                .collect::<Vec<_>>();
+            tail.extend(tail_fields.into_iter().map(|code| {
+                if code == 0 {
+                    op_path_field(&schema, "T", "id")
+                } else {
+                    op_path_field(&schema, "T", "child")
+                }
+            }));
+
+            let actual = super::concat_op_paths(&OpPath(head.clone()), &OpPath(tail.clone()));
+            let expected = head
+                .iter()
+                .chain(tail.iter().skip(redundant_fragments))
+                .map(|element| op_path_element_kind(element))
+                .collect::<Vec<_>>();
+            let actual = actual
+                .0
+                .iter()
+                .map(|element| op_path_element_kind(element))
+                .collect::<Vec<_>>();
+            prop_assert_eq!(actual, expected);
+        }
     }
 }

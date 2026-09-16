@@ -1143,3 +1143,1030 @@ impl QueryGraph {
             .ok_and_any(|field| field.directives.has(&provides_directive_definition.name))?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use petgraph::visit::EdgeRef;
+    use petgraph::visit::IntoNodeReferences;
+    use proptest::prelude::*;
+    use proptest::test_runner::TestCaseError;
+
+    use crate::Supergraph;
+    use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
+
+    /// A compile-time corpus chosen by graph feature, not by expected query-plan text. Together
+    /// these exercise key cliques, nested @requires, @provides node duplication, interface
+    /// objects, abstract runtime types, progressive @override, @context/@fromContext, renamed
+    /// roots, and non-query roots. Keeping the SDL embedded makes a failing audit replayable
+    /// without depending on the working directory or enumerating fixture files at runtime.
+    const QUERY_GRAPH_FIXTURES: [(&str, &str); 12] = [
+        (
+            "key-chains",
+            include_str!(
+                "../../tests/query_plan/supergraphs/handles_case_of_key_chains_in_parallel_requires.graphql"
+            ),
+        ),
+        (
+            "nested-provides",
+            include_str!(
+                "../../tests/query_plan/supergraphs/it_works_with_nested_provides.graphql"
+            ),
+        ),
+        (
+            "nested-requires",
+            include_str!(
+                "../../tests/query_plan/supergraphs/handles_multiple_requires_involving_different_nestedness.graphql"
+            ),
+        ),
+        (
+            "interface-object",
+            include_str!(
+                "../../tests/query_plan/supergraphs/can_use_a_key_on_an_interface_object_type.graphql"
+            ),
+        ),
+        (
+            "abstract-runtime-types",
+            include_str!(
+                "../../tests/query_plan/supergraphs/field_covariance_and_type_explosion.graphql"
+            ),
+        ),
+        (
+            "progressive-override",
+            include_str!(
+                "../../tests/query_plan/supergraphs/it_handles_progressive_override_on_entity_fields.graphql"
+            ),
+        ),
+        (
+            "from-context",
+            include_str!(
+                "../../tests/query_plan/supergraphs/set_context_test_with_type_conditions_for_union.graphql"
+            ),
+        ),
+        (
+            "renamed-root",
+            include_str!("../../tests/query_plan/supergraphs/defer_on_renamed_root_type.graphql"),
+        ),
+        (
+            "subscription",
+            include_str!(
+                "../../tests/query_plan/supergraphs/basic_subscription_query_plan.graphql"
+            ),
+        ),
+        (
+            "mutation",
+            include_str!(
+                "../../tests/query_plan/supergraphs/adjacent_mutations_get_merged.graphql"
+            ),
+        ),
+        (
+            "interface-union",
+            include_str!("../../tests/query_plan/supergraphs/interface_union_interaction.graphql"),
+        ),
+        (
+            "nested-external-key",
+            include_str!(
+                "../../tests/query_plan/supergraphs/external_on_nested_key_fields_with_cross_subgraph_requires.graphql"
+            ),
+        ),
+    ];
+
+    fn build_fixture_query_graph(
+        fixture: usize,
+        for_query_planning: bool,
+    ) -> Result<QueryGraph, FederationError> {
+        let (_, sdl) = QUERY_GRAPH_FIXTURES[fixture % QUERY_GRAPH_FIXTURES.len()];
+        let supergraph = Supergraph::new_with_router_specs(sdl)?;
+        let api_schema = supergraph.to_api_schema(Default::default())?;
+        build_federated_query_graph(
+            supergraph.schema,
+            api_schema,
+            None,
+            Some(for_query_planning),
+        )
+    }
+
+    fn audit_error(message: impl Into<String>) -> TestCaseError {
+        TestCaseError::fail(message.into())
+    }
+
+    fn schema_type_name(node: &QueryGraphNode) -> Option<&Name> {
+        match &node.type_ {
+            QueryGraphNodeType::SchemaType(position) => Some(position.type_name()),
+            QueryGraphNodeType::FederatedRootType(_) => None,
+        }
+    }
+
+    fn expected_root_type_name(
+        schema: &ValidFederationSchema,
+        root_kind: SchemaRootDefinitionKind,
+    ) -> Option<&Name> {
+        let definition = &schema.schema().schema_definition;
+        match root_kind {
+            SchemaRootDefinitionKind::Query => definition.query.as_ref().map(|name| &**name),
+            SchemaRootDefinitionKind::Mutation => definition.mutation.as_ref().map(|name| &**name),
+            SchemaRootDefinitionKind::Subscription => {
+                definition.subscription.as_ref().map(|name| &**name)
+            }
+        }
+    }
+
+    /// Recompute the reachability bit using a forward search. This is intentionally the opposite
+    /// direction from the builder's incremental reverse-ancestor marking algorithm and handles
+    /// same-source cycles with an explicit visited set.
+    fn has_cross_source_edge_reachable_from(graph: &QueryGraph, start: NodeIndex) -> bool {
+        let mut visited = IndexSet::default();
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            if !visited.insert(node) {
+                continue;
+            }
+            let source = &graph.graph[node].source;
+            for edge in graph.graph.edges_directed(node, Direction::Outgoing) {
+                let target = edge.target();
+                if graph.graph[target].source != *source {
+                    return true;
+                }
+                if !visited.contains(&target) {
+                    stack.push(target);
+                }
+            }
+        }
+        false
+    }
+
+    fn is_trivial_followup(previous: &QueryGraphEdge, followup: &QueryGraphEdge) -> bool {
+        match &previous.transition {
+            QueryGraphEdgeTransition::KeyResolution => {
+                matches!(followup.transition, QueryGraphEdgeTransition::KeyResolution)
+                    && previous.conditions == followup.conditions
+            }
+            QueryGraphEdgeTransition::RootTypeResolution { .. }
+            | QueryGraphEdgeTransition::SubgraphEnteringTransition => matches!(
+                followup.transition,
+                QueryGraphEdgeTransition::RootTypeResolution { .. }
+            ),
+            _ => false,
+        }
+    }
+
+    /// Check the builder premise that makes a pruned two-hop transition semantically redundant:
+    /// the first edge's head must have a direct transition to the second edge's destination.
+    fn has_direct_replacement_for_trivial_followup(
+        graph: &QueryGraph,
+        previous_id: EdgeIndex,
+        followup_id: EdgeIndex,
+    ) -> bool {
+        let (origin, _) = graph.graph.edge_endpoints(previous_id).unwrap();
+        let (_, destination) = graph.graph.edge_endpoints(followup_id).unwrap();
+        let previous = &graph.graph[previous_id];
+        let followup = &graph.graph[followup_id];
+        let destination_node = &graph.graph[destination];
+
+        // Interface-object key edges can produce A(S1) -> I-object(S2) -> I(S1). There is no
+        // literal A -> I key edge because both types are already in S1; staying on concrete A is
+        // the strictly more specific zero-hop replacement. Require a same-source runtime-subset
+        // proof instead of granting that exception by transition name alone.
+        let origin_node = &graph.graph[origin];
+        let zero_hop_is_safe = || {
+            if origin_node.source != destination_node.source {
+                return false;
+            }
+            let Ok(origin_type) =
+                CompositeTypeDefinitionPosition::try_from(origin_node.type_.clone())
+            else {
+                return origin == destination;
+            };
+            let Ok(destination_type) =
+                CompositeTypeDefinitionPosition::try_from(destination_node.type_.clone())
+            else {
+                return origin == destination;
+            };
+            let Some(schema) = graph.sources.get(&origin_node.source) else {
+                return false;
+            };
+            let Ok(origin_runtime) = schema.possible_runtime_types(origin_type) else {
+                return false;
+            };
+            let Ok(destination_runtime) = schema.possible_runtime_types(destination_type) else {
+                return false;
+            };
+            origin_runtime
+                .iter()
+                .all(|runtime| destination_runtime.contains(runtime))
+        };
+        if zero_hop_is_safe() {
+            return true;
+        }
+
+        // The direct replacement may be a self-key/root edge (for A -> B -> A). Normal traversal
+        // deliberately hides those edges because staying in A is the zero-hop alternative, but
+        // the builder still creates the self edge that proves its clique premise.
+        graph
+            .out_edges_with_federation_self_edges(origin)
+            .into_iter()
+            .any(|candidate_ref| {
+                let candidate = candidate_ref.weight();
+                let candidate_destination = &graph.graph[candidate_ref.target()];
+                if candidate_destination.source != destination_node.source
+                    || schema_type_name(candidate_destination) != schema_type_name(destination_node)
+                {
+                    return false;
+                }
+                match (
+                    &previous.transition,
+                    &followup.transition,
+                    &candidate.transition,
+                ) {
+                    (
+                        QueryGraphEdgeTransition::KeyResolution,
+                        QueryGraphEdgeTransition::KeyResolution,
+                        QueryGraphEdgeTransition::KeyResolution,
+                    ) => candidate.conditions == previous.conditions,
+                    (
+                        QueryGraphEdgeTransition::RootTypeResolution { root_kind },
+                        QueryGraphEdgeTransition::RootTypeResolution {
+                            root_kind: followup_kind,
+                        },
+                        QueryGraphEdgeTransition::RootTypeResolution {
+                            root_kind: candidate_kind,
+                        },
+                    ) => root_kind == followup_kind && root_kind == candidate_kind,
+                    (
+                        QueryGraphEdgeTransition::SubgraphEnteringTransition,
+                        QueryGraphEdgeTransition::RootTypeResolution {
+                            root_kind: followup_kind,
+                        },
+                        QueryGraphEdgeTransition::SubgraphEnteringTransition,
+                    ) => candidate_destination.root_kind == Some(*followup_kind),
+                    _ => false,
+                }
+            })
+    }
+
+    fn audit_transition(graph: &QueryGraph, edge_id: EdgeIndex) -> Result<(), TestCaseError> {
+        let (head_id, tail_id) = graph.graph.edge_endpoints(edge_id).unwrap();
+        let head = &graph.graph[head_id];
+        let tail = &graph.graph[tail_id];
+        let edge = &graph.graph[edge_id];
+
+        match &edge.transition {
+            QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position,
+                ..
+            } => {
+                prop_assert_eq!(&head.source, source, "field edge {:?} head source", edge_id);
+                prop_assert_eq!(&tail.source, source, "field edge {:?} tail source", edge_id);
+                let schema = graph.sources.get(source).ok_or_else(|| {
+                    audit_error(format!(
+                        "field edge {edge_id:?} has missing source {source}"
+                    ))
+                })?;
+                let field = field_definition_position
+                    .get(schema.schema())
+                    .map_err(|error| audit_error(format!("field edge {edge_id:?}: {error}")))?;
+                let field_parent = field_definition_position.parent();
+                prop_assert_eq!(
+                    schema_type_name(head),
+                    Some(field_parent.type_name()),
+                    "field edge {:?} starts at the wrong type",
+                    edge_id
+                );
+                prop_assert_eq!(
+                    schema_type_name(tail),
+                    Some(field.ty.inner_named_type()),
+                    "field edge {:?} ends at the wrong base output type",
+                    edge_id
+                );
+            }
+            QueryGraphEdgeTransition::Downcast {
+                source,
+                from_type_position,
+                to_type_position,
+            } => {
+                prop_assert_eq!(&head.source, source, "downcast {:?} head source", edge_id);
+                prop_assert_eq!(&tail.source, source, "downcast {:?} tail source", edge_id);
+                prop_assert_eq!(
+                    schema_type_name(head),
+                    Some(from_type_position.type_name()),
+                    "downcast {:?} starts at the wrong type",
+                    edge_id
+                );
+                prop_assert_eq!(
+                    schema_type_name(tail),
+                    Some(to_type_position.type_name()),
+                    "downcast {:?} ends at the wrong type",
+                    edge_id
+                );
+                let schema = graph.sources.get(source).ok_or_else(|| {
+                    audit_error(format!("downcast {edge_id:?} has missing source {source}"))
+                })?;
+                let from_runtime = schema
+                    .possible_runtime_types(from_type_position.clone())
+                    .map_err(|error| audit_error(format!("downcast {edge_id:?}: {error}")))?;
+                let to_runtime = schema
+                    .possible_runtime_types(to_type_position.clone())
+                    .map_err(|error| audit_error(format!("downcast {edge_id:?}: {error}")))?;
+                prop_assert!(
+                    from_runtime.iter().any(|ty| to_runtime.contains(ty)),
+                    "downcast {edge_id:?} has disjoint runtime types"
+                );
+            }
+            QueryGraphEdgeTransition::KeyResolution => {
+                prop_assert!(
+                    edge.conditions.is_some(),
+                    "key edge {edge_id:?} has no key conditions"
+                );
+                if schema_type_name(head) != schema_type_name(tail) {
+                    // The sole legal type-changing key is a concrete implementation entering an
+                    // @interfaceObject. Prove the relationship in the supergraph rather than
+                    // accepting every differently-named key edge.
+                    let supergraph = graph.supergraph_schema.as_ref().ok_or_else(|| {
+                        audit_error(format!("type-changing key {edge_id:?} has no supergraph"))
+                    })?;
+                    let head_name = schema_type_name(head).ok_or_else(|| {
+                        audit_error(format!("key edge {edge_id:?} starts at a federated root"))
+                    })?;
+                    let tail_name = schema_type_name(tail).ok_or_else(|| {
+                        audit_error(format!("key edge {edge_id:?} ends at a federated root"))
+                    })?;
+                    let tail_supergraph_position =
+                        supergraph.get_type(tail_name).map_err(|error| {
+                            audit_error(format!(
+                                "key edge {edge_id:?} has invalid interface-object target: {error}"
+                            ))
+                        })?;
+                    let tail_supergraph_type: CompositeTypeDefinitionPosition =
+                        tail_supergraph_position.try_into().map_err(|error| {
+                            audit_error(format!(
+                                "key edge {edge_id:?} has non-composite interface-object target: {error}"
+                            ))
+                        })?;
+                    let runtime_types = supergraph
+                        .possible_runtime_types(tail_supergraph_type)
+                        .map_err(|error| audit_error(format!("key edge {edge_id:?}: {error}")))?;
+                    prop_assert!(
+                        runtime_types
+                            .iter()
+                            .any(|runtime| &runtime.type_name == head_name),
+                        "type-changing key {:?} does not enter an interface object applicable to {}",
+                        edge_id,
+                        head_name
+                    );
+                }
+            }
+            QueryGraphEdgeTransition::RootTypeResolution { root_kind } => {
+                prop_assert_eq!(head.root_kind, Some(*root_kind));
+                prop_assert_eq!(tail.root_kind, Some(*root_kind));
+            }
+            QueryGraphEdgeTransition::SubgraphEnteringTransition => {
+                let QueryGraphNodeType::FederatedRootType(root_kind) = head.type_ else {
+                    return Err(audit_error(format!(
+                        "entering edge {edge_id:?} does not start at a federated root"
+                    )));
+                };
+                prop_assert_eq!(head.source.as_ref(), FEDERATED_GRAPH_ROOT_SOURCE);
+                prop_assert_eq!(head.root_kind, Some(root_kind));
+                prop_assert_eq!(tail.root_kind, Some(root_kind));
+                prop_assert_ne!(tail.source.as_ref(), FEDERATED_GRAPH_ROOT_SOURCE);
+            }
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast {
+                source,
+                from_type_position,
+                to_type_name,
+            } => {
+                prop_assert_eq!(&head.source, source);
+                prop_assert_eq!(&tail.source, source);
+                prop_assert_eq!(schema_type_name(head), Some(from_type_position.type_name()));
+                prop_assert_eq!(
+                    schema_type_name(tail),
+                    Some(from_type_position.type_name()),
+                    "fake downcast {:?} must remain on its interface-object type",
+                    edge_id
+                );
+                let supergraph = graph.supergraph_schema.as_ref().ok_or_else(|| {
+                    audit_error(format!("fake downcast {edge_id:?} has no supergraph"))
+                })?;
+                prop_assert!(
+                    supergraph.schema().types.contains_key(to_type_name),
+                    "fake downcast {edge_id:?} targets absent supergraph type {to_type_name}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Full structural and cached-attribute audit built only from raw nodes, raw edges, and source
+    /// schemas. It intentionally does not call any production precomputation helper.
+    fn audit_query_graph(graph: &QueryGraph) -> Result<(), TestCaseError> {
+        prop_assert_eq!(graph.current_source.as_ref(), FEDERATED_GRAPH_ROOT_SOURCE);
+        prop_assert!(graph.sources.contains_key(FEDERATED_GRAPH_ROOT_SOURCE));
+
+        let expected_subgraphs: IndexSet<&str> = graph
+            .sources
+            .keys()
+            .filter(|source| source.as_ref() != FEDERATED_GRAPH_ROOT_SOURCE)
+            .map(|source| source.as_ref())
+            .collect();
+        let actual_subgraphs: IndexSet<&str> = graph
+            .subgraphs_by_name
+            .keys()
+            .map(|source| source.as_ref())
+            .collect();
+        prop_assert_eq!(actual_subgraphs, expected_subgraphs);
+
+        for node_id in graph.graph.node_indices() {
+            let node = &graph.graph[node_id];
+            let schema = graph.sources.get(&node.source).ok_or_else(|| {
+                audit_error(format!(
+                    "node {node_id:?} has missing source {}",
+                    node.source
+                ))
+            })?;
+            match &node.type_ {
+                QueryGraphNodeType::SchemaType(position) => {
+                    let actual_position =
+                        schema.get_type(position.type_name()).map_err(|error| {
+                            audit_error(format!("node {node_id:?} type does not exist: {error}"))
+                        })?;
+                    let expected_position: crate::schema::position::TypeDefinitionPosition =
+                        position.clone().into();
+                    prop_assert_eq!(
+                        actual_position,
+                        expected_position,
+                        "node {:?} has the wrong output kind",
+                        node_id
+                    );
+                }
+                QueryGraphNodeType::FederatedRootType(root_kind) => {
+                    prop_assert_eq!(node.source.as_ref(), FEDERATED_GRAPH_ROOT_SOURCE);
+                    prop_assert_eq!(node.root_kind, Some(*root_kind));
+                }
+            }
+            if let Some(root_kind) = node.root_kind {
+                match &node.type_ {
+                    QueryGraphNodeType::FederatedRootType(kind) => {
+                        prop_assert_eq!(*kind, root_kind);
+                    }
+                    QueryGraphNodeType::SchemaType(position) => {
+                        prop_assert_eq!(
+                            Some(position.type_name()),
+                            expected_root_type_name(schema, root_kind),
+                            "node {:?} is indexed as the wrong {} root",
+                            node_id,
+                            root_kind
+                        );
+                    }
+                }
+            }
+            prop_assert_eq!(
+                node.has_reachable_cross_subgraph_edges,
+                has_cross_source_edge_reachable_from(graph, node_id),
+                "node {:?} has stale cross-subgraph reachability",
+                node_id
+            );
+
+            // Validate construction completeness for ordinary (non-@provides-copy) schema
+            // nodes. The rest of this audit reconstructs caches from the raw graph, which is
+            // intentionally unable to notice an edge omitted from that raw graph. Deriving the
+            // required field set from the source schema closes that blind spot for object fields
+            // and for the built-in __typename field on every composite type where the builder is
+            // documented to create it.
+            let QueryGraphNodeType::SchemaType(position) = &node.type_ else {
+                continue;
+            };
+            if node.provide_id.is_some() {
+                // @provides copies deliberately contain only a path-specific subset of fields.
+                continue;
+            }
+            let outgoing_field_positions = graph
+                .graph
+                .edges_directed(node_id, Direction::Outgoing)
+                .filter_map(|edge| match &edge.weight().transition {
+                    QueryGraphEdgeTransition::FieldCollection {
+                        field_definition_position,
+                        is_part_of_provides: false,
+                        ..
+                    } => Some(field_definition_position.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            match position {
+                OutputTypeDefinitionPosition::Object(object) => {
+                    let object_definition = object.get(schema.schema()).map_err(|error| {
+                        audit_error(format!("object node {node_id:?}: {error}"))
+                    })?;
+                    let metadata = schema.subgraph_metadata();
+                    for field_name in object_definition.fields.keys() {
+                        let field_position: FieldDefinitionPosition =
+                            object.field(field_name.clone()).into();
+                        let is_external = metadata
+                            .is_some_and(|metadata| metadata.is_field_external(&field_position));
+                        let count = outgoing_field_positions
+                            .iter()
+                            .filter(|candidate| **candidate == field_position)
+                            .count();
+                        if is_external {
+                            prop_assert_eq!(
+                                count,
+                                0,
+                                "base object node {:?} exposes external field {}",
+                                node_id,
+                                field_position,
+                            );
+                        } else {
+                            prop_assert!(
+                                count >= 1,
+                                "base object node {node_id:?} omitted field edge {field_position}"
+                            );
+                        }
+                    }
+                    let is_interface_object = schema
+                        .is_interface_object_type(object.clone().into())
+                        .map_err(|error| {
+                            audit_error(format!("object node {node_id:?}: {error}"))
+                        })?;
+                    let typename: FieldDefinitionPosition =
+                        object.introspection_typename_field().into();
+                    let typename_count = outgoing_field_positions
+                        .iter()
+                        .filter(|candidate| **candidate == typename)
+                        .count();
+                    if is_interface_object {
+                        prop_assert_eq!(
+                            typename_count,
+                            0,
+                            "@interfaceObject node {:?} must not resolve __typename locally",
+                            node_id,
+                        );
+                    } else {
+                        prop_assert!(
+                            typename_count >= 1,
+                            "object node {node_id:?} omitted its __typename edge"
+                        );
+                    }
+                }
+                OutputTypeDefinitionPosition::Interface(interface) => {
+                    let interface_definition = interface.get(schema.schema()).map_err(|error| {
+                        audit_error(format!("interface node {node_id:?}: {error}"))
+                    })?;
+                    let metadata = schema.subgraph_metadata();
+                    for field_name in interface_definition.fields.keys() {
+                        let field_position: FieldDefinitionPosition =
+                            interface.field(field_name.clone()).into();
+                        let is_external = metadata
+                            .is_some_and(|metadata| metadata.is_field_external(&field_position));
+                        let count = outgoing_field_positions
+                            .iter()
+                            .filter(|candidate| **candidate == field_position)
+                            .count();
+                        if is_external {
+                            prop_assert_eq!(
+                                count,
+                                0,
+                                "base interface node {:?} exposes external field {}",
+                                node_id,
+                                field_position,
+                            );
+                        } else {
+                            prop_assert!(
+                                count >= 1,
+                                "base interface node {node_id:?} omitted field edge {field_position}",
+                            );
+                        }
+                    }
+                    let typename: FieldDefinitionPosition =
+                        interface.introspection_typename_field().into();
+                    prop_assert!(
+                        outgoing_field_positions
+                            .iter()
+                            .any(|candidate| *candidate == typename),
+                        "interface node {node_id:?} omitted its __typename edge"
+                    );
+                }
+                OutputTypeDefinitionPosition::Union(union) => {
+                    let typename: FieldDefinitionPosition =
+                        union.introspection_typename_field().into();
+                    prop_assert!(
+                        outgoing_field_positions
+                            .iter()
+                            .any(|candidate| *candidate == typename),
+                        "union node {node_id:?} omitted its __typename edge"
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        // Root indexes are also checked against the source schemas, rather than reconstructed
+        // solely from whatever root-marked nodes happen to exist in the graph.
+        for (source, schema) in &graph.sources {
+            let definition = &schema.schema().schema_definition;
+            for (kind, expected_name) in [
+                (SchemaRootDefinitionKind::Query, definition.query.as_ref()),
+                (
+                    SchemaRootDefinitionKind::Mutation,
+                    definition.mutation.as_ref(),
+                ),
+                (
+                    SchemaRootDefinitionKind::Subscription,
+                    definition.subscription.as_ref(),
+                ),
+            ] {
+                let Some(expected_name) = expected_name else {
+                    continue;
+                };
+                let indexed = graph
+                    .root_kinds_to_nodes_by_source
+                    .get(source)
+                    .and_then(|roots| roots.get(&kind))
+                    .ok_or_else(|| {
+                        audit_error(format!("source {source} omitted its {kind} root"))
+                    })?;
+                prop_assert_eq!(
+                    schema_type_name(&graph.graph[*indexed]),
+                    Some(&**expected_name),
+                    "source {} indexed the wrong {} root",
+                    source,
+                    kind,
+                );
+            }
+        }
+
+        prop_assert_eq!(
+            graph.types_to_nodes_by_source.len(),
+            graph.sources.len(),
+            "types-to-nodes source set differs"
+        );
+        for source in graph.sources.keys() {
+            let mut expected: IndexMap<NamedType, IndexSet<NodeIndex>> = IndexMap::default();
+            if source.as_ref() == FEDERATED_GRAPH_ROOT_SOURCE {
+                for (node_id, node) in graph.graph.node_references() {
+                    if node.source.as_ref() == FEDERATED_GRAPH_ROOT_SOURCE {
+                        continue;
+                    }
+                    if let QueryGraphNodeType::SchemaType(position) = &node.type_ {
+                        expected
+                            .entry(position.type_name().clone())
+                            .or_default()
+                            .insert(node_id);
+                    }
+                }
+            } else {
+                for (node_id, node) in graph.graph.node_references() {
+                    if node.source == *source {
+                        if let QueryGraphNodeType::SchemaType(position) = &node.type_ {
+                            expected
+                                .entry(position.type_name().clone())
+                                .or_default()
+                                .insert(node_id);
+                        }
+                    }
+                }
+            }
+            let actual = graph
+                .types_to_nodes_by_source
+                .get(source)
+                .ok_or_else(|| audit_error(format!("missing type index for source {source}")))?;
+            prop_assert_eq!(actual, &expected, "type index differs for {}", source);
+        }
+
+        prop_assert_eq!(
+            graph.root_kinds_to_nodes_by_source.len(),
+            graph.sources.len(),
+            "root-index source set differs"
+        );
+        for source in graph.sources.keys() {
+            let expected: IndexMap<SchemaRootDefinitionKind, NodeIndex> = graph
+                .graph
+                .node_references()
+                .filter(|(_, node)| node.source == *source)
+                .filter_map(|(node_id, node)| node.root_kind.map(|kind| (kind, node_id)))
+                .collect();
+            let actual = graph
+                .root_kinds_to_nodes_by_source
+                .get(source)
+                .ok_or_else(|| audit_error(format!("missing root index for source {source}")))?;
+            prop_assert_eq!(actual, &expected, "root index differs for {}", source);
+        }
+
+        prop_assert_eq!(
+            graph.non_trivial_followup_edges.len(),
+            graph.graph.edge_count(),
+            "followup cache does not cover every edge"
+        );
+        for edge_id in graph.graph.edge_indices() {
+            let (_, tail) = graph.graph.edge_endpoints(edge_id).unwrap();
+            let previous = &graph.graph[edge_id];
+            let mut expected = Vec::new();
+            for followup in graph.out_edges(tail) {
+                if is_trivial_followup(previous, followup.weight()) {
+                    let direct_candidates: Vec<_> = graph
+                        .out_edges_with_federation_self_edges(
+                            graph.graph.edge_endpoints(edge_id).unwrap().0,
+                        )
+                        .into_iter()
+                        .map(|candidate| {
+                            (
+                                candidate.id(),
+                                candidate.target(),
+                                candidate.weight().clone(),
+                                graph.graph[candidate.target()].clone(),
+                            )
+                        })
+                        .collect();
+                    prop_assert!(
+                        has_direct_replacement_for_trivial_followup(graph, edge_id, followup.id(),),
+                        "pruned chain {:?} ({:?} -> {:?}) -> {:?} ({:?} -> {:?}) has no direct replacement; origin candidates={:?}",
+                        edge_id,
+                        graph.graph.edge_endpoints(edge_id).unwrap(),
+                        previous,
+                        followup.id(),
+                        graph.graph.edge_endpoints(followup.id()).unwrap(),
+                        followup.weight(),
+                        direct_candidates,
+                    );
+                } else {
+                    expected.push(followup.id());
+                }
+            }
+            let actual = graph
+                .non_trivial_followup_edges
+                .get(&edge_id)
+                .ok_or_else(|| {
+                    audit_error(format!("edge {edge_id:?} absent from followup cache"))
+                })?;
+            prop_assert_eq!(
+                actual,
+                &expected,
+                "followup cache differs for {:?}",
+                edge_id
+            );
+            audit_transition(graph, edge_id)?;
+        }
+
+        let mut used_override_labels = IndexSet::default();
+        let mut override_values_by_label: IndexMap<Arc<str>, IndexSet<bool>> = IndexMap::default();
+        for edge in graph.graph.edge_weights() {
+            if let Some(condition) = &edge.override_condition {
+                prop_assert!(
+                    graph.override_condition_labels.contains(&condition.label),
+                    "override edge label {} is absent from the label index",
+                    condition.label
+                );
+                used_override_labels.insert(condition.label.clone());
+                override_values_by_label
+                    .entry(condition.label.clone())
+                    .or_default()
+                    .insert(condition.condition);
+            }
+        }
+        prop_assert_eq!(
+            &used_override_labels,
+            &graph.override_condition_labels,
+            "override label index contains an unused label"
+        );
+        for (label, values) in override_values_by_label {
+            prop_assert_eq!(
+                values,
+                IndexSet::from_iter([false, true]),
+                "progressive override label {} must guard both the old and new field edges",
+                label,
+            );
+        }
+
+        // Derive the complete @fromContext argument set from directive referencers. Merely
+        // validating entries already present in the graph would miss a builder omission.
+        let mut expected_context_arguments: IndexMap<
+            Arc<str>,
+            IndexSet<ObjectFieldArgumentDefinitionPosition>,
+        > = IndexMap::default();
+        for (source, schema) in graph.subgraphs() {
+            let metadata = schema.subgraph_metadata().ok_or_else(|| {
+                audit_error(format!("subgraph {source} has no federation metadata"))
+            })?;
+            let definition = metadata
+                .federation_spec_definition()
+                .from_context_directive_definition(schema)
+                .map_err(|error| audit_error(format!("subgraph {source}: {error}")))?;
+            let Some(referencers) = schema.referencers().directives.get(&definition.name) else {
+                continue;
+            };
+            if !referencers.object_field_arguments.is_empty() {
+                expected_context_arguments.insert(
+                    source.clone(),
+                    referencers.object_field_arguments.iter().cloned().collect(),
+                );
+            }
+        }
+
+        let mut context_ids = IndexSet::default();
+        for (source, arguments) in &graph.arguments_to_context_ids_by_source {
+            prop_assert!(graph.subgraphs_by_name.contains_key(source));
+            for (argument, context_id) in arguments {
+                prop_assert!(
+                    context_ids.insert(context_id.clone()),
+                    "context id {context_id} is reused for multiple arguments"
+                );
+                argument
+                    .get(graph.sources[source].schema())
+                    .map_err(|error| {
+                        audit_error(format!("context argument {argument} is missing: {error}"))
+                    })?;
+            }
+        }
+        let actual_context_arguments: IndexMap<
+            Arc<str>,
+            IndexSet<ObjectFieldArgumentDefinitionPosition>,
+        > = graph
+            .arguments_to_context_ids_by_source
+            .iter()
+            .map(|(source, arguments)| (source.clone(), arguments.keys().cloned().collect()))
+            .collect();
+        prop_assert_eq!(
+            &actual_context_arguments,
+            &expected_context_arguments,
+            "context-argument index differs from schema @fromContext applications",
+        );
+
+        let mut contexts_attached_to_fields = IndexSet::default();
+        for edge in graph.graph.edge_weights() {
+            let QueryGraphEdgeTransition::FieldCollection {
+                source,
+                field_definition_position: FieldDefinitionPosition::Object(field_position),
+                ..
+            } = &edge.transition
+            else {
+                prop_assert!(
+                    edge.required_contexts.is_empty(),
+                    "non-object-field edge unexpectedly carries @fromContext requirements",
+                );
+                continue;
+            };
+            for context in &edge.required_contexts {
+                prop_assert_eq!(&context.subgraph_name, source);
+                prop_assert_eq!(&context.argument_coordinate.parent(), field_position);
+                let argument_definition = context
+                    .argument_coordinate
+                    .get(graph.sources[source].schema())
+                    .map_err(|error| {
+                        audit_error(format!(
+                            "context argument {} is missing: {error}",
+                            context.argument_coordinate,
+                        ))
+                    })?;
+                prop_assert_eq!(
+                    &context.argument_name,
+                    &context.argument_coordinate.argument_name
+                );
+                prop_assert_eq!(&context.argument_type, &argument_definition.ty);
+                let indexed = graph
+                    .arguments_to_context_ids_by_source
+                    .get(&context.subgraph_name)
+                    .and_then(|arguments| arguments.get(&context.argument_coordinate));
+                prop_assert!(
+                    indexed.is_some(),
+                    "required context argument {} in {} has no context id",
+                    context.argument_coordinate,
+                    context.subgraph_name
+                );
+                contexts_attached_to_fields.insert((
+                    context.subgraph_name.clone(),
+                    context.argument_coordinate.clone(),
+                ));
+            }
+        }
+        for (source, arguments) in &expected_context_arguments {
+            for argument in arguments {
+                prop_assert!(
+                    contexts_attached_to_fields.contains(&(source.clone(), argument.clone())),
+                    "@fromContext argument {} in {} was not attached to its field edge",
+                    argument,
+                    source,
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// This corpus is finite, so enumerate it instead of randomly sampling it. That guarantees
+    /// every fixture/mode pair is audited on every run and avoids spending 128 proptest cases on
+    /// repeated values that cannot shrink.
+    #[test]
+    fn built_federated_query_graph_passes_full_audit() -> Result<(), TestCaseError> {
+        for fixture in 0..QUERY_GRAPH_FIXTURES.len() {
+            // The context-v0.1 fixture is intentionally a query-planning-only feature; building
+            // the composition-validation graph rejects it before QueryGraph construction.
+            let modes: &[bool] = if QUERY_GRAPH_FIXTURES[fixture].0 == "from-context" {
+                &[true]
+            } else {
+                &[false, true]
+            };
+            for &for_query_planning in modes {
+                let graph = build_fixture_query_graph(fixture, for_query_planning).map_err(
+                    |error| {
+                        audit_error(format!(
+                            "failed to build fixture {} (for_query_planning={for_query_planning}): {error}",
+                            QUERY_GRAPH_FIXTURES[fixture].0,
+                        ))
+                    },
+                )?;
+                audit_query_graph(&graph)?;
+                if for_query_planning {
+                    non_local_selections_estimation::audit_precomputed_query_graph_metadata(
+                        &graph,
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `I` and `U` overlap on `B | C` in Subgraph1, so an inline fragment conditioned on `U`
+    /// can be rebased onto an `I` node. The non-local-selection estimator's cache must represent
+    /// that ordinary GraphQL fragment-applicability relation.
+    #[test]
+    fn non_local_selection_metadata_includes_interface_union_overlap() {
+        let graph = build_fixture_query_graph(10, true).unwrap();
+        let interface_nodes = graph
+            .graph
+            .node_indices()
+            .filter(|node| {
+                graph.graph[*node].source.as_ref() == "Subgraph1"
+                    && schema_type_name(&graph.graph[*node]).is_some_and(|name| name == "I")
+            })
+            .collect::<Vec<_>>();
+        assert!(!interface_nodes.is_empty());
+        for node in interface_nodes {
+            assert!(
+                non_local_selections_estimation::metadata_allows_inline_fragment_rebase(
+                    &graph, "U", node,
+                ),
+                "inline fragment on U must be rebaseable onto Subgraph1.I because both can contain B or C"
+            );
+        }
+    }
+
+    /// Keep the corpus honest: a renamed or simplified fixture must not silently erase one of the
+    /// transition families or metadata features this palette exists to exercise.
+    #[test]
+    fn query_graph_fixture_palette_covers_required_features() {
+        let mut transitions = IndexSet::default();
+        let mut has_provides = false;
+        let mut has_override = false;
+        let mut has_context = false;
+        let mut root_kinds = IndexSet::default();
+
+        for fixture in 0..QUERY_GRAPH_FIXTURES.len() {
+            let graph = build_fixture_query_graph(fixture, true).unwrap();
+            for node in graph.graph.node_weights() {
+                root_kinds.extend(node.root_kind);
+            }
+            for edge in graph.graph.edge_weights() {
+                let name = match edge.transition {
+                    QueryGraphEdgeTransition::FieldCollection {
+                        is_part_of_provides,
+                        ..
+                    } => {
+                        has_provides |= is_part_of_provides;
+                        "field"
+                    }
+                    QueryGraphEdgeTransition::Downcast { .. } => "downcast",
+                    QueryGraphEdgeTransition::KeyResolution => "key",
+                    QueryGraphEdgeTransition::RootTypeResolution { .. } => "root-resolution",
+                    QueryGraphEdgeTransition::SubgraphEnteringTransition => "entering",
+                    QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => {
+                        "interface-object-fake-downcast"
+                    }
+                };
+                transitions.insert(name);
+                has_override |= edge.override_condition.is_some();
+                has_context |= !edge.required_contexts.is_empty();
+            }
+        }
+
+        assert_eq!(
+            transitions,
+            IndexSet::from_iter([
+                "field",
+                "downcast",
+                "key",
+                "root-resolution",
+                "entering",
+                "interface-object-fake-downcast",
+            ])
+        );
+        assert!(has_provides, "fixture palette lost @provides coverage");
+        assert!(
+            has_override,
+            "fixture palette lost progressive @override coverage"
+        );
+        assert!(has_context, "fixture palette lost @fromContext coverage");
+        assert!(root_kinds.contains(&SchemaRootDefinitionKind::Query));
+        assert!(root_kinds.contains(&SchemaRootDefinitionKind::Mutation));
+        assert!(root_kinds.contains(&SchemaRootDefinitionKind::Subscription));
+    }
+}
