@@ -23,6 +23,9 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::response_cache::debugger::CacheEntryKind;
+use crate::plugins::response_cache::debugger::CacheKeyContext;
+use crate::plugins::response_cache::debugger::CacheKeySource;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
@@ -5444,4 +5447,346 @@ async fn include_cache_control_header_on_router_response_true_sends_headers() {
     let cache_control_header = get_cache_control_header(&response).expect("missing header");
     assert!(cache_control_contains_max_age(&cache_control_header));
     assert!(cache_control_contains_public(&cache_control_header));
+}
+
+/// Builds a two-subgraph harness where `orga` resolves `Organization.name` for two entities and
+/// answers with `orga_entities`/`orga_errors`. Shared by the REG-2060 tests below, which differ
+/// only in the shape of the error path the subgraph reports.
+async fn entity_error_harness(
+    storage: Storage,
+    drop_tx: tokio::sync::broadcast::Sender<()>,
+    orga_entities: serde_json::Value,
+    orga_errors: serde_json::Value,
+) -> supergraph::BoxCloneService {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                    {
+                        "__typename": "Organization",
+                        "id": "1"
+                    },
+                    {
+                        "__typename": "Organization",
+                        "id": "2"
+                    }
+                ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("no-store")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+            "variables": {
+                "representations": [
+                    {
+                        "id": "1",
+                        "__typename": "Organization",
+                    },
+                    {
+                        "id": "2",
+                        "__typename": "Organization",
+                    }
+                ]
+            }}},
+            serde_json::json! {{
+                "data": { "_entities": orga_entities },
+                "errors": orga_errors
+            }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600")).build())
+    ].into_iter().collect());
+
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    let response_cache = ResponseCache::for_test(
+        storage,
+        create_subgraph_conf(map),
+        valid_schema,
+        true,
+        drop_tx,
+        true,
+    )
+    .await
+    .unwrap();
+
+    TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap()
+}
+
+fn entity_error_request() -> supergraph::Request {
+    supergraph::Request::fake_builder()
+        .query("query { currentUser { allOrganizations { id name } } }")
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap()
+}
+
+/// The debug entry the response cache recorded for each `Organization` entity, keyed by the
+/// entity's `id`. This is the plugin's own record of the store decision it made, so asserting on
+/// it needs no waiting on the spawned cache write.
+fn organization_debug_entries(response: &supergraph::Response) -> HashMap<String, CacheKeyContext> {
+    get_cache_keys_context(response)
+        .expect("missing cache keys")
+        .into_iter()
+        .filter_map(|ck| match &ck.kind {
+            CacheEntryKind::Entity {
+                typename,
+                entity_key,
+            } if typename == "Organization" => {
+                let id = entity_key.get("id")?.as_str()?.to_string();
+                Some((id, ck))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn has_subgraph_errors_warning(entry: &CacheKeyContext) -> bool {
+    entry.warnings.iter().any(|w| w.code == "SUBGRAPH_ERRORS")
+}
+
+/// Regression test for REG-2060:
+/// Some subgraph frameworks resolve `_entities` without a context per list element and
+/// report entity errors without the index segment in their path, for example:
+/// `["_entities", "name"]` instead of `["_entities", 0, "name"]`. The response cache cannot
+/// attribute such an error to one of the fetched entities, but it must still pass it on to the
+/// client instead of dropping it while reassembling the `_entities` response, and it must not cache
+/// entities the error may belong to.
+#[tokio::test]
+async fn entity_error_without_index_in_path() {
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+
+    let service = entity_error_harness(
+        storage.clone(),
+        drop_tx,
+        serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
+        // The failure is reported without the entity index, so it cannot be attributed.
+        serde_json::json!([{
+            "message": "cannot resolve name",
+            "path": ["_entities", "name"],
+            "extensions": {"code": "NAME_FAILURE"}
+        }]),
+    )
+    .await;
+
+    let mut response = service
+        .clone()
+        .oneshot(entity_error_request())
+        .await
+        .unwrap();
+
+    // Neither organization may be cached: the error could belong to either of them.
+    let debug_entries = organization_debug_entries(&response);
+    let mut keys = Vec::new();
+    for id in ["1", "2"] {
+        let entry = debug_entries
+            .get(id)
+            .unwrap_or_else(|| panic!("missing debug entry for organization {id}"));
+        assert!(
+            !entry.should_store,
+            "organization {id} should not be cached alongside an unattributable error"
+        );
+        assert!(has_subgraph_errors_warning(entry));
+        keys.push(entry.key.clone());
+    }
+
+    let mut body = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut body));
+
+    // The subgraph error must reach the client. Since it carries no entity index, the router
+    // cannot tell which entity failed and reports it for every entity of the fetch — the same
+    // behaviour as when the response cache is disabled.
+    insta::assert_json_snapshot!(body, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": null
+            },
+            {
+              "id": "2",
+              "name": "Organization 2"
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            0
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        },
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            1
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        }
+      ]
+    }
+    "#);
+
+    // `should_store` above is only the debugger's mirror of the decision, computed by
+    // `compute_should_store` and not by the store gate in `insert_entities_in_result`. A second
+    // request checks the gate itself: had either entity reached the cache, its debug entry would
+    // now name the cache rather than the subgraph as its source. This is the assertion that fails
+    // if the gate stops honouring unattributable errors while the debugger keeps reporting that it
+    // does — and it cannot lose a race with the plugin's spawned write task, since a regression's
+    // write would have landed during the round trip.
+    let response = service.oneshot(entity_error_request()).await.unwrap();
+    let debug_entries = organization_debug_entries(&response);
+    for id in ["1", "2"] {
+        let entry = debug_entries
+            .get(id)
+            .unwrap_or_else(|| panic!("missing debug entry for organization {id}"));
+        assert!(
+            matches!(entry.source, CacheKeySource::Subgraph),
+            "organization {id} must be refetched from the subgraph, not served from the cache"
+        );
+    }
+
+    // And directly against storage, now that the second request has given any errant write ample
+    // time to land.
+    let key_strs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let cached = storage.fetch_multiple(&key_strs, "").await.unwrap();
+    assert!(
+        cached.iter().all(Option::is_none),
+        "no entity may be written alongside an unattributable error, got: {cached:?}"
+    );
+}
+
+/// Counterpart to `entity_error_without_index_in_path`: when the subgraph *does* report the entity
+/// index, the error is attributed to that one entity. Only that entity is kept out of the cache,
+/// its sibling is stored as usual, and the error's index is rewritten to the entity's position in
+/// the reassembled response.
+#[tokio::test]
+async fn entity_error_with_index_in_path() {
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+
+    let service = entity_error_harness(
+        storage.clone(),
+        drop_tx,
+        serde_json::json!([{"name": null}, {"name": "Organization 2"}]),
+        serde_json::json!([{
+            "message": "cannot resolve name",
+            "path": ["_entities", 0, "name"],
+            "extensions": {"code": "NAME_FAILURE"}
+        }]),
+    )
+    .await;
+
+    let mut response = service.oneshot(entity_error_request()).await.unwrap();
+
+    let debug_entries = organization_debug_entries(&response);
+    let errored = debug_entries.get("1").expect("missing debug entry");
+    let stored = debug_entries.get("2").expect("missing debug entry");
+    assert!(
+        !errored.should_store,
+        "the entity that errored is not cached"
+    );
+    assert!(has_subgraph_errors_warning(errored));
+    assert!(stored.should_store, "its sibling is cached as usual");
+    assert!(!has_subgraph_errors_warning(stored));
+
+    let mut body = response.next_response().await.unwrap();
+    assert!(remove_debug_extensions_key(&mut body));
+
+    // A single error, pointing at the one organization the subgraph attributed it to.
+    insta::assert_json_snapshot!(body, @r#"
+    {
+      "data": {
+        "currentUser": {
+          "allOrganizations": [
+            {
+              "id": "1",
+              "name": null
+            },
+            {
+              "id": "2",
+              "name": "Organization 2"
+            }
+          ]
+        }
+      },
+      "errors": [
+        {
+          "message": "cannot resolve name",
+          "path": [
+            "currentUser",
+            "allOrganizations",
+            0,
+            "name"
+          ],
+          "extensions": {
+            "code": "NAME_FAILURE",
+            "service": "orga"
+          }
+        }
+      ]
+    }
+    "#);
+
+    // Waiting for the sibling's key proves the write batch for this fetch has landed, so the
+    // errored entity's absence from storage afterwards is conclusive rather than a race.
+    wait_for_cache(&storage, vec![stored.key.clone()]).await;
+    let cached = storage
+        .fetch_multiple(&[errored.key.as_str()], "")
+        .await
+        .unwrap();
+    assert!(
+        cached.iter().all(Option::is_none),
+        "the entity the error was attributed to must not be cached, got: {cached:?}"
+    );
 }
