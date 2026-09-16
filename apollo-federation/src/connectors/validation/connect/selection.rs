@@ -604,13 +604,22 @@ impl<'schema> SelectionValidator<'schema> {
         type_ref: SchemaTypeRef<'schema>,
         shape: &Shape,
     ) -> Result<Vec<(Name, Name)>, Message> {
-        // Shape errors are now carried as metadata rather than a dedicated
-        // `ShapeCase::Error` variant. A shape-processing failure is surfaced
-        // through other diagnostics; there is nothing to credit as seen here,
-        // and we must not descend into the (possibly partial) structure, as
-        // that could emit spurious `SelectedFieldNotFound`-style errors.
-        if shape.has_own_errors() {
-            return Ok(Vec::new());
+        // Shape errors are carried as metadata rather than a dedicated
+        // `ShapeCase::Error` variant, so they ride on a shape that still has a
+        // partial structure. Report the first one and stop: descending into a
+        // structure we already know is partial would emit spurious
+        // `SelectedFieldNotFound`-style errors on top of the real failure.
+        //
+        // Returning `Ok(Vec::new())` here instead would credit no fields as
+        // seen, which does not suppress the diagnostic so much as replace it:
+        // the selected fields then look unresolved by any connector, and the
+        // reader is told the wrong thing about a different field.
+        if let Some(error) = shape.own_errors().next() {
+            return Err(Message {
+                code: Code::InvalidSelection,
+                message: error.message.clone(),
+                locations: self.get_shape_locations(shape.locations()),
+            });
         }
         match shape.case() {
             ShapeCase::Object { fields, .. } => {

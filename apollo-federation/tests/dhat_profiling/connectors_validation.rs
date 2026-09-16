@@ -26,23 +26,27 @@ fn valid_large_body() {
     //
     //              peak bytes   total blocks
     //   before        395,940         58,730
-    //   after         450,627         59,307
+    //   after         450,507         59,307
+    //
+    // Carrying the front end here is not what costs this: the same code in a dependency would
+    // build the same shapes. What grew is what the shapes *say*. GraphQL types now carry the
+    // shapes their schemas describe, so `ID` is a three-node `One<String, Int>` where the old
+    // walker made every scalar a single `Unknown`, and `[String]` is
+    // `One<List<One<String, null>>, null>`, where that walker wrapped the inner type once and left
+    // list elements no nullability of their own. More precise types are more nodes.
     //
     // Peak live bytes grew 13.8% while allocation count moved 1.0%, which is the signature of more
-    // shape held live at once rather than more allocation traffic. The heap profile attributes it
-    // to node count, not to any one allocation getting bigger: GraphQL types now carry the shapes
-    // their schemas describe, so `ID` is a three-node `One<String, Int>` where the old walker made
-    // every scalar a single `Unknown`, and `[String]` is `One<List<One<String, null>>, null>`,
-    // where that walker wrapped the inner type once and left list elements no nullability of their
-    // own. Each node owns an `IndexSet<Location>` that allocates, since `Shape::cached_or_else`
+    // shape held live at once rather than more allocation traffic, and the heap profile attributes
+    // it to node count rather than to any one allocation getting bigger. Each node owns an `IndexSet<Location>` that allocates, since `Shape::cached_or_else`
     // hands back its cached singleton only for an empty location list and this path always has
     // real spans. Of the 55k, roughly 34k is those nodes and their locations, 14k is
     // `Namespace::insert` propagating derived names over the bigger tree, and 5k is the member
     // sets of the new unions.
     //
     // A sixth of that was avoidable and is gone: `graphql_shapes::Locator` memoizes each file's
-    // `SourceId`, which took the `graphql:<path>` strings live at peak from 4,744 bytes in 103
-    // blocks to 216 in 3.
+    // `SourceId`, which took those strings live at peak from 4,744 bytes in 103 blocks to a
+    // handful. They are also short now, `graphql:<FileId>` rather than `graphql:<path>`, which is
+    // the 120 bytes between this figure and the 450,627 measured while they carried paths.
     //
     // 500_000 is ~11% above the measured peak, the margin this file asks for. Note that 420_000
     // gave only 6% over 395,940, so the guard was already tighter than stated before this change.

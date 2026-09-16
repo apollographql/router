@@ -130,28 +130,41 @@ a test snapshot or a log query, needs updating.
 
 By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10118>
 
-### Connectors validation uses `shape` 0.9.0 and carries its own GraphQL front end ([PR #10233](https://github.com/apollographql/router/pull/10233))
+### Connectors validation describes GraphQL types more precisely and stops losing selection errors ([PR #10233](https://github.com/apollographql/router/pull/10233))
 
-`shape` 0.9.0 moves its GraphQL front end out of the crate, so that `shape`
-itself no longer depends on `apollo-compiler`. Rather than take that front end
-back as a dependency, connectors validation now carries it directly, as
-`connectors::graphql_shapes`, built on this workspace's `apollo-compiler`.
-Upgrading `apollo-compiler` is therefore a change to this repository alone,
-with no intervening crate release.
+Two changes to how connectors validation reasons about shapes, both of which
+can change whether a schema composes.
 
-One change reaches composition diagnostics. An input object field whose type is
-a built-in scalar now carries that scalar's shape rather than `Unknown`, so a
-composition error quoting such a shape names the real field type:
+**A connector selection whose mapping is invalid is now reported.** It could
+previously pass validation silently, depending on whether the selection was
+named:
+
+```graphql
+selection: "a: $->echo({x: 1})->first"   # reported nothing
+selection: "$->echo({x: 1})->first"      # reported an error
+```
+
+Both forms now fail with `INVALID_SELECTION` and `Method ->first requires an
+array or string input`. The mapping was always wrong; at runtime the arrow
+passed its input through and reported the same message per request.
+
+**A field whose type is a built-in scalar now carries that scalar's shape
+rather than `Unknown`.** `ID` is `One<String, Int>`, `String` is `String`, and
+a list keeps the nullability of both itself and its elements. Because
+`Unknown` was compatible with everything, a mapping that fed one of these into
+an incompatible position could validate clean and can now be rejected: an `ID`
+no longer satisfies a `String` on the strength of saying nothing. Custom
+scalars are still `Unknown`, which is correct, since the schema does not say
+what JSON they carry.
+
+Composition messages quoting such a shape now name the real type:
 
 ```
 does not accept `One<{ val: One<String, null> }, null>`
 ```
 
-where it previously said `{ val: Unknown }`. Object *output* fields were
-already correct, since connectors converts those types itself.
-
-No validation outcome changes. Anything matching on the previous strings, such
-as a test snapshot or a log query, needs updating.
+where it previously said `{ val: Unknown }`. Anything matching on the old
+strings, such as a test snapshot or a log query, needs updating.
 
 By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10233>
 

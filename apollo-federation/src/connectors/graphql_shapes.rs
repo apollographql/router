@@ -10,8 +10,9 @@
 //! # Locations
 //!
 //! Every shape produced here carries [`Location`]s whose [`SourceId`] names the
-//! GraphQL source file by path, prefixed with [`SOURCE_ID_PREFIX`] (see
-//! [`source_id`]). [`source_file`] maps such a `SourceId` back to the
+//! GraphQL source file by its `apollo_compiler` [`FileId`], prefixed with
+//! [`SOURCE_ID_PREFIX`] (see [`source_id`]). [`source_file`] maps such a
+//! `SourceId` back to the
 //! [`SourceFile`] in `schema.sources`, for example to compute line and column
 //! ranges for diagnostics. It returns `None` for any other `SourceId`, which
 //! is how a GraphQL location is told apart from the ones JSONSelection mints
@@ -44,20 +45,28 @@ use shape::name::NotFinal;
 /// consumer may use for its own source texts.
 pub(crate) const SOURCE_ID_PREFIX: &str = "graphql:";
 
-/// The [`SourceId`] for [`Location`]s within `file`: the file's path, prefixed
-/// with [`SOURCE_ID_PREFIX`].
+/// The [`SourceId`] for [`Location`]s within the source file `file_id`: the
+/// file's `apollo_compiler` id, prefixed with [`SOURCE_ID_PREFIX`].
+///
+/// The id and not the path, because a path identifies a file neither uniquely
+/// nor always: [`Schema`] can be built from several documents parsed through
+/// [`apollo_compiler::parser::Parser`] under the same or an empty path, and a
+/// document actually named `built_in.graphql` would collide with the synthetic
+/// file the compiler injects for built-in scalars and introspection types
+/// ([`FileId::BUILT_IN`]). A [`FileId`] is unique by construction.
 #[must_use]
-pub(crate) fn source_id(file: &SourceFile) -> SourceId {
-    SourceId::new(format!(
-        "{SOURCE_ID_PREFIX}{}",
-        file.path().to_string_lossy()
-    ))
+pub(crate) fn source_id(file_id: FileId) -> SourceId {
+    SourceId::new(format!("{SOURCE_ID_PREFIX}{file_id:?}"))
 }
 
-/// The path of the GraphQL source file that `source_id` names, if it was
-/// produced by [`source_id`].
+/// The [`FileId`] part of `source_id`, as it was rendered by [`source_id`], if
+/// it was produced there.
+///
+/// Returned as text rather than a [`FileId`], which has no public constructor
+/// from its integer: a caller resolves it by looking for the schema file whose
+/// id renders the same way, which [`source_file`] does.
 #[must_use]
-pub(crate) fn source_path(source_id: &SourceId) -> Option<&str> {
+fn source_file_id(source_id: &SourceId) -> Option<&str> {
     if let SourceId::Other(id) = source_id {
         id.strip_prefix(SOURCE_ID_PREFIX)
     } else {
@@ -66,16 +75,21 @@ pub(crate) fn source_path(source_id: &SourceId) -> Option<&str> {
 }
 
 /// The [`SourceFile`] in `schema.sources` that `source_id` names, if any.
+///
+/// Scans the schema's files rather than indexing them, since a [`FileId`]
+/// cannot be reconstructed from its rendering. A schema has a handful of
+/// source files and both callers are diagnostic paths, so the scan is not
+/// worth avoiding; it is also what this did when it matched on paths.
 #[must_use]
 pub(crate) fn source_file<'a>(
     schema: &'a Schema,
     source_id: &SourceId,
 ) -> Option<&'a Arc<SourceFile>> {
-    let path = source_path(source_id)?;
+    let wanted = source_file_id(source_id)?;
     schema
         .sources
-        .values()
-        .find(|file| file.path().to_string_lossy() == path)
+        .iter()
+        .find_map(|(file_id, file)| (format!("{file_id:?}") == wanted).then_some(file))
 }
 
 /// A schema, plus the [`SourceId`] of each of its files that has been asked
@@ -106,7 +120,10 @@ impl<'a> Locator<'a> {
         if let Some(id) = self.source_ids.borrow().get(&file_id) {
             return Some(id.clone());
         }
-        let id = source_id(self.schema.sources.get(&file_id)?);
+        if !self.schema.sources.contains_key(&file_id) {
+            return None;
+        }
+        let id = source_id(file_id);
         self.source_ids.borrow_mut().insert(file_id, id.clone());
         Some(id)
     }
@@ -472,6 +489,49 @@ mod tests {
     use shape::ShapeCase;
 
     use super::*;
+
+    /// A `SourceId` has to name exactly one of the schema's files, and a path
+    /// cannot: `apollo_compiler` injects its built-in scalars and
+    /// introspection types as a synthetic file whose path is literally
+    /// `built_in.graphql`, so a document of that name gives two files the same
+    /// path. `Schema` can also be built from several documents parsed under
+    /// the same or an empty path.
+    ///
+    /// Keying on [`FileId`] rather than the path is what makes each id
+    /// distinct. Before it did, both files rendered the same `SourceId` and
+    /// `source_file` resolved either to whichever the scan reached first, so a
+    /// diagnostic could be attributed to the wrong file, or to the compiler's
+    /// own source instead of the user's.
+    #[test]
+    fn source_ids_survive_a_schema_file_named_like_the_built_in_one() {
+        let schema =
+            Schema::parse("type Query { me: String }", "built_in.graphql").expect("parse failed");
+
+        // The premise: two files, one path between them.
+        let colliding = schema
+            .sources
+            .iter()
+            .filter(|(_, file)| file.path().to_string_lossy() == "built_in.graphql")
+            .count();
+        assert_eq!(
+            colliding, 2,
+            "expected the synthetic file and the parsed one to share a path",
+        );
+
+        // Every file's id round-trips to that same file, not to its twin.
+        for (file_id, file) in schema.sources.iter() {
+            let resolved = source_file(&schema, &source_id(*file_id))
+                .expect("a schema file's own source id resolves");
+            assert!(
+                Arc::ptr_eq(resolved, file),
+                "source id for {file_id:?} resolved to a different file",
+            );
+        }
+
+        // And the ids really are distinct, which is what the paths were not.
+        let ids: IndexSet<_> = schema.sources.keys().map(|id| source_id(*id)).collect();
+        assert_eq!(ids.len(), schema.sources.len(), "source ids are unique");
+    }
 
     /// A self-reference (`bestFriend`), a reference through a list
     /// (`friends`), and a mutual reference (`Person.pets` / `Pet.owner`).
