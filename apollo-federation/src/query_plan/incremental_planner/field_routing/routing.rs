@@ -215,13 +215,20 @@ struct KeyHopCandidate {
     target_subgraph: Arc<str>,
     is_root: bool,
     conditions_local: bool,
+    conditions_provided: bool,
     key_conditions: Option<Arc<SelectionSet>>,
     key_leaf_count: usize,
 }
 
 impl KeyHopCandidate {
     fn dedup_rank(&self) -> (u8, usize) {
-        let satisfiability = if self.conditions_local { 0 } else { 2 };
+        let satisfiability = if self.conditions_local {
+            0
+        } else if self.conditions_provided {
+            1
+        } else {
+            2
+        };
         (satisfiability, self.key_leaf_count)
     }
 
@@ -311,43 +318,10 @@ impl FieldRoutingSearchSpace {
         Ok(())
     }
 
-    /// Append cross-subgraph key-hop options. Chained hops are a last
-    /// resort, explored only when every option so far is circular. The
-    /// in-flight guard breaks the mutual recursion with
-    /// `conditions_routable`: re-entering a (node, key) already on the
-    /// call stack means the key conditions require the selection being
-    /// hopped for, so the circular key resolves to no hops.
-    pub(super) fn append_key_hop_options(
-        &self,
-        pending_node: NodeIndex,
-        key: RoutingSiteKey,
-        options: &mut Vec<RoutingChoice>,
-        edge_finder: impl Fn(NodeIndex) -> Option<EdgeIndex>,
-    ) -> Result<(), FederationError> {
-        if !self
-            .caches
-            .key_hops_in_flight
-            .borrow_mut()
-            .insert((pending_node, key.clone()))
-        {
-            trace!(
-                ?pending_node,
-                ?key,
-                "key-hop cycle guard hit: circular key resolves to no hops"
-            );
-            return Ok(());
-        }
-        let result = self.append_key_hop_options_inner(pending_node, options, &edge_finder);
-        self.caches
-            .key_hops_in_flight
-            .borrow_mut()
-            .remove(&(pending_node, key));
-        result
-    }
-
     fn append_key_hop_options_inner(
         &self,
         pending_node: NodeIndex,
+        provides_anchor: Option<NodeIndex>,
         options: &mut Vec<RoutingChoice>,
         edge_finder: &impl Fn(NodeIndex) -> Option<EdgeIndex>,
     ) -> Result<(), FederationError> {
@@ -383,9 +357,11 @@ impl FieldRoutingSearchSpace {
             }
             if let Some(found_edge_idx) = edge_finder(key_target) {
                 let candidate = self.single_hop_candidate(
+                    pending_node,
                     found_edge_idx,
                     key_edge,
                     key_target_node.source.clone(),
+                    provides_anchor,
                     (&source_type, &source_schema),
                 )?;
                 KeyHopCandidate::insert_or_replace(&mut candidates, candidate);
@@ -418,6 +394,7 @@ impl FieldRoutingSearchSpace {
                     &current_source,
                     &source_type,
                     &source_schema,
+                    provides_anchor,
                     edge_finder,
                 )?);
             }
@@ -442,6 +419,7 @@ impl FieldRoutingSearchSpace {
         origin_source: &Arc<str>,
         origin_type: &Option<CompositeTypeDefinitionPosition>,
         origin_schema: &Option<&crate::schema::ValidFederationSchema>,
+        provides_anchor: Option<NodeIndex>,
         edge_finder: &impl Fn(NodeIndex) -> Option<EdgeIndex>,
     ) -> Result<Vec<RoutingChoice>, FederationError> {
         let first_conditions_local = match (&first_key_edge.conditions, origin_type, origin_schema)
@@ -450,8 +428,16 @@ impl FieldRoutingSearchSpace {
             (None, _, _) => true,
             _ => false,
         };
+        let mut first_conditions_provided = false;
         let mut first_conditions_unroutable = false;
         if !first_conditions_local && let Some(conds) = &first_key_edge.conditions {
+            first_conditions_provided =
+                self.key_conditions_provided(origin_node, provides_anchor, conds)?;
+        }
+        if !first_conditions_local
+            && !first_conditions_provided
+            && let Some(conds) = &first_key_edge.conditions
+        {
             first_conditions_unroutable = !self.conditions_routable(origin_node, conds)?;
         }
 
@@ -565,9 +551,11 @@ impl FieldRoutingSearchSpace {
     /// never loses to an unsatisfiable same-subgraph rival.
     fn single_hop_candidate(
         &self,
+        pending_node: NodeIndex,
         found_edge_idx: EdgeIndex,
         key_edge: &crate::query_graph::QueryGraphEdge,
         target_subgraph: Arc<str>,
+        provides_anchor: Option<NodeIndex>,
         (source_type, source_schema): (
             &Option<CompositeTypeDefinitionPosition>,
             &Option<&crate::schema::ValidFederationSchema>,
@@ -586,6 +574,16 @@ impl FieldRoutingSearchSpace {
                 _ => false,
             }
         };
+        let conditions_provided = if !is_root && !conditions_local {
+            match &key_edge.conditions {
+                Some(conds) => {
+                    self.key_conditions_provided(pending_node, provides_anchor, conds)?
+                }
+                None => false,
+            }
+        } else {
+            false
+        };
         let key_leaf_count = key_edge
             .conditions
             .as_ref()
@@ -596,6 +594,7 @@ impl FieldRoutingSearchSpace {
             target_subgraph,
             is_root,
             conditions_local,
+            conditions_provided,
             key_conditions: key_edge.conditions.clone(),
             key_leaf_count,
         })
@@ -613,6 +612,7 @@ impl FieldRoutingSearchSpace {
             let mut conditions_unroutable = false;
             if !c.is_root
                 && !c.conditions_local
+                && !c.conditions_provided
                 && let Some(conds) = &c.key_conditions
             {
                 conditions_unroutable = !self.conditions_routable(pending_node, conds)?;
@@ -662,6 +662,8 @@ impl FieldRoutingSearchSpace {
                 });
             } else if c.conditions_local {
                 options.push(RoutingChoice::KeyHopWithLocalKey { edge, key });
+            } else if c.conditions_provided {
+                options.push(RoutingChoice::KeyHopWithProvidedKey { edge, key });
             } else {
                 options.push(RoutingChoice::KeyHopWithExternalKey { edge, key });
             }
@@ -786,10 +788,16 @@ impl FieldRoutingSearchSpace {
         }
 
         let key = RoutingSiteKey::Field(field_selection.field.name().clone());
-        self.append_key_hop_options(pending.query_graph_node, key, &mut options, |key_target| {
-            self.cached_query_graph
-                .edge_for_field(key_target, &field_selection.field)
-        })?;
+        let hops = self.cached_key_hops(
+            pending.query_graph_node,
+            pending.provides_anchor,
+            key,
+            |key_target| {
+                self.cached_query_graph
+                    .edge_for_field(key_target, &field_selection.field)
+            },
+        )?;
+        options.extend(hops.iter().cloned());
 
         let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
         let is_abstract = matches!(
@@ -894,10 +902,16 @@ impl FieldRoutingSearchSpace {
             "searching key hops for fragment downcast",
         );
         let key = RoutingSiteKey::InlineFragment(Some(type_cond.type_name().clone()));
-        self.append_key_hop_options(pending.query_graph_node, key, &mut options, |key_target| {
-            self.cached_query_graph
-                .edge_for_inline_fragment(key_target, &fragment_selection.inline_fragment)
-        })?;
+        let hops = self.cached_key_hops(
+            pending.query_graph_node,
+            pending.provides_anchor,
+            key,
+            |key_target| {
+                self.cached_query_graph
+                    .edge_for_inline_fragment(key_target, &fragment_selection.inline_fragment)
+            },
+        )?;
+        options.extend(hops.iter().cloned());
 
         if type_cond.is_abstract_type() {
             options.push(RoutingChoice::TypeExplosion);
@@ -936,17 +950,74 @@ impl FieldRoutingSearchSpace {
         Ok(current_runtime_types.is_subset(&cond_runtime_types))
     }
 
-    /// Enumerate key hops into a fresh Vec; the cycle guard lives in
-    /// `append_key_hop_options`.
-    pub(super) fn key_hops_guarded(
+    /// Cached key hop enumeration with integrated cycle guard. The guard
+    /// breaks mutual recursion with `conditions_routable`: re-entering a
+    /// (node, key) already on the call stack returns empty (circular).
+    /// Results are cached only when the guard did not fire (or this is
+    /// the outermost call, whose result is the stable fixpoint). The
+    /// provides_anchor path bypasses the cache because the same (node,
+    /// key) pair yields different hops under different ancestors.
+    pub(super) fn cached_key_hops(
         &self,
         node: NodeIndex,
+        provides_anchor: Option<NodeIndex>,
         key: RoutingSiteKey,
         edge_finder: impl Fn(NodeIndex) -> Option<EdgeIndex>,
-    ) -> Result<Vec<RoutingChoice>, FederationError> {
+    ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
+        if provides_anchor.is_none() {
+            if let Some(cached) = self.caches.key_hops.borrow().get(&(node, key.clone())) {
+                return Ok(cached.clone());
+            }
+        }
+        let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
+        if !self
+            .caches
+            .key_hops_in_flight
+            .borrow_mut()
+            .insert((node, key.clone()))
+        {
+            self.caches.guard_hits.set(self.caches.guard_hits.get() + 1);
+            trace!(
+                ?node,
+                ?key,
+                "key-hop cycle guard hit: circular key resolves to no hops"
+            );
+            return Ok(Arc::new(Vec::new()));
+        }
+        let hits_before = self.caches.guard_hits.get();
         let mut hops = Vec::new();
-        self.append_key_hop_options(node, key, &mut hops, edge_finder)?;
+        let result =
+            self.append_key_hop_options_inner(node, provides_anchor, &mut hops, &edge_finder);
+        self.caches
+            .key_hops_in_flight
+            .borrow_mut()
+            .remove(&(node, key.clone()));
+        result?;
+        let hops = Arc::new(hops);
+        if provides_anchor.is_none() && (outermost || self.caches.guard_hits.get() == hits_before) {
+            self.caches
+                .key_hops
+                .borrow_mut()
+                .insert((node, key), hops.clone());
+        }
         Ok(hops)
+    }
+
+    /// Whether key conditions are locally satisfiable or reachable via
+    /// the provides anchor.
+    fn key_conditions_provided(
+        &self,
+        node: NodeIndex,
+        provides_anchor: Option<NodeIndex>,
+        conditions: &SelectionSet,
+    ) -> Result<bool, FederationError> {
+        if self.conditions_resolvable_at_node(node, conditions)? {
+            return Ok(true);
+        }
+        match provides_anchor {
+            Some(anchor) => self.conditions_resolvable_at_node(anchor, conditions),
+            None => Ok(false),
+        }
     }
 
     /// Whether not-locally-satisfiable key conditions can actually be
@@ -954,7 +1025,7 @@ impl FieldRoutingSearchSpace {
     /// route: a direct edge, or a key hop that can reach it. The mutual
     /// recursion (hop viability depends on condition routability, which
     /// depends on hop viability) is broken by the in-flight guard in
-    /// `key_hops_guarded`.
+    /// `cached_key_hops`.
     fn conditions_routable(
         &self,
         node: NodeIndex,
@@ -964,7 +1035,8 @@ impl FieldRoutingSearchSpace {
         if let Some(&cached) = self.caches.conditions_routable.borrow().get(&cache_key) {
             return Ok(cached);
         }
-        let guard_before = self.caches.guard_hits.get();
+        let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
+        let hits_before = self.caches.guard_hits.get();
         let mut result = true;
         for sel in conditions.selections.values() {
             let routable = match sel {
@@ -978,14 +1050,11 @@ impl FieldRoutingSearchSpace {
                 break;
             }
         }
-        // Cache when: (a) no guard was hit, so no circular paths
-        // influenced the answer; or (b) the result is false and guard
-        // hits occurred. Case (b) is safe because the guard only hides
-        // circular paths, and circular paths can never make conditions
-        // routable. A true result influenced by guard hits might be
-        // overly optimistic, so we do not cache that.
-        let no_guard_change = self.caches.guard_hits.get() == guard_before;
-        if no_guard_change || !result {
+        // Cache when no guard fired during this evaluation, or when this
+        // is the outermost call (no key hop enumeration in progress). The
+        // outermost result is the deterministic fixpoint a fresh call would
+        // recompute, so it is safe to memoize even if guards fired inside.
+        if outermost || self.caches.guard_hits.get() == hits_before {
             self.caches
                 .conditions_routable
                 .borrow_mut()
@@ -1025,7 +1094,7 @@ impl FieldRoutingSearchSpace {
         // No provides anchor: only hop existence matters here, which the
         // anchor never changes (it only refines `conditions_provided`).
         let key = RoutingSiteKey::Field(field_sel.field.name().clone());
-        let hops = self.key_hops_guarded(node, key, |key_target| {
+        let hops = self.cached_key_hops(node, None, key, |key_target| {
             self.cached_query_graph
                 .edge_for_field(key_target, &field_sel.field)
         })?;
@@ -1052,7 +1121,7 @@ impl FieldRoutingSearchSpace {
             return self.conditions_routable(target, &frag_sel.selection_set);
         }
         let key = RoutingSiteKey::InlineFragment(Some(type_cond.type_name().clone()));
-        let hops = self.key_hops_guarded(node, key, |key_target| {
+        let hops = self.cached_key_hops(node, None, key, |key_target| {
             self.cached_query_graph
                 .edge_for_inline_fragment(key_target, &frag_sel.inline_fragment)
         })?;
