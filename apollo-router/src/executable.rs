@@ -745,6 +745,7 @@ impl Executable {
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)
             .and_uplink(uplink_config)
+            .and_oci(opt.oci_config().ok())
             .schema(schema_source)
             .license(license)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
@@ -943,6 +944,7 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                oci: None,
                 validated_yaml: None,
                 raw_yaml: None,
             }));
@@ -1026,6 +1028,7 @@ mod tests {
                 apollo_plugins: Default::default(),
                 notify: Default::default(),
                 uplink: None,
+                oci: None,
                 validated_yaml: None,
                 raw_yaml: None,
             }));

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::string::FromUtf8Error;
 use std::time::Duration;
@@ -124,12 +125,20 @@ pub(crate) enum OciError {
     Parse(oci_client::ParseError),
     #[error("unable to parse layer: {0}")]
     LayerParse(FromUtf8Error),
+    #[error("unable to decompress persisted query chunk layer: {0}")]
+    ChunkDecompress(std::io::Error),
 }
 
 const APOLLO_REGISTRY_ENDING: &str = "apollographql.com";
 const APOLLO_REGISTRY_USERNAME: &str = "apollo-registry";
 const APOLLO_SCHEMA_MEDIA_TYPE: &str = "application/apollo.schema";
 const APOLLO_MANIFEST_LAUNCH_ID_ANNOTATION: &str = "com.apollograph.launch.id";
+/// Media type of persisted query chunk layers on a graph artifact image. Each blob is the
+/// gzipped JSON of one persisted query manifest chunk (the same document the router reads
+/// from GCS when Uplink serves chunk URLs); the layer digest is the SHA-256 of the gzipped
+/// bytes.
+const APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE: &str =
+    "application/vnd.apollo.persisted-query-chunk.v1+gzip";
 
 impl From<oci_client::ParseError> for OciError {
     fn from(value: oci_client::ParseError) -> Self {
@@ -561,6 +570,178 @@ pub(crate) fn stream_from_oci(
     ReceiverStream::new(receiver).boxed()
 }
 
+/// The persisted query chunks of one graph artifact image: the decompressed JSON documents of
+/// each persisted-query chunk layer, in manifest layer order (the order the persisted query
+/// manifest is assembled in).
+pub(crate) type OciPersistedQueryChunks = Vec<String>;
+
+/// Type alias for the OCI persisted query chunk stream
+pub(crate) type OciPersistedQueryChunkStream =
+    Pin<Box<dyn Stream<Item = Result<OciPersistedQueryChunks, OciError>> + Send>>;
+
+/// Create a persisted query chunk stream from OCI config, gated on reference type and
+/// hot-reload the same way as the schema stream: this stream polls the same graph manifest the
+/// schema stream does, so the two are only ever configured together.
+pub(crate) fn create_oci_pq_chunk_stream(
+    oci_config: OciConfig,
+) -> Result<OciPersistedQueryChunkStream, anyhow::Error> {
+    let (_, ref_type) = validate_oci_reference(&oci_config.reference)?;
+
+    match (ref_type, oci_config.hot_reload) {
+        (OciReferenceType::Tag, true) => Ok(Box::pin(stream_pq_chunks_from_oci(oci_config))),
+        (OciReferenceType::Tag, false) => Err(anyhow::anyhow!(
+            "Tag references without --hot-reload are not yet supported."
+        )),
+        (OciReferenceType::Digest, true) => Err(anyhow::anyhow!(
+            "Digest references are immutable so --hot-reload flag is not allowed."
+        )),
+        (OciReferenceType::Digest, false) => {
+            let stream = stream::once(async move {
+                fetch_pq_chunks(&oci_config, &mut HashMap::new())
+                    .await
+                    .map(|(chunks, _)| chunks)
+            });
+            Ok(Box::pin(stream))
+        }
+    }
+}
+
+/// Regularly poll the graph manifest for persisted query chunk changes at the configured
+/// interval. HEADs the manifest digest each tick and only GETs the manifest when it moved;
+/// chunk blobs are cached by digest across polls, so a publish that changed the manifest
+/// without touching the persisted query layers (a schema launch) fetches no blobs and emits
+/// nothing.
+pub(crate) fn stream_pq_chunks_from_oci(
+    oci_config: OciConfig,
+) -> impl Stream<Item = Result<OciPersistedQueryChunks, OciError>> {
+    let (sender, receiver) = channel(2);
+
+    let task = async move {
+        let mut last_digest: Option<String> = None;
+        let mut last_chunk_digests: Option<Vec<String>> = None;
+        let mut chunk_cache: HashMap<String, String> = HashMap::new();
+        let mut polling_time = oci_config.poll_interval;
+        loop {
+            match fetch_oci_manifest_digest(&oci_config).await {
+                Ok(current_digest) => {
+                    if last_digest.as_deref() == Some(current_digest.as_str()) {
+                        tracing::debug!(
+                            "oci manifest digest unchanged, skipping persisted query chunk fetch"
+                        );
+                    } else {
+                        match fetch_pq_chunks(&oci_config, &mut chunk_cache).await {
+                            Ok((chunks, chunk_digests)) => {
+                                if last_chunk_digests.as_ref() == Some(&chunk_digests) {
+                                    // The manifest moved but carries the same persisted query
+                                    // layers (a schema-only publish); remember the digest so the
+                                    // manifest isn't refetched every tick, but don't swap the
+                                    // manifest downstream.
+                                    tracing::debug!(
+                                        "oci persisted query chunk layers unchanged, skipping update"
+                                    );
+                                    last_digest = Some(current_digest);
+                                } else if let Err(e) = sender.send(Ok(chunks)).await {
+                                    tracing::debug!(
+                                        "failed to push to stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
+                                } else {
+                                    // Only advance on a successful send so a failed fetch retries
+                                    last_digest = Some(current_digest);
+                                    last_chunk_digests = Some(chunk_digests);
+                                }
+                            }
+                            Err(err) => {
+                                if let Some(retry_after) = parse_rate_limit_error(&err) {
+                                    polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                                }
+
+                                if let Err(e) = sender.send(Err(err)).await {
+                                    tracing::debug!(
+                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    if let Some(retry_after) = parse_rate_limit_error(&err) {
+                        polling_time = retry_after.max(Duration::from_secs(10)); // Minimum 10 second backoff
+                    }
+
+                    if let Err(e) = sender.send(Err(err)).await {
+                        tracing::debug!(
+                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                        );
+                        break;
+                    }
+                }
+            }
+
+            tokio::time::sleep(polling_time).await;
+            polling_time = oci_config.poll_interval;
+        }
+    };
+    drop(tokio::task::spawn(task.with_current_subscriber()));
+
+    ReceiverStream::new(receiver).boxed()
+}
+
+/// Fetch the graph manifest and materialize its persisted query chunk layers, reusing
+/// `chunk_cache` (digest -> decompressed JSON) for layers already fetched on a previous poll.
+/// Returns the chunks in manifest layer order together with their layer digests. The cache is
+/// replaced with exactly the surviving layers, so chunks dropped from the image are evicted.
+async fn fetch_pq_chunks(
+    oci_config: &OciConfig,
+    chunk_cache: &mut HashMap<String, String>,
+) -> Result<(OciPersistedQueryChunks, Vec<String>), OciError> {
+    let reference: Reference = oci_config.reference.as_str().parse()?;
+    let auth = build_auth(&reference, &oci_config.apollo_key);
+    let mut client = Client::new(ClientConfig {
+        protocol: oci_config.client_protocol(),
+        ..Default::default()
+    });
+
+    let (manifest, _) =
+        fetch_oci_manifest(&mut client, &auth, &reference, Some(oci_config)).await?;
+
+    let chunk_layers: Vec<_> = manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.media_type == APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE)
+        .cloned()
+        .collect();
+
+    let mut chunks = Vec::with_capacity(chunk_layers.len());
+    let mut chunk_digests = Vec::with_capacity(chunk_layers.len());
+    let mut new_cache = HashMap::new();
+    for layer in &chunk_layers {
+        let chunk = match chunk_cache.get(&layer.digest) {
+            Some(cached) => cached.clone(),
+            None => {
+                let compressed = fetch_oci_blob(&mut client, &reference, layer).await?;
+                decompress_pq_chunk(&compressed)?
+            }
+        };
+        new_cache.insert(layer.digest.clone(), chunk.clone());
+        chunk_digests.push(layer.digest.clone());
+        chunks.push(chunk);
+    }
+    *chunk_cache = new_cache;
+
+    Ok((chunks, chunk_digests))
+}
+
+/// Decompress a gzipped persisted query chunk blob into its JSON document.
+fn decompress_pq_chunk(compressed: &[u8]) -> Result<String, OciError> {
+    let mut decoder = flate2::read::GzDecoder::new(compressed);
+    let mut json = String::new();
+    std::io::Read::read_to_string(&mut decoder, &mut json).map_err(OciError::ChunkDecompress)?;
+    Ok(json)
+}
+
 fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
     if let OciError::Distribution(OciDistributionError::RegistryError { envelope, .. }) = error
         && let Some(error) = envelope
@@ -577,6 +758,148 @@ fn parse_rate_limit_error(error: &OciError) -> Option<Duration> {
     None
 }
 
+/// Mock-registry helpers shared between this module's tests and the persisted query manifest
+/// poller's tests (which exercise the OCI manifest source end to end).
+#[cfg(test)]
+pub(crate) mod test_helpers {
+    use std::collections::BTreeMap;
+    use std::io::Write;
+    use std::time::Duration;
+
+    use futures::future::join_all;
+    use oci_client::Reference;
+    use oci_client::client::ImageLayer;
+    use oci_client::manifest::IMAGE_MANIFEST_MEDIA_TYPE;
+    use oci_client::manifest::OCI_IMAGE_MEDIA_TYPE;
+    use oci_client::manifest::OciDescriptor;
+    use oci_client::manifest::OciImageManifest;
+    use oci_client::manifest::OciManifest;
+    use sha2::Digest;
+    use sha2::Sha256;
+    use url::Url;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
+
+    use super::APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE;
+    use super::OciConfig;
+
+    pub(crate) fn calculate_manifest_digest(manifest: &OciManifest) -> String {
+        let manifest_bytes = serde_json::to_vec(manifest).unwrap();
+        let hash = Sha256::digest(&manifest_bytes);
+        format!("sha256:{:x}", hash)
+    }
+
+    pub(crate) fn mock_oci_config_with_reference(reference: String) -> OciConfig {
+        OciConfig {
+            apollo_key: "test-api-key".to_string(),
+            reference: reference.clone(),
+            hot_reload: false,
+            poll_interval: Duration::from_millis(10),
+            use_ssl: false,
+        }
+    }
+
+    /// Gzip-compress bytes the way the graph artifact writer stores persisted query chunks.
+    pub(crate) fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// A persisted query chunk layer as it appears on a graph artifact image: gzipped JSON
+    /// under the persisted query chunk media type.
+    pub(crate) fn pq_chunk_layer(chunk_json: &str) -> ImageLayer {
+        ImageLayer {
+            data: gzip(chunk_json.as_bytes()),
+            media_type: APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE.to_string(),
+            annotations: None,
+        }
+    }
+
+    pub(crate) async fn setup_mocks(
+        mock_server: &MockServer,
+        layers: Vec<ImageLayer>,
+        manifest_annotations: Option<BTreeMap<String, String>>,
+    ) -> Reference {
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+
+        let layer_descriptors = join_all(layers.iter().map(async |layer| {
+            let blob_digest = layer.sha256_digest();
+            let blob_url = Url::parse(&format!(
+                "{}/v2/{graph_id}/blobs/{blob_digest}",
+                mock_server.uri()
+            ))
+            .expect("url must be valid");
+            Mock::given(method("GET"))
+                .and(path(blob_url.path()))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                        .set_body_bytes(layer.data.clone()),
+                )
+                .mount(mock_server)
+                .await;
+            OciDescriptor {
+                media_type: layer.media_type.clone(),
+                digest: blob_digest,
+                size: layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            }
+        }))
+        .await;
+
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+        let oci_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: layer_descriptors,
+            subject: None,
+            artifact_type: None,
+            annotations: manifest_annotations,
+        });
+        let manifest_digest = calculate_manifest_digest(&oci_manifest);
+
+        // Set up HEAD request for manifest digest (used by fetch_oci_manifest_digest)
+        let _ = Mock::given(method("HEAD"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest.clone())
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
+            )
+            .mount(mock_server)
+            .await;
+
+        // Set up GET request for full manifest (used by pull_image_manifest)
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("Docker-Content-Digest", manifest_digest)
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+            )
+            .mount(mock_server)
+            .await;
+
+        format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -586,7 +909,6 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use futures::StreamExt;
-    use futures::future::join_all;
     use oci_client::client::ClientConfig;
     use oci_client::client::ClientProtocol;
     use oci_client::client::ImageLayer;
@@ -596,8 +918,6 @@ mod tests {
     use oci_client::manifest::OciImageManifest;
     use oci_client::manifest::OciManifest;
     use parking_lot::Mutex;
-    use sha2::Digest;
-    use sha2::Sha256;
     use tokio::time::timeout;
     use url::Url;
     use wiremock::Mock;
@@ -608,24 +928,12 @@ mod tests {
     use wiremock::matchers::method;
     use wiremock::matchers::path;
 
+    use super::test_helpers::calculate_manifest_digest;
+    use super::test_helpers::mock_oci_config_with_reference;
+    use super::test_helpers::pq_chunk_layer;
+    use super::test_helpers::setup_mocks;
     use super::*;
     use crate::registry::OciError::LayerMissingTitle;
-
-    fn calculate_manifest_digest(manifest: &OciManifest) -> String {
-        let manifest_bytes = serde_json::to_vec(manifest).unwrap();
-        let hash = Sha256::digest(&manifest_bytes);
-        format!("sha256:{:x}", hash)
-    }
-
-    fn mock_oci_config_with_reference(reference: String) -> OciConfig {
-        OciConfig {
-            apollo_key: "test-api-key".to_string(),
-            reference: reference.clone(),
-            hot_reload: false,
-            poll_interval: Duration::from_millis(10),
-            use_ssl: false,
-        }
-    }
 
     struct SchemaLayerManifest {
         oci_manifest: OciManifest,
@@ -752,86 +1060,6 @@ mod tests {
         }
 
         manifest_annotations
-    }
-
-    async fn setup_mocks(
-        mock_server: &MockServer,
-        layers: Vec<ImageLayer>,
-        manifest_annotations: Option<BTreeMap<String, String>>,
-    ) -> Reference {
-        let graph_id = "test-graph-id";
-        let reference = "latest";
-
-        let layer_descriptors = join_all(layers.iter().map(async |layer| {
-            let blob_digest = layer.sha256_digest();
-            let blob_url = Url::parse(&format!(
-                "{}/v2/{graph_id}/blobs/{blob_digest}",
-                mock_server.uri()
-            ))
-            .expect("url must be valid");
-            Mock::given(method("GET"))
-                .and(path(blob_url.path()))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
-                        .set_body_bytes(layer.data.clone()),
-                )
-                .mount(mock_server)
-                .await;
-            OciDescriptor {
-                media_type: layer.media_type.clone(),
-                digest: blob_digest,
-                size: layer.data.len().try_into().unwrap(),
-                urls: None,
-                annotations: None,
-            }
-        }))
-        .await;
-
-        let manifest_url = Url::parse(&format!(
-            "{}/v2/{}/manifests/{}",
-            mock_server.uri(),
-            graph_id,
-            reference
-        ))
-        .expect("url must be valid");
-        let oci_manifest = OciManifest::Image(OciImageManifest {
-            schema_version: 2,
-            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
-            config: Default::default(),
-            layers: layer_descriptors,
-            subject: None,
-            artifact_type: None,
-            annotations: manifest_annotations,
-        });
-        let manifest_digest = calculate_manifest_digest(&oci_manifest);
-
-        // Set up HEAD request for manifest digest (used by fetch_oci_manifest_digest)
-        let _ = Mock::given(method("HEAD"))
-            .and(path(manifest_url.path()))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", manifest_digest.clone())
-                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE),
-            )
-            .mount(mock_server)
-            .await;
-
-        // Set up GET request for full manifest (used by pull_image_manifest)
-        let _ = Mock::given(method("GET"))
-            .and(path(manifest_url.path()))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .append_header("Docker-Content-Digest", manifest_digest)
-                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
-            )
-            .mount(mock_server)
-            .await;
-
-        format!("{}/{graph_id}:{reference}", mock_server.address())
-            .parse::<Reference>()
-            .expect("url must be valid")
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1724,6 +1952,267 @@ mod tests {
             elapsed >= Duration::from_secs(10),
             "Should have slept for at least 10 seconds due to backoff, but elapsed time was {:?}",
             elapsed
+        );
+    }
+
+    const CHUNK_ONE_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"op-1","body":"query { one }"}]}"#;
+    const CHUNK_TWO_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"op-2","body":"query { two }"}]}"#;
+
+    fn schema_layer(sdl: &str) -> ImageLayer {
+        ImageLayer {
+            data: sdl.to_string().into_bytes(),
+            media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+            annotations: None,
+        }
+    }
+
+    fn image_manifest_for_layers(layers: &[&ImageLayer]) -> (String, Vec<u8>) {
+        let descriptors = layers
+            .iter()
+            .map(|layer| OciDescriptor {
+                media_type: layer.media_type.clone(),
+                digest: layer.sha256_digest(),
+                size: layer.data.len().try_into().unwrap(),
+                urls: None,
+                annotations: None,
+            })
+            .collect();
+        let manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: descriptors,
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let digest = calculate_manifest_digest(&manifest);
+        let body = serde_json::to_vec(&manifest).unwrap();
+        (digest, body)
+    }
+
+    /// Mount a blob GET that counts its fetches, returning the counter.
+    async fn mount_counting_blob(mock_server: &MockServer, layer: &ImageLayer) -> Arc<AtomicUsize> {
+        let count = Arc::new(AtomicUsize::new(0));
+        let counter = count.clone();
+        let data = layer.data.clone();
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/v2/test-graph-id/blobs/{}",
+                layer.sha256_digest()
+            )))
+            .respond_with(move |_request: &Request| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(data.clone())
+            })
+            .mount(mock_server)
+            .await;
+        count
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_from_oci_success() {
+        let mock_server = &MockServer::start().await;
+
+        let image_reference = setup_mocks(
+            mock_server,
+            vec![
+                schema_layer("test schema"),
+                pq_chunk_layer(CHUNK_ONE_JSON),
+                pq_chunk_layer(CHUNK_TWO_JSON),
+            ],
+            None,
+        )
+        .await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_pq_chunks_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            // Chunks arrive in manifest layer order; the schema layer is not among them.
+            Ok(chunks) => assert_eq!(
+                chunks,
+                &vec![CHUNK_ONE_JSON.to_string(), CHUNK_TWO_JSON.to_string()]
+            ),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_from_oci_emits_empty_set_without_chunk_layers() {
+        let mock_server = &MockServer::start().await;
+
+        // A graph that has never published persisted queries still emits (an empty set), because
+        // the manifest poller blocks startup on the first emission.
+        let image_reference =
+            setup_mocks(mock_server, vec![schema_layer("test schema")], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_pq_chunks_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            Ok(chunks) => assert!(chunks.is_empty()),
+            Err(e) => panic!("expected success, got error: {e}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_caches_chunks_and_skips_schema_only_publishes() {
+        let mock_server = &MockServer::start().await;
+
+        let chunk_one = pq_chunk_layer(CHUNK_ONE_JSON);
+        let chunk_two = pq_chunk_layer(CHUNK_TWO_JSON);
+        let schema_v1 = schema_layer("schema v1");
+        let schema_v2 = schema_layer("schema v2");
+
+        let v1 = image_manifest_for_layers(&[&schema_v1, &chunk_one]);
+        // A schema-only launch: the manifest digest moves but the chunk layers are identical.
+        let v2 = image_manifest_for_layers(&[&schema_v2, &chunk_one]);
+        // A persisted query publish adds a chunk.
+        let v3 = image_manifest_for_layers(&[&schema_v2, &chunk_one, &chunk_two]);
+
+        let chunk_one_fetches = mount_counting_blob(mock_server, &chunk_one).await;
+        let chunk_two_fetches = mount_counting_blob(mock_server, &chunk_two).await;
+        // Deliberately no blob mocks for the schema layers: the persisted query stream must never
+        // fetch them, and an attempt would 404 and surface as an error item.
+
+        let current_manifest: Arc<Mutex<(String, Vec<u8>)>> = Arc::new(Mutex::new(v1.clone()));
+        let manifest_path = "/v2/test-graph-id/manifests/latest";
+        {
+            let current = current_manifest.clone();
+            Mock::given(method("HEAD"))
+                .and(path(manifest_path))
+                .respond_with(move |_request: &Request| {
+                    let (digest, _) = current.lock().clone();
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                })
+                .mount(mock_server)
+                .await;
+        }
+        {
+            let current = current_manifest.clone();
+            Mock::given(method("GET"))
+                .and(path(manifest_path))
+                .respond_with(move |_request: &Request| {
+                    let (digest, body) = current.lock().clone();
+                    ResponseTemplate::new(200)
+                        .append_header("Docker-Content-Digest", digest)
+                        .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                        .set_body_bytes(body)
+                })
+                .mount(mock_server)
+                .await;
+        }
+
+        let oci_config = mock_oci_config_with_reference(format!(
+            "{}/test-graph-id:latest",
+            mock_server.address()
+        ));
+        let mut stream = Box::pin(stream_pq_chunks_from_oci(oci_config));
+
+        let first = timeout(Duration::from_secs(30), stream.next())
+            .await
+            .expect("first emission should arrive")
+            .expect("stream should not end")
+            .expect("first emission should succeed");
+        assert_eq!(first, vec![CHUNK_ONE_JSON.to_string()]);
+        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
+
+        // Move the tag to the schema-only publish: no emission, and the unchanged chunk is not
+        // refetched. 200ms covers ~20 polls at the 10ms test interval.
+        *current_manifest.lock() = v2;
+        let nothing = timeout(Duration::from_millis(200), stream.next()).await;
+        assert!(
+            nothing.is_err(),
+            "a schema-only publish must not emit a persisted query update"
+        );
+        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
+
+        // Move the tag to the publish that adds a chunk: one emission with both chunks in layer
+        // order, fetching only the new blob.
+        *current_manifest.lock() = v3;
+        let second = timeout(Duration::from_secs(30), stream.next())
+            .await
+            .expect("second emission should arrive")
+            .expect("stream should not end")
+            .expect("second emission should succeed");
+        assert_eq!(
+            second,
+            vec![CHUNK_ONE_JSON.to_string(), CHUNK_TWO_JSON.to_string()]
+        );
+        assert_eq!(chunk_one_fetches.load(Ordering::SeqCst), 1);
+        assert_eq!(chunk_two_fetches.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_pq_chunks_bad_gzip_emits_error() {
+        let mock_server = &MockServer::start().await;
+
+        let corrupt_chunk = ImageLayer {
+            data: b"not gzip data".to_vec(),
+            media_type: APOLLO_PERSISTED_QUERY_CHUNK_MEDIA_TYPE.to_string(),
+            annotations: None,
+        };
+        let image_reference = setup_mocks(mock_server, vec![corrupt_chunk], None).await;
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let results = stream_pq_chunks_from_oci(oci_config)
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+        assert_eq!(results.len(), 1);
+        assert!(
+            matches!(&results[0], Err(OciError::ChunkDecompress(_))),
+            "expected a chunk decompression error, got {:?}",
+            results[0].as_ref().map(|chunks| chunks.len())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_oci_pq_chunk_stream_rejects_tag_without_hot_reload() {
+        let oci_config =
+            mock_oci_config_with_reference("registry.example.com/test-graph:latest".to_string());
+        let error = match create_oci_pq_chunk_stream(oci_config) {
+            Ok(_) => panic!("expected tag-without-hot-reload to be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Tag references without --hot-reload")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn create_oci_pq_chunk_stream_rejects_digest_with_hot_reload() {
+        let oci_config = OciConfig {
+            hot_reload: true,
+            ..mock_oci_config_with_reference(format!(
+                "registry.example.com/test-graph@sha256:{}",
+                "a".repeat(64)
+            ))
+        };
+        let error = match create_oci_pq_chunk_stream(oci_config) {
+            Ok(_) => panic!("expected digest-with-hot-reload to be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Digest references are immutable")
         );
     }
 }
