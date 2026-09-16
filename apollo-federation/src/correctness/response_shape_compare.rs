@@ -128,6 +128,24 @@ where
     ) -> Result<(Self, PossibleTypes), ComparisonError>;
 }
 
+/// The constraint that narrows nothing: every field's response may be any type.
+///
+/// This is the identity for the pair impl below, and the constraint to pass when a comparison
+/// derives its own possible types and wants no oracle on top — `query_compare` does, because the
+/// algorithm it ports computes possible types itself. Being a unit struct rather than an
+/// `Option`, it monomorphizes away instead of costing a branch at every field boundary.
+pub(crate) struct NoConstraint;
+
+impl PathConstraint for NoConstraint {
+    fn for_field(
+        &self,
+        _representative_field: &Field,
+        _parent_types: &PossibleTypes,
+    ) -> Result<(Self, PossibleTypes), ComparisonError> {
+        Ok((NoConstraint, PossibleTypes::All))
+    }
+}
+
 /// Conjunction of two path constraints: a runtime type is possible only if both constraints
 /// allow it. This is how an extra oracle (e.g. `SubgraphConstraint`) is layered on top of the
 /// base `SchemaConstraint`.

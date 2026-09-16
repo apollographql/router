@@ -55,3 +55,5 @@ fuzz/timeout-*
 
 # Cursor (local IDE configuration)
 .cursor/
+mutants.out/
+mutants.out.old/

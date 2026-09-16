@@ -1,0 +1,39 @@
+[package]
+name = "query-inclusion-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Its own workspace: this package depends on a Lean checkout for the differential lane and must
+# not be built by the router workspace's ordinary `cargo test`.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+apollo-compiler = "1.33.0"
+apollo-federation = { path = "..", features = ["correctness"] }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+
+[[example]]
+name = "differential"
+path = "runners/differential.rs"
+
+[[example]]
+name = "metamorphic"
+path = "runners/metamorphic.rs"
+
+[[example]]
+name = "boolean_case_split_cost"
+path = "runners/boolean_case_split_cost.rs"
+
+[[example]]
+name = "benchmark"
+path = "runners/benchmark.rs"

@@ -1,3 +1,4 @@
+pub mod query_compare;
 pub mod query_plan_analysis;
 #[cfg(test)]
 pub mod query_plan_analysis_test;
@@ -110,6 +111,18 @@ pub fn compare_operations(
         "compare_operations:\nResponse shape (left): {this_rs}\nResponse shape (right): {other_rs}"
     );
     Ok(compare_response_shapes(schema, &this_rs, &other_rs)?)
+}
+
+/// The response-shape query plan checker.
+///
+/// This is the checker that predates the port of the Lean `checkQueryPlan` model. It is kept
+/// reachable so the two can be run against each other while the new one lands: they decide the
+/// same question by different routes, and the new one is not yet at feature parity.
+///
+/// Its implementation still lives in this module rather than under `legacy`, to keep the change
+/// that introduces the new checker small.
+pub mod legacy {
+    pub use super::check_plan;
 }
 
 /// Check the correctness of the query plan against the schema and input operation by comparing
