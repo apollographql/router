@@ -166,7 +166,16 @@ impl LicenseSource {
                             future::ready(match res {
                                 Ok(license) => Some(license),
                                 Err(e) => {
-                                    tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
+                                    // A genuine "no entitlement" (`OciError::is_not_found()`)
+                                    // is already converted to `Ok(License::default())` inside
+                                    // `fetch_license_from_reference`, so any `Err` reaching
+                                    // here is a transient failure (auth, 5xx, network) that
+                                    // should be retried on the next poll, not treated as an
+                                    // invalid license.
+                                    tracing::warn!(
+                                        "transient error fetching license from oci registry, will retry: {}",
+                                        e
+                                    );
                                     None
                                 }
                             })

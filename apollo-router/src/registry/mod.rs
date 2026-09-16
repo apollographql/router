@@ -162,6 +162,40 @@ impl From<LicenseError> for OciError {
     }
 }
 
+impl OciError {
+    /// True when the registry indicates the requested resource genuinely does not
+    /// exist (manifest, blob, or entitlement layer unknown / HTTP 404) — as opposed
+    /// to a transient failure (auth, 5xx, network) that should be retried without
+    /// changing any license state. See ROUTER-2085.
+    pub(crate) fn is_not_found(&self) -> bool {
+        match self {
+            // The manifest was fetched successfully but has no entitlement layer at
+            // all: semantically "no license," the same as a 404, not transient.
+            OciError::LayerNotFound(media_type) => media_type == ENTITLEMENT_MEDIA_TYPE,
+            OciError::Distribution(inner) => is_not_found_distribution_error(inner),
+            _ => false,
+        }
+    }
+}
+
+fn is_not_found_distribution_error(error: &OciDistributionError) -> bool {
+    match error {
+        OciDistributionError::ImageManifestNotFoundError(_) => true,
+        OciDistributionError::ServerError { code, .. } => *code == 404,
+        OciDistributionError::RegistryError { envelope, .. } => envelope.errors.iter().any(|e| {
+            matches!(
+                e.code,
+                OciErrorCode::ManifestUnknown
+                    | OciErrorCode::NameUnknown
+                    | OciErrorCode::BlobUnknown
+                    | OciErrorCode::ManifestBlobUnknown
+                    | OciErrorCode::NotFound
+            )
+        }),
+        _ => false,
+    }
+}
+
 /// Determine whether a resolved registry hostname belongs to Apollo's own registry.
 fn is_apollo_registry(server: &str) -> bool {
     server
@@ -711,7 +745,17 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     {
         Ok(license) => Ok(license),
         Err(err) => {
-            tracing::error!("error fetching license from oci registry: {}", err);
+            if err.is_not_found() {
+                tracing::debug!(
+                    "no entitlement found for this graph in oci registry: {}",
+                    err
+                );
+            } else {
+                tracing::warn!(
+                    "transient error fetching license from oci registry, will retry: {}",
+                    err
+                );
+            }
             Err(err)
         }
     }
@@ -765,6 +809,8 @@ mod tests {
     use oci_client::client::ClientConfig;
     use oci_client::client::ClientProtocol;
     use oci_client::client::ImageLayer;
+    use oci_client::errors::OciEnvelope;
+    use oci_client::errors::OciError as OciApiError;
     use oci_client::manifest::IMAGE_MANIFEST_MEDIA_TYPE;
     use oci_client::manifest::OCI_IMAGE_MEDIA_TYPE;
     use oci_client::manifest::OciDescriptor;
@@ -794,6 +840,85 @@ mod tests {
         let manifest_bytes = serde_json::to_vec(manifest).unwrap();
         let hash = Sha256::digest(&manifest_bytes);
         format!("sha256:{:x}", hash)
+    }
+
+    fn registry_error(code: OciErrorCode) -> OciDistributionError {
+        OciDistributionError::RegistryError {
+            envelope: OciEnvelope {
+                errors: vec![OciApiError {
+                    code,
+                    message: "test error".to_string(),
+                    detail: serde_json::Value::Null,
+                }],
+            },
+            url: "https://example.com".to_string(),
+        }
+    }
+
+    fn server_error(code: u16) -> OciDistributionError {
+        OciDistributionError::ServerError {
+            code,
+            url: "https://example.com".to_string(),
+            message: "test error".to_string(),
+        }
+    }
+
+    #[rstest::rstest]
+    #[case::layer_not_found_entitlement(
+        OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()),
+        true
+    )]
+    #[case::layer_not_found_schema(
+        OciError::LayerNotFound(APOLLO_SCHEMA_MEDIA_TYPE.to_string()),
+        false
+    )]
+    #[case::image_manifest_not_found(
+        OciError::Distribution(OciDistributionError::ImageManifestNotFoundError(
+            "no matching platform".to_string()
+        )),
+        true
+    )]
+    #[case::server_error_404(OciError::Distribution(server_error(404)), true)]
+    #[case::server_error_403(OciError::Distribution(server_error(403)), false)]
+    #[case::server_error_500(OciError::Distribution(server_error(500)), false)]
+    #[case::registry_error_manifest_unknown(
+        OciError::Distribution(registry_error(OciErrorCode::ManifestUnknown)),
+        true
+    )]
+    #[case::registry_error_name_unknown(
+        OciError::Distribution(registry_error(OciErrorCode::NameUnknown)),
+        true
+    )]
+    #[case::registry_error_denied(
+        OciError::Distribution(registry_error(OciErrorCode::Denied)),
+        false
+    )]
+    #[case::registry_error_unauthorized(
+        OciError::Distribution(registry_error(OciErrorCode::Unauthorized)),
+        false
+    )]
+    #[case::registry_error_toomanyrequests(
+        OciError::Distribution(registry_error(OciErrorCode::Toomanyrequests)),
+        false
+    )]
+    #[case::unauthorized_error(
+        OciError::Distribution(OciDistributionError::UnauthorizedError {
+            url: "https://example.com".to_string(),
+        }),
+        false
+    )]
+    #[case::authentication_failure(
+        OciError::Distribution(OciDistributionError::AuthenticationFailure(
+            "bad credentials".to_string()
+        )),
+        false
+    )]
+    fn is_not_found_cases(#[case] error: OciError, #[case] expected: bool) {
+        assert_eq!(
+            error.is_not_found(),
+            expected,
+            "unexpected is_not_found() for {error:?}"
+        );
     }
 
     fn mock_oci_config_with_reference(reference: String) -> OciConfig {
@@ -1650,6 +1775,10 @@ mod tests {
             matches!(err, OciError::Distribution(_)),
             "expected OciError::Distribution, got {err:?}"
         );
+        assert!(
+            err.is_not_found(),
+            "a 404-everything registry should classify as not-found: {err:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1727,9 +1856,10 @@ mod tests {
             .await
             .expect("first item should arrive")
             .expect("stream should not have closed");
+        let first_err = first_result.expect_err("expected first result to be an error");
         assert!(
-            first_result.is_err(),
-            "expected first result to be an error, got {first_result:?}"
+            !first_err.is_not_found(),
+            "a 500 blob response should classify as transient, not not-found: {first_err:?}"
         );
 
         // Poll 2: same manifest digest, but because the previous fetch failed
