@@ -3132,11 +3132,16 @@ impl ObjectTypeDefinitionPosition {
                 self.insert_root_query_references(schema, referencers)?;
             }
         }
+        let mut errors = MultipleFederationErrors { errors: vec![] };
         for (field_name, field) in type_.fields.iter() {
-            self.field(field_name.clone())
-                .insert_references(field, referencers, false)?;
+            if let Err(e) =
+                self.field(field_name.clone())
+                    .insert_references(field, referencers, false)
+            {
+                errors.push(e);
+            }
         }
-        Ok(())
+        errors.into_result()
     }
 
     fn remove_references(
@@ -4505,11 +4510,16 @@ impl InterfaceTypeDefinitionPosition {
             referencers,
             true,
         )?;
+        let mut errors = MultipleFederationErrors { errors: vec![] };
         for (field_name, field) in type_.fields.iter() {
-            self.field(field_name.clone())
-                .insert_references(field, referencers, false)?;
+            if let Err(e) =
+                self.field(field_name.clone())
+                    .insert_references(field, referencers, false)
+            {
+                errors.push(e);
+            }
         }
-        Ok(())
+        errors.into_result()
     }
 
     fn remove_references(

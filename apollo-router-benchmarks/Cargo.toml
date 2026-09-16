@@ -7,7 +7,7 @@ license = "Elastic-2.0"
 publish = false
 
 [dev-dependencies]
-apollo-router = { path = "../apollo-router" }
+apollo-router = { path = "../apollo-router", features = ["mock_subgraphs_testing"] }
 criterion = { version = "0.8", features = ["async_tokio", "async_futures"] }
 futures = "0.3"
 memory-stats = "1.1.0"

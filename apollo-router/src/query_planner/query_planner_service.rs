@@ -419,9 +419,10 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                 )
                 .await;
 
-            f64_histogram!(
+            f64_histogram_with_unit!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time, in seconds.",
+                "s",
                 start.elapsed().as_secs_f64()
             );
 
@@ -587,9 +588,10 @@ pub(crate) fn metric_query_planning_plan_duration(
     outcome: QueryPlanningOutcome,
     compute_job_type: ComputeJobType,
 ) {
-    f64_histogram!(
+    f64_histogram_with_unit!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning, in seconds.",
+        "s",
         elapsed,
         "planner" = planner,
         "outcome" = outcome,
@@ -631,7 +633,6 @@ mod tests {
     use crate::spec::query::subselections::SubSelectionValue;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
-    const SUBSCRIPTION_SCHEMA: &str = include_str!("testdata/schema_subscription.graphql");
 
     #[test(tokio::test)]
     async fn test_plan() {
@@ -730,53 +731,6 @@ mod tests {
         let plan = content;
 
         assert_eq!(plan.root, None, "expected an empty plan");
-    }
-
-    #[test(tokio::test)]
-    async fn test_plan_error() {
-        let config = Arc::new(Configuration::default());
-        let schema = Arc::new(Schema::parse(SUBSCRIPTION_SCHEMA, &config).unwrap());
-
-        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
-
-        // subscription with @defer cannot be query planned
-        let query = r#"
-            subscription {
-                userWasCreated {
-                  ... @defer(label: "name") { username }
-                }
-            }
-        "#;
-        let document = Query::parse_document(query, None, &schema, &config).unwrap();
-
-        let result = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                QueryPlannerRequest::builder()
-                    .query(query)
-                    .and_operation_name(document.operation.name.as_deref())
-                    .document(document)
-                    .compute_job_type(ComputeJobType::QueryPlanning)
-                    .metadata(CacheKeyMetadata::default())
-                    .plan_options(PlanOptions::default())
-                    .build(),
-            )
-            .await;
-
-        let err = match result {
-            Ok(response) => panic!("expected error, got {:?}", response.content),
-            Err(MaybeBackPressureError::TemporaryError(err)) => {
-                panic!("expected permanent error, got {err:?}")
-            }
-            Err(MaybeBackPressureError::PermanentError(err)) => err,
-        };
-
-        assert_eq!(
-            "Federation error: @defer is not supported on subscriptions",
-            err.to_string()
-        );
     }
 
     #[test(tokio::test)]

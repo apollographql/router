@@ -134,9 +134,6 @@ fn count<'a>(
                 counts.depth = counts.depth.max(nested.depth.saturating_add(1));
                 counts.height = counts.height.saturating_add(nested.height);
                 counts.aliases = counts.aliases.saturating_add(nested.aliases);
-                // Multiple aliases for the same field could use different arguments
-                // Until we do full merging for limit checking purpose,
-                // approximate measured height with an upper bound rather than a lower bound.
                 let used_name = if let Some(alias) = &field.alias {
                     counts.aliases = counts.aliases.saturating_add(1);
                     alias

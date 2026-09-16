@@ -1,0 +1,7 @@
+description: |
+  The `expose_query_plan` plugin has been promoted out of experimental in Router
+  3.0. Its configuration moves to a top-level key.
+actions:
+  - type: move
+    from: plugins.["experimental.expose_query_plan"]
+    to: expose_query_plan

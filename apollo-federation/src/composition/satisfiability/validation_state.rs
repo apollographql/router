@@ -201,6 +201,30 @@ impl ValidationState {
     ) -> Result<ValidationResult, FederationError> {
         let mut new_subgraph_paths: Vec<SubgraphPathInfo> = Default::default();
         let mut dead_ends: Vec<UnadvanceableClosures> = Default::default();
+        // Paths sharing the same (tail node, subgraph-entry source, contexts, runtime types)
+        // will produce identical advancement results on every subsequent transition, so we
+        // keep only one exemplar per equivalence class.
+        //
+        // The key is strictly finer than `SubgraphContextKey` used by the visit-skipping
+        // memo in `can_skip_visit_for_subgraph_paths` (the node index determines both
+        // subgraph and type), so dedup never removes a distinct `SubgraphContextKey` and
+        // the memo's recorded visit sets are unaffected.
+        //
+        // The subgraph-entry source (head of the last subgraph-entering edge) is included
+        // because `advance_with_non_collecting_and_type_preserving_transitions` uses it to
+        // prune indirect key edges: paths entering the current subgraph from different
+        // sources may compute different pruning decisions and thus produce different
+        // advancement results.
+        //
+        // Trade-off: deduped paths are never advanced, so their `UnadvanceableClosures`
+        // are never produced. Satisfiability error messages may omit subgraph bullets
+        // that would have appeared without dedup.
+        let mut seen_options: IndexSet<(
+            petgraph::graph::NodeIndex,
+            Option<petgraph::graph::NodeIndex>,
+            SubgraphPathContexts,
+            BTreeSet<Name>,
+        )> = Default::default();
 
         for SubgraphPathInfo { path, contexts } in subgraph_path_infos.iter_mut() {
             let options = path.advance_with_transition(
@@ -246,10 +270,25 @@ impl ValidationState {
                 }
                 Arc::new(contexts)
             };
-            new_subgraph_paths.extend(options.into_iter().map(|option| SubgraphPathInfo {
-                path: option,
-                contexts: new_contexts.clone(),
-            }));
+            for option in options {
+                let key = (
+                    option.path.tail(),
+                    option.path.last_subgraph_entering_edge_head()?,
+                    new_contexts.clone(),
+                    option
+                        .path
+                        .runtime_types_of_tail()
+                        .iter()
+                        .map(|type_pos| type_pos.type_name.clone())
+                        .collect::<BTreeSet<_>>(),
+                );
+                if seen_options.insert(key) {
+                    new_subgraph_paths.push(SubgraphPathInfo {
+                        path: option,
+                        contexts: new_contexts.clone(),
+                    });
+                }
+            }
         }
 
         if new_subgraph_paths.is_empty() {

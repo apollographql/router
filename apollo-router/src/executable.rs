@@ -33,6 +33,7 @@ use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::plugins::telemetry::reload::otel::shutdown_installed_tracer_provider;
 use crate::registry::OciConfig;
+use crate::registry::is_apollo_graph_artifact_reference;
 use crate::registry::should_use_ssl;
 use crate::registry::validate_oci_reference;
 use crate::router::ConfigurationSource;
@@ -265,16 +266,65 @@ impl Opt {
 
         let use_ssl = should_use_ssl(&validated_reference);
 
+        // `APOLLO_KEY` is only required to authenticate with Apollo's own registry.
+        // A non-Apollo OCI registry should not require a GraphOS account.
+        let apollo_key = if is_apollo_graph_artifact_reference(&validated_reference) {
+            Some(
+                self.apollo_key
+                    .clone()
+                    .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            )
+        } else {
+            self.apollo_key.clone()
+        };
+
         Ok(OciConfig {
-            apollo_key: self
-                .apollo_key
-                .clone()
-                .ok_or(Self::err_require_opt("APOLLO_KEY"))?,
+            apollo_key,
             reference: validated_reference,
             hot_reload: self.hot_reload,
             poll_interval,
             use_ssl,
         })
+    }
+
+    /// Order of precedence for licenses:
+    /// 1. explicit path from cli
+    /// 2. env APOLLO_ROUTER_LICENSE
+    /// 3. graph artifact OCI registry (when a graph artifact reference is configured)
+    /// 4. uplink
+    pub(crate) fn license_source(
+        &self,
+        current_directory: &std::path::Path,
+    ) -> Result<LicenseSource, anyhow::Error> {
+        Ok(
+            match (
+                &self.apollo_router_license,
+                &self.apollo_router_license_path,
+                &self.graph_artifact_reference,
+                &self.apollo_key,
+                &self.apollo_graph_ref,
+            ) {
+                (_, Some(license_path), _, _, _) => {
+                    let license_path = if license_path.is_relative() {
+                        current_directory.join(license_path)
+                    } else {
+                        license_path.clone()
+                    };
+                    LicenseSource::File {
+                        path: license_path,
+                        watch: self.hot_reload,
+                    }
+                }
+                (Some(_license), _, _, _, _) => LicenseSource::Env,
+                (_, _, Some(_graph_artifact_reference), _, _) => {
+                    LicenseSource::OCI(self.oci_config()?)
+                }
+                (_, _, None, Some(_apollo_key), Some(_apollo_graph_ref)) => {
+                    LicenseSource::Registry(self.uplink_config()?)
+                }
+                _ => LicenseSource::default(),
+            },
+        )
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -528,7 +578,8 @@ impl Executable {
         // 1. CLI --supergraph
         // 2. Env APOLLO_ROUTER_SUPERGRAPH_PATH
         // 3. Env APOLLO_ROUTER_SUPERGRAPH_URLS
-        // 4. Env APOLLO_KEY and APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only)
+        // 4. Env APOLLO_GRAPH_ARTIFACT_REFERENCE (CLI/env only). APOLLO_KEY is only
+        //    required here when the reference points at an Apollo-hosted registry.
         // 5. Env APOLLO_KEY and APOLLO_GRAPH_REF (CLI/env only)
         #[cfg(unix)]
         let akp = &opt.apollo_key_path;
@@ -654,6 +705,15 @@ impl Executable {
                     Some(_) => SchemaSource::OCI(opt.oci_config()?),
                 }
             }
+            // No APOLLO_KEY anywhere, but a graph artifact reference was given: this
+            // is valid when the reference points at a non-Apollo OCI registry.
+            // `oci_config()` still enforces APOLLO_KEY if the reference turns out to
+            // be Apollo-hosted.
+            (_, None, None, None, None) if opt.graph_artifact_reference.is_some() => {
+                tracing::info!("{apollo_router_msg}");
+                tracing::info!("{apollo_telemetry_msg}");
+                SchemaSource::OCI(opt.oci_config()?)
+            }
             _ => {
                 return Err(anyhow!(
                     r#"{apollo_router_msg}
@@ -689,38 +749,10 @@ impl Executable {
             }
         };
 
-        // Order of precedence for licenses:
-        // 1. explicit path from cli
-        // 2. env APOLLO_ROUTER_LICENSE
-        // 3. uplink
-
         let license = if let Some(license) = license {
             license
         } else {
-            match (
-                &opt.apollo_router_license,
-                &opt.apollo_router_license_path,
-                &opt.apollo_key,
-                &opt.apollo_graph_ref,
-            ) {
-                (_, Some(license_path), _, _) => {
-                    let license_path = if license_path.is_relative() {
-                        current_directory.join(license_path)
-                    } else {
-                        license_path.clone()
-                    };
-                    LicenseSource::File {
-                        path: license_path,
-                        watch: opt.hot_reload,
-                    }
-                }
-                (Some(_license), _, _, _) => LicenseSource::Env,
-                (_, _, Some(_apollo_key), Some(_apollo_graph_ref)) => {
-                    LicenseSource::Registry(opt.uplink_config()?)
-                }
-
-                _ => LicenseSource::default(),
-            }
+            opt.license_source(&current_directory)?
         };
 
         // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
@@ -944,7 +976,6 @@ mod tests {
                 apq: Default::default(),
                 persisted_queries: Default::default(),
                 limits: Default::default(),
-                experimental_chaos: Default::default(),
                 batching: Default::default(),
                 experimental_type_conditioned_fetching: false,
                 experimental_hoist_orphan_errors: Default::default(),
@@ -1027,7 +1058,6 @@ mod tests {
                 apq: Default::default(),
                 persisted_queries: Default::default(),
                 limits: Default::default(),
-                experimental_chaos: Default::default(),
                 batching: Default::default(),
                 experimental_type_conditioned_fetching: false,
                 experimental_hoist_orphan_errors: Default::default(),
@@ -1059,6 +1089,286 @@ mod tests {
                 error_msg.contains("APOLLO_ROUTER_SUPERGRAPH_URLS")
                     || error_msg.contains("--graph-artifact-reference"),
                 "Error should mention the conflicting options"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_graph_artifact_reference_without_apollo_key_routes_to_oci_config() {
+            // ROUTER-1983: a --graph-artifact-reference with no APOLLO_KEY/APOLLO_KEY_PATH
+            // anywhere must still be routed to `oci_config()` (which itself decides
+            // whether a key is actually required) rather than falling into the
+            // generic "no schema source configured" error. Use a reference that is
+            // guaranteed to fail *offline* validation so this test makes no network
+            // calls, while still proving which code path was reached.
+            let opt = Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: None,
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(":bad".to_string()),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            };
+
+            let result = Executable::inner_start(
+                None,
+                None,
+                None,
+                Some(crate::router::LicenseSource::default()),
+                opt,
+            )
+            .await;
+
+            let error_msg = result
+                .expect_err("invalid OCI reference should fail")
+                .to_string();
+            assert!(
+                error_msg.contains("graph artifact reference"),
+                "expected an OCI reference validation error, got: {error_msg}"
+            );
+            assert!(
+                !error_msg.contains("requires a composed supergraph schema"),
+                "should not fall back to the generic no-schema-source error, got: {error_msg}"
+            );
+        }
+    }
+
+    mod oci_config_tests {
+        use tokio::time::Duration;
+
+        use super::super::Opt;
+
+        fn base_opt(graph_artifact_reference: String, apollo_key: Option<String>) -> Opt {
+            Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key,
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: Some(graph_artifact_reference),
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            }
+        }
+
+        #[test]
+        fn does_not_require_apollo_key_for_non_apollo_registry() {
+            let opt = base_opt("ghcr.io/my-org/my-graph:latest".to_string(), None);
+
+            let oci_config = opt
+                .oci_config()
+                .expect("non-Apollo registry should not require APOLLO_KEY");
+            assert_eq!(oci_config.apollo_key, None);
+        }
+
+        #[test]
+        fn passes_through_apollo_key_when_present_for_non_apollo_registry() {
+            let opt = base_opt(
+                "ghcr.io/my-org/my-graph:latest".to_string(),
+                Some("test-key".to_string()),
+            );
+
+            let oci_config = opt.oci_config().expect("should succeed");
+            assert_eq!(oci_config.apollo_key, Some("test-key".to_string()));
+        }
+
+        #[test]
+        fn requires_apollo_key_for_apollo_registry() {
+            let opt = base_opt(
+                "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                None,
+            );
+
+            let err = opt
+                .oci_config()
+                .expect_err("Apollo registry should require APOLLO_KEY");
+            assert!(err.to_string().contains("APOLLO_KEY"));
+        }
+    }
+
+    mod license_source_tests {
+        use tokio::time::Duration;
+
+        use super::super::Opt;
+        use crate::router::LicenseSource;
+
+        fn base_opt() -> Opt {
+            Opt {
+                log_level: "error".to_string(),
+                hot_reload: false,
+                config_path: None,
+                dev: false,
+                supergraph_path: None,
+                supergraph_urls: None,
+                command: None,
+                apollo_key: None,
+                #[cfg(unix)]
+                apollo_key_path: None,
+                apollo_graph_ref: None,
+                apollo_router_license: None,
+                apollo_router_license_path: None,
+                apollo_uplink_endpoints: None,
+                graph_artifact_reference: None,
+                anonymous_telemetry_disabled: true,
+                apollo_uplink_timeout: Duration::from_secs(30),
+                listen_address: None,
+                version: false,
+            }
+        }
+
+        #[test]
+        fn prefers_oci_over_uplink_when_graph_artifact_reference_is_set() {
+            // Standard credentials AND a graph artifact reference are both present:
+            // OCI must win, mirroring SchemaSource's precedence.
+            let opt = Opt {
+                apollo_key: Some("test-key".to_string()),
+                apollo_graph_ref: Some("test-graph@current".to_string()),
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::OCI(_)),
+                "expected OCI license source, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn uses_oci_for_self_hosted_router_without_a_studio_graph_ref() {
+            // A self-hosted router pointed at its own OCI registry, with no
+            // apollo_graph_ref (i.e. not tied to an Apollo Studio graph),
+            // must resolve to OCI instead of silently falling through to no
+            // license source, since only a graph artifact reference is
+            // configured.
+            let opt = Opt {
+                apollo_key: Some("registry-token".to_string()),
+                apollo_graph_ref: None,
+                graph_artifact_reference: Some(
+                    "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::OCI(_)),
+                "expected OCI license source, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn uses_oci_for_self_hosted_router_without_studio_credentials() {
+            // A self-hosted router pointed at its own OCI registry, with no
+            // apollo_key must resolve to OCI
+            let opt = Opt {
+                apollo_key: None,
+                apollo_graph_ref: Some("test-graph@current".to_string()),
+                graph_artifact_reference: Some(
+                    "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::OCI(_)),
+                "expected OCI license source, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn falls_back_to_uplink_when_no_graph_artifact_reference_is_set() {
+            // A standard router (Studio credentials set, no graph artifact
+            // reference) must fall back to Uplink, not fail at startup.
+            let opt = Opt {
+                apollo_key: Some("test-key".to_string()),
+                apollo_graph_ref: Some("test-graph@current".to_string()),
+                graph_artifact_reference: None,
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::Registry(_)),
+                "expected Registry (Uplink) license source, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn defaults_when_no_credentials_or_graph_artifact_reference() {
+            let opt = base_opt();
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::Static { .. }),
+                "expected the default license source, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn explicit_license_path_takes_precedence_over_graph_artifact_reference() {
+            let opt = Opt {
+                apollo_router_license_path: Some(std::path::PathBuf::from("license.jwt")),
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::File { .. }),
+                "expected File license source, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn explicit_license_env_takes_precedence_over_graph_artifact_reference() {
+            let opt = Opt {
+                apollo_router_license: Some("test-license".to_string()),
+                graph_artifact_reference: Some(
+                    "registry.apollographql.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).unwrap();
+            assert!(
+                matches!(source, LicenseSource::Env),
+                "expected Env license source, got {source:?}"
             );
         }
     }

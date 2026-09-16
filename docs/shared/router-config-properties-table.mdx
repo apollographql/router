@@ -151,7 +151,7 @@ Configures the externalization plugin
 coprocessor:
   client:
     dns_resolution_strategy: ipv4_only
-    experimental_http2: enable
+    http2: enable
   execution:
     request:
       body: false
@@ -306,20 +306,6 @@ demand_control:
 
 ---
 
-### `experimental_chaos`
-
-Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!
-
-- **Type:** `object`
-
-```yaml title="experimental_chaos"
-experimental_chaos:
-  force_reload: null
-```
-
-
----
-
 ### `experimental_type_conditioned_fetching`
 
 Type conditioned fetching configuration.
@@ -423,17 +409,6 @@ Configuration for exposing errors that originate from subgraphs
 include_subgraph_errors:
   all: false
   subgraphs: {}
-```
-
-
----
-
-### `license_enforcement`
-
-- **Type:** `object`
-
-```yaml title="license_enforcement"
-license_enforcement: {}
 ```
 
 
@@ -676,7 +651,7 @@ Configuration options pertaining to the supergraph server component.
 supergraph:
   defer_support: true
   early_cancel: false
-  experimental_log_on_broken_pipe: false
+  log_on_broken_pipe: false
   generate_query_fragments: true
   introspection: false
   listen: example_listen
@@ -736,7 +711,7 @@ telemetry:
     client_version_header: apollographql-client-version
     endpoint: https://usage-reporting.api.apollographql.com/api/ingress/traces
     errors:
-      preview_extended_error_metrics: disabled
+      extended_error_metrics: enabled
       subgraph:
         all:
           redact: true
@@ -895,7 +870,7 @@ telemetry:
           subgraph: true
           subgraph_request: true
           supergraph: true
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: false
         format: hexadecimal
         header_name: example_header_name
@@ -1440,7 +1415,7 @@ traffic_shaping:
     compression: gzip
     deduplicate_query: false
     dns_resolution_strategy: ipv4_only
-    experimental_http2: enable
+    http2: enable
     experimental_http2_keep_alive_interval: null
     experimental_http2_keep_alive_timeout: null
     global_rate_limit:

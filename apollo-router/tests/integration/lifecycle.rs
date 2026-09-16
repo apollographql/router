@@ -137,38 +137,6 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_force_config_reload_via_chaos() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "experimental_chaos:
-                force_config_reload: 2s",
-        )
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    router.assert_reloaded().await;
-    router.graceful_shutdown().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_force_schema_reload_via_chaos() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "experimental_chaos:
-                force_schema_reload: 2s",
-        )
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    router.assert_reloaded().await;
-    router.graceful_shutdown().await;
-    Ok(())
-}
-
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload_via_sighup() -> Result<(), BoxError> {

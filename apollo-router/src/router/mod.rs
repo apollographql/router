@@ -29,7 +29,6 @@ use tracing_futures::WithSubscriber;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterPipelineFactory;
-use crate::plugins::chaos::ChaosEventStream;
 use crate::router::event::reload::ReloadableEventStream;
 use crate::router_factory::PipelineFactory;
 use crate::state_machine::ListenAddresses;
@@ -243,7 +242,6 @@ fn generate_event_stream(
             .boxed(),
     ])
     .with_sighup_reload()
-    .with_chaos_reload()
     .take_while(|msg| future::ready(!matches!(msg, Event::Shutdown)))
     .chain(stream::iter(vec![Event::Shutdown]))
     .boxed()

@@ -345,20 +345,6 @@ pub(crate) fn extract_subgraphs_from_supergraph(
         )?;
     }
 
-    for graph_enum_value in graph_enum_value_name_to_subgraph_name.keys() {
-        let subgraph = get_subgraph(
-            &mut subgraphs,
-            &graph_enum_value_name_to_subgraph_name,
-            graph_enum_value,
-        )?;
-        let federation_spec_definition = federation_spec_definitions
-            .get(graph_enum_value)
-            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
-                message: "Subgraph unexpectedly does not use federation spec".to_owned(),
-            })?;
-        add_federation_operations(subgraph, federation_spec_definition)?;
-    }
-
     let mut valid_subgraphs = ValidFederationSubgraphs::new();
     for (_, mut subgraph) in subgraphs {
         let valid_subgraph_schema = if validate_extracted_subgraphs {
@@ -586,12 +572,23 @@ fn extract_subgraphs_from_fed_2_supergraph(
             }))
         })
         .collect::<Vec<_>>();
-    for subgraph in subgraphs.subgraphs.values_mut() {
+    for (graph_enum_value, subgraph_name) in graph_enum_value_name_to_subgraph_name {
+        let subgraph = subgraphs.get_mut(subgraph_name).ok_or_else(|| {
+            FederationError::internal(
+                "All subgraphs should have been created by \"collect_empty_subgraphs()\"",
+            )
+        })?;
+        let federation_spec_definition = federation_spec_definitions
+            .get(graph_enum_value)
+            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                message: "Subgraph unexpectedly does not use federation spec".to_owned(),
+            })?;
         remove_inactive_requires_and_provides_from_subgraph(
             supergraph_schema,
             &mut subgraph.schema,
             FieldSetValidation::Validate,
         )?;
+        add_federation_operations(subgraph, federation_spec_definition)?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             let pos = DirectiveDefinitionPosition {

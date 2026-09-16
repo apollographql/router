@@ -364,7 +364,7 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
 #[derive(Clone)]
 struct HandlerOptions {
     early_cancel: bool,
-    experimental_log_on_broken_pipe: bool,
+    log_on_broken_pipe: bool,
 }
 
 pub(super) fn main_router(configuration: &Configuration) -> axum::Router<()> {
@@ -379,7 +379,7 @@ pub(super) fn main_router(configuration: &Configuration) -> axum::Router<()> {
 
     router = router.route_layer(Extension(HandlerOptions {
         early_cancel: configuration.supergraph.early_cancel,
-        experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
+        log_on_broken_pipe: configuration.supergraph.log_on_broken_pipe,
     }));
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
     {
@@ -397,7 +397,7 @@ async fn handle_graphql(
 ) -> impl IntoResponse {
     let HandlerOptions {
         early_cancel,
-        experimental_log_on_broken_pipe,
+        log_on_broken_pipe,
     } = options;
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -415,7 +415,7 @@ async fn handle_graphql(
         // means it went through the entire pipeline at least once (not looking at deferred responses or
         // subscription events). This is a bit wasteful, so to avoid unneeded subgraph calls, we insert in
         // the context a flag to indicate that the request is canceled and subgraph calls should not be made
-        let mut cancel_handler = CancelHandler::new(&context, experimental_log_on_broken_pipe);
+        let mut cancel_handler = CancelHandler::new(&context, log_on_broken_pipe);
         let task = service
             .oneshot(request)
             .with_current_subscriber()
@@ -497,16 +497,16 @@ where
 struct CancelHandler<'a> {
     context: &'a Context,
     got_first_response: bool,
-    experimental_log_on_broken_pipe: bool,
+    log_on_broken_pipe: bool,
     span: tracing::Span,
 }
 
 impl<'a> CancelHandler<'a> {
-    fn new(context: &'a Context, experimental_log_on_broken_pipe: bool) -> Self {
+    fn new(context: &'a Context, log_on_broken_pipe: bool) -> Self {
         CancelHandler {
             context,
             got_first_response: false,
-            experimental_log_on_broken_pipe,
+            log_on_broken_pipe,
             span: tracing::Span::current(),
         }
     }
@@ -519,7 +519,7 @@ impl<'a> CancelHandler<'a> {
 impl Drop for CancelHandler<'_> {
     fn drop(&mut self) {
         if !self.got_first_response {
-            if self.experimental_log_on_broken_pipe {
+            if self.log_on_broken_pipe {
                 self.span
                     .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
             }
@@ -543,7 +543,7 @@ mod tests {
 
     // Drive the http router call into its cancellation-handling path (where `CancelHandler`
     // is constructed) and then deterministically cancel it before completion. With
-    // `experimental_log_on_broken_pipe = true`, dropping `CancelHandler` without an
+    // `log_on_broken_pipe = true`, dropping `CancelHandler` without an
     // intervening `on_response` is what emits the "broken pipe" error log asserted on below.
     //
     // Historical note: this used to race a `Duration::from_nanos(100)` timeout against the
@@ -569,7 +569,7 @@ mod tests {
         .await
     }
 
-    // Same shape as `request_cancel_log`, but with `experimental_log_on_broken_pipe = false`,
+    // Same shape as `request_cancel_log`, but with `log_on_broken_pipe = false`,
     // so the snapshot asserts that no error log is emitted on cancellation.
     #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_no_log() {

@@ -25,7 +25,6 @@ use crate::uplink::license_enforcement::LicenseState;
 const MANDATORY_PLUGINS: &[&str] = &[
     "apollo.include_subgraph_errors",
     "apollo.headers",
-    "apollo.license_enforcement",
     "apollo.health_check",
     "apollo.traffic_shaping",
     "apollo.limits",

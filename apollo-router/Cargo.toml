@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.97.1"
+rust-version = "1.98.1"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -50,13 +50,17 @@ ci = []
 # Enables the HTTP snapshot server for testing
 snapshot = []
 
+# Enables the `experimental_mock_subgraphs` plugin, the router's own internal
+# subgraph-mocking test tool. Always enabled for `cfg(test)` builds; this feature
+# additionally enables it for the separately-compiled integration test binary.
+# Not enabled in release builds, so it is not reachable via router.yaml in production.
+mock_subgraphs_testing = []
+
 [dependencies]
 addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-errors = "0.7.1"
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
-apollo-qos = "0.5.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -103,6 +107,7 @@ fred = { version = "10.1.0", features = [
 # "tcp-user-timeouts" feature to work: https://github.com/aembke/fred.rs/pull/369
 socket2 = { version = "0.5", features = ["all"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
+globset = "0.4.16"
 graphql_client = "0.16.0"
 # Not used directly, but declared here to enforce a minimum version floor for this
 # transitive dependency and to allow Renovate to manage future version bumps.
@@ -135,12 +140,12 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.15.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.49.0", default-features = false }
+jsonschema = { version = "0.56.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
 lru = "0.18.0"
-mediatype = "0.21.0"
+mediatype = "0.23.0"
 mockall = "0.15.0"
 mime = "0.3.17"
 multer = "3.1.0"
@@ -255,7 +260,7 @@ tokio-tungstenite = { version = "0.30.0", features = [
     "rustls-tls-native-roots",
 ] }
 tokio-rustls = { version = "0.26.0", default-features = false }
-hickory-resolver = "0.26.0"
+hickory-resolver = "0.26.2"
 http-serde = "2.1.1"
 hmac = "0.12.1"
 parking_lot = { version = "0.12.3", features = ["serde"] }
@@ -283,7 +288,7 @@ ryu = "1.0.15"
 apollo-environment-detector = "0.1.0"
 log = "0.4.22"
 scopeguard = "1.2.0"
-tokio-tar = { package = "astral-tokio-tar", version = "0.6.2" }
+tokio-tar = { package = "astral-tokio-tar", version = "0.7.0" }
 blake3 = { version = "1.8.2", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -356,7 +361,7 @@ tracing-mock = "0.1.0-beta.1"
 walkdir = "2.5.0"
 wiremock = "0.6"
 libtest-mimic = "0.8.0"
-rstest = "0.26.0"
+rstest = "0.27.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }

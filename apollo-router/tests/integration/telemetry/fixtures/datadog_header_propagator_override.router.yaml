@@ -1,7 +1,7 @@
 telemetry:
   exporters:
     tracing:
-      experimental_response_trace_id:
+      response_trace_id:
         enabled: true
         header_name: apollo-custom-trace-id
         format: datadog

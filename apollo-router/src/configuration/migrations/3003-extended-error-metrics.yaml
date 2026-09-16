@@ -1,0 +1,5 @@
+description: preview_extended_error_metrics is now extended_error_metrics
+actions:
+  - type: move
+    from: telemetry.apollo.errors.preview_extended_error_metrics
+    to: telemetry.apollo.errors.extended_error_metrics

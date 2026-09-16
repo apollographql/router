@@ -147,7 +147,6 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    registrar.add_mandatory("license_enforcement").await;
     registrar.add_mandatory("health_check").await;
     registrar.add_mandatory("traffic_shaping").await;
     registrar.add_mandatory("limits").await;
@@ -171,11 +170,13 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("rhai").await;
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
+    registrar.add_optional("expose_query_plan").await;
     registrar.add_user_plugins(user_plugins_config, extra).await;
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
     // it needs to intervene after user plugins for users plugins to run at all.
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
     registrar.add_optional("experimental_mock_subgraphs").await;
 
     registrar.finish()

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::collections::IndexSet;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 
@@ -54,7 +54,8 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     operation_directives: DirectiveList,
     operation_compression: SubgraphOperationCompression,
     operation_name: Option<Name>,
-    assigned_defer_labels: IndexSet<String>,
+    /// See [`crate::operation::NormalizedDefer::client_labels`].
+    client_labels: IndexMap<String, Option<String>>,
     counter: u32,
 }
 
@@ -252,14 +253,14 @@ impl FetchDependencyGraphToQueryPlanProcessor {
         operation_directives: DirectiveList,
         operation_compression: SubgraphOperationCompression,
         operation_name: Option<Name>,
-        assigned_defer_labels: IndexSet<String>,
+        client_labels: IndexMap<String, Option<String>>,
     ) -> Self {
         Self {
             variable_definitions,
             operation_directives,
             operation_compression,
             operation_name,
-            assigned_defer_labels,
+            client_labels,
             counter: 0,
         }
     }
@@ -365,11 +366,9 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 .cloned()
                 .map(|id| DeferredDependency { id })
                 .collect(),
-            label: if self.assigned_defer_labels.contains(&defer_info.label) {
-                None
-            } else {
-                Some(defer_info.label.clone())
-            },
+            // Restore the client-visible label (deferred blocks may share one; they remain
+            // distinguishable by their paths), or strip it if the defer had no label.
+            label: self.client_labels.get(&defer_info.label).cloned().flatten(),
             query_path: op_path_to_query_path(&defer_info.path.full_path),
             // Note that if the deferred block has nested @defer,
             // then the `value` is going to be a `DeferNode`

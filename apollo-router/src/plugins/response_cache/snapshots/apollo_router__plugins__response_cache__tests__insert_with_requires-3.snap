@@ -5,7 +5,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.2:subgraph:inventory:type:Product:representation:fad83d6ff957f12a7829ec7f25a2160d4bd7530abbe47937f19fbed8996d10d9:hash:ec233be71f188994bd65efc876a1692841948ac1676f8213f6dc5a8b8cbbf89c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:inventory:type:Product:representation:fad83d6ff957f12a7829ec7f25a2160d4bd7530abbe47937f19fbed8996d10d9:hash:671f4a15e607d9f1ef777ba5a413415538fa044e528f07dd2c58ef869799ab2e:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "product",
       "product-1",

@@ -57,8 +57,7 @@ To enable query plans, you must run the router with the `--dev` flag and leverag
 As an alternative to using `--dev`, you can also enable query plans via the below configuration option, however, Apollo strongly discourages this as the feature may be removed or renamed in the future.
 
 ```yaml
-plugins:
-  experimental.expose_query_plan: true
+expose_query_plan: true
 ```
 
 ## Log `@apollo/gateway` subgraph calls

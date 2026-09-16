@@ -16,6 +16,22 @@ info:
             attributes:
               subgraph.name: true
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          connector.source: reviews_api
+          has_errors: false
+          subgraph.name: reviews
+      - sum: 0.1
+        count: 1
+        attributes:
+          has_errors: false
+          subgraph.name: products
 - name: http.client.request.duration
   description: Duration of HTTP client requests.
   unit: s

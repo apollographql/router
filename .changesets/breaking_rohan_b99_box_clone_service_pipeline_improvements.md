@@ -1,4 +1,4 @@
-### BoxCloneService router pipeline improvements ([PR #9169](https://github.com/apollographql/router/pull/9169))
+### BoxCloneService router pipeline improvements ([PR #9169](https://github.com/apollographql/router/pull/9169), [PR #10115](https://github.com/apollographql/router/pull/10115))
 
 The `ServiceFactory`, `MakeSubgraphService` and `MakeHttpService` traits have been removed from router internals, as well as unnecessary `buffered` calls in the execution, supergraph, connector, and file-upload service pipelines.
 
@@ -9,6 +9,7 @@ Previously, each of these pipelines wrapped their inner service in a `Buffer` la
 - `apollo_router::services::subgraph::BoxService` has been removed. Use `apollo_router::services::subgraph::BoxCloneService` instead.
 - `apollo_router::services::supergraph::BoxService` has been removed. Use `apollo_router::services::supergraph::BoxCloneService` instead.
 - `apollo_router::services::execution::BoxService` has been removed. Use `apollo_router::services::execution::BoxCloneService` instead.
+- `apollo_router::services::connector::request_service::BoxService` has been removed. Use `apollo_router::services::connector::request_service::BoxCloneService` instead.
 - Removed intermediate `Buffer` layers from the execution, supergraph, connector, and file-upload service pipelines. `poll_ready` back-pressure from inner services now propagates directly to the outer router buffer instead of being absorbed.
 
-By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9169
+By [@rohan-b99](https://github.com/rohan-b99) in https://github.com/apollographql/router/pull/9169 and [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/10115

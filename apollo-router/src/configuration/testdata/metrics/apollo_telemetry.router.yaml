@@ -4,7 +4,7 @@ supergraph:
 telemetry:
   apollo:
     errors:
-      preview_extended_error_metrics: enabled
+      extended_error_metrics: enabled
       subgraph:
         all:
           send: true
