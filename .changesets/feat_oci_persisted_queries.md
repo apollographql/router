@@ -4,4 +4,4 @@ When the router is configured with a graph artifact reference (`APOLLO_GRAPH_ART
 
 Local manifest files still take precedence, and routers without a graph artifact reference continue to use Uplink.
 
-By [@samaanghani](https://github.com/samaanghani) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@samaanghani](https://github.com/samaanghani) in https://github.com/apollographql/router/pull/10238
