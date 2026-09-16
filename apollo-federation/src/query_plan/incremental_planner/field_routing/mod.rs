@@ -28,8 +28,6 @@ use apollo_compiler::Name;
 use hashbrown::HashMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
-#[allow(unused_imports)]
-use petgraph::visit::EdgeRef;
 use routing::RoutingChoice;
 pub(crate) use state::PendingSelection;
 use state::PlanCheckpoint;
