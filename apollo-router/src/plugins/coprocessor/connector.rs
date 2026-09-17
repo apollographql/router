@@ -450,14 +450,16 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    if !response_config.condition.evaluate_response(&response) {
+    // `None` means no HTTP call was made because the response came out of the router's response
+    // cache. A cache hit has no status or headers, so any condition built on transport selectors
+    // (status/headers) would evaluate false and skip the stage. Cache hits must still reach the
+    // coprocessor — the payload says so explicitly via `cacheHit: true` rather than looking like a
+    // transport failure — so the condition only gates the stage when an HTTP call actually happened.
+    let served_from_cache = response.transport_result.is_none();
+    if !served_from_cache && !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
 
-    // Extract data from the transport result. `None` means no HTTP call was made because the
-    // response came out of the router's response cache: there is no status or header set to
-    // report, so the payload says so explicitly rather than looking like a transport failure.
-    let served_from_cache = response.transport_result.is_none();
     let (headers_to_send, status_to_send) = match &response.transport_result {
         Some(Ok(TransportResponse::Http(http_response))) => {
             let headers = response_config
@@ -650,4 +652,167 @@ fn parse_connector_break_error(
     };
 
     (message, code, extensions)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use apollo_federation::connectors::JSONSelection;
+    use apollo_federation::connectors::runtime::key::ResponseKey;
+    use futures::future::BoxFuture;
+
+    use super::*;
+    use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::services::router::body;
+    use crate::services::router::body::RouterBody;
+
+    type MockCallback = fn(
+        http::Request<RouterBody>,
+    ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>;
+
+    /// Minimal in-process coprocessor: drives a `tower_test` mock with the given callback.
+    /// Mirrors `supergraph::tests::mock_with_callback`, which is not reachable across modules.
+    fn mock_coprocessor(
+        callback: MockCallback,
+    ) -> tower_test::mock::Mock<HttpRequest, HttpResponse> {
+        let (mock, mut handle) = tower_test::mock::pair::<HttpRequest, HttpResponse>();
+        tokio::spawn(async move {
+            while let Some((req, responder)) = handle.next_request().await {
+                let context = req.context.clone();
+                if let Ok(response) = callback(req.http_request).await {
+                    responder.send_response(HttpResponse {
+                        http_response: response,
+                        context,
+                    });
+                }
+            }
+        });
+        mock
+    }
+
+    /// Echoes the request payload back as a valid coprocessor response, asserting that the
+    /// cache-hit payload carries `cacheHit: true` and no status (no HTTP call happened).
+    fn echo_and_assert_cache_hit(
+        req: http::Request<RouterBody>,
+    ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>> {
+        Box::pin(async move {
+            let bytes = body::into_bytes(req.into_body()).await.unwrap();
+            let payload: Externalizable<serde_json::Value> =
+                serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                Some(true),
+                payload.cache_hit,
+                "cache-hit payload must carry cacheHit: true"
+            );
+            assert_eq!(None, payload.status_code, "cache hit has no HTTP status");
+            Ok(http::Response::builder()
+                .body(body::from_bytes(bytes))
+                .unwrap())
+        })
+    }
+
+    fn root_field_key() -> ResponseKey {
+        ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        }
+    }
+
+    // A condition built on a transport selector: the response status must equal 599. On a real
+    // HTTP response it is false unless the status is 599; on a cache hit the status is absent, so
+    // the selector yields `None` and the condition is false.
+    fn status_eq_599() -> Condition<ConnectorSelector> {
+        Condition::Eq([
+            SelectorOrValue::Selector(ConnectorSelector::ConnectorResponseStatus {
+                connector_http_response_status: ResponseStatus::Code,
+            }),
+            SelectorOrValue::Value(AttributeValue::I64(599)),
+        ])
+    }
+
+    #[tokio::test]
+    async fn connector_response_stage_runs_on_cache_hit_despite_transport_condition() {
+        let context = Context::new();
+        // A cache hit replays the mapped response but has no transport result.
+        let mut response = request_service::Response::test_new(
+            context.clone(),
+            root_field_key(),
+            vec![],
+            serde_json_bytes::json!({}),
+            None,
+        );
+        response.transport_result = None;
+
+        let response_config = ConnectorResponseConf {
+            condition: status_eq_599(),
+            status_code: true,
+            ..Default::default()
+        };
+
+        let mut executed = false;
+        let result = process_connector_response_stage(
+            mock_coprocessor(echo_and_assert_cache_hit),
+            "http://test".to_string(),
+            "test_service".to_string(),
+            response,
+            response_config,
+            context,
+            &mut executed,
+            None,
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "cache-hit stage should not error: {result:?}"
+        );
+        assert!(
+            executed,
+            "connector_response stage must still run on a cache hit even though the transport-based condition evaluates false"
+        );
+    }
+
+    #[tokio::test]
+    async fn connector_response_stage_still_gated_by_condition_on_http_response() {
+        // Negative control: for a real HTTP response, an unmatched transport condition still skips
+        // the stage — the cache-hit bypass must not turn the condition into a no-op.
+        let context = Context::new();
+        let response = request_service::Response::test_new(
+            context.clone(),
+            root_field_key(),
+            vec![],
+            serde_json_bytes::json!({}),
+            None,
+        );
+        // test_new sets a 200 HTTP transport result, which does not match `status == 599`.
+
+        let response_config = ConnectorResponseConf {
+            condition: status_eq_599(),
+            status_code: true,
+            ..Default::default()
+        };
+
+        let mut executed = false;
+        let result = process_connector_response_stage(
+            mock_coprocessor(echo_and_assert_cache_hit),
+            "http://test".to_string(),
+            "test_service".to_string(),
+            response,
+            response_config,
+            context,
+            &mut executed,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "skipped stage should not error: {result:?}");
+        assert!(
+            !executed,
+            "connector_response stage must be skipped when a transport condition is unmatched on a real HTTP response"
+        );
+    }
 }
