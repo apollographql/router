@@ -16,4 +16,4 @@ in addition to the existing rate-limited log that only fires once a request is a
 served while halted. A router that stops receiving traffic right as its license expires
 previously logged nothing explaining why — indistinguishable from a crash.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/####
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10241
