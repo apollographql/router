@@ -50,8 +50,7 @@ pub(crate) const APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE: &str =
 pub(crate) const LICENSE_VERSION_INCOMPATIBLE_SHORT_MESSAGE: &str = "This license uses a format that this version of the Apollo Router does not understand. \
     Upgrade the Router to the latest version, or contact Apollo support if the problem persists.";
 
-pub(crate) const LICENSE_INVALID_SHORT_MESSAGE: &str =
-    "This license file is invalid or corrupted. Re-download the license from Apollo \
+pub(crate) const LICENSE_INVALID_SHORT_MESSAGE: &str = "This license file is invalid or corrupted. Re-download the license from Apollo \
     Studio, or contact Apollo support if the problem persists.";
 
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
