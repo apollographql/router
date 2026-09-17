@@ -2355,7 +2355,6 @@ fn matches_graphql_js_directive_applications() {
         r#"
         type Query {
             a: Int @deprecated
-            b: Int @deprecated(reason: null)
             c: Int @deprecated(reason: "Reason")
             d: Int @deprecated(reason: "No longer supported")
         }
@@ -2366,11 +2365,25 @@ fn matches_graphql_js_directive_applications() {
     insta::assert_snapshot!(api_schema, @r###"
         type Query {
           a: Int @deprecated
-          b: Int
           c: Int @deprecated(reason: "Reason")
           d: Int @deprecated
         }
     "###);
+}
+
+#[test]
+fn rejects_deprecated_with_null_reason() {
+    let result = inaccessible_to_api_schema(
+        r#"
+        type Query {
+            b: Int @deprecated(reason: null)
+        }
+        "#,
+    );
+    assert!(
+        result.is_err(),
+        "compiler v2 rejects null for String! argument"
+    );
 }
 
 // Note that federation will keep certain default value invalidities, and will not coerce
@@ -2380,17 +2393,11 @@ fn matches_federation_default_value_propagation() {
     let api_schema = inaccessible_to_api_schema(
         r#"
         type Query {
-          defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
           defaultShouldNotHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
         }
 
         input OneOptionalOneDefault {
           notDefaulted: Int
-          defaulted: Boolean = false
-        }
-
-        input OneRequiredOneDefault {
-          notDefaulted: Int!
           defaulted: Boolean = false
         }
         "#,
@@ -2399,7 +2406,6 @@ fn matches_federation_default_value_propagation() {
 
     insta::assert_snapshot!(api_schema, @r###"
     type Query {
-      defaultShouldBeKeptDespiteInvalid(arg: OneRequiredOneDefault = {}): Int
       defaultShouldNotHavePropagatedValues(arg: OneOptionalOneDefault = {}): Int
     }
 
@@ -2407,12 +2413,27 @@ fn matches_federation_default_value_propagation() {
       notDefaulted: Int
       defaulted: Boolean = false
     }
-
-    input OneRequiredOneDefault {
-      notDefaulted: Int!
-      defaulted: Boolean = false
-    }
     "###);
+}
+
+#[test]
+fn rejects_empty_default_for_input_with_required_fields() {
+    let result = inaccessible_to_api_schema(
+        r#"
+        type Query {
+          f(arg: OneRequiredOneDefault = {}): Int
+        }
+
+        input OneRequiredOneDefault {
+          notDefaulted: Int!
+          defaulted: Boolean = false
+        }
+        "#,
+    );
+    assert!(
+        result.is_err(),
+        "compiler v2 rejects empty default for input with required fields"
+    );
 }
 
 #[test]

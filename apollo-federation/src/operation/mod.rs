@@ -2789,6 +2789,7 @@ impl TryFrom<&Operation> for executable::Operation {
             variables: normalized_operation.variables.deref().clone(),
             directives: normalized_operation.directives.iter().cloned().collect(),
             selection_set: (&normalized_operation.selection_set).try_into()?,
+            description: None,
         })
     }
 }

@@ -2910,6 +2910,7 @@ impl FetchDependencyGraphNode {
                     ty: ty.clone(),
                     default_value: None,
                     directives: Default::default(),
+                    description: None,
                 })
             })
         });
@@ -3456,6 +3457,7 @@ fn representations_variable_definition(
         ty: Type::Named(any_name).non_null().list().non_null().into(),
         default_value: None,
         directives: Default::default(),
+        description: None,
     }
     .into())
 }

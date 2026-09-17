@@ -184,7 +184,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5cf9cb85c9c600cc8ff8154d502a4c8bbf9abb8c3f915d34914c1950a1a6273a"
 dependencies = [
  "ahash",
- "apollo-parser",
+ "apollo-parser 0.8.6",
+ "ariadne",
+ "futures",
+ "indexmap 2.14.2",
+ "rowan",
+ "serde",
+ "serde_json_bytes",
+ "thiserror 2.0.20",
+ "triomphe",
+ "typed-arena",
+]
+
+[[package]]
+name = "apollo-compiler"
+version = "2.0.0-beta.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f6d0efa38a950a9429c90ccb422a68f4a382e5b67abd5ff9a6b8885d787c84"
+dependencies = [
+ "ahash",
+ "apollo-parser 0.9.0-beta.0",
  "ariadne",
  "futures",
  "indexmap 2.14.2",
@@ -212,9 +231,9 @@ name = "apollo-federation"
 version = "2.17.0"
 dependencies = [
  "ahash",
- "apollo-compiler",
+ "apollo-compiler 2.0.0-beta.0",
  "apollo-federation",
- "apollo-parser",
+ "apollo-parser 0.9.0-beta.0",
  "clap",
  "derive_more",
  "dhat",
@@ -263,7 +282,7 @@ name = "apollo-federation-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler",
+ "apollo-compiler 2.0.0-beta.0",
  "apollo-federation",
  "clap",
  "insta",
@@ -285,13 +304,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.9.0-beta.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c72cf951e113a1a27378bdddb82ccf08bbe2f49436cf597eb851ae8cb012ea3"
+dependencies = [
+ "memchr",
+ "rowan",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "apollo-router"
 version = "2.17.0"
 dependencies = [
  "addr2line 0.27.1",
  "ahash",
  "anyhow",
- "apollo-compiler",
+ "apollo-compiler 2.0.0-beta.0",
  "apollo-environment-detector",
  "apollo-federation",
  "astral-tokio-tar",
@@ -463,7 +493,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "2.17.0"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.9.0-beta.0",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -479,12 +509,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.16.0"
+version = "0.17.0-beta.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "231b846cb1c3fd7c15d1a96eeab979883105ca1be4e238ee9cdad32658984c18"
+checksum = "c75e0aa74f34bd906db5b991ef9e4d8ea5c85011f333affd2ca11684366395b7"
 dependencies = [
- "apollo-compiler",
- "apollo-parser",
+ "apollo-compiler 2.0.0-beta.0",
+ "apollo-parser 0.9.0-beta.0",
  "arbitrary",
  "indexmap 2.14.2",
  "once_cell",
@@ -6260,7 +6290,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "apollo-federation",
- "apollo-parser",
+ "apollo-parser 0.9.0-beta.0",
  "apollo-router",
  "apollo-smith",
  "async-trait",
@@ -6491,7 +6521,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7013,7 +7043,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7144,7 +7174,7 @@ name = "supergraph_sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler",
+ "apollo-compiler 1.33.0",
  "apollo-router",
  "async-trait",
  "tower",
