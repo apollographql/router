@@ -9,4 +9,4 @@ pattern already used for expired and version-incompatible licenses. No detection
 changed — `is_version_incompatible()` already correctly separates this case from a
 version mismatch; only the message shown for it does.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/####
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10242
