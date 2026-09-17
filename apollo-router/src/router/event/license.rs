@@ -12,13 +12,37 @@ use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
 use crate::uplink::UplinkConfig;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE;
 use crate::uplink::license_enforcement::Audience;
+use crate::uplink::license_enforcement::LICENSE_INVALID_SHORT_MESSAGE;
+use crate::uplink::license_enforcement::LICENSE_VERSION_INCOMPATIBLE_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::License;
 use crate::uplink::license_stream::LicenseQuery;
 use crate::uplink::license_stream::LicenseStreamExt;
 use crate::uplink::stream_from_uplink;
 
 const APOLLO_ROUTER_LICENSE_INVALID: &str = "APOLLO_ROUTER_LICENSE_INVALID";
+
+/// Logs the license parse failure under the version-incompatible code/message when
+/// `is_version_incompatible` reports the router doesn't understand the claim shape it
+/// was given, otherwise under the generic invalid-license code.
+fn log_license_parse_error(is_version_incompatible: bool, err: impl std::fmt::Display) {
+    if is_version_incompatible {
+        tracing::error!(
+            code = APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE,
+            "{}: {}",
+            LICENSE_VERSION_INCOMPATIBLE_SHORT_MESSAGE,
+            err
+        );
+    } else {
+        tracing::error!(
+            code = APOLLO_ROUTER_LICENSE_INVALID,
+            "{}: {}",
+            LICENSE_INVALID_SHORT_MESSAGE,
+            err
+        );
+    }
+}
 
 type LicenseStream = Pin<Box<dyn Stream<Item = License> + Send>>;
 
@@ -107,13 +131,9 @@ impl LicenseSource {
                                         }
                                     })
                                     .filter_map(|e| async move {
-                                        let result = e.parse();
+                                        let result = e.parse::<License>();
                                         if let Err(e) = &result {
-                                            tracing::error!(
-                                                code = APOLLO_ROUTER_LICENSE_INVALID,
-                                                "failed to parse license file, {}",
-                                                e
-                                            );
+                                            log_license_parse_error(e.is_version_incompatible(), e);
                                         }
                                         result.ok()
                                     })
@@ -126,11 +146,7 @@ impl LicenseSource {
                             }
                         }
                         Ok(Err(err)) => {
-                            tracing::error!(
-                                code = APOLLO_ROUTER_LICENSE_INVALID,
-                                "Failed to parse license: {}",
-                                err
-                            );
+                            log_license_parse_error(err.is_version_incompatible(), &err);
                             stream::empty().boxed()
                         }
                         Err(err) => {
@@ -151,7 +167,17 @@ impl LicenseSource {
                         future::ready(match res {
                             Ok(license) => Some(license),
                             Err(e) => {
-                                tracing::error!(code = APOLLO_ROUTER_LICENSE_INVALID, "{}", e);
+                                let code = match &e {
+                                    crate::uplink::Error::UplinkError { code, .. }
+                                    | crate::uplink::Error::UplinkErrorNoRetry { code, .. } => {
+                                        Some(code.as_str())
+                                    }
+                                    _ => None,
+                                };
+                                log_license_parse_error(
+                                    code == Some("LICENSE_VERSION_INCOMPATIBLE"),
+                                    &e,
+                                );
                                 None
                             }
                         })
@@ -196,7 +222,7 @@ impl LicenseSource {
                 match std::env::var("APOLLO_ROUTER_LICENSE").map(|e| License::from_str(&e)) {
                     Ok(Ok(license)) => stream::once(future::ready(license)).boxed(),
                     Ok(Err(err)) => {
-                        tracing::error!("Failed to parse license: {}", err);
+                        log_license_parse_error(err.is_version_incompatible(), &err);
                         stream::empty().boxed()
                     }
                     Err(_) => stream::once(future::ready(License::default()))
@@ -207,5 +233,38 @@ impl LicenseSource {
         }
         .expand_licenses()
         .chain(stream::iter(vec![NoMoreLicense]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_harness::tracing_test;
+
+    #[test]
+    fn log_license_parse_error_uses_version_incompatible_code_when_classified_as_such() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        log_license_parse_error(true, "missing required claim: warnAt");
+
+        assert!(tracing_test::logs_contain(
+            APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE
+        ));
+        assert!(tracing_test::logs_contain(
+            LICENSE_VERSION_INCOMPATIBLE_SHORT_MESSAGE
+        ));
+    }
+
+    #[test]
+    fn log_license_parse_error_falls_back_to_generic_invalid_code() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        log_license_parse_error(false, "invalid signature");
+
+        assert!(tracing_test::logs_contain(APOLLO_ROUTER_LICENSE_INVALID));
+        assert!(tracing_test::logs_contain(LICENSE_INVALID_SHORT_MESSAGE));
+        assert!(!tracing_test::logs_contain(
+            APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE
+        ));
     }
 }
