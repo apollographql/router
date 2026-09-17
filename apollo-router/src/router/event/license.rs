@@ -14,6 +14,7 @@ use crate::router::Event::NoMoreLicense;
 use crate::uplink::UplinkConfig;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE;
 use crate::uplink::license_enforcement::Audience;
+use crate::uplink::license_enforcement::LICENSE_INVALID_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LICENSE_VERSION_INCOMPATIBLE_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::License;
 use crate::uplink::license_stream::LicenseQuery;
@@ -36,7 +37,8 @@ fn log_license_parse_error(is_version_incompatible: bool, err: impl std::fmt::Di
     } else {
         tracing::error!(
             code = APOLLO_ROUTER_LICENSE_INVALID,
-            "Failed to parse license: {}",
+            "{}: {}",
+            LICENSE_INVALID_SHORT_MESSAGE,
             err
         );
     }
@@ -260,6 +262,7 @@ mod tests {
         log_license_parse_error(false, "invalid signature");
 
         assert!(tracing_test::logs_contain(APOLLO_ROUTER_LICENSE_INVALID));
+        assert!(tracing_test::logs_contain(LICENSE_INVALID_SHORT_MESSAGE));
         assert!(!tracing_test::logs_contain(
             APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE
         ));
