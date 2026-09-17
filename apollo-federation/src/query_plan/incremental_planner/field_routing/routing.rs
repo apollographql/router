@@ -830,6 +830,22 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connectors on root fields (Query/Mutation).
+        let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
+        if let QueryGraphNodeType::FederatedRootType(root_kind) = &current_node_data.type_
+            && let Some(root_type_name) = self
+                .supergraph_schema
+                .schema()
+                .root_operation((*root_kind).into())
+        {
+            self.push_connector_options(
+                &mut options,
+                root_type_name,
+                field_selection.field.name(),
+                true,
+            );
+        }
+
         // Prefer root options which can locally satisfy more fields in the selection
         if options.len() > 1
             && let Some(sub_ss) = field_selection.selection_set.as_ref()

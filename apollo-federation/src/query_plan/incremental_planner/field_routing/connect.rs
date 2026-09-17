@@ -216,16 +216,39 @@ impl FieldRoutingSearchSpace {
                 .connector_index
                 .output_shape(&connector.id.coordinate())
             {
-                Some(shape) if matches!(shape.case(), ShapeCase::Object { .. }) => self
-                    .partition_connector_selections(
+                Some(shape) if matches!(shape.case(), ShapeCase::Object { .. }) => {
+                    // Entity-resolver connectors describe the entity-level
+                    // output (e.g. User), but we are partitioning the
+                    // sub-selections of the committed field (e.g.
+                    // newsletterSubscriptions). Drill into the field's
+                    // sub-shape so the partition checks the right level.
+                    let effective_shape = match shape.case() {
+                        ShapeCase::Object { fields, .. } => {
+                            let field_name = field_sel.field.name();
+                            match fields.get(field_name.as_str()) {
+                                Some(child_shape) => {
+                                    let unwrapped = unwrap_list_shape(child_shape);
+                                    if matches!(unwrapped.case(), ShapeCase::Object { .. }) {
+                                        unwrapped
+                                    } else {
+                                        shape
+                                    }
+                                }
+                                None => shape,
+                            }
+                        }
+                        _ => shape,
+                    };
+                    self.partition_connector_selections(
                         &restored,
-                        shape,
+                        effective_shape,
                         &landing_type,
                         source_subgraph,
                         &child_op_path,
                         &child_response_path,
                         &mut deferred,
-                    )?,
+                    )?
+                }
                 // Non-object output shape (scalar / opaque): the connector
                 // resolves the whole subtree.
                 _ => Some(restored),
