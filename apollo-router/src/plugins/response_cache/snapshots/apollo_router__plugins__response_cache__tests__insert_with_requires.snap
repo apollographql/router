@@ -9,8 +9,8 @@ expression: cache_keys
     "invalidationKeys": [
       "product",
       "product-1",
-      "subgraph-test",
-      "type-test-Product"
+      "subgraph-inventory",
+      "type-inventory-Product"
     ],
     "indexes": {
       "subgraph": true,
@@ -23,7 +23,7 @@ expression: cache_keys
         "upc": "1"
       }
     },
-    "subgraphName": "test",
+    "subgraphName": "inventory",
     "subgraphRequest": {
       "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
       "variables": {
