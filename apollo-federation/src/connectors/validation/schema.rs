@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
@@ -12,7 +13,6 @@ use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceSpan;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use hashbrown::HashSet;
@@ -62,11 +62,7 @@ pub(super) fn validate(
 fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<Item = Message> {
     use crate::connectors::ConnectSpec;
 
-    let subscription_name = schema
-        .schema_definition
-        .subscription
-        .as_ref()
-        .map(|sub| &sub.name);
+    let subscription_name = schema.schema_definition.subscription.as_deref();
     let spec = schema.connect_link.spec;
 
     user_defined_types(schema)
@@ -511,9 +507,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
 /// but entity resolution for an interface goes through its implementing objects, which carry their
 /// own `@key`; demanding an entity connector for the interface itself would reject a subgraph whose
 /// implementations are all resolvable.
-fn find_all_resolvable_keys<'a>(
-    schema: &'a SchemaInfo,
-) -> Vec<(FieldSet, &'a Component<Directive>)> {
+fn find_all_resolvable_keys<'a>(schema: &'a SchemaInfo) -> Vec<(FieldSet, &'a Node<Directive>)> {
     let Ok(applications) = schema.federation_schema().key_directive_applications() else {
         // No federation link, or `@key` has no definition. Nothing to check against.
         return Vec::new();

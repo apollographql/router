@@ -1,12 +1,10 @@
 use apollo_compiler::Name;
-#[cfg(test)]
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 #[cfg(test)]
 use apollo_compiler::schema::ObjectType;
@@ -206,7 +204,7 @@ impl<'schema> SchemaTypeRef<'schema> {
     pub(super) fn get_fields(
         &self,
         field_name: &str,
-    ) -> IndexMap<String, &'schema Component<FieldDefinition>> {
+    ) -> IndexMap<String, &'schema Node<FieldDefinition>> {
         self.schema
             .types
             .get(self.name)
@@ -239,7 +237,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     .members
                     .iter()
                     .flat_map(|m| {
-                        SchemaTypeRef::new(self.schema, m.name.as_str())
+                        SchemaTypeRef::new(self.schema, m.as_str())
                             .map(|type_ref| type_ref.get_fields(field_name))
                             .unwrap_or_default()
                     })

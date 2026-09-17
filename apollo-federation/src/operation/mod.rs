@@ -2880,8 +2880,7 @@ impl TryFrom<&Field> for executable::Field {
         let definition = normalized_field
             .field_position
             .get(normalized_field.schema.schema())?
-            .node
-            .to_owned();
+            .clone();
         let selection_set = executable::SelectionSet {
             ty: definition.ty.inner_named_type().clone(),
             selections: vec![],
