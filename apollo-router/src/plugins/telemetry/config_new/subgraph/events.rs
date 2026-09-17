@@ -103,6 +103,9 @@ pub(crate) struct SubgraphEventsConfig {
 #[cfg(test)]
 mod test {
     use http::HeaderValue;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -128,14 +131,29 @@ mod test {
             subgraph_req
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
-            test_harness
-                .subgraph_service("subgraph", |_r| async {
+
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     subgraph::Response::fake2_builder()
                         .header("custom-header", "val1")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                })
+                        .unwrap(),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_service);
+
+            let _response = service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
@@ -144,6 +162,8 @@ mod test {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
@@ -166,15 +186,30 @@ mod test {
             subgraph_req
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
-            test_harness
-                .subgraph_service("subgraph", |_r| async {
+
+            let (mock_service, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
                     subgraph::Response::fake2_builder()
                         .header("custom-header", "val1")
                         .header("x-log-response", HeaderValue::from_static("log"))
                         .subgraph_name("subgraph")
                         .data(serde_json::json!({"data": "res"}).to_string())
                         .build()
-                })
+                        .unwrap(),
+                );
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_subgraph_layer())
+                .service(mock_service);
+
+            let _response = service
+                .ready()
+                .await
+                .unwrap()
                 .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
@@ -183,6 +218,8 @@ mod test {
                 )
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await

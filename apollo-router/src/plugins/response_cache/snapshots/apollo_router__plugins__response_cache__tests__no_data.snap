@@ -64,8 +64,8 @@ expression: cache_keys
     "invalidationKeys": [
       "organization",
       "organization-1",
-      "subgraph-test",
-      "type-test-Organization"
+      "subgraph-orga",
+      "type-orga-Organization"
     ],
     "indexes": {
       "subgraph": true,
@@ -78,7 +78,7 @@ expression: cache_keys
         "id": "1"
       }
     },
-    "subgraphName": "test",
+    "subgraphName": "orga",
     "subgraphRequest": {
       "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }",
       "variables": {
@@ -113,8 +113,8 @@ expression: cache_keys
     "invalidationKeys": [
       "organization",
       "organization-3",
-      "subgraph-test",
-      "type-test-Organization"
+      "subgraph-orga",
+      "type-orga-Organization"
     ],
     "indexes": {
       "subgraph": true,
@@ -127,7 +127,7 @@ expression: cache_keys
         "id": "3"
       }
     },
-    "subgraphName": "test",
+    "subgraphName": "orga",
     "subgraphRequest": {
       "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }",
       "variables": {
