@@ -198,6 +198,14 @@ fn run_bulb_and_finalize(
         timeout: parameters.config.incremental_planner.timeout,
     };
 
+    // Enable split-repush from the start. Keyless value types split
+    // across subgraphs need the planner to re-push unroutable selections
+    // at the nearest entity ancestor. The split-repush logic only runs in
+    // error-recovery paths (recover_doomed, doomed-check in fast_forward),
+    // so it adds no overhead for operations that don't need it.
+    let mut initial = initial;
+    initial.split_repush_enabled = true;
+
     debug!(
         pending = initial.pending.len(),
         beam_width = config.beam_width,
@@ -207,8 +215,8 @@ fn run_bulb_and_finalize(
 
     let (result, stats) = bulb_search(
         search_space,
-        initial.clone(),
-        config.clone(),
+        initial,
+        config,
         parameters.check_for_cooperative_cancellation,
     );
 
@@ -221,33 +229,8 @@ fn run_bulb_and_finalize(
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
     }
 
-    // When the first search does not find a complete plan (None, or a
-    // plan with dropped/pending fields), retry with split-repush enabled.
-    // Keyless value types split across subgraphs can only be planned when
-    // the planner is allowed to re-push unroutable selections at the
-    // nearest entity ancestor.
-    let first_complete =
-        matches!(&result, Some(r) if r.dropped_fields == 0 && r.pending.is_empty());
-    let (mut result, stats) = if !first_complete
-        && !matches!(
-            stats.termination,
-            BulbTermination::TimedOut | BulbTermination::Cancelled
-        ) {
-        let mut split_initial = initial;
-        split_initial.split_repush_enabled = true;
-        let (split_result, split_stats) = bulb_search(
-            search_space,
-            split_initial,
-            config,
-            parameters.check_for_cooperative_cancellation,
-        );
-        match split_result {
-            Some(sr) if sr.dropped_fields == 0 && sr.pending.is_empty() => (sr, split_stats),
-            _ => unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?,
-        }
-    } else {
-        unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?
-    };
+    let (mut result, stats) =
+        unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?;
 
     debug!(
         pending_remaining = result.pending.len(),
