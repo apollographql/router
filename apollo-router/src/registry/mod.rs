@@ -127,8 +127,6 @@ pub(crate) enum OciError {
     LayerNotFound(String),
     #[error("unable to parse layer: {0}")]
     LayerParse(FromUtf8Error),
-    #[error("license identifier not found in OCI manifest annotations: {0}")]
-    LicenseIdNotFound(String),
     #[error("unable to parse license: {0}")]
     LicenseParse(LicenseError),
 }
@@ -756,8 +754,19 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     }
     .cloned();
 
-    let identifier = identifier
-        .ok_or_else(|| OciError::LicenseIdNotFound(String::from("entitlement id not found")))?;
+    let identifier = match identifier {
+        Some(identifier) => identifier,
+        None => {
+            // No entitlement id annotation on this graph manifest means no
+            // entitlement can be resolved, so the router should boot
+            // unlicensed, not retry forever (mirrors the missing-entitlement-
+            // layer fallback in `fetch_license_from_reference`).
+            tracing::info!(
+                "no entitlement id annotation found in oci manifest, treating as unlicensed"
+            );
+            return Ok(License::default());
+        }
+    };
     let license_repository = format!("entitlements/{identifier}");
     let registry = schema_reference.registry().to_string();
 
