@@ -250,6 +250,21 @@ impl Supergraph {
         Self::new_with_spec_check(schema_str, &router_supported_supergraph_specs())
     }
 
+    /// Like `new_with_spec_check` but allows disabling default value validation.
+    pub fn new_with_spec_check_and_options(
+        schema_str: &str,
+        supported_specs: &[Url],
+        validate_default_values: bool,
+    ) -> Result<Self, FederationError> {
+        let mut schema = Schema::builder()
+            .validate_default_values(validate_default_values)
+            .parse(schema_str, "schema.graphql")
+            .build()?;
+        coerce_and_validate_schema_values(&mut schema)?;
+        let schema = schema.validate()?;
+        Self::from_schema(schema, Some(supported_specs))
+    }
+
     /// Construct from a pre-validation supergraph schema, which will be validated.
     /// * `supported_specs`: (optional) If provided, checks if all EXECUTION/SECURITY specs are
     ///   supported.

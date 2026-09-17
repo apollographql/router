@@ -14,7 +14,6 @@ use apollo_federation::Supergraph;
 use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
-use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
@@ -68,8 +67,13 @@ impl Schema {
             ..Default::default()
         };
 
-        let expansion =
-            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
+        let validate_default_values = config.supergraph.validate_default_values;
+        let expansion = apollo_federation::connectors::expand::expand_connectors_with_options(
+            &raw_sdl.sdl,
+            &api_schema_options,
+            validate_default_values,
+        )
+        .map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
         let (raw_sdl, api_schema, connectors) = match expansion {
             ExpansionResult::Expanded {
@@ -95,13 +99,15 @@ impl Schema {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let mut definitions = result
-            .map_err(|invalid| {
-                SchemaError::Parse(ParseErrors {
-                    errors: invalid.errors,
-                })
-            })?
-            .to_schema()
+        let ast = result.map_err(|invalid| {
+            SchemaError::Parse(ParseErrors {
+                errors: invalid.errors,
+            })
+        })?;
+        let mut definitions = apollo_compiler::Schema::builder()
+            .validate_default_values(validate_default_values)
+            .add_ast(&ast)
+            .build()
             .map_err(|errors| SchemaError::Validate(errors.into()))?;
         coerce_and_validate_schema_values(&mut definitions)?;
         let definitions = definitions

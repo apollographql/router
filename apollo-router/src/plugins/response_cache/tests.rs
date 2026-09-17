@@ -294,7 +294,7 @@ async fn insert() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -308,7 +308,7 @@ async fn insert() {
         }
       }
     }
-    "###);
+    "#);
 
     wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
@@ -344,7 +344,7 @@ async fn insert() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -358,7 +358,7 @@ async fn insert() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -481,7 +481,7 @@ async fn insert_with_custom_key() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -495,7 +495,7 @@ async fn insert_with_custom_key() {
         }
       }
     }
-    "###);
+    "#);
 
     wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
@@ -531,7 +531,7 @@ async fn insert_with_custom_key() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -545,7 +545,7 @@ async fn insert_with_custom_key() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -654,7 +654,7 @@ async fn already_expired_cache_control() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -668,7 +668,7 @@ async fn already_expired_cache_control() {
         }
       }
     }
-    "###);
+    "#);
 
     wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
     let service = TestHarness::builder()
@@ -700,7 +700,7 @@ async fn already_expired_cache_control() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -714,7 +714,7 @@ async fn already_expired_cache_control() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -815,7 +815,7 @@ async fn insert_without_debug_header() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(!remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -829,7 +829,7 @@ async fn insert_without_debug_header() {
         }
       }
     }
-    "###);
+    "#);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -855,7 +855,7 @@ async fn insert_without_debug_header() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(!remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -869,7 +869,7 @@ async fn insert_without_debug_header() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -1291,7 +1291,7 @@ async fn no_cache_control() {
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1305,7 +1305,7 @@ async fn no_cache_control() {
         }
       }
     }
-    "###);
+    "#);
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1332,7 +1332,7 @@ async fn no_cache_control() {
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1346,7 +1346,7 @@ async fn no_cache_control() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 #[tokio::test]
@@ -1428,7 +1428,7 @@ async fn no_store_from_request() {
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1442,7 +1442,7 @@ async fn no_store_from_request() {
         }
       }
     }
-    "###);
+    "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
     let invalidations_by_subgraph = storage
@@ -1494,7 +1494,7 @@ async fn no_store_from_request() {
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1508,7 +1508,7 @@ async fn no_store_from_request() {
         }
       }
     }
-    "###);
+    "#);
 
     // Just to make sure it doesn't invalidate anything, which means nothing has been stored
     let invalidations_by_subgraph = storage
@@ -1603,7 +1603,7 @@ async fn no_cache_from_request() {
     let response = response.next_response().await.unwrap();
 
     // Sanity-check: normal request returns entity data
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1617,7 +1617,7 @@ async fn no_cache_from_request() {
         }
       }
     }
-    "###);
+    "#);
 
     // Phase 2: Request with `no-cache` — cache must be bypassed for lookup but entity data
     // from the subgraph must still be returned correctly (regression for ROUTER-1689).
@@ -1649,7 +1649,7 @@ async fn no_cache_from_request() {
     let response = response.next_response().await.unwrap();
 
     // Entity fields must NOT be null — this was the regression
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1663,7 +1663,7 @@ async fn no_cache_from_request() {
         }
       }
     }
-    "###);
+    "#);
 
     // Metrics must NOT be recorded for no-cache requests (no misleading cache hit/miss counters)
     let orga_metric = no_cache_context
@@ -1773,7 +1773,7 @@ async fn private_only() {
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -1787,7 +1787,7 @@ async fn private_only() {
             }
           }
         }
-        "###);
+        "#);
         // First request with only private response cache-control
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -1819,7 +1819,7 @@ async fn private_only() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -1833,7 +1833,7 @@ async fn private_only() {
             }
           }
         }
-        "###);
+        "#);
 
         let context = Context::new();
         context.insert_json_value("sub", "5678".into());
@@ -1855,7 +1855,7 @@ async fn private_only() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -1869,7 +1869,7 @@ async fn private_only() {
             }
           }
         }
-        "###);
+        "#);
     }.with_metrics().await;
 }
 
@@ -1980,7 +1980,7 @@ async fn private_and_public() {
 
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -1997,7 +1997,7 @@ async fn private_and_public() {
         }
       }
     }
-    "###);
+    "#);
 
     let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -2029,7 +2029,7 @@ async fn private_and_public() {
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -2046,7 +2046,7 @@ async fn private_and_public() {
         }
       }
     }
-    "###);
+    "#);
 
     let context = Context::new();
     context.insert_json_value("sub", "5678".into());
@@ -2068,7 +2068,7 @@ async fn private_and_public() {
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
 
-    insta::assert_json_snapshot!(response, @r###"
+    insta::assert_json_snapshot!(response, @r#"
     {
       "data": {
         "currentUser": {
@@ -2085,7 +2085,7 @@ async fn private_and_public() {
         }
       }
     }
-    "###);
+    "#);
 }
 
 // In this test we want to make sure when we have a subgraph query that could be either public or private depending of private_id it still works
@@ -2194,7 +2194,7 @@ async fn polymorphic_private_and_public() {
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2211,7 +2211,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
 
         let subgraphs_public = serde_json::json!({
             "user": {
@@ -2276,7 +2276,7 @@ async fn polymorphic_private_and_public() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2293,7 +2293,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
 
         // Put back private cache-control to check it's still in cache
         let mut service = TestHarness::builder()
@@ -2325,7 +2325,7 @@ async fn polymorphic_private_and_public() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2342,7 +2342,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
 
         // Test again with subgraph public to make sure it's still cached
         let mut service = TestHarness::builder()
@@ -2373,7 +2373,7 @@ async fn polymorphic_private_and_public() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2390,7 +2390,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         // Test again with public subgraph but with a private_id set, it should be private because this query is private once we have private_id set, even if the subgraph is public, it's coming from the cache
@@ -2414,7 +2414,7 @@ async fn polymorphic_private_and_public() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2431,7 +2431,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         // Test again with private subgraph but without private_id set, it should give the public values because it's cached and it knows even if the subgraphs are private it was public without private_id
@@ -2462,7 +2462,7 @@ async fn polymorphic_private_and_public() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2479,7 +2479,7 @@ async fn polymorphic_private_and_public() {
             }
           }
         }
-        "###);
+        "#);
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
     }.with_metrics().await;
 }
@@ -2580,7 +2580,7 @@ async fn private_without_private_id() {
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2594,7 +2594,7 @@ async fn private_without_private_id() {
             }
           }
         }
-        "###);
+        "#);
         // Now testing without any mock subgraphs, all the data should come from the cache
         let mut service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true }, "experimental_mock_subgraphs": subgraphs.clone() }))
@@ -2625,7 +2625,7 @@ async fn private_without_private_id() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -2639,7 +2639,7 @@ async fn private_without_private_id() {
             }
           }
         }
-        "###);
+        "#);
     }.with_metrics().await;
 }
 
@@ -3193,7 +3193,7 @@ async fn invalidate_by_cache_tag() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3207,7 +3207,7 @@ async fn invalidate_by_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 1u64, "subgraph.name" = "orga");
 
         // Now testing without any mock subgraphs, all the data should come from the cache
@@ -3240,7 +3240,7 @@ async fn invalidate_by_cache_tag() {
         assert!(remove_debug_extensions_key(&mut response));
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 2u64, "subgraph.name" = "orga");
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3254,7 +3254,7 @@ async fn invalidate_by_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
 
         // now we invalidate data
         let res = invalidation
@@ -3295,7 +3295,7 @@ async fn invalidate_by_cache_tag() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3309,7 +3309,7 @@ async fn invalidate_by_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
         assert_histogram_sum!("apollo.router.operations.response_cache.fetch.entity", 3u64, "subgraph.name" = "orga");
     }.with_metrics().await;
 }
@@ -3407,7 +3407,7 @@ async fn complex_cache_tag() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -3421,7 +3421,7 @@ async fn complex_cache_tag() {
             }
           }
         }
-        "###);
+        "#);
     }.with_metrics().await;
 }
 
@@ -4518,7 +4518,7 @@ async fn invalidate_by_type() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4532,7 +4532,7 @@ async fn invalidate_by_type() {
             }
           }
         }
-        "###);
+        "#);
 
         // Now testing without any mock subgraphs, all the data should come from the cache
         wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
@@ -4564,7 +4564,7 @@ async fn invalidate_by_type() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4578,7 +4578,7 @@ async fn invalidate_by_type() {
             }
           }
         }
-        "###);
+        "#);
 
         // now we invalidate data
         let res = invalidation
@@ -4617,7 +4617,7 @@ async fn invalidate_by_type() {
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
 
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4631,7 +4631,7 @@ async fn invalidate_by_type() {
             }
           }
         }
-        "###);
+        "#);
     }.with_metrics().await;
 }
 
@@ -4721,7 +4721,7 @@ async fn failure_mode() {
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
         let response = response.next_response().await.unwrap();
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4735,7 +4735,7 @@ async fn failure_mode() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -4775,7 +4775,7 @@ async fn failure_mode() {
         let mut response = service.oneshot(request).await.unwrap();
 
         let response = response.next_response().await.unwrap();
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4789,7 +4789,7 @@ async fn failure_mode() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -4900,7 +4900,7 @@ async fn failure_mode_reconnect() {
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
         let response = response.next_response().await.unwrap();
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4914,7 +4914,7 @@ async fn failure_mode_reconnect() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -4965,7 +4965,7 @@ async fn failure_mode_reconnect() {
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -4979,7 +4979,7 @@ async fn failure_mode_reconnect() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
@@ -5026,7 +5026,7 @@ async fn failure_mode_reconnect() {
 
         let mut response = response.next_response().await.unwrap();
         assert!(remove_debug_extensions_key(&mut response));
-        insta::assert_json_snapshot!(response, @r###"
+        insta::assert_json_snapshot!(response, @r#"
         {
           "data": {
             "currentUser": {
@@ -5040,7 +5040,7 @@ async fn failure_mode_reconnect() {
             }
           }
         }
-        "###);
+        "#);
 
         assert_counter!(
             "apollo.router.operations.response_cache.fetch.error",
