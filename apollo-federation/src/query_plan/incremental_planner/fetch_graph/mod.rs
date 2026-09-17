@@ -162,6 +162,9 @@ pub(crate) struct FetchNode {
     pub(crate) context_rewrites: Vec<FetchDataKeyRenamer>,
     /// @fromContext variable definitions added to the subgraph operation.
     pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
+    /// Pipeline depth: longest incoming dependency chain. Maintained
+    /// incrementally by FetchGraph to avoid per-call toposorts.
+    pub(crate) pipeline_depth: u32,
 }
 
 impl FetchNode {
@@ -173,6 +176,7 @@ impl FetchNode {
             defer_ref: None,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            pipeline_depth: 0,
         }
     }
 
@@ -213,6 +217,12 @@ enum FetchGraphOp {
     AddEdge(EdgeIndex),
     /// An input was appended to an edge. Undo: pop last input.
     AppendEdgeInput(EdgeIndex),
+    /// A node's pipeline depth was raised. Undo: restore previous depth and
+    /// adjust running_cost.
+    DepthChange {
+        node_index: NodeIndex,
+        old_depth: u32,
+    },
     /// A selection was appended to a node. Undo: restore previous head pointer.
     ModifySelection {
         node_index: NodeIndex,
@@ -285,6 +295,9 @@ pub(crate) struct FetchGraph {
     /// LIFO undo releases it with that node.
     groups: HashMap<GroupKey, NodeIndex>,
     undo_log: Vec<FetchGraphOp>,
+    /// Sum of FETCH_COST * pipelining_factor(depth) over all nodes,
+    /// maintained incrementally as nodes and edges are added or rolled back.
+    running_cost: QueryPlanCost,
 }
 
 impl FetchGraph {
@@ -293,6 +306,7 @@ impl FetchGraph {
             graph: StableDiGraph::new(),
             groups: HashMap::new(),
             undo_log: Vec::new(),
+            running_cost: 0.0,
         }
     }
 
@@ -311,6 +325,8 @@ impl FetchGraph {
         while self.undo_log.len() > cp.0 {
             match self.undo_log.pop().unwrap() {
                 FetchGraphOp::AddNode { node_index } => {
+                    let depth = self.graph[node_index].pipeline_depth;
+                    self.running_cost -= FETCH_COST * pipelining_factor(depth);
                     self.graph.remove_node(node_index);
                 }
                 FetchGraphOp::RegisterGroup { key } => {
@@ -339,6 +355,16 @@ impl FetchGraph {
                     fetch_node.context_rewrites.truncate(prev_rewrites);
                     fetch_node.context_variables.truncate(prev_variables);
                 }
+                FetchGraphOp::DepthChange {
+                    node_index,
+                    old_depth,
+                } => {
+                    let node = &mut self.graph[node_index];
+                    let cur_depth = node.pipeline_depth;
+                    node.pipeline_depth = old_depth;
+                    self.running_cost -= FETCH_COST * pipelining_factor(cur_depth);
+                    self.running_cost += FETCH_COST * pipelining_factor(old_depth);
+                }
             }
         }
     }
@@ -346,7 +372,9 @@ impl FetchGraph {
     /// Add a `FetchNode`, logging for rollback. The node claims its reuse
     /// slot if free; a duplicate for an occupied slot is added unregistered
     /// so the owner's registration survives the duplicate's rollback.
-    fn insert_node(&mut self, node: FetchNode) -> NodeIndex {
+    fn insert_node(&mut self, mut node: FetchNode) -> NodeIndex {
+        node.pipeline_depth = 0;
+        self.running_cost += FETCH_COST * pipelining_factor(0);
         let key = group_key(&node);
         let id = self.graph.add_node(node);
         self.undo_log.push(FetchGraphOp::AddNode { node_index: id });
@@ -396,6 +424,7 @@ impl FetchGraph {
             defer_ref,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            pipeline_depth: 0,
         })
     }
 
@@ -413,6 +442,7 @@ impl FetchGraph {
             defer_ref,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            pipeline_depth: 0,
         })
     }
 
@@ -524,7 +554,37 @@ impl FetchGraph {
             .graph
             .add_edge(parent, child, FetchEdgeWeight { inputs });
         self.undo_log.push(FetchGraphOp::AddEdge(id));
+        let parent_depth = self.graph[parent].pipeline_depth;
+        self.raise_depth(child, parent_depth + 1);
         id
+    }
+
+    /// Raise a node's pipeline depth to at least `min_depth`, propagating
+    /// increases to all descendants via BFS. Each change is logged for
+    /// rollback and adjusts running_cost.
+    fn raise_depth(&mut self, node: NodeIndex, min_depth: u32) {
+        if self.graph[node].pipeline_depth >= min_depth {
+            return;
+        }
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back((node, min_depth));
+        while let Some((n, new_depth)) = queue.pop_front() {
+            let cur = &mut self.graph[n];
+            if cur.pipeline_depth >= new_depth {
+                continue;
+            }
+            let old_depth = cur.pipeline_depth;
+            cur.pipeline_depth = new_depth;
+            self.running_cost -= FETCH_COST * pipelining_factor(old_depth);
+            self.running_cost += FETCH_COST * pipelining_factor(new_depth);
+            self.undo_log.push(FetchGraphOp::DepthChange {
+                node_index: n,
+                old_depth,
+            });
+            for edge in self.graph.edges_directed(n, Direction::Outgoing) {
+                queue.push_back((edge.target(), new_depth + 1));
+            }
+        }
     }
 
     /// Add an ordering-only dependency edge (no inputs) unless one exists.
@@ -718,18 +778,10 @@ impl FetchGraph {
         self.graph.edge_count()
     }
 
-    /// Structural cost: FETCH_COST per group, scaled by pipeline depth
-    /// (longest parent chain). Recomputed per call; incremental caching is
-    /// deferred until the search is proven correct.
+    /// Structural cost: FETCH_COST per group, scaled by pipeline depth.
+    /// Maintained incrementally by insert_node, add_dependency, and rollback.
     pub(crate) fn cost(&self) -> QueryPlanCost {
-        let Ok(depth) = self.pipeline_depths() else {
-            debug_assert!(false, "cycle in fetch graph");
-            return f64::MAX;
-        };
-        self.graph
-            .node_indices()
-            .map(|node| FETCH_COST * pipelining_factor(depth[node.index()]))
-            .sum()
+        self.running_cost
     }
 
     /// Pipeline depth (longest parent chain) per node, indexed by node
