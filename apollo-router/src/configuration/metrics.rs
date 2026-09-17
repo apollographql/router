@@ -341,7 +341,19 @@ impl InstrumentData {
             opt.subgraph.ttl,
             "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]",
             opt.subgraph.invalidation.enabled,
-            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]"
+            "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]",
+            opt.connector.enabled,
+            // Connector caching is "on" for a deployment when storage is configured AND the
+            // feature is not explicitly disabled. `enabled` defaults to on (a missing flag means
+            // enabled, see `ConnectorCacheConfiguration::is_source_enabled`), so we can't key on
+            // `enabled` alone the way subgraph does — a redis-only config with `enabled` omitted
+            // still caches. `enabled != false` matches both the omitted and `true` cases while
+            // excluding an explicit `enabled: false`.
+            "$[?((@.connector.all.redis || @.connector.sources..redis) && @.connector.all.enabled != false)]",
+            opt.connector.ttl,
+            "$[?(@.connector.all.ttl || @.connector.sources..ttl)]",
+            opt.connector.invalidation.enabled,
+            "$[?(@.connector.all.invalidation.enabled || @.connector.sources..invalidation.enabled)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,

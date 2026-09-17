@@ -79,6 +79,20 @@ pub(crate) struct CacheControl {
     #[serde(skip_serializing_if = "is_false", default)]
     only_if_cached: bool,
 
+    // -- router internal --
+    /// Not a `Cache-Control` directive. Marks a cache-control whose `max_age` is the router's
+    /// **configured fallback TTL** for a connector response that carried no `Cache-Control`
+    /// header at all, rather than a freshness lifetime the origin promised.
+    ///
+    /// The router stores and serves such an entry on the strength of its own configuration, but
+    /// it must not pass that TTL on: an origin that said nothing about caching has not licensed
+    /// the router to tell the client, or a CDN in front of it, that the payload may be held.
+    /// [`client_facing`](Self::client_facing) collapses these to `no-store`, which is what a
+    /// subgraph sends in the same situation. Defaulted on deserialization, so entries written
+    /// before this field existed load as "origin-specified" and keep their previous behavior.
+    #[serde(skip_serializing_if = "is_false", default)]
+    ttl_from_config: bool,
+
     // -- response only --
     /// Value of the `Age` response header, indicating how many seconds old the response is.
     /// Used to offset `max_age` when computing the remaining TTL.
@@ -177,6 +191,7 @@ impl Default for CacheControl {
             max_stale: None,
             min_fresh: None,
             only_if_cached: false,
+            ttl_from_config: false,
         }
     }
 }
@@ -287,6 +302,29 @@ impl CacheControl {
         Self {
             no_store: true,
             ..Self::default()
+        }
+    }
+
+    /// A cache-control for a connector response that carried no `Cache-Control` header, whose
+    /// freshness therefore comes from the router's configured TTL rather than from the origin.
+    /// Storable and servable by the router; `no-store` downstream. See
+    /// [`ttl_from_config`](Self#structfield.ttl_from_config).
+    pub(crate) fn from_config_ttl(ttl: Option<Duration>) -> Self {
+        Self {
+            ttl_from_config: true,
+            ..Self::default().with_default_ttl(ttl)
+        }
+    }
+
+    /// What this cache-control contributes to the client-facing `Cache-Control` header.
+    ///
+    /// Identical to `self` except for a TTL that came from router configuration rather than from
+    /// an origin response, which collapses to `no-store`.
+    pub(crate) fn client_facing(&self) -> Self {
+        if self.ttl_from_config {
+            Self::default_no_store()
+        } else {
+            self.clone()
         }
     }
 
@@ -453,6 +491,9 @@ impl CacheControl {
                 other.remaining_min_fresh(now),
             ),
             only_if_cached: self.only_if_cached || other.only_if_cached,
+            // Most restrictive wins downstream: if either side's TTL came from config rather
+            // than from an origin, the merged value must not be advertised to the client.
+            ttl_from_config: self.ttl_from_config || other.ttl_from_config,
         }
     }
 

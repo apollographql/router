@@ -280,33 +280,38 @@ impl Selector for ConnectorSelector {
                 default,
                 redact,
             } => {
-                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
-                    let header_value = http_response
-                        .inner
-                        .headers
-                        .get(connector_response_header)
-                        .and_then(|h| Some(h.to_str().ok()?.to_string()));
+                // On a cache hit there is no transport response, so no header value is available.
+                // The configured `default` must still apply in that case rather than dropping the
+                // selector entirely — otherwise telemetry defaults go quiet as the hit rate climbs.
+                match response.transport_result {
+                    None => default.clone().map(Into::into),
+                    Some(Ok(TransportResponse::Http(ref http_response))) => {
+                        let raw = http_response
+                            .inner
+                            .headers
+                            .get(connector_response_header)
+                            .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                    let value = crate::services::header_masking::redact_header_value(
-                        &response.context,
-                        crate::services::header_masking::Direction::Response,
-                        Some(response.subgraph_name.as_str()),
-                        connector_response_header,
-                        header_value,
-                        redact.as_ref(),
-                    );
-
-                    value
+                        crate::services::header_masking::redact_header_value(
+                            &response.context,
+                            crate::services::header_masking::Direction::Response,
+                            Some(response.subgraph_name.as_str()),
+                            connector_response_header,
+                            raw,
+                            redact.as_ref(),
+                        )
                         .or_else(|| default.clone())
-                        .map(opentelemetry::Value::from)
-                } else {
-                    None
+                        .map(Into::into)
+                    }
+                    Some(_) => None,
                 }
             }
             ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
             } => {
-                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                if let Some(Ok(TransportResponse::Http(ref http_response))) =
+                    response.transport_result
+                {
                     let status = http_response.inner.status;
                     match response_status {
                         ResponseStatus::Code => Some(Value::I64(status.as_u16() as i64)),
@@ -321,7 +326,9 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorResponseBodySize {
                 connector_http_response_body_size,
             } if *connector_http_response_body_size => {
-                if let Ok(TransportResponse::Http(ref http_response)) = response.transport_result {
+                if let Some(Ok(TransportResponse::Http(ref http_response))) =
+                    response.transport_result
+                {
                     http_response
                         .inner
                         .extensions
@@ -564,14 +571,14 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name: String::new(),
-            transport_result: Ok(TransportResponse::Http(HttpResponse {
+            transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
                     .expect("expecting valid response")
                     .into_parts()
                     .0,
-            })),
+            }))),
             mapped_response: MappedResponse::Data {
                 data: serde_json::json!({})
                     .try_into()
@@ -586,16 +593,33 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name: String::new(),
-            transport_result: Ok(TransportResponse::Http(HttpResponse {
+            transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(status_code)
                     .body(body::empty())
                     .expect("expecting valid response")
                     .into_parts()
                     .0,
-            })),
+            }))),
             mapped_response: MappedResponse::Error {
                 error: RuntimeError::new("Internal server errror", &response_key()),
+                key: response_key(),
+                problems: vec![],
+            },
+        }
+    }
+
+    // A cache hit replays the mapped response but has no transport response (nothing went over
+    // the wire), so `transport_result` is `None`.
+    fn connector_response_cache_hit() -> Response {
+        Response {
+            context: Context::new(),
+            subgraph_name: String::new(),
+            transport_result: None,
+            mapped_response: MappedResponse::Data {
+                data: serde_json::json!({})
+                    .try_into()
+                    .expect("expecting valid JSON"),
                 key: response_key(),
                 problems: vec![],
             },
@@ -610,7 +634,7 @@ mod tests {
         Response {
             context: Context::new(),
             subgraph_name,
-            transport_result: Ok(TransportResponse::Http(HttpResponse {
+            transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                 inner: http::Response::builder()
                     .status(200)
                     .header(TEST_HEADER_NAME, TEST_HEADER_VALUE)
@@ -618,7 +642,7 @@ mod tests {
                     .expect("expecting valid response")
                     .into_parts()
                     .0,
-            })),
+            }))),
             mapped_response: MappedResponse::Data {
                 data: serde_json::json!({})
                     .try_into()
@@ -746,6 +770,22 @@ mod tests {
         assert_eq!(
             Some("defaulted".into()),
             selector.on_response(&connector_response(StatusCode::OK))
+        );
+    }
+
+    #[test]
+    fn connector_on_response_header_default_applies_on_cache_hit() {
+        // On a cache hit there is no transport response, but a configured `default` must still be
+        // reported rather than dropped — otherwise defaulted telemetry goes quiet as the cache hit
+        // rate climbs.
+        let selector = ConnectorSelector::ConnectorResponseHeader {
+            connector_http_response_header: TEST_HEADER_NAME.to_string(),
+            redact: None,
+            default: Some("defaulted".into()),
+        };
+        assert_eq!(
+            Some("defaulted".into()),
+            selector.on_response(&connector_response_cache_hit())
         );
     }
 

@@ -94,6 +94,12 @@ pub(crate) struct Externalizable<T> {
     query_plan: Option<Arc<QueryPlan>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) subgraph_request_id: Option<SubgraphRequestId>,
+    /// Set on the `ConnectorResponse` stage when the response was served from the router's
+    /// response cache. No HTTP call happened, so `status_code` and `headers` are absent for
+    /// reasons unrelated to failure — without this flag a coprocessor keying off an absent
+    /// status cannot tell a cache hit from a transport error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cache_hit: Option<bool>,
 }
 
 #[buildstructor::buildstructor]
@@ -137,6 +143,7 @@ where
             has_next: None,
             query_plan: None,
             subgraph_request_id: None,
+            cache_hit: None,
         }
     }
 
@@ -176,6 +183,7 @@ where
             has_next,
             query_plan: None,
             subgraph_request_id: None,
+            cache_hit: None,
         }
     }
 
@@ -216,6 +224,7 @@ where
             has_next,
             query_plan,
             subgraph_request_id: None,
+            cache_hit: None,
         }
     }
 
@@ -256,6 +265,7 @@ where
             has_next: None,
             query_plan: None,
             subgraph_request_id,
+            cache_hit: None,
         }
     }
 
@@ -349,6 +359,7 @@ where
         method: Option<String>,
         service_name: Option<String>,
         uri: Option<String>,
+        cache_hit: Option<bool>,
     ) -> Self {
         assert!(matches!(
             stage,
@@ -371,6 +382,7 @@ where
             has_next: None,
             query_plan: None,
             subgraph_request_id: None,
+            cache_hit,
         }
     }
 }

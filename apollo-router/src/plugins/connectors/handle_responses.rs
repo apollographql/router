@@ -257,7 +257,7 @@ where
     connector::request_service::Response {
         context: context.clone(),
         subgraph_name: connector.id.subgraph_name.to_string(),
-        transport_result: result,
+        transport_result: Some(result),
         mapped_response,
     }
 }
@@ -326,9 +326,9 @@ fn log_connectors_event(
             let response = connector::request_service::Response {
                 context: context.clone(),
                 subgraph_name: connector.id.subgraph_name.to_string(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
                     inner: parts.clone(),
-                })),
+                }))),
                 mapped_response: MappedResponse::Data {
                     data: Value::Null,
                     key: response_key,

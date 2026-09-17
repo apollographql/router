@@ -7199,7 +7199,7 @@ mod tests {
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_ok());
+            assert!(response.transport_result.unwrap().is_ok());
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -7259,7 +7259,7 @@ mod tests {
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_ok());
+            assert!(response.transport_result.unwrap().is_ok());
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -7341,7 +7341,7 @@ mod tests {
 
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_ok());
+            assert!(response.transport_result.unwrap().is_ok());
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -7390,7 +7390,7 @@ mod tests {
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_err());
+            assert!(response.transport_result.unwrap().is_err());
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -7686,7 +7686,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_ok());
+            assert!(response.transport_result.unwrap().is_ok());
         }
 
         #[tokio::test]
@@ -7800,7 +7800,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_err());
+            assert!(response.transport_result.unwrap().is_err());
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
                     assert_eq!(error.message, "Not authenticated.");
@@ -7855,7 +7855,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_err());
+            assert!(response.transport_result.unwrap().is_err());
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
                     assert_eq!(error.message, "Request blocked");
@@ -7920,7 +7920,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_err());
+            assert!(response.transport_result.unwrap().is_err());
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
                     assert_eq!(error.message, "Rate limited");
@@ -7990,7 +7990,7 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_ok());
+            assert!(response.transport_result.unwrap().is_ok());
         }
 
         #[tokio::test]
@@ -8111,11 +8111,11 @@ mod tests {
                 Ok(request_service::Response {
                     context: req.context,
                     subgraph_name,
-                    transport_result: Err(
+                    transport_result: Some(Err(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),
                         ),
-                    ),
+                    )),
                     mapped_response: MappedResponse::Error {
                         error: apollo_federation::connectors::runtime::errors::RuntimeError::new(
                             "Original error message",
