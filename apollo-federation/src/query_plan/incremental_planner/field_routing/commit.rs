@@ -19,7 +19,6 @@ use super::context;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::RoutingChoice;
-use super::routing::RoutingTarget;
 use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
 use super::state::ContextAnchor;

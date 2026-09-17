@@ -198,14 +198,6 @@ fn run_bulb_and_finalize(
         timeout: parameters.config.incremental_planner.timeout,
     };
 
-    // Enable split-repush from the start. Keyless value types split
-    // across subgraphs need the planner to re-push unroutable selections
-    // at the nearest entity ancestor. The split-repush logic only runs in
-    // error-recovery paths (recover_doomed, doomed-check in fast_forward),
-    // so it adds no overhead for operations that don't need it.
-    let mut initial = initial;
-    initial.split_repush_enabled = true;
-
     debug!(
         pending = initial.pending.len(),
         beam_width = config.beam_width,

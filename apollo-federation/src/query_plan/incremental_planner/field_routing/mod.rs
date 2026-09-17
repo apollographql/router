@@ -259,7 +259,7 @@ impl FieldRoutingSearchSpace {
     /// routing options to a different subgraph, wrapping the stranded
     /// remainder back into the ancestor's selection shape.
     fn try_split_repush(&self, state: &mut PlanState, pending: &PendingSelection) -> bool {
-        if !state.split_repush_enabled || pending.best_effort {
+        if pending.best_effort {
             return false;
         }
         let Ok(source) = self.node_source(pending.query_graph_node) else {

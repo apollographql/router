@@ -256,10 +256,6 @@ pub(crate) struct PlanState {
     /// achievable without splitting always win over split plans — splitting
     /// only rescues candidates that would otherwise drop selections.
     pub(crate) splits: usize,
-    /// Whether `try_split_repush` may fire. Off in the first search pass: a
-    /// split-free plan is always preferred, and disabling splits saves the
-    /// budget that finds split-free plans.
-    pub(crate) split_repush_enabled: bool,
     /// Monotonic count of pending-stack pushes over the whole search,
     /// including rolled-back work. Every unit of planning effort flows
     /// through `push_pending`, so this tracks wall time far more tightly
@@ -301,7 +297,6 @@ impl PlanState {
             dropped_fields: 0,
             type_explosions: 0,
             splits: 0,
-            split_repush_enabled: false,
             effort: 0,
             forced_backtracks: 0,
             condition_alias_ids: BTreeMap::new(),
@@ -345,7 +340,6 @@ impl PlanState {
             forced_backtracks: self.forced_backtracks,
             type_explosions: self.type_explosions,
             splits: self.splits,
-            split_repush_enabled: self.split_repush_enabled,
         }
     }
 
