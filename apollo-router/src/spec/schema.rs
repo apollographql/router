@@ -14,6 +14,7 @@ use apollo_federation::Supergraph;
 use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
+use apollo_federation::connectors::expand::build_connectors_without_expansion;
 use apollo_federation::connectors::expand::expand_connectors;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
@@ -68,23 +69,35 @@ impl Schema {
             ..Default::default()
         };
 
-        let expansion =
-            expand_connectors(&raw_sdl.sdl, &api_schema_options).map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
-        let (raw_sdl, api_schema, connectors) = match expansion {
-            ExpansionResult::Expanded {
-                raw_sdl,
-                api_schema: api,
-                connectors,
-            } => (
-                Arc::new(SchemaState {
-                    sdl: raw_sdl,
-                    launch_id: preserved_launch_id,
-                }),
-                Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
-                Some(apply_config(config, connectors)),
-            ),
-            ExpansionResult::Unchanged => (raw_sdl, None, None),
+        let (raw_sdl, api_schema, connectors) = if config.native_connectors {
+            // With native connector support the incremental planner routes
+            // to connectors directly via FetchProtocol::Connector, so the
+            // expensive virtual-subgraph expansion is skipped. The Connector
+            // models are still parsed so ConnectorServiceFactory can serve
+            // requests.
+            let connectors = build_connectors_without_expansion(&raw_sdl.sdl)
+                .map_err(SchemaError::Connector)?
+                .map(|c| apply_config(config, c));
+            (raw_sdl, None, connectors)
+        } else {
+            let expansion = expand_connectors(&raw_sdl.sdl, &api_schema_options)
+                .map_err(SchemaError::Connector)?;
+            match expansion {
+                ExpansionResult::Expanded {
+                    raw_sdl,
+                    api_schema: api,
+                    connectors,
+                } => (
+                    Arc::new(SchemaState {
+                        sdl: raw_sdl,
+                        launch_id: preserved_launch_id,
+                    }),
+                    Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
+                    Some(apply_config(config, connectors)),
+                ),
+                ExpansionResult::Unchanged => (raw_sdl, None, None),
+            }
         };
 
         let mut parser = apollo_compiler::parser::Parser::new();

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/query_planner/tests.rs
+assertion_line: 187
 expression: query_plan
 ---
 Sequence {

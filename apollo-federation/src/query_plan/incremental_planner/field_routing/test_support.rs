@@ -31,9 +31,9 @@ pub(super) fn search_space(subgraphs: &[(&str, &str)]) -> FieldRoutingSearchSpac
     FieldRoutingSearchSpace {
         cached_query_graph: CachedQueryGraph::new(Arc::new(query_graph), Default::default()),
         supergraph_schema: schema,
+        connector_index: Default::default(),
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
-        connector_index: Default::default(),
     }
 }
 
