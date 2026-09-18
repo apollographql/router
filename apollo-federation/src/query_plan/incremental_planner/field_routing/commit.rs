@@ -15,7 +15,6 @@ use super::FieldRoutingSearchSpace;
 use super::NodeSource;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
-use super::routing::HopKind;
 use super::routing::RoutingChoice;
 use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
@@ -65,16 +64,24 @@ impl FieldRoutingSearchSpace {
         };
 
         // Mutating half: commit the hop or resolve the direct fetch group.
-        let (fetch_node, _key_hop_edge) = match choice.hop_kind {
-            HopKind::RootHop => {
+        let (fetch_node, _key_hop_edge) = match choice {
+            RoutingChoice::Provides(_) | RoutingChoice::DirectLocal(_) => {
+                (self.direct_fetch_node(state, pending, choice)?, None)
+            }
+            RoutingChoice::RootHop(_) => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
                 (group, Some(hop_edge))
             }
-            HopKind::KeyHop => {
+            RoutingChoice::TypeExplosion => {
+                todo!("type explosion dispatch")
+            }
+            RoutingChoice::RestructureFragment => {
+                todo!("fragment restructuring dispatch")
+            }
+            _ => {
                 let (group, hop_edge) = self.commit_key_hop(state, pending, choice)?;
                 (group, Some(hop_edge))
             }
-            HopKind::Direct => (self.direct_fetch_node(state, pending, choice)?, None),
         };
 
         // Pure half: assemble op and response paths for children.
@@ -188,10 +195,11 @@ impl FieldRoutingSearchSpace {
         // Every key is an entry key; the parent group outputs whatever
         // enters the first group of the chain (the target's own key when
         // there is no chain).
-        let first_key = choice
-            .intermediate_key_hops
+        let key_info = choice.key();
+        let intermediate_hops = choice.intermediate_hops();
+        let first_key: Option<&Arc<SelectionSet>> = intermediate_hops
             .first()
-            .map_or(&choice.key_conditions, |hop| &hop.entry_key);
+            .map_or(Some(&key_info.key_conditions), |hop| hop.entry_key.as_ref());
 
         let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
@@ -201,9 +209,7 @@ impl FieldRoutingSearchSpace {
         };
 
         // Key fields plus __typename, which identifies the entity type.
-        let anchor_key = key_locally_resolvable
-            .then_some(first_key.as_ref())
-            .flatten();
+        let anchor_key = key_locally_resolvable.then_some(first_key).flatten();
         self.append_entity_inputs(
             state,
             pending.fetch_node,
@@ -216,7 +222,7 @@ impl FieldRoutingSearchSpace {
 
         // The group the key edge enters: for a chained hop, the first
         // intermediate, not the final target.
-        let (first_subgraph, first_dest_node) = match choice.intermediate_key_hops.first() {
+        let (first_subgraph, first_dest_node) = match intermediate_hops.first() {
             Some(hop) => (
                 &qg.node_weight(hop.target_node)?.source,
                 Some(hop.target_node),
@@ -257,13 +263,13 @@ impl FieldRoutingSearchSpace {
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
         // they commit.
-        if !key_locally_resolvable && let Some(key_conditions) = first_key.clone() {
+        if !key_locally_resolvable && let Some(key_conditions) = first_key.cloned() {
             self.push_condition_pendings(state, pending, &key_conditions, new_group)?;
         }
 
         // Multi-hop key chain: walk through intermediate subgraphs,
         // creating an entity group for each hop that feeds the next.
-        if !choice.intermediate_key_hops.is_empty() {
+        if !intermediate_hops.is_empty() {
             return self.commit_intermediate_hops(state, pending, choice, new_group, merge_at);
         }
 
@@ -282,18 +288,19 @@ impl FieldRoutingSearchSpace {
         let mut prev_group = first_group;
         let mut last = None;
 
-        for (i, hop) in choice.intermediate_key_hops.iter().enumerate() {
+        let intermediate_hops = choice.intermediate_hops();
+        for (i, hop) in intermediate_hops.iter().enumerate() {
             let hop_node_data = qg.node_weight(hop.target_node)?;
             let hop_type_pos: CompositeTypeDefinitionPosition =
                 hop_node_data.type_.clone().try_into()?;
 
             // This hop's group must output the key entering the next group:
             // the next hop's entry key, or the target's for the last hop.
-            let (next_dest_node, exit_key) = match choice.intermediate_key_hops.get(i + 1) {
-                Some(next) => (next.target_node, &next.entry_key),
+            let (next_dest_node, exit_key) = match intermediate_hops.get(i + 1) {
+                Some(next) => (next.target_node, next.entry_key.as_ref()),
                 None => (
                     qg.edge_endpoints(choice.edge_index())?.0,
-                    &choice.key_conditions,
+                    Some(&choice.key().key_conditions),
                 ),
             };
             let next_subgraph = &qg.node_weight(next_dest_node)?.source;
@@ -543,35 +550,10 @@ impl FieldRoutingSearchSpace {
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
         let qg = &self.query_graph;
-        let op_path = match choice.hop_kind {
-            // Hops restart the op path at the new group's root: empty for
-            // root hops; for key hops, `... on <ConcreteType>` (entity
-            // fetches start from the _Entity union) plus any trailing
-            // @skip/@include fragments.
-            HopKind::RootHop | HopKind::KeyHop => {
-                let base = if choice.hop_kind == HopKind::RootHop {
-                    SharedPath::new()
-                } else {
-                    let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
-                    let dest = self.node_source(field_source)?;
-                    let mut initial_path = self.entity_root_path(dest.type_pos.type_name())?;
-                    for element in trailing_condition_fragments(&pending.op_path) {
-                        initial_path = initial_path.pushed(element);
-                    }
-                    initial_path
-                };
-                let op_element: Arc<OpPathElement> = match &pending.selection {
-                    Selection::Field(field_sel) => {
-                        Arc::new(OpPathElement::Field(field_sel.field.clone()))
-                    }
-                    Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
-                        frag_sel.inline_fragment.clone(),
-                    )),
-                };
-                base.pushed(op_element)
-            }
+        let is_direct = choice.is_direct();
+        let op_path = if is_direct {
             // Direct choices extend the current op path with this selection.
-            HopKind::Direct => match &pending.selection {
+            match &pending.selection {
                 Selection::Field(field_sel) => pending
                     .op_path
                     .pushed(Arc::new(OpPathElement::Field(field_sel.field.clone()))),
@@ -600,13 +582,38 @@ impl FieldRoutingSearchSpace {
                             )))
                     }
                 }
-            },
+            }
+        } else {
+            // Hops restart the op path at the new group's root: empty for
+            // root hops; for key hops, `... on <ConcreteType>` (entity
+            // fetches start from the _Entity union) plus any trailing
+            // @skip/@include fragments.
+            let base = if matches!(choice, RoutingChoice::RootHop(_)) {
+                SharedPath::new()
+            } else {
+                let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
+                let dest = self.node_source(field_source)?;
+                let mut initial_path = self.entity_root_path(dest.type_pos.type_name())?;
+                for element in trailing_condition_fragments(&pending.op_path) {
+                    initial_path = initial_path.pushed(element);
+                }
+                initial_path
+            };
+            let op_element: Arc<OpPathElement> = match &pending.selection {
+                Selection::Field(field_sel) => {
+                    Arc::new(OpPathElement::Field(field_sel.field.clone()))
+                }
+                Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
+                    frag_sel.inline_fragment.clone(),
+                )),
+            };
+            base.pushed(op_element)
         };
 
         // Hops restart the response path at the new fetch node's root.
         // Only direct choices continue from the pending's current position.
         let response_path = {
-            let mut rp = if choice.hop_kind == HopKind::Direct {
+            let mut rp = if is_direct {
                 pending.path_in_fetch.clone()
             } else {
                 SharedPath::new()
