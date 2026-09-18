@@ -20,6 +20,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [2.18.x](unreleased) - Unreleased
 
+## ❗ BREAKING CHANGES ❗
+
+### Composition enforces default value validation per the GraphQL 2025 spec ([PR #10119](https://github.com/apollographql/router/pull/10119))
+
+Composition now validates default values against their declared types, as
+required by the GraphQL September 2025 specification. Subgraph schemas with
+invalid defaults (e.g. `{}` for an input type with required fields) that
+previously composed successfully will now produce composition errors.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
+
 ## 🚀 Features
 
 ### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))

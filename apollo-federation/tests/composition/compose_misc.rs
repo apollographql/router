@@ -10,22 +10,39 @@ use super::print_sdl;
 // MISCELLANEOUS COMPOSITION TESTS - Standalone composition behavior tests
 // =============================================================================
 
-/// `{}` on inputs with required fields should appear on the composed supergraph for backward
-/// compatibility (when all subgraph agree), and should not be coerced when computing the API
-/// schema. See `misc_drops_empty_object_default_when_only_some_subgraphs_declare_it` for the case
-/// where only some subgraphs have it.
+/// Compiler v2 rejects `= {}` for inputs with required fields at parse time.
 #[test]
-fn misc_keeps_invalid_empty_object_argument_defaults_on_supergraph() {
+fn misc_rejects_invalid_empty_object_argument_defaults() {
     let subgraph = ServiceDefinition {
         name: "subgraph",
         type_defs: r#"
         type Query {
           fieldA(filter: InputWithRequired = {}): String
-          fieldB(filter: InputAllOptional = {}): String
         }
 
         input InputWithRequired {
           required: String!
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph]);
+    assert!(
+        result.is_err(),
+        "compiler v2 rejects empty default for input with required fields"
+    );
+}
+
+/// `{}` on inputs where all fields are optional should compose successfully.
+/// See `misc_drops_empty_object_default_when_only_some_subgraphs_declare_it` for the case
+/// where only some subgraphs have it.
+#[test]
+fn misc_keeps_empty_object_argument_defaults_when_all_optional() {
+    let subgraph = ServiceDefinition {
+        name: "subgraph",
+        type_defs: r#"
+        type Query {
+          fieldB(filter: InputAllOptional = {}): String
         }
 
         input InputAllOptional {

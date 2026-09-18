@@ -1346,6 +1346,7 @@ mod tests {
                 name!("external"),
                 name!("include"),
                 name!("key"),
+                name!("oneOf"),
                 name!("provides"),
                 name!("requires"),
                 name!("skip"),
@@ -1395,6 +1396,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1442,6 +1444,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1498,6 +1501,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy")
             ]
@@ -1555,6 +1559,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
