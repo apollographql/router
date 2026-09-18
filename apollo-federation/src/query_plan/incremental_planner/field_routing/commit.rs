@@ -96,6 +96,20 @@ impl FieldRoutingSearchSpace {
             };
         }
 
+        if choice.is_connector() {
+            let connector = choice.connector().ok_or_else(|| {
+                FederationError::internal("connector choice must have a connector")
+            })?;
+            let source_subgraph = choice.target_subgraph();
+            return self.commit_connector_choice(
+                state,
+                pending,
+                connector,
+                source_subgraph,
+                choice,
+            );
+        }
+
         let qg = &self.qg();
 
         let edge_index = choice.edge_index().ok_or_else(|| {
@@ -1214,7 +1228,7 @@ impl FieldRoutingSearchSpace {
                 .cached_query_graph
                 .edge_for_inline_fragment(n, &frag_sel.inline_fragment)
             {
-                Some(edge) => Ok(self.cached_query_graph.query_graph.edge_endpoints(edge)?.1),
+                Some(edge) => Ok(self.qg().edge_endpoints(edge)?.1),
                 None => Ok(n),
             }
         };
@@ -1352,4 +1366,29 @@ fn remaining_after_split(sel: &Selection, split: &[Selection]) -> Option<Selecti
         }
         _ => None,
     }
+}
+
+/// The response path elements a field contributes: its response key, plus
+/// an index wildcard per level of list nesting.
+pub(super) fn field_response_elements(
+    field: &Field,
+) -> Result<Vec<FetchDataPathElement>, FederationError> {
+    let mut elements = vec![FetchDataPathElement::Key(
+        field.response_name().clone(),
+        Default::default(),
+    )];
+    let mut ty = &field.field_position.get(field.schema.schema())?.ty;
+    loop {
+        match ty {
+            apollo_compiler::ast::Type::Named(_) | apollo_compiler::ast::Type::NonNullNamed(_) => {
+                break;
+            }
+            apollo_compiler::ast::Type::List(inner)
+            | apollo_compiler::ast::Type::NonNullList(inner) => {
+                elements.push(FetchDataPathElement::AnyIndex(Default::default()));
+                ty = inner;
+            }
+        }
+    }
+    Ok(elements)
 }
