@@ -791,6 +791,11 @@ impl FieldRoutingSearchSpace {
         )?;
         options.extend(hops.iter().cloned());
 
+        // Offer type explosion at abstract positions. When other options
+        // exist, gate on cross-subgraph keys to avoid unnecessary BULB
+        // branching for fully-local interfaces. When no options exist,
+        // any abstract type may need explosion (some implementers may
+        // define the field while others don't).
         let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
         let is_abstract = matches!(
             CompositeTypeDefinitionPosition::try_from(current_node_data.type_.clone()),
