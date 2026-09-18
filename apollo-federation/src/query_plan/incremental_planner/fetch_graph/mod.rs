@@ -2,7 +2,6 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with checkpoint / undo-log rollback.
 
-#[allow(dead_code)]
 pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
@@ -165,6 +164,9 @@ pub(crate) struct FetchNode {
     pub(crate) context_rewrites: Vec<FetchDataKeyRenamer>,
     /// @fromContext variable definitions added to the subgraph operation.
     pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
+    /// When set, this fetch is backed by a connector rather than a GraphQL
+    /// subgraph endpoint. Plan builder maps this to `FetchProtocol::Connector`.
+    pub(crate) connector: Option<Arc<crate::connectors::Connector>>,
     /// Pipeline depth: longest incoming dependency chain. Maintained
     /// incrementally by FetchGraph to avoid per-call toposorts.
     pub(crate) pipeline_depth: u32,
@@ -179,6 +181,7 @@ impl FetchNode {
             defer_ref: None,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
             pipeline_depth: 0,
         }
     }
@@ -259,9 +262,14 @@ enum GroupKey {
     ),
 }
 
-/// The reuse-slot key for a node.
-fn group_key(node: &FetchNode) -> GroupKey {
-    match &node.kind {
+/// The reuse-slot key for a node. Connector-backed nodes have no key:
+/// each connector resolution is its own fetch and must never claim or be
+/// found in a reuse slot.
+fn group_key(node: &FetchNode) -> Option<GroupKey> {
+    if node.connector.is_some() {
+        return None;
+    }
+    Some(match &node.kind {
         FetchGroupKind::Root { .. } => {
             GroupKey::Root(node.subgraph.clone(), node.defer_ref.clone())
         }
@@ -280,7 +288,7 @@ fn group_key(node: &FetchNode) -> GroupKey {
             merge_at.clone(),
             node.defer_ref.clone(),
         ),
-    }
+    })
 }
 
 /// Opaque undo checkpoint: the undo log length at a point in time.
@@ -381,7 +389,9 @@ impl FetchGraph {
         let key = group_key(&node);
         let id = self.graph.add_node(node);
         self.undo_log.push(FetchGraphOp::AddNode { node_index: id });
-        if let std::collections::hash_map::Entry::Vacant(slot) = self.groups.entry(key.clone()) {
+        if let Some(key) = key
+            && let std::collections::hash_map::Entry::Vacant(slot) = self.groups.entry(key.clone())
+        {
             slot.insert(id);
             self.undo_log.push(FetchGraphOp::RegisterGroup { key });
         }
@@ -427,6 +437,7 @@ impl FetchGraph {
             defer_ref,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
             pipeline_depth: 0,
         })
     }
@@ -445,6 +456,7 @@ impl FetchGraph {
             defer_ref,
             context_rewrites: Vec::new(),
             context_variables: Vec::new(),
+            connector: None,
             pipeline_depth: 0,
         })
     }
@@ -490,6 +502,47 @@ impl FetchGraph {
             return id;
         }
         self.add_root_hop_group(subgraph, root_type, root_kind, merge_at)
+    }
+
+    /// Create a root fetch group backed by a connector.
+    pub(crate) fn add_connector_root_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        root_type: CompositeTypeDefinitionPosition,
+        connector: Arc<crate::connectors::Connector>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(FetchNode {
+            subgraph: subgraph.clone(),
+            kind: FetchGroupKind::Root { root_type },
+            selection_builder: SelectionBuilder::default(),
+            defer_ref,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
+            connector: Some(connector),
+            pipeline_depth: 0,
+        })
+    }
+
+    /// Create an entity fetch group backed by a connector. Never reused —
+    /// each connector entity resolution is its own node.
+    pub(crate) fn add_connector_entity_group(
+        &mut self,
+        subgraph: &Arc<str>,
+        merge_at: Vec<FetchDataPathElement>,
+        connector: Arc<crate::connectors::Connector>,
+        defer_ref: Option<String>,
+    ) -> NodeIndex {
+        self.insert_node(FetchNode {
+            subgraph: subgraph.clone(),
+            kind: FetchGroupKind::Entity { merge_at },
+            selection_builder: SelectionBuilder::default(),
+            defer_ref,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
+            connector: Some(connector),
+            pipeline_depth: 0,
+        })
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at, defer_ref).
@@ -1820,5 +1873,150 @@ mod tests {
             FetchDataPathElement::TypenameEquals(name) if name == "Admin"
         ));
         assert!(matches!(&stripped[3], FetchDataPathElement::Parent));
+    }
+
+    #[test]
+    fn display_covers_all_node_kinds() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("A");
+        let sg2: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let entity = g.add_entity_group(&sg2, user_path(None));
+        g.add_dependency(root, entity, vec![]);
+        let _root_hop = g.add_root_hop_group(
+            &sg2,
+            dummy_root_type(),
+            SchemaRootDefinitionKind::Query,
+            vec![],
+        );
+
+        let display = format!("{g}");
+        assert!(
+            display.contains("root"),
+            "Display should contain root node: {display}"
+        );
+        assert!(
+            display.contains("entity"),
+            "Display should contain entity node: {display}"
+        );
+        assert!(
+            display.contains("root_hop"),
+            "Display should contain root_hop node: {display}"
+        );
+        assert!(
+            display.contains("selections"),
+            "Display should show selection counts: {display}"
+        );
+    }
+
+    #[test]
+    fn is_reachable_transitive() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let mid = g.add_entity_group(&sg, vec![]);
+        let leaf = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(root, mid, vec![]);
+        g.add_dependency(mid, leaf, vec![]);
+
+        assert!(g.is_reachable(root, leaf));
+        assert!(g.is_reachable(root, mid));
+        assert!(!g.is_reachable(leaf, root));
+        assert!(!g.is_reachable(mid, root));
+    }
+
+    #[test]
+    fn get_or_create_root_group_with_defer_differentiates_labels() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root_type = dummy_root_type();
+        let primary = g.get_or_create_root_group(&sg, root_type.clone());
+        let deferred = g.get_or_create_root_group_with_defer(
+            &sg,
+            root_type.clone(),
+            Some("label1".to_string()),
+        );
+        let same_deferred =
+            g.get_or_create_root_group_with_defer(&sg, root_type, Some("label1".to_string()));
+
+        assert_ne!(primary, deferred);
+        assert_eq!(deferred, same_deferred);
+        assert_eq!(g.node_count(), 2);
+    }
+
+    #[test]
+    fn add_entity_group_with_defer_sets_defer_ref() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let entity = g.add_entity_group_with_defer(&sg, vec![], Some("d1".to_string()));
+        assert_eq!(g.graph[entity].defer_ref.as_deref(), Some("d1"));
+    }
+
+    #[test]
+    fn get_or_create_entity_group_with_defer_is_idempotent() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let path = user_path(None);
+        let e1 = g.get_or_create_entity_group_with_defer(&sg, path.clone(), Some("d1".to_string()));
+        let e2 = g.get_or_create_entity_group_with_defer(&sg, path, Some("d1".to_string()));
+        assert_eq!(e1, e2);
+        assert_eq!(g.node_count(), 1);
+    }
+
+    #[test]
+    fn edge_has_key_input_returns_false_when_empty() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let entity = g.add_entity_group(&sg, vec![]);
+        let edge = g.add_dependency(root, entity, vec![]);
+        assert!(!g.edge_has_key_input(edge, &apollo_compiler::name!("User")));
+    }
+
+    #[test]
+    fn incoming_inputs_empty_for_root() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let root = g.get_or_create_root_group(&sg, dummy_root_type());
+        let inputs: Vec<_> = g.incoming_inputs(root).collect();
+        assert!(inputs.is_empty());
+    }
+
+    #[test]
+    fn checkpoint_rollback_root_hop_group() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        g.add_root_hop_group(
+            &sg,
+            dummy_root_type(),
+            SchemaRootDefinitionKind::Query,
+            vec![],
+        );
+        assert_eq!(g.node_count(), 1);
+        g.rollback(cp);
+        assert_eq!(g.node_count(), 0);
+    }
+
+    #[test]
+    fn checkpoint_rollback_deferred_root_group() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        g.get_or_create_root_group_with_defer(&sg, dummy_root_type(), Some("d".to_string()));
+        assert_eq!(g.node_count(), 1);
+        g.rollback(cp);
+        assert_eq!(g.node_count(), 0);
+    }
+
+    #[test]
+    fn checkpoint_rollback_deferred_entity_group() {
+        let mut g = FetchGraph::new();
+        let sg: Arc<str> = Arc::from("sg");
+        let cp = g.checkpoint();
+        g.get_or_create_entity_group_with_defer(&sg, user_path(None), Some("d".to_string()));
+        assert_eq!(g.node_count(), 1);
+        g.rollback(cp);
+        assert_eq!(g.node_count(), 0);
     }
 }
