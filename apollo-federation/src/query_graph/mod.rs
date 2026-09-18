@@ -1142,4 +1142,16 @@ impl QueryGraph {
             })
             .ok_and_any(|field| field.directives.has(&provides_directive_definition.name))?)
     }
+
+    pub(crate) fn subgraph_entering_transitions(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = EdgeReference<'_, QueryGraphEdge>> {
+        self.out_edges(node).into_iter().filter(|edge_ref| {
+            matches!(
+                edge_ref.weight().transition,
+                QueryGraphEdgeTransition::SubgraphEnteringTransition
+            )
+        })
+    }
 }
