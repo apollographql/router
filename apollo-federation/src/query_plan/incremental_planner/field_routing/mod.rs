@@ -303,7 +303,7 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         trace!(
             selection = %selection_label(&pending.selection),
             target_subgraph = %choice.target_subgraph(),
-            hop_kind = ?choice.hop_kind,
+            choice = ?choice,
             "applying routing choice",
         );
 
