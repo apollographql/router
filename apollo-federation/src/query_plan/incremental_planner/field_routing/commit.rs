@@ -249,7 +249,7 @@ impl FieldRoutingSearchSpace {
         // `can_resolve_in_place` cannot see.
         let key_locally_resolvable = match first_key {
             Some(key_conditions) => {
-                choice.conditions_provided
+                matches!(choice, RoutingChoice::KeyHopWithProvidedKey { .. })
                     || self.can_resolve_in_place(
                         pending.query_graph_node,
                         key_conditions,
@@ -735,7 +735,7 @@ impl FieldRoutingSearchSpace {
             fetch_node,
             op_path,
             response_path,
-            entity_root: choice.hop_kind != HopKind::Direct,
+            entity_root: !choice.is_direct(),
         })
     }
 
