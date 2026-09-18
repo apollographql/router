@@ -185,8 +185,7 @@ impl RoutingChoice {
 
     /// Whether the key conditions for this hop are unroutable (circular).
     pub(crate) fn conditions_unroutable(&self) -> bool {
-        self.key_opt()
-            .is_some_and(|key| key.conditions_unroutable)
+        self.key_opt().is_some_and(|key| key.conditions_unroutable)
     }
 
     /// Planning heuristic for choosing among routing options. Prefers local
@@ -439,16 +438,14 @@ impl FieldRoutingSearchSpace {
         origin_schema: &Option<&crate::schema::ValidFederationSchema>,
         edge_finder: &impl Fn(NodeIndex) -> Option<EdgeIndex>,
     ) -> Result<Vec<RoutingChoice>, FederationError> {
-        let first_conditions_local =
-            match (&first_key_edge.conditions, origin_type, origin_schema) {
-                (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
-                (None, _, _) => true,
-                _ => false,
-            };
-        let mut first_conditions_unroutable = false;
-        if !first_conditions_local
-            && let Some(conds) = &first_key_edge.conditions
+        let first_conditions_local = match (&first_key_edge.conditions, origin_type, origin_schema)
         {
+            (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
+            (None, _, _) => true,
+            _ => false,
+        };
+        let mut first_conditions_unroutable = false;
+        if !first_conditions_local && let Some(conds) = &first_key_edge.conditions {
             first_conditions_unroutable = !self.conditions_routable(origin_node, conds)?;
         }
 
