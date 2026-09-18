@@ -194,10 +194,12 @@ impl LicenseSource {
                                 Err(e) => {
                                     // A genuine "no entitlement" (`OciError::is_not_found()`)
                                     // is already converted to `Ok(License::default())` inside
-                                    // `fetch_license_from_reference`, so any `Err` reaching
-                                    // here is a transient failure (auth, 5xx, network) that
-                                    // should be retried on the next poll, not treated as an
-                                    // invalid license.
+                                    // `fetch_license_oci` / `fetch_license_from_reference`
+                                    // (missing annotation, missing entitlement manifest, or
+                                    // missing license layer), so any `Err` reaching here is a
+                                    // transient failure (auth, 5xx, network) that should be
+                                    // retried on the next poll, not treated as an invalid
+                                    // license.
                                     tracing::warn!(
                                         "transient error fetching license from oci registry, will retry: {}",
                                         e
