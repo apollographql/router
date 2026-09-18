@@ -482,9 +482,9 @@ impl FieldRoutingSearchSpace {
             key_hop_edge,
         } = *ctx;
 
-        if choice.hop_kind == super::routing::HopKind::KeyHop {
+        if choice.is_key_hop() {
             let source = self.node_source(pending.query_graph_node)?;
-            let resolvable_in_place = choice.requires_resolvable_in_place;
+            let resolvable_in_place = choice.requires_resolvable_in_place();
 
             let has_input_conflict = resolvable_in_place
                 && key_hop_edge.is_some_and(|e| {
@@ -552,7 +552,7 @@ impl FieldRoutingSearchSpace {
             });
         }
 
-        if !choice.requires_resolvable_in_place {
+        if !choice.requires_resolvable_in_place() {
             return Err(FederationError::internal(
                 "non-hop routing choice with @requires conditions not resolvable in place",
             ));

@@ -114,7 +114,11 @@ impl FieldRoutingSearchSpace {
             choice,
             key_hop_edge,
         };
-        let edge = qg.edge_weight(choice.edge_index().expect("commit called on non-edge choice"))?;
+        let edge = qg.edge_weight(
+            choice
+                .edge_index()
+                .expect("commit called on non-edge choice"),
+        )?;
         if let Some(requires_conditions) = &edge.conditions {
             target = self.apply_requires(state, &ctx, requires_conditions, target)?;
         }
