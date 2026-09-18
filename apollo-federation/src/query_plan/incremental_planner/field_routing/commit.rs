@@ -49,13 +49,28 @@ impl FieldRoutingSearchSpace {
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
         let qg = &self.query_graph;
-        let (_, target_qg_node) = qg.edge_endpoints(choice.edge_index())?;
+
+        // Non-edge choices are not yet implemented.
+        match choice {
+            RoutingChoice::TypeExplosion => {
+                todo!("type explosion dispatch")
+            }
+            RoutingChoice::StripFragment => {
+                todo!("fragment restructuring dispatch")
+            }
+            _ => {}
+        }
+
+        let edge_index = choice
+            .edge_index()
+            .expect("edge-based routing choice must have an edge index");
+        let (_, target_qg_node) = qg.edge_endpoints(edge_index)?;
 
         // Reject unexpected edge transitions before any mutation. Later
         // failures can leave partial mutations: callers must checkpoint
         // immediately before and roll back on Err.
         let Some(response_path_elements) =
-            self.response_path_for_edge(choice.edge_index(), &pending.selection)?
+            self.response_path_for_edge(edge_index, &pending.selection)?
         else {
             return Err(FederationError::internal(format!(
                 "unexpected edge transition committing {}",
@@ -65,18 +80,12 @@ impl FieldRoutingSearchSpace {
 
         // Mutating half: commit the hop or resolve the direct fetch group.
         let (fetch_node, _key_hop_edge) = match choice {
-            RoutingChoice::Provides(_) | RoutingChoice::DirectLocal(_) => {
+            RoutingChoice::Provides(_) | RoutingChoice::Local(_) => {
                 (self.direct_fetch_node(state, pending, choice)?, None)
             }
             RoutingChoice::RootHop(_) => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
                 (group, Some(hop_edge))
-            }
-            RoutingChoice::TypeExplosion => {
-                todo!("type explosion dispatch")
-            }
-            RoutingChoice::RestructureFragment => {
-                todo!("fragment restructuring dispatch")
             }
             _ => {
                 let (group, hop_edge) = self.commit_key_hop(state, pending, choice)?;
@@ -128,7 +137,8 @@ impl FieldRoutingSearchSpace {
 
         let merge_at = self.pending_merge_at(state, pending);
 
-        let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
+        let (field_source, _) =
+            qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
         let field_source_node = qg.node_weight(field_source)?;
         let root_type: CompositeTypeDefinitionPosition =
             field_source_node.type_.clone().try_into()?;
@@ -241,7 +251,10 @@ impl FieldRoutingSearchSpace {
         let key_input = if let Some(key_conditions) = first_key {
             let dest_node = match first_dest_node {
                 Some(node) => node,
-                None => qg.edge_endpoints(choice.edge_index())?.0,
+                None => {
+                    qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?
+                        .0
+                }
             };
             let dest_type: CompositeTypeDefinitionPosition =
                 qg.node_weight(dest_node)?.type_.clone().try_into()?;
@@ -299,7 +312,8 @@ impl FieldRoutingSearchSpace {
             let (next_dest_node, exit_key) = match intermediate_hops.get(i + 1) {
                 Some(next) => (next.target_node, next.entry_key.as_ref()),
                 None => (
-                    qg.edge_endpoints(choice.edge_index())?.0,
+                    qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?
+                        .0,
                     Some(&choice.key().key_conditions),
                 ),
             };
@@ -483,7 +497,8 @@ impl FieldRoutingSearchSpace {
             current_node_data.type_,
             QueryGraphNodeType::FederatedRootType(_)
         ) {
-            let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
+            let (field_source, _) =
+                qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
             let subgraph_node = qg.node_weight(field_source)?;
             let root_type: CompositeTypeDefinitionPosition =
                 subgraph_node.type_.clone().try_into()?;
@@ -558,7 +573,7 @@ impl FieldRoutingSearchSpace {
                     .op_path
                     .pushed(Arc::new(OpPathElement::Field(field_sel.field.clone()))),
                 Selection::InlineFragment(frag_sel) => {
-                    let edge = qg.edge_weight(choice.edge_index())?;
+                    let edge = qg.edge_weight(choice.edge_index().expect("edge-based choice"))?;
                     if matches!(
                         edge.transition,
                         QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
@@ -591,7 +606,8 @@ impl FieldRoutingSearchSpace {
             let base = if matches!(choice, RoutingChoice::RootHop(_)) {
                 SharedPath::new()
             } else {
-                let (field_source, _) = qg.edge_endpoints(choice.edge_index())?;
+                let (field_source, _) =
+                    qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
                 let dest = self.node_source(field_source)?;
                 let mut initial_path = self.entity_root_path(dest.type_pos.type_name())?;
                 for element in trailing_condition_fragments(&pending.op_path) {
