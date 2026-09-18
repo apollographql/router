@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/tests/composition/compose_validation.rs
-assertion_line: 649
 expression: validated.schema_string()
 ---
 schema {

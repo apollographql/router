@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/expand/visitors/selection.rs
-assertion_line: 1058
 expression: target.schema().serialize().to_string()
 ---
 type Cat {

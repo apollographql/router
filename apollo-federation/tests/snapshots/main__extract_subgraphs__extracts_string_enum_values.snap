@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/tests/extract_subgraphs.rs
-assertion_line: 892
 expression: snapshot
 ---
 A

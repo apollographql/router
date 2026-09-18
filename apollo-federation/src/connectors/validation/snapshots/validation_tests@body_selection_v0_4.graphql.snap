@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/src/connectors/validation/mod.rs
-assertion_line: 324
 expression: result.errors
 input_file: apollo-federation/src/connectors/validation/test_data/body_selection_v0_4.graphql
 ---

@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/axum_factory/tests.rs
-assertion_line: 2387
 expression: parts
 ---
 [
