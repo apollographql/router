@@ -1,3 +1,4 @@
 supergraph:
   query_planning:
-    experimental_incremental_planning: true
+    incremental_planner:
+      enabled: true

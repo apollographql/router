@@ -181,8 +181,8 @@ impl InstrumentData {
             "$.supergraph[?(@.defer_support == true)]"
         );
         populate_config_instrument!(
-            apollo.router.config.experimental_incremental_planning,
-            "$.supergraph.query_planning[?(@.experimental_incremental_planning == true)]"
+            apollo.router.config.incremental_planner,
+            "$.supergraph.query_planning.incremental_planner[?(@.enabled == true)]"
         );
         populate_config_instrument!(
             apollo.router.config.authentication.jwt,
