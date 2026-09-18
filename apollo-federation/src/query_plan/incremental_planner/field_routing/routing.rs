@@ -37,6 +37,7 @@ pub(crate) struct KeyHopInfo {
     /// @key fields entering the target group.
     pub(crate) key_conditions: Arc<SelectionSet>,
     /// Whether the anchor fetch can select @requires conditions in place.
+    #[allow(dead_code)]
     pub(crate) requires_resolvable_in_place: bool,
 }
 
@@ -150,6 +151,7 @@ impl RoutingChoice {
     }
 
     /// Whether this is a key hop (entity-based, not root-type-resolution).
+    #[allow(dead_code)]
     pub(crate) fn is_key_hop(&self) -> bool {
         self.key_opt().is_some()
     }
@@ -169,6 +171,7 @@ impl RoutingChoice {
 
     /// Whether @requires conditions are resolvable in place. True for
     /// choices with no key hop, which carry no @requires verdict.
+    #[allow(dead_code)]
     pub(crate) fn requires_resolvable_in_place(&self) -> bool {
         self.key_opt()
             .is_none_or(|key| key.requires_resolvable_in_place)
@@ -775,6 +778,7 @@ impl FieldRoutingSearchSpace {
 
     /// True when every descendant field is local, so the whole subtree
     /// can be added in one shot.
+    #[allow(dead_code)]
     pub(super) fn is_fully_local(
         &self,
         query_graph_node: NodeIndex,
@@ -785,6 +789,7 @@ impl FieldRoutingSearchSpace {
 
     /// Recursively check that every sub-selection has an edge at the given
     /// node.
+    #[allow(dead_code)]
     pub(super) fn all_sub_selections_available(
         &self,
         node: NodeIndex,
