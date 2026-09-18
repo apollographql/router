@@ -53,19 +53,18 @@ pub(crate) struct IntermediateKeyHop {
 /// order defines the sort ranking (best first).
 #[derive(Clone, Debug)]
 pub(crate) enum RoutingChoice {
-    /// Direct edge inside an @provides subtree.
+    /// Direct edge created by @provides.
     Provides(EdgeInfo),
-    /// Direct edge in the current subgraph, no hop needed.
+    /// Direct edge in the current subgraph.
     Local(EdgeInfo),
-    /// Key hop whose @key conditions are locally available in the source subgraph.
+    /// Key hop whose @key conditions are locally available.
     KeyHopWithLocalKey { edge: EdgeInfo, key: KeyHopInfo },
     /// Key hop whose @key conditions are covered by an ancestor @provides.
     #[allow(dead_code)]
     KeyHopWithProvidedKey { edge: EdgeInfo, key: KeyHopInfo },
     /// Key hop whose @key conditions must be fetched from other subgraphs.
     KeyHopWithExternalKey { edge: EdgeInfo, key: KeyHopInfo },
-    /// Root-type-resolution hop. Creates a root-hop group (fresh root
-    /// operation) instead of an entity group.
+    /// Hop to the root type of another subgraph.
     RootHop(EdgeInfo),
     /// Multi-hop key chain through intermediate subgraphs.
     ChainedKeyHop {
@@ -73,17 +72,16 @@ pub(crate) enum RoutingChoice {
         key: KeyHopInfo,
         intermediate_hops: Vec<IntermediateKeyHop>,
     },
-    /// Key hop with statically circular conditions. Commit handles
-    /// these via locally_satisfiable_subset.
+    /// Key hop with statically circular conditions.
     #[allow(dead_code)]
     CircularKeyHop {
         edge: EdgeInfo,
         key: KeyHopInfo,
         intermediate_hops: Vec<IntermediateKeyHop>,
     },
-    /// Restructure an inline fragment (pass-through / vacuous / abstract explosion).
+    /// Strip a fragment which provides no routing information.
     #[allow(dead_code)]
-    RestructureFragment,
+    StripFragment,
     /// Per-concrete-type explosion at an abstract position.
     #[allow(dead_code)]
     TypeExplosion,
@@ -91,7 +89,7 @@ pub(crate) enum RoutingChoice {
 
 impl RoutingChoice {
     /// Edge info for edge-based choices, `None` for type explosion and
-    /// fragment restructuring.
+    /// fragment restructuring, which have no associated edge.
     fn edge(&self) -> Option<&EdgeInfo> {
         match self {
             Self::Provides(e)
@@ -102,7 +100,7 @@ impl RoutingChoice {
             | Self::KeyHopWithExternalKey { edge: e, .. }
             | Self::ChainedKeyHop { edge: e, .. }
             | Self::CircularKeyHop { edge: e, .. } => Some(e),
-            Self::TypeExplosion | Self::RestructureFragment => None,
+            Self::StripFragment | Self::TypeExplosion => None,
         }
     }
 
@@ -129,7 +127,7 @@ impl RoutingChoice {
             }
             None => {
                 static LABEL: std::sync::LazyLock<Arc<str>> =
-                    std::sync::LazyLock::new(|| Arc::from("<restructure>"));
+                    std::sync::LazyLock::new(|| Arc::from("<strip-fragment>"));
                 &LABEL
             }
         }
@@ -190,7 +188,7 @@ impl RoutingChoice {
             Self::RootHop(_) => 5,
             Self::ChainedKeyHop { .. } => 6,
             Self::CircularKeyHop { .. } => 7,
-            Self::RestructureFragment => 8,
+            Self::StripFragment => 8,
             Self::TypeExplosion => 9,
         };
         let key_size = self
@@ -574,8 +572,10 @@ impl FieldRoutingSearchSpace {
         let mut options = Vec::new();
         let field_selection = match &pending.selection {
             Selection::Field(field_selection) => field_selection,
+            // Root types are object types, so any inline fragment here is
+            // vacuous. It may still carry directives that need preserving.
             Selection::InlineFragment(_) => {
-                options.push(RoutingChoice::RestructureFragment);
+                options.push(RoutingChoice::StripFragment);
                 return Ok(options);
             }
         };
@@ -661,7 +661,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         fragment_selection: &InlineFragmentSelection,
     ) -> Result<Vec<RoutingChoice>, FederationError> {
-        let mut options = vec![RoutingChoice::RestructureFragment];
+        let mut options = Vec::new();
 
         if let Some(edge_idx) = self.edge_for_inline_fragment(
             pending.query_graph_node,
@@ -676,8 +676,13 @@ impl FieldRoutingSearchSpace {
         }
 
         let Some(type_cond) = &fragment_selection.inline_fragment.type_condition_position else {
+            options.push(RoutingChoice::StripFragment);
             return Ok(options);
         };
+
+        if self.is_vacuous_type_condition(pending.query_graph_node, type_cond)? {
+            options.push(RoutingChoice::StripFragment);
+        }
 
         // @interfaceObject fake downcast: the concrete type doesn't exist in
         // this subgraph.
@@ -723,7 +728,32 @@ impl FieldRoutingSearchSpace {
             self.edge_for_inline_fragment(key_target, &fragment_selection.inline_fragment)
         })?;
 
+        if type_cond.is_abstract_type() {
+            options.push(RoutingChoice::TypeExplosion);
+        }
+
         Ok(options)
+    }
+
+    /// Whether the type condition is vacuous at the given node, meaning every
+    /// runtime type at that position satisfies the condition.
+    fn is_vacuous_type_condition(
+        &self,
+        node: NodeIndex,
+        type_cond: &CompositeTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let current_node = self.query_graph.node_weight(node)?;
+        if matches!(current_node.type_, QueryGraphNodeType::FederatedRootType(_)) {
+            return Ok(true);
+        }
+        let current_type: CompositeTypeDefinitionPosition =
+            current_node.type_.clone().try_into()?;
+        let current_schema = self.query_graph.schema_by_source(&current_node.source)?;
+        let current_runtime_types = current_schema.possible_runtime_types(current_type)?;
+        let cond_runtime_types = self
+            .supergraph_schema
+            .possible_runtime_types(type_cond.clone())?;
+        Ok(current_runtime_types.is_subset(&cond_runtime_types))
     }
 
     /// Count immediate sub-selections with a FieldCollection edge at the
