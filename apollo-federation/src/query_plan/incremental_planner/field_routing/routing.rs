@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -774,7 +775,7 @@ impl FieldRoutingSearchSpace {
         let key = (
             pending.query_graph_node,
             super::SelectionArcKey::new(&pending.selection),
-            None::<super::ArcKey<std::collections::HashSet<apollo_compiler::Name>>>,
+            None::<super::ArcKey<HashSet<Name>>>,
         );
         let unfiltered = if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
             cached.clone()
@@ -1130,7 +1131,7 @@ impl FieldRoutingSearchSpace {
             }
             options.retain(|opt| {
                 opt.edge()
-                    .map_or(true, |e| e.target_subgraph != source_subgraph)
+                    .is_none_or(|e| e.target_subgraph != source_subgraph)
             });
             let key_conditions = match &connector.entity_resolver {
                 Some(
@@ -1209,7 +1210,7 @@ impl FieldRoutingSearchSpace {
     /// Drop subgraph-edge options landing in a connector-backed subgraph.
     fn drop_connector_subgraph_edges(&self, options: &mut Vec<RoutingChoice>) {
         options.retain(|opt| {
-            opt.edge().map_or(true, |e| {
+            opt.edge().is_none_or(|e| {
                 !self
                     .connector_index
                     .is_connector_subgraph(&e.target_subgraph)
@@ -1223,6 +1224,7 @@ impl FieldRoutingSearchSpace {
     /// one implementer can be routed to a different subgraph via an entity
     /// key, so this gates the TypeExplosion option to avoid doubling the
     /// BULB search tree at every abstract-type field.
+    #[allow(dead_code)]
     fn abstract_type_has_cross_subgraph_keys(
         &self,
         node: NodeIndex,

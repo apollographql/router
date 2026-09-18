@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -8218,17 +8219,6 @@ expression: "&schema"
             "null"
           ]
         },
-        "incremental_planner": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/IncrementalPlanner"
-            }
-          ],
-          "default": {
-            "enabled": false
-          },
-          "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates. Deferred operations fall\nback to the default planner."
-        },
         "warmed_up_queries": {
           "default": null,
           "description": "Warms up the cache on reloads by running the query plan over\na list of the most used queries (from the in memory cache)\nConfigures the number of queries warmed up. Defaults to 1/3 of\nthe in memory cache",
@@ -11677,9 +11667,6 @@ expression: "&schema"
             },
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
-            "incremental_planner": {
-              "enabled": false
-            },
             "warmed_up_queries": null
           },
           "description": "Query planning options"
@@ -13157,7 +13144,7 @@ expression: "&schema"
       ],
       "default": {
         "beam_width": 16,
-        "enabled": false,
+        "enabled": true,
         "fuel": 5000
       },
       "description": "Configuration for the incremental query planner."
@@ -13296,9 +13283,6 @@ expression: "&schema"
           },
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
-          "incremental_planner": {
-            "enabled": false
-          },
           "warmed_up_queries": null
         },
         "redact_query_validation_errors": false,

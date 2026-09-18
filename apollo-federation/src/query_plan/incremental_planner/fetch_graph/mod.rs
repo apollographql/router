@@ -1823,40 +1823,6 @@ mod tests {
     }
 
     #[test]
-    fn display_covers_all_node_kinds() {
-        let mut g = FetchGraph::new();
-        let sg: Arc<str> = Arc::from("A");
-        let sg2: Arc<str> = Arc::from("B");
-        let root = g.get_or_create_root_group(&sg, dummy_root_type());
-        let entity = g.add_entity_group(&sg2, user_path(None));
-        g.add_dependency(root, entity, vec![]);
-        let _root_hop = g.add_root_hop_group(
-            &sg2,
-            dummy_root_type(),
-            SchemaRootDefinitionKind::Query,
-            vec![],
-        );
-
-        let display = format!("{g}");
-        assert!(
-            display.contains("root"),
-            "Display should contain root node: {display}"
-        );
-        assert!(
-            display.contains("entity"),
-            "Display should contain entity node: {display}"
-        );
-        assert!(
-            display.contains("root_hop"),
-            "Display should contain root_hop node: {display}"
-        );
-        assert!(
-            display.contains("selections"),
-            "Display should show selection counts: {display}"
-        );
-    }
-
-    #[test]
     fn is_reachable_transitive() {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");

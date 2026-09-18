@@ -1050,7 +1050,6 @@ impl QueryPlanning {
     }
 }
 
-
 /// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
