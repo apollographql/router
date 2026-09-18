@@ -1,5 +1,6 @@
 ---
 source: apollo-federation/tests/composition/compose_directive.rs
+assertion_line: 1565
 expression: result.schema().schema()
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://custom.dev/custom/v1.0", import: ["@custom"]) {

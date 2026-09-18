@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/authorization/scopes.rs
+assertion_line: 1667
 expression: "TestResult\n{\n    query: QUERY, extracted_scopes: &extracted_scopes, scopes: Vec::new(),\n    result: doc, paths\n}"
 ---
 query:
