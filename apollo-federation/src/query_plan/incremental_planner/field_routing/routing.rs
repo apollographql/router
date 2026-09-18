@@ -200,6 +200,12 @@ impl RoutingChoice {
 
 /// Per-subgraph dedup: when multiple key edges reach the same subgraph,
 /// keep the choice that ranks best (satisfiability then key size).
+///
+/// FIXME: this discards keys to the same subgraph based on rank, but rank
+/// encodes satisfiability optimistically. If we keep a locally-satisfiable
+/// key and discard an external one, and the local key turns out to be
+/// unresolvable at commit time, the discarded key is lost. We should keep
+/// all candidates until satisfiability is confirmed.
 fn insert_or_replace_choice(choices: &mut Vec<RoutingChoice>, choice: RoutingChoice) {
     if let Some(existing) = choices
         .iter_mut()
@@ -285,6 +291,10 @@ impl FieldRoutingSearchSpace {
 
     /// Append cross-subgraph key-hop options. Chained hops are a last
     /// resort, explored only when `options` is still empty afterward.
+    ///
+    /// FIXME: chained hops are gated on single-hop options being empty,
+    /// but single-hop options may all turn out unsatisfiable at commit
+    /// time. We should defer this pruning until satisfiability is known.
     pub(super) fn append_key_hop_options(
         &self,
         pending_node: NodeIndex,
@@ -400,6 +410,8 @@ impl FieldRoutingSearchSpace {
             let Some(current) = hops.last().map(|hop| hop.target_node) else {
                 continue;
             };
+            // FIXME: the JS planner uses loop detection instead of a fixed
+            // depth limit, so long chains that are valid could be pruned here.
             if hops.len() >= MAX_CHAIN_DEPTH {
                 continue;
             }
@@ -434,6 +446,8 @@ impl FieldRoutingSearchSpace {
                     }
                 }
             }
+            // FIXME: stopping at the first depth with hits can miss a
+            // longer chain whose key conditions are cheaper to resolve.
             if !options.is_empty() {
                 break;
             }
@@ -699,6 +713,10 @@ impl FieldRoutingSearchSpace {
             {
                 let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
                 let target_node = self.query_graph.node_weight(target)?;
+                // Only offer the fake downcast when the target subgraph can
+                // resolve at least one non-__typename field under it. A
+                // downcast to a subgraph that owns none of the requested
+                // fields would produce an empty fetch.
                 let has_local_sub_sel =
                     fragment_selection
                         .selection_set
