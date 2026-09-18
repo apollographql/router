@@ -204,6 +204,7 @@ pub struct Operation {
     pub(crate) name: Option<Name>,
     pub(crate) variables: Arc<Vec<Node<executable::VariableDefinition>>>,
     pub(crate) directives: DirectiveList,
+    pub(crate) description: Option<Node<str>>,
     pub(crate) selection_set: SelectionSet,
 }
 
@@ -227,6 +228,7 @@ impl Operation {
             name: operation.name.clone(),
             variables: Arc::new(operation.variables.clone()),
             directives: operation.directives.clone().into(),
+            description: operation.description.clone(),
             selection_set: SelectionSet::from_selection_set(
                 &operation.selection_set,
                 &FragmentSpreadCache::init(&document.fragments, &schema, &never_cancel),
@@ -2789,7 +2791,7 @@ impl TryFrom<&Operation> for executable::Operation {
             variables: normalized_operation.variables.deref().clone(),
             directives: normalized_operation.directives.iter().cloned().collect(),
             selection_set: (&normalized_operation.selection_set).try_into()?,
-            description: None,
+            description: normalized_operation.description.clone(),
         })
     }
 }
@@ -3206,6 +3208,7 @@ pub(crate) fn normalize_operation(
         name: operation.name.clone(),
         variables: Arc::new(operation.variables.clone()),
         directives: operation.directives.clone().into(),
+        description: operation.description.clone(),
         selection_set: normalized_selection_set,
     };
     Ok(normalized_operation)

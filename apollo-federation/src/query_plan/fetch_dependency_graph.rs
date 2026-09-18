@@ -3421,6 +3421,7 @@ pub(crate) fn operation_for_entities_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
@@ -3439,6 +3440,7 @@ pub(crate) fn operation_for_query_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
