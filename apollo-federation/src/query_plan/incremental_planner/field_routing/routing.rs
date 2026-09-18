@@ -24,36 +24,20 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 /// subgraph.
 const MAX_CHAIN_DEPTH: usize = 5;
 
-/// Where a routing choice sends the field.
+/// Common fields for every edge-based routing choice.
 #[derive(Clone, Debug)]
-pub(crate) enum RoutingTarget {
-    /// Standard subgraph field resolution via a query graph edge.
-    SubgraphEdge {
-        edge_index: EdgeIndex,
-        target_subgraph: Arc<str>,
-    },
+pub(crate) struct EdgeInfo {
+    pub(crate) edge_index: EdgeIndex,
+    pub(crate) target_subgraph: Arc<str>,
 }
 
-/// A routing choice for a field: either a subgraph edge or a key hop.
+/// Key-hop metadata carried by key-based routing choices.
 #[derive(Clone, Debug)]
-pub(crate) struct RoutingChoice {
-    /// Where to route the field.
-    pub(crate) target: RoutingTarget,
-    /// How this choice reaches its target subgraph.
-    pub(crate) hop_kind: HopKind,
-    /// @key fields entering the target group; the group before it must
-    /// output them. `None` for direct edges.
-    pub(crate) key_conditions: Option<Arc<SelectionSet>>,
-    /// Whether the current subgraph can satisfy the key conditions without
-    /// an intermediate hop.
-    pub(crate) conditions_locally_satisfiable: bool,
-    /// Whether the anchoring fetch can select the edge's @requires
-    /// conditions in place; commit applies this verdict. True when the
-    /// edge has no conditions.
+pub(crate) struct KeyHopInfo {
+    /// @key fields entering the target group.
+    pub(crate) key_conditions: Arc<SelectionSet>,
+    /// Whether the anchor fetch can select @requires conditions in place.
     pub(crate) requires_resolvable_in_place: bool,
-    /// Intermediate hops, in order, when the field is only reachable
-    /// through a multi-hop key chain.
-    pub(crate) intermediate_key_hops: Vec<IntermediateKeyHop>,
 }
 
 /// One leg of a multi-hop key chain: an intermediate node and the key
@@ -65,110 +49,169 @@ pub(crate) struct IntermediateKeyHop {
     pub(crate) entry_key: Option<Arc<SelectionSet>>,
 }
 
-/// How a routing choice reaches its target subgraph.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum HopKind {
-    /// The current fetch group's subgraph resolves the selection in place.
-    Direct,
-    /// Entity fetch (`_entities`) in another subgraph, reached via @key.
-    KeyHop,
-    /// Root-level fetch at a non-root path (RootTypeResolution).
-    RootHop,
+/// A routing decision for a pending selection. Variant declaration
+/// order defines the sort ranking (best first).
+#[derive(Clone, Debug)]
+pub(crate) enum RoutingChoice {
+    /// Direct edge inside an @provides subtree.
+    Provides(EdgeInfo),
+    /// Direct edge in the current subgraph, no hop needed.
+    DirectLocal(EdgeInfo),
+    /// Key hop whose @key conditions are satisfiable in the source subgraph.
+    SatisfiableKeyHop { edge: EdgeInfo, key: KeyHopInfo },
+    /// Key hop whose @key conditions are covered by an ancestor @provides.
+    #[allow(dead_code)]
+    ProvidedKeyHop { edge: EdgeInfo, key: KeyHopInfo },
+    /// Key hop whose @key conditions require routing through other subgraphs.
+    UnsatisfiableKeyHop { edge: EdgeInfo, key: KeyHopInfo },
+    /// Root-type-resolution hop. Creates a root-hop group (fresh root
+    /// operation) instead of an entity group.
+    RootHop(EdgeInfo),
+    /// Multi-hop key chain through intermediate subgraphs.
+    ChainedKeyHop {
+        edge: EdgeInfo,
+        key: KeyHopInfo,
+        intermediate_hops: Vec<IntermediateKeyHop>,
+    },
+    /// Key hop with statically circular conditions. Commit handles
+    /// these via locally_satisfiable_subset.
+    #[allow(dead_code)]
+    CircularKeyHop {
+        edge: EdgeInfo,
+        key: KeyHopInfo,
+        intermediate_hops: Vec<IntermediateKeyHop>,
+    },
+    /// Restructure an inline fragment (pass-through / vacuous / abstract explosion).
+    #[allow(dead_code)]
+    RestructureFragment,
+    /// Per-concrete-type explosion at an abstract position.
+    #[allow(dead_code)]
+    TypeExplosion,
 }
 
 impl RoutingChoice {
-    /// A direct edge in the current subgraph.
-    fn direct(edge_index: EdgeIndex, target_subgraph: Arc<str>) -> Self {
-        Self {
-            target: RoutingTarget::SubgraphEdge {
-                edge_index,
-                target_subgraph,
-            },
-            hop_kind: HopKind::Direct,
-            key_conditions: None,
-            conditions_locally_satisfiable: true,
-            requires_resolvable_in_place: true,
-            intermediate_key_hops: Vec::new(),
+    /// Edge info for edge-based choices, `None` for type explosion and
+    /// fragment restructuring.
+    fn edge(&self) -> Option<&EdgeInfo> {
+        match self {
+            Self::Provides(e)
+            | Self::DirectLocal(e)
+            | Self::RootHop(e)
+            | Self::SatisfiableKeyHop { edge: e, .. }
+            | Self::ProvidedKeyHop { edge: e, .. }
+            | Self::UnsatisfiableKeyHop { edge: e, .. }
+            | Self::ChainedKeyHop { edge: e, .. }
+            | Self::CircularKeyHop { edge: e, .. } => Some(e),
+            Self::TypeExplosion | Self::RestructureFragment => None,
         }
     }
 
-    /// Same-subgraph entity re-entry for in-place-unresolvable @requires.
-    fn self_key_hop(
-        edge_index: EdgeIndex,
-        target_subgraph: Arc<str>,
-        key: Arc<SelectionSet>,
-        requires_resolvable_in_place: bool,
-    ) -> Self {
-        Self {
-            target: RoutingTarget::SubgraphEdge {
-                edge_index,
-                target_subgraph,
-            },
-            hop_kind: HopKind::KeyHop,
-            key_conditions: Some(key),
-            conditions_locally_satisfiable: true,
-            requires_resolvable_in_place,
-            intermediate_key_hops: Vec::new(),
+    /// Key hop metadata, `None` for direct, root, and non-edge choices.
+    fn key_opt(&self) -> Option<&KeyHopInfo> {
+        match self {
+            Self::SatisfiableKeyHop { key, .. }
+            | Self::ProvidedKeyHop { key, .. }
+            | Self::UnsatisfiableKeyHop { key, .. }
+            | Self::ChainedKeyHop { key, .. }
+            | Self::CircularKeyHop { key, .. } => Some(key),
+            _ => None,
         }
     }
 
-    /// Target subgraph name.
+    /// Target subgraph name (synthetic label for non-edge choices).
     pub(crate) fn target_subgraph(&self) -> &Arc<str> {
-        match &self.target {
-            RoutingTarget::SubgraphEdge {
-                target_subgraph, ..
-            } => target_subgraph,
-        }
-    }
-
-    /// Query graph edge index.
-    pub(crate) fn edge_index(&self) -> EdgeIndex {
-        match &self.target {
-            RoutingTarget::SubgraphEdge { edge_index, .. } => *edge_index,
-        }
-    }
-}
-
-/// Rank of a routing option, best first.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum RoutingPreference {
-    Provides,
-    DirectLocal,
-    /// Same-subgraph entity re-entry for in-place-unresolvable @requires.
-    SelfRequiresHop,
-    LocallySatisfiableKeyHop,
-    RemoteKeyHop,
-    ChainedKeyHop,
-}
-
-struct KeyHopCandidate {
-    found_edge_idx: EdgeIndex,
-    target_subgraph: Arc<str>,
-    is_root: bool,
-    conditions_local: bool,
-    key_conditions: Option<Arc<SelectionSet>>,
-    key_leaf_count: usize,
-}
-
-impl KeyHopCandidate {
-    /// Satisfiable keys must never lose the dedup to a cheaper-looking
-    /// unsatisfiable one.
-    fn dedup_rank(&self) -> (u8, usize) {
-        let satisfiability = if self.conditions_local { 0 } else { 2 };
-        (satisfiability, self.key_leaf_count)
-    }
-
-    fn insert_or_replace(candidates: &mut Vec<Self>, candidate: Self) {
-        if let Some(existing) = candidates
-            .iter_mut()
-            .find(|c| c.target_subgraph == candidate.target_subgraph)
-        {
-            if candidate.dedup_rank() < existing.dedup_rank() {
-                *existing = candidate;
+        match self.edge() {
+            Some(e) => &e.target_subgraph,
+            None if matches!(self, Self::TypeExplosion) => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<type-explosion>"));
+                &LABEL
             }
-        } else {
-            candidates.push(candidate);
+            None => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<restructure>"));
+                &LABEL
+            }
         }
+    }
+
+    /// Query graph edge index. Panics on non-edge routing choices.
+    pub(crate) fn edge_index(&self) -> EdgeIndex {
+        self.edge()
+            .expect("edge_index() called on a non-edge routing choice")
+            .edge_index
+    }
+
+    /// Key hop metadata. Panics on direct, root, or non-edge choices.
+    pub(crate) fn key(&self) -> &KeyHopInfo {
+        self.key_opt()
+            .expect("key() called on a non-key-hop routing choice")
+    }
+
+    /// Whether this is a direct resolution (no hop needed).
+    pub(crate) fn is_direct(&self) -> bool {
+        matches!(self, Self::Provides(_) | Self::DirectLocal(_))
+    }
+
+    /// Whether this is a key hop (entity-based, not root-type-resolution).
+    pub(crate) fn is_key_hop(&self) -> bool {
+        self.key_opt().is_some()
+    }
+
+    /// Intermediate hops for chained key chains, empty otherwise.
+    pub(crate) fn intermediate_hops(&self) -> &[IntermediateKeyHop] {
+        match self {
+            Self::ChainedKeyHop {
+                intermediate_hops, ..
+            }
+            | Self::CircularKeyHop {
+                intermediate_hops, ..
+            } => intermediate_hops,
+            _ => &[],
+        }
+    }
+
+    /// Whether @requires conditions are resolvable in place. True for
+    /// choices with no key hop, which carry no @requires verdict.
+    pub(crate) fn requires_resolvable_in_place(&self) -> bool {
+        self.key_opt()
+            .is_none_or(|key| key.requires_resolvable_in_place)
+    }
+
+    /// Sort key: variant preference (declaration order in the enum, best
+    /// first), tiebroken by key condition leaf count so smaller keys win.
+    pub(super) fn rank(&self) -> (u8, usize) {
+        let variant = match self {
+            Self::Provides(_) => 0,
+            Self::DirectLocal(_) => 1,
+            Self::SatisfiableKeyHop { .. } => 2,
+            Self::ProvidedKeyHop { .. } => 3,
+            Self::UnsatisfiableKeyHop { .. } => 4,
+            Self::RootHop(_) => 5,
+            Self::ChainedKeyHop { .. } => 6,
+            Self::CircularKeyHop { .. } => 7,
+            Self::RestructureFragment => 8,
+            Self::TypeExplosion => 9,
+        };
+        let key_size = self
+            .key_opt()
+            .map_or(0, |key| selection_leaf_count(&key.key_conditions));
+        (variant, key_size)
+    }
+}
+
+/// Per-subgraph dedup: when multiple key edges reach the same subgraph,
+/// keep the choice that ranks best (satisfiability then key size).
+fn insert_or_replace_choice(choices: &mut Vec<RoutingChoice>, choice: RoutingChoice) {
+    if let Some(existing) = choices
+        .iter_mut()
+        .find(|c| c.target_subgraph() == choice.target_subgraph())
+    {
+        if choice.rank() < existing.rank() {
+            *existing = choice;
+        }
+    } else {
+        choices.push(choice);
     }
 }
 
@@ -188,6 +231,31 @@ impl FieldRoutingSearchSpace {
         self.can_resolve_in_place(node, conditions, &source)
     }
 
+    /// Build a direct routing choice for a field edge, classifying it as
+    /// Provides when the edge is part of an @provides subtree.
+    fn direct_choice(
+        &self,
+        edge_idx: EdgeIndex,
+        target_subgraph: Arc<str>,
+    ) -> Result<RoutingChoice, FederationError> {
+        let is_provides = matches!(
+            self.query_graph.edge_weight(edge_idx)?.transition,
+            QueryGraphEdgeTransition::FieldCollection {
+                is_part_of_provides: true,
+                ..
+            }
+        );
+        let edge_info = EdgeInfo {
+            edge_index: edge_idx,
+            target_subgraph,
+        };
+        Ok(if is_provides {
+            RoutingChoice::Provides(edge_info)
+        } else {
+            RoutingChoice::DirectLocal(edge_info)
+        })
+    }
+
     /// Enumerate local resolution strategies for a direct edge carrying
     /// @requires conditions.
     fn push_requires_strategy_options(
@@ -200,15 +268,19 @@ impl FieldRoutingSearchSpace {
         let in_place = self.requires_conditions_resolvable_in_place(node, edge_idx)?;
         let key = self.query_graph.get_locally_satisfiable_key(node)?;
         if in_place {
-            options.push(RoutingChoice::direct(edge_idx, target_subgraph.clone()));
+            options.push(self.direct_choice(edge_idx, target_subgraph.clone())?);
         }
         if let Some(key) = key {
-            options.push(RoutingChoice::self_key_hop(
-                edge_idx,
-                target_subgraph.clone(),
-                Arc::new(key),
-                in_place,
-            ));
+            options.push(RoutingChoice::SatisfiableKeyHop {
+                edge: EdgeInfo {
+                    edge_index: edge_idx,
+                    target_subgraph: target_subgraph.clone(),
+                },
+                key: KeyHopInfo {
+                    key_conditions: Arc::new(key),
+                    requires_resolvable_in_place: in_place,
+                },
+            });
         }
         Ok(())
     }
@@ -227,7 +299,7 @@ impl FieldRoutingSearchSpace {
             current_node.type_.clone().try_into().ok();
         let source_schema = self.query_graph.schema_by_source(&current_source).ok();
 
-        let mut candidates: Vec<KeyHopCandidate> = Vec::new();
+        let mut deduped: Vec<RoutingChoice> = Vec::new();
         let mut need_chain: Vec<(NodeIndex, EdgeIndex)> = Vec::new();
 
         for key_edge_idx in self
@@ -252,13 +324,14 @@ impl FieldRoutingSearchSpace {
                 continue;
             }
             if let Some(found_edge_idx) = edge_finder(key_target) {
-                let candidate = self.single_hop_candidate(
+                let choice = self.single_hop_choice(
+                    pending_node,
                     found_edge_idx,
                     key_edge,
                     key_target_node.source.clone(),
                     (&source_type, &source_schema),
                 )?;
-                KeyHopCandidate::insert_or_replace(&mut candidates, candidate);
+                insert_or_replace_choice(&mut deduped, choice);
             } else if !matches!(
                 key_edge.transition,
                 QueryGraphEdgeTransition::RootTypeResolution { .. }
@@ -267,7 +340,7 @@ impl FieldRoutingSearchSpace {
             }
         }
 
-        options.extend(self.evaluate_hop_candidates(pending_node, &candidates)?);
+        options.extend(deduped);
 
         if options.is_empty() {
             for (key_target, key_edge_idx) in need_chain {
@@ -298,16 +371,10 @@ impl FieldRoutingSearchSpace {
         first_intermediate: NodeIndex,
         first_key_edge: &crate::query_graph::QueryGraphEdge,
         origin_source: &Arc<str>,
-        origin_type: &Option<CompositeTypeDefinitionPosition>,
-        origin_schema: &Option<&crate::schema::ValidFederationSchema>,
+        _origin_type: &Option<CompositeTypeDefinitionPosition>,
+        _origin_schema: &Option<&crate::schema::ValidFederationSchema>,
         edge_finder: &impl Fn(NodeIndex) -> Option<EdgeIndex>,
     ) -> Result<Vec<RoutingChoice>, FederationError> {
-        let first_conditions_local = match (&first_key_edge.conditions, origin_type, origin_schema)
-        {
-            (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
-            (None, _, _) => true,
-            _ => false,
-        };
         let mut visited: Vec<Arc<str>> = vec![
             origin_source.clone(),
             self.query_graph
@@ -340,22 +407,28 @@ impl FieldRoutingSearchSpace {
             }
             for next in self.chain_exits(current, &mut visited)? {
                 match edge_finder(next.target_node) {
-                    Some(found_edge) => options.push(RoutingChoice {
-                        target: RoutingTarget::SubgraphEdge {
+                    Some(found_edge) => {
+                        let edge = EdgeInfo {
                             edge_index: found_edge,
                             target_subgraph: self
                                 .query_graph
                                 .node_weight(next.target_node)?
                                 .source
                                 .clone(),
-                        },
-                        hop_kind: HopKind::KeyHop,
-                        key_conditions: next.entry_key,
-                        conditions_locally_satisfiable: first_conditions_local,
-                        requires_resolvable_in_place: self
-                            .requires_conditions_resolvable_in_place(origin_node, found_edge)?,
-                        intermediate_key_hops: hops.clone(),
-                    }),
+                        };
+                        let key = KeyHopInfo {
+                            key_conditions: next.entry_key.ok_or_else(|| {
+                                FederationError::internal("chained key hop missing entry key")
+                            })?,
+                            requires_resolvable_in_place: self
+                                .requires_conditions_resolvable_in_place(origin_node, found_edge)?,
+                        };
+                        options.push(RoutingChoice::ChainedKeyHop {
+                            edge,
+                            key,
+                            intermediate_hops: hops.clone(),
+                        });
+                    }
                     None => {
                         let mut extended = hops.clone();
                         extended.push(next);
@@ -402,13 +475,12 @@ impl FieldRoutingSearchSpace {
         Ok(exits)
     }
 
-    /// Dedup candidate for a single-hop key edge whose target has the
-    /// field. Satisfiability is computed before dedup so a producible key
-    /// never loses to an unsatisfiable same-subgraph rival. This verdict
-    /// is schema-static and weaker than commit's; @provides support adds
-    /// a dedup tier for provides-copies.
-    fn single_hop_candidate(
+    /// Build a RoutingChoice for a single-hop key edge. Satisfiability is
+    /// computed here, before dedup, so a key the state can produce is never
+    /// collapsed into an unsatisfiable same-subgraph rival.
+    fn single_hop_choice(
         &self,
+        pending_node: NodeIndex,
         found_edge_idx: EdgeIndex,
         key_edge: &crate::query_graph::QueryGraphEdge,
         target_subgraph: Arc<str>,
@@ -416,67 +488,51 @@ impl FieldRoutingSearchSpace {
             &Option<CompositeTypeDefinitionPosition>,
             &Option<&crate::schema::ValidFederationSchema>,
         ),
-    ) -> Result<KeyHopCandidate, FederationError> {
-        let is_root = matches!(
+    ) -> Result<RoutingChoice, FederationError> {
+        let edge = EdgeInfo {
+            edge_index: found_edge_idx,
+            target_subgraph,
+        };
+
+        if matches!(
             key_edge.transition,
             QueryGraphEdgeTransition::RootTypeResolution { .. }
-        );
-        let conditions_local = if is_root {
-            true
-        } else {
-            match (&key_edge.conditions, source_type, source_schema) {
-                (Some(conds), Some(st), Some(ss)) => self.can_satisfy(conds, st, ss),
-                (None, _, _) => true,
-                _ => false,
-            }
-        };
-        let key_leaf_count = key_edge
-            .conditions
-            .as_ref()
-            .map(|c| selection_leaf_count(c))
-            .unwrap_or(0);
-        Ok(KeyHopCandidate {
-            found_edge_idx,
-            target_subgraph,
-            is_root,
-            conditions_local,
-            key_conditions: key_edge.conditions.clone(),
-            key_leaf_count,
-        })
-    }
-
-    fn evaluate_hop_candidates(
-        &self,
-        pending_node: NodeIndex,
-        candidates: &[KeyHopCandidate],
-    ) -> Result<Vec<RoutingChoice>, FederationError> {
-        let mut options = Vec::with_capacity(candidates.len());
-        for c in candidates {
-            let hop_kind = if c.is_root {
-                HopKind::RootHop
-            } else {
-                HopKind::KeyHop
-            };
+        ) {
             trace!(
-                target_subgraph = %c.target_subgraph,
-                conditions_local = c.conditions_local,
-                ?hop_kind,
+                target_subgraph = %edge.target_subgraph,
+                is_root = true,
                 "found edge via key hop",
             );
-            options.push(RoutingChoice {
-                target: RoutingTarget::SubgraphEdge {
-                    edge_index: c.found_edge_idx,
-                    target_subgraph: c.target_subgraph.clone(),
-                },
-                hop_kind,
-                key_conditions: c.key_conditions.clone(),
-                conditions_locally_satisfiable: c.conditions_local,
-                requires_resolvable_in_place: self
-                    .requires_conditions_resolvable_in_place(pending_node, c.found_edge_idx)?,
-                intermediate_key_hops: Vec::new(),
-            });
+            return Ok(RoutingChoice::RootHop(edge));
         }
-        Ok(options)
+
+        let key_conditions = key_edge
+            .conditions
+            .clone()
+            .ok_or_else(|| FederationError::internal("key hop missing conditions"))?;
+
+        let conditions_local = match (source_type, source_schema) {
+            (Some(st), Some(ss)) => self.can_satisfy(&key_conditions, st, ss),
+            _ => false,
+        };
+
+        trace!(
+            target_subgraph = %edge.target_subgraph,
+            conditions_local,
+            "found edge via key hop",
+        );
+
+        let key = KeyHopInfo {
+            key_conditions,
+            requires_resolvable_in_place: self
+                .requires_conditions_resolvable_in_place(pending_node, found_edge_idx)?,
+        };
+
+        Ok(if conditions_local {
+            RoutingChoice::SatisfiableKeyHop { edge, key }
+        } else {
+            RoutingChoice::UnsatisfiableKeyHop { edge, key }
+        })
     }
 
     /// Enumerate `RoutingChoice`s for a pending selection at its query
@@ -500,7 +556,7 @@ impl FieldRoutingSearchSpace {
                     self.fragment_options(pending, fragment_selection)?
                 }
             };
-            self.rank_options(&mut options, &current_node_data.source);
+            options.sort_by_key(RoutingChoice::rank);
             options
         };
         Ok(options)
@@ -536,10 +592,10 @@ impl FieldRoutingSearchSpace {
                 if self.disabled_subgraphs.contains(&subgraph_node.source) {
                     continue;
                 }
-                options.push(RoutingChoice::direct(
-                    field_edge_idx,
-                    subgraph_node.source.clone(),
-                ));
+                options.push(RoutingChoice::DirectLocal(EdgeInfo {
+                    edge_index: field_edge_idx,
+                    target_subgraph: subgraph_node.source.clone(),
+                }));
             }
         }
 
@@ -577,7 +633,7 @@ impl FieldRoutingSearchSpace {
             let target_node = self.query_graph.node_weight(target)?;
             let edge = self.query_graph.edge_weight(edge_idx)?;
             if edge.conditions.is_none() {
-                options.push(RoutingChoice::direct(edge_idx, target_node.source.clone()));
+                options.push(self.direct_choice(edge_idx, target_node.source.clone())?);
             } else {
                 self.push_requires_strategy_options(
                     &mut options,
@@ -610,7 +666,10 @@ impl FieldRoutingSearchSpace {
         ) {
             let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
             let target_node = self.query_graph.node_weight(target)?;
-            options.push(RoutingChoice::direct(edge_idx, target_node.source.clone()));
+            options.push(RoutingChoice::DirectLocal(EdgeInfo {
+                edge_index: edge_idx,
+                target_subgraph: target_node.source.clone(),
+            }));
         }
 
         let Some(type_cond) = &fragment_selection.inline_fragment.type_condition_position else {
@@ -644,7 +703,10 @@ impl FieldRoutingSearchSpace {
                             _ => false,
                         });
                 if has_local_sub_sel {
-                    options.push(RoutingChoice::direct(edge_idx, target_node.source.clone()));
+                    options.push(RoutingChoice::DirectLocal(EdgeInfo {
+                        edge_index: edge_idx,
+                        target_subgraph: target_node.source.clone(),
+                    }));
                 }
                 break;
             }
@@ -658,41 +720,6 @@ impl FieldRoutingSearchSpace {
             self.edge_for_inline_fragment(key_target, &fragment_selection.inline_fragment)
         })?;
         Ok(options)
-    }
-
-    /// Order options best-first: @provides beats a direct local edge beats a
-    /// same-subgraph re-entry beats a key hop whose conditions are locally
-    /// satisfiable beats a remote hop.
-    pub(super) fn rank_options(&self, options: &mut [RoutingChoice], current_source: &Arc<str>) {
-        options.sort_by_key(|opt| {
-            let preference = if let Ok(edge) = self.query_graph.edge_weight(opt.edge_index()) {
-                match &edge.transition {
-                    QueryGraphEdgeTransition::FieldCollection {
-                        is_part_of_provides: true,
-                        ..
-                    } => RoutingPreference::Provides,
-                    _ if opt.hop_kind == HopKind::Direct => RoutingPreference::DirectLocal,
-                    _ if !opt.intermediate_key_hops.is_empty() => RoutingPreference::ChainedKeyHop,
-                    _ if opt.hop_kind == HopKind::KeyHop
-                        && opt.target_subgraph() == current_source =>
-                    {
-                        RoutingPreference::SelfRequiresHop
-                    }
-                    _ if opt.conditions_locally_satisfiable => {
-                        RoutingPreference::LocallySatisfiableKeyHop
-                    }
-                    _ => RoutingPreference::RemoteKeyHop,
-                }
-            } else {
-                RoutingPreference::RemoteKeyHop
-            };
-            let key_size = opt
-                .key_conditions
-                .as_ref()
-                .map(|conds| selection_leaf_count(conds))
-                .unwrap_or(0);
-            (preference, key_size)
-        });
     }
 
     /// Count immediate sub-selections with a FieldCollection edge at the
@@ -847,39 +874,75 @@ mod tests {
             .expect("composed graph has a key edge")
     }
 
-    /// A same-subgraph entity re-entry (the strategy for in-place
-    /// unresolvable @requires) must outrank any cross-subgraph hop, even a
-    /// locally satisfiable one with a smaller key.
+    /// Satisfiable beats provided beats unsatisfiable, then smaller keys win.
     #[test]
-    fn self_requires_hop_outranks_cross_subgraph_hops() {
+    fn key_hops_sort_by_satisfiability_then_key_size() {
         let space = search_space();
-        let current: Arc<str> = Arc::from("S1");
         let edge = any_key_edge(&space);
 
-        let self_hop = RoutingChoice::self_key_hop(
-            edge,
-            Arc::clone(&current),
-            key_selection(&space, "k x"),
-            false,
-        );
-        let remote_hop = RoutingChoice {
-            target: RoutingTarget::SubgraphEdge {
+        let satisfiable = RoutingChoice::SatisfiableKeyHop {
+            edge: EdgeInfo {
+                edge_index: edge,
+                target_subgraph: Arc::from("S1"),
+            },
+            key: KeyHopInfo {
+                key_conditions: key_selection(&space, "k x"),
+                requires_resolvable_in_place: false,
+            },
+        };
+        let provided = RoutingChoice::ProvidedKeyHop {
+            edge: EdgeInfo {
                 edge_index: edge,
                 target_subgraph: Arc::from("S2"),
             },
-            hop_kind: HopKind::KeyHop,
-            key_conditions: Some(key_selection(&space, "k")),
-            conditions_locally_satisfiable: true,
-            requires_resolvable_in_place: true,
-            intermediate_key_hops: Vec::new(),
+            key: KeyHopInfo {
+                key_conditions: key_selection(&space, "k"),
+                requires_resolvable_in_place: false,
+            },
+        };
+        let unsatisfiable_small = RoutingChoice::UnsatisfiableKeyHop {
+            edge: EdgeInfo {
+                edge_index: edge,
+                target_subgraph: Arc::from("S3"),
+            },
+            key: KeyHopInfo {
+                key_conditions: key_selection(&space, "k"),
+                requires_resolvable_in_place: true,
+            },
+        };
+        let unsatisfiable_large = RoutingChoice::UnsatisfiableKeyHop {
+            edge: EdgeInfo {
+                edge_index: edge,
+                target_subgraph: Arc::from("S4"),
+            },
+            key: KeyHopInfo {
+                key_conditions: key_selection(&space, "k x"),
+                requires_resolvable_in_place: false,
+            },
         };
 
-        let mut options = vec![remote_hop, self_hop];
-        space.rank_options(&mut options, &current);
+        let mut options = [
+            unsatisfiable_large,
+            provided,
+            unsatisfiable_small,
+            satisfiable,
+        ];
+        options.sort_by_key(RoutingChoice::rank);
         assert_eq!(
-            options[0].target_subgraph(),
-            &current,
-            "self re-entry must rank above cross-subgraph hops",
+            options[0].target_subgraph().as_ref(),
+            "S1",
+            "satisfiable wins"
+        );
+        assert_eq!(options[1].target_subgraph().as_ref(), "S2", "provided next");
+        assert_eq!(
+            options[2].target_subgraph().as_ref(),
+            "S3",
+            "unsatisfiable small key"
+        );
+        assert_eq!(
+            options[3].target_subgraph().as_ref(),
+            "S4",
+            "unsatisfiable large key last"
         );
     }
 }
