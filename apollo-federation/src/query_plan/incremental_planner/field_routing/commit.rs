@@ -597,7 +597,9 @@ impl FieldRoutingSearchSpace {
         match &pending.selection {
             Selection::Field(_) => self.field_fetch_node(state, pending, choice),
             Selection::InlineFragment(_) => {
-                let edge = self.query_graph.edge_weight(choice.edge_index())?;
+                let edge = self
+                    .query_graph
+                    .edge_weight(choice.edge_index().expect("edge-based choice"))?;
                 if matches!(
                     edge.transition,
                     QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
