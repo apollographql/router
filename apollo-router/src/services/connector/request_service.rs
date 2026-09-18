@@ -153,6 +153,46 @@ impl Request {
     }
 }
 
+/// What happened at the transport layer for a single connector call.
+///
+/// Three states, spelled out rather than encoded as `Option<Result<..>>`: a connector
+/// response can be served from the router's response cache, in which case no call was
+/// made at all and there is no status, no headers and no upstream body to report. That
+/// third state is not an absence of a result, it is a result of its own, and every
+/// consumer has to decide what it means for them.
+///
+/// Naming it is the point. With `Option<Result<..>>`, code that only handled the two
+/// familiar cases fell into an `else` on a cache hit and compiled without complaint,
+/// which is how telemetry selectors went quiet and a coprocessor condition stopped
+/// gating its stage. A match on this enum makes the compiler ask.
+#[derive(Debug)]
+pub enum TransportOutcome {
+    /// The connector call was made and the upstream responded, or the connector is
+    /// mapping-only and produced a response without any transport at all.
+    Response(TransportResponse),
+
+    /// The connector call was attempted and failed at the transport level.
+    Error(Error),
+
+    /// No connector call was made: the response was served from the router's response
+    /// cache. There is no status, no headers and no upstream body, because nothing went
+    /// over the wire.
+    ServedFromCache,
+}
+
+impl TransportOutcome {
+    /// Whether this response was served from the router's response cache rather than
+    /// from a connector call.
+    ///
+    /// Deliberately the only convenience accessor here. A `transport_response()` helper
+    /// returning `Option<&TransportResponse>` would hand every reader back the same
+    /// silent `else` that this enum exists to remove, so reading a status or a header
+    /// means matching and saying what a cache hit does instead.
+    pub fn served_from_cache(&self) -> bool {
+        matches!(self, Self::ServedFromCache)
+    }
+}
+
 /// Response type for a connector
 #[derive(Debug)]
 pub struct Response {
@@ -166,8 +206,7 @@ pub struct Response {
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request. `None` means no transport happened. Rather, the
-    /// response was served from the router's response cache.
+    /// What happened at the transport layer for this connector call.
     ///
     /// This is the raw transport outcome: HTTP status, headers and transport-level
     /// errors. Telemetry and downstream plugins read it, but the data returned to the
@@ -175,7 +214,7 @@ pub struct Response {
     /// changes. Rewriting the status or headers here therefore makes telemetry
     /// disagree with what the client actually receives unless you make the
     /// corresponding change through the mapped-response accessors.
-    pub transport_result: Option<Result<TransportResponse, Error>>,
+    pub transport_outcome: TransportOutcome,
 
     /// The mapped response, including any mapping problems encountered when processing
     /// the response. This is what is merged into the GraphQL response returned to the
@@ -200,7 +239,7 @@ impl Response {
     /// customization cannot turn a failed connector call into a successful one, which
     /// is also true of the coprocessor `ConnectorResponse` stage.
     ///
-    /// This does not touch [`Response::transport_result`], so telemetry continues to
+    /// This does not touch [`Response::transport_outcome`], so telemetry continues to
     /// report the status and headers actually received from the upstream.
     pub fn set_data(&mut self, data: serde_json_bytes::Value) -> bool {
         match &mut self.mapped_response {
@@ -270,7 +309,7 @@ impl Response {
         Self {
             context,
             subgraph_name,
-            transport_result: Some(Err(error)),
+            transport_outcome: TransportOutcome::Error(error),
             mapped_response,
         }
     }
@@ -297,7 +336,7 @@ impl Response {
         Response {
             context: request_context,
             subgraph_name,
-            transport_result: Some(Err(Error::TransportFailure(message))),
+            transport_outcome: TransportOutcome::Error(Error::TransportFailure(message)),
             mapped_response: MappedResponse::Error {
                 error,
                 key: request_key,
@@ -332,7 +371,7 @@ impl Response {
         Self {
             context,
             subgraph_name: String::new(),
-            transport_result: Some(Ok(http_response.into())),
+            transport_outcome: TransportOutcome::Response(http_response.into()),
             mapped_response,
         }
     }
@@ -453,7 +492,9 @@ impl tower::Service<Request> for ConnectorRequestService {
                     Ok(Response {
                         context: request.context,
                         subgraph_name: original_subgraph_name,
-                        transport_result: Some(Ok(TransportResponse::MappingOnly)),
+                        transport_outcome: TransportOutcome::Response(
+                            TransportResponse::MappingOnly,
+                        ),
                         mapped_response: mapped,
                     })
                 }

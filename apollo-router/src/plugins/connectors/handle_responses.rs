@@ -43,6 +43,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::fetch::AddSubgraphNameExt;
 
 // --- ERRORS ------------------------------------------------------------------
@@ -89,7 +90,7 @@ where
     T: HttpBody,
     T::Error: Into<tower::BoxError>,
 {
-    let (mut mapped_response, result) = match result {
+    let (mut mapped_response, outcome) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -99,13 +100,13 @@ where
                     key: response_key,
                     problems: Vec::new(),
                 },
-                Err(error),
+                TransportOutcome::Error(error),
             )
         }
         Ok(response) => {
             let (parts, body) = response.into_parts();
 
-            let result = Ok(TransportResponse::Http(HttpResponse {
+            let outcome = TransportOutcome::Response(TransportResponse::Http(HttpResponse {
                 inner: parts.clone(),
             }));
 
@@ -241,7 +242,7 @@ where
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             }
 
-            (mapped, result)
+            (mapped, outcome)
         }
     };
 
@@ -257,7 +258,7 @@ where
     connector::request_service::Response {
         context: context.clone(),
         subgraph_name: connector.id.subgraph_name.to_string(),
-        transport_result: Some(result),
+        transport_outcome: outcome,
         mapped_response,
     }
 }
@@ -326,9 +327,11 @@ fn log_connectors_event(
             let response = connector::request_service::Response {
                 context: context.clone(),
                 subgraph_name: connector.id.subgraph_name.to_string(),
-                transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
-                    inner: parts.clone(),
-                }))),
+                transport_outcome: TransportOutcome::Response(TransportResponse::Http(
+                    HttpResponse {
+                        inner: parts.clone(),
+                    },
+                )),
                 mapped_response: MappedResponse::Data {
                     data: Value::Null,
                     key: response_key,

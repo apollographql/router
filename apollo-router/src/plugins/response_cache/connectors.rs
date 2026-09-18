@@ -80,6 +80,7 @@ use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::connect;
 use crate::services::connector;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::spec::TYPENAME;
 
 /// Configuration for connector response caching: global defaults plus per-source overrides
@@ -1338,9 +1339,9 @@ impl ConnectorRequestCacheService {
                     return Ok(connector::request_service::Response {
                             context: request.context,
                             subgraph_name,
-                            transport_result: Some(Err(
+                            transport_outcome: TransportOutcome::Error(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
-                            )),
+                            ),
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1631,7 +1632,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     // No transport happened — served from the response cache.
-                    transport_result: None,
+                    transport_outcome: TransportOutcome::ServedFromCache,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -1904,11 +1905,11 @@ fn connector_response_cache_control(
     response: &connector::request_service::Response,
     connector_ttl: Duration,
 ) -> Option<CacheControl> {
-    let Some(Ok(
+    let TransportOutcome::Response(
         apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
             http_response,
         ),
-    )) = &response.transport_result
+    ) = &response.transport_outcome
     else {
         return None;
     };

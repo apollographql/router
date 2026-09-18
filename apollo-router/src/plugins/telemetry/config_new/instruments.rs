@@ -2759,6 +2759,7 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
@@ -3450,11 +3451,11 @@ mod tests {
                                     let response = Response {
                                         context: context.clone(),
                                         subgraph_name: String::new(),
-                                        transport_result: Some(Ok(TransportResponse::Http(
+                                        transport_outcome: TransportOutcome::Response(TransportResponse::Http(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
                                             },
-                                        ))),
+                                        )),
                                         mapped_response: MappedResponse::Data {
                                             data: json!({})
                                                 .try_into()

@@ -35,6 +35,7 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::services::PipelineStep;
 use crate::services::connector::request_service;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
@@ -450,18 +451,19 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    // `None` means no HTTP call was made because the response came out of the router's response
-    // cache. A cache hit has no status or headers, so any condition built on transport selectors
-    // (status/headers) would evaluate false and skip the stage. Cache hits must still reach the
-    // coprocessor — the payload says so explicitly via `cacheHit: true` rather than looking like a
-    // transport failure — so the condition only gates the stage when an HTTP call actually happened.
-    let served_from_cache = response.transport_result.is_none();
+    // `TransportOutcome::ServedFromCache` means no HTTP call was made because the response came
+    // out of the router's response cache. A cache hit has no status or headers, so any condition
+    // built on transport selectors (status/headers) would evaluate false and skip the stage. Cache
+    // hits must still reach the coprocessor — the payload says so explicitly via `cacheHit: true`
+    // rather than looking like a transport failure — so the condition only gates the stage when an
+    // HTTP call actually happened.
+    let served_from_cache = response.transport_outcome.served_from_cache();
     if !served_from_cache && !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
 
-    let (headers_to_send, status_to_send) = match &response.transport_result {
-        Some(Ok(TransportResponse::Http(http_response))) => {
+    let (headers_to_send, status_to_send) = match &response.transport_outcome {
+        TransportOutcome::Response(TransportResponse::Http(http_response)) => {
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
@@ -484,7 +486,9 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        None | Some(Ok(TransportResponse::MappingOnly)) | Some(Err(_)) => (None, None),
+        TransportOutcome::ServedFromCache
+        | TransportOutcome::Response(TransportResponse::MappingOnly)
+        | TransportOutcome::Error(_) => (None, None),
     };
 
     // Extract body from mapped response
@@ -552,14 +556,16 @@ where
     if let Some(control) = co_processor_output.control {
         let new_status = control.get_http_status()?;
         // Update the transport result status if it was successful
-        if let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        if let TransportOutcome::Response(TransportResponse::Http(ref mut http_response)) =
+            response.transport_outcome
         {
             http_response.inner.status = new_status;
         }
     }
 
     if let Some(headers) = co_processor_output.headers
-        && let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        && let TransportOutcome::Response(TransportResponse::Http(ref mut http_response)) =
+            response.transport_outcome
     {
         http_response.inner.headers = internalize_header_map(headers)?;
     }
@@ -666,6 +672,7 @@ mod tests {
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router::body;
     use crate::services::router::body::RouterBody;
 
@@ -745,7 +752,7 @@ mod tests {
             serde_json_bytes::json!({}),
             None,
         );
-        response.transport_result = None;
+        response.transport_outcome = TransportOutcome::ServedFromCache;
 
         let response_config = ConnectorResponseConf {
             condition: status_eq_599(),

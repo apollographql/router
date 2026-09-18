@@ -92,6 +92,7 @@ use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::connect;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
@@ -899,11 +900,11 @@ impl PluginPrivate for ResponseCache {
             return ServiceBuilder::new()
                 .map_response(
                     move |response: crate::services::connector::request_service::Response| {
-                        if let Some(Ok(
+                        if let TransportOutcome::Response(
                             apollo_federation::connectors::runtime::http_json_transport::TransportResponse::Http(
                                 ref http_response,
                             ),
-                        )) = response.transport_result
+                        ) = response.transport_outcome
                         {
                             update_cache_control(
                                 &response.context,

@@ -302,6 +302,7 @@ mod tests {
     use crate::plugins::telemetry::otel;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -928,15 +929,17 @@ connector:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
-                        inner: http::Response::builder()
-                            .status(200)
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .body(body::empty())
-                            .expect("expecting valid response")
-                            .into_parts()
-                            .0,
-                    }))),
+                    transport_outcome: TransportOutcome::Response(TransportResponse::Http(
+                        HttpResponse {
+                            inner: http::Response::builder()
+                                .status(200)
+                                .header("x-log-response", HeaderValue::from_static("log"))
+                                .body(body::empty())
+                                .expect("expecting valid response")
+                                .into_parts()
+                                .0,
+                        },
+                    )),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -1365,15 +1368,17 @@ subgraph:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
-                        inner: http::Response::builder()
-                            .status(200)
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .body(body::empty())
-                            .expect("expecting valid response")
-                            .into_parts()
-                            .0,
-                    }))),
+                    transport_outcome: TransportOutcome::Response(TransportResponse::Http(
+                        HttpResponse {
+                            inner: http::Response::builder()
+                                .status(200)
+                                .header("x-log-response", HeaderValue::from_static("log"))
+                                .body(body::empty())
+                                .expect("expecting valid response")
+                                .into_parts()
+                                .0,
+                        },
+                    )),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()

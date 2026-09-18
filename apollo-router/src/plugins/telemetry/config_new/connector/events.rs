@@ -151,6 +151,7 @@ mod tests {
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router::body;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -218,15 +219,17 @@ mod tests {
                 .call_connector_request_service(connector_request, |request| Response {
                     context: request.context.clone(),
                     subgraph_name: request.connector.id.subgraph_name.to_string(),
-                    transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
-                        inner: http::Response::builder()
-                            .status(200)
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .body(body::empty())
-                            .expect("expecting valid response")
-                            .into_parts()
-                            .0,
-                    }))),
+                    transport_outcome: TransportOutcome::Response(TransportResponse::Http(
+                        HttpResponse {
+                            inner: http::Response::builder()
+                                .status(200)
+                                .header("x-log-request", HeaderValue::from_static("log"))
+                                .body(body::empty())
+                                .expect("expecting valid response")
+                                .into_parts()
+                                .0,
+                        },
+                    )),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -307,15 +310,17 @@ mod tests {
                 .call_connector_request_service(connector_request, |request| Response {
                     context: request.context.clone(),
                     subgraph_name: request.connector.id.subgraph_name.to_string(),
-                    transport_result: Some(Ok(TransportResponse::Http(HttpResponse {
-                        inner: http::Response::builder()
-                            .status(200)
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .body(body::empty())
-                            .expect("expecting valid response")
-                            .into_parts()
-                            .0,
-                    }))),
+                    transport_outcome: TransportOutcome::Response(TransportResponse::Http(
+                        HttpResponse {
+                            inner: http::Response::builder()
+                                .status(200)
+                                .header("x-log-response", HeaderValue::from_static("log"))
+                                .body(body::empty())
+                                .expect("expecting valid response")
+                                .into_parts()
+                                .0,
+                        },
+                    )),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
