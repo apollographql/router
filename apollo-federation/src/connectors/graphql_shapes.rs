@@ -31,7 +31,6 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::FileId;
 use apollo_compiler::parser::SourceFile;
 use apollo_compiler::parser::SourceSpan;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use indexmap::IndexSet;
 use shape::Shape;
@@ -346,7 +345,7 @@ impl<'a> GraphQLSchemaWalker<'a> {
                     .members
                     .iter()
                     .filter_map(|member| {
-                        self.locator.schema.types.get(&member.name).map(|extended| {
+                        self.locator.schema.types.get(&**member).map(|extended| {
                             // Get the member type shape with abstract context
                             let member_shape =
                                 self.shape_from_extended_type_with_context(extended, true);
@@ -419,7 +418,7 @@ pub(crate) fn shapes_for_schema(schema: &Schema) -> IndexMap<String, Shape> {
 #[must_use]
 pub(crate) fn shape_for_arguments(
     schema: &Schema,
-    field_definition: &Component<FieldDefinition>,
+    field_definition: &Node<FieldDefinition>,
 ) -> Shape {
     let locator = Locator::new(schema);
     // Accumulate the locations of all the arguments so they can be highlighted together

@@ -4,7 +4,6 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use itertools::Itertools;
 
@@ -65,7 +64,7 @@ pub(crate) struct SourceDirectiveArguments {
 
 impl SourceDirectiveArguments {
     fn from_directive(
-        value: &Component<Directive>,
+        value: &Node<Directive>,
         sources: &SourceMap,
         spec: ConnectSpec,
     ) -> Result<Self, FederationError> {

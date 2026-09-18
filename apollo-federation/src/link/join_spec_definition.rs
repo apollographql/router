@@ -9,7 +9,6 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
@@ -1133,7 +1132,7 @@ impl JoinSpecDefinition {
                     value_name: enum_value_name.clone(),
                 };
 
-                enum_value_position.insert(schema, Component::new(enum_value))?;
+                enum_value_position.insert(schema, Node::new(enum_value))?;
             }
         }
 
