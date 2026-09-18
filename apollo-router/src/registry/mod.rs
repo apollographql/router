@@ -776,18 +776,23 @@ async fn fetch_license_oci(oci_config: &OciConfig) -> Result<License, OciError> 
     // Fetch the license
     match fetch_license_from_reference(client, &auth, &license_reference, Some(oci_config)).await {
         Ok(license) => Ok(license),
+        Err(err) if err.is_not_found() => {
+            // The entitlement id resolved, but its own manifest (or license
+            // layer) doesn't exist on the registry — e.g. the entitlement was
+            // deleted, not yet published, or a partial mirror only copied the
+            // graph artifact. Same as the missing-annotation case above: boot
+            // unlicensed, not retry forever.
+            tracing::info!(
+                "no entitlement found for this graph in oci registry, treating as unlicensed: {}",
+                err
+            );
+            Ok(License::default())
+        }
         Err(err) => {
-            if err.is_not_found() {
-                tracing::debug!(
-                    "no entitlement found for this graph in oci registry: {}",
-                    err
-                );
-            } else {
-                tracing::warn!(
-                    "transient error fetching license from oci registry, will retry: {}",
-                    err
-                );
-            }
+            tracing::warn!(
+                "transient error fetching license from oci registry, will retry: {}",
+                err
+            );
             Err(err)
         }
     }
@@ -1973,6 +1978,35 @@ mod tests {
             err.is_not_found(),
             "a 404-everything registry should classify as not-found: {err:?}"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fetch_license_oci_missing_entitlement_repository_boots_unlicensed() {
+        // The graph manifest carries a valid entitlement id annotation, but no
+        // `entitlements/{id}` repository exists on the registry (entitlement
+        // deleted after a plan change, not yet published, or a partial
+        // mirror that only copied the graph artifact). This must boot
+        // unlicensed, not surface an error that gets retried forever —
+        // mirroring the missing-annotation and missing-license-layer
+        // fallbacks.
+        let mock_server = &MockServer::start().await;
+        let entitlement_id = "missing-entitlement-id";
+        let image_reference = setup_mocks_with_repository(
+            mock_server,
+            "test-graph-id",
+            vec![],
+            Some(entitlement_annotations(entitlement_id)),
+        )
+        .await;
+        // Deliberately do not mount anything under `entitlements/{entitlement_id}`.
+
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let license = fetch_license_oci(&oci_config)
+            .await
+            .expect("missing entitlement repository must boot unlicensed, not error");
+
+        assert_eq!(license.claims, License::default().claims);
     }
 
     #[tokio::test(flavor = "multi_thread")]
