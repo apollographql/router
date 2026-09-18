@@ -17,6 +17,7 @@ mod routing;
 pub(super) mod state;
 #[cfg(test)]
 mod test_support;
+mod type_conditions;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -29,7 +30,6 @@ use petgraph::graph::NodeIndex;
 #[allow(unused_imports)]
 use petgraph::visit::EdgeRef;
 use routing::RoutingChoice;
-use routing::RoutingTarget;
 pub(crate) use state::PendingSelection;
 use state::PlanCheckpoint;
 pub(crate) use state::PlanState;
@@ -457,8 +457,8 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         // effort and the search's fuel budget never binds.
         candidate.effort += 1;
         if matches!(
-            choice.target,
-            RoutingTarget::TypeExplosion | RoutingTarget::RestructureFragment
+            choice,
+            RoutingChoice::TypeExplosion | RoutingChoice::StripFragment
         ) {
             candidate.type_explosions += 1;
         }
