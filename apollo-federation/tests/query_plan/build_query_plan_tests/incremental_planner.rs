@@ -3743,24 +3743,24 @@ fn inc_multi_parent_entity_fetch_requires_order_agnostic_check() {
         Flatten(path: "w.elements.@.teasers.@") {
           Fetch(service: "Subgraph2") {
             {
-              ... on A {
+              ... on Z {
                 __typename
                 id
               }
-              ... on Z {
+              ... on A {
                 __typename
                 id
               }
             } =>
             {
-              ... on Z {
-                img {
-                  d
-                }
-              }
               ... on A {
                 logo {
                   c
+                }
+              }
+              ... on Z {
+                img {
+                  d
                 }
               }
             }

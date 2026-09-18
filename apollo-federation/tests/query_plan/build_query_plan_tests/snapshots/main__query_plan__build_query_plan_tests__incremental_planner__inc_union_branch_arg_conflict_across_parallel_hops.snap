@@ -1,6 +1,5 @@
 ---
 source: apollo-federation/tests/query_plan/build_query_plan_tests/incremental_planner.rs
-assertion_line: 4699
 expression: plan
 ---
 QueryPlan {
@@ -56,7 +55,7 @@ QueryPlan {
         } =>
         {
           ... on Widget {
-            value
+            value(scale: 100)
           }
         }
       },
