@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/expansion.rs
+assertion_line: 535
 expression: value
 ---
 connectors:
