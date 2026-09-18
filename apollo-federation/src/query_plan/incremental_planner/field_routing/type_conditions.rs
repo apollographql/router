@@ -1,7 +1,7 @@
 //! Handling for selections with no direct routing option: pass-through
 //! and vacuous fragments, and type explosion of abstract types into
 //! concrete-type fragments. Enumeration offers these as forced fallback
-//! choices (`RoutingTarget::RestructureFragment` / `TypeExplosion`);
+//! choices (`RoutingChoice::StripFragment` / `TypeExplosion`);
 //! `commit_choice` dispatches into the `try_*` functions here.
 
 use std::sync::Arc;

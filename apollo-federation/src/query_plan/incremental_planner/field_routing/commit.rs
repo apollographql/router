@@ -64,9 +64,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
-        use super::routing::RoutingTarget;
-
-        if matches!(choice.target, RoutingTarget::TypeExplosion) {
+        if matches!(choice, RoutingChoice::TypeExplosion) {
             return if self.try_explode_interface_field(state, pending)? {
                 Ok(())
             } else {
@@ -76,7 +74,7 @@ impl FieldRoutingSearchSpace {
             };
         }
 
-        if matches!(choice.target, RoutingTarget::RestructureFragment) {
+        if matches!(choice, RoutingChoice::StripFragment) {
             return if self.try_pass_through_fragment(state, pending)?
                 || self.try_vacuous_type_condition(state, pending)?
                 || self.try_explode_abstract_type(state, pending)?
