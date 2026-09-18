@@ -255,6 +255,68 @@ impl FieldRoutingSearchSpace {
         Ok(satisfiable && !self.conditions_have_requires(node, conditions)?)
     }
 
+    /// Walk up the split_parent chain to find an ancestor field with
+    /// routing options to a different subgraph, wrapping the stranded
+    /// remainder back into the ancestor's selection shape.
+    fn try_split_repush(&self, state: &mut PlanState, pending: &PendingSelection) -> bool {
+        if pending.best_effort {
+            return false;
+        }
+        let Ok(source) = self.node_source(pending.query_graph_node) else {
+            return false;
+        };
+        let avoid = source.subgraph;
+        let mut remainder: Vec<Selection> = vec![pending.selection.clone()];
+        let mut link = pending.split_parent.clone();
+        while let Some(anchor) = link {
+            let Some(template) = anchor.selection.selection_set() else {
+                return false;
+            };
+            let wrapped = if template.type_position.is_abstract_type() {
+                anchor.selection.clone()
+            } else {
+                let Some(wrapped) = wrap_in_parent(&anchor.selection, &remainder) else {
+                    return false;
+                };
+                wrapped
+            };
+            if matches!(anchor.selection, Selection::Field(_)) && anchor.condition.is_none() {
+                let mut candidate = anchor
+                    .fork(wrapped.clone())
+                    .with_split_avoid(Some(avoid.clone()));
+                candidate.condition = pending.condition;
+                let has_alternative = self
+                    .cached_routing_options(&candidate)
+                    .is_ok_and(|options| !options.is_empty());
+                if has_alternative {
+                    let Some(anchor_ss) = anchor.selection.selection_set() else {
+                        return false;
+                    };
+                    let Some(remainder_ss) = wrapped.selection_set() else {
+                        return false;
+                    };
+                    if routing::selection_leaf_count(remainder_ss)
+                        >= routing::selection_leaf_count(anchor_ss)
+                    {
+                        return false;
+                    }
+                    debug!(
+                        selection = %selection_label(&pending.selection),
+                        anchor = %selection_label(&anchor.selection),
+                        avoid = %avoid,
+                        "re-pushing stranded remainder at ancestor with alternatives",
+                    );
+                    state.splits += 1;
+                    state.push_pending(candidate);
+                    return true;
+                }
+            }
+            remainder = vec![wrapped];
+            link = anchor.split_parent.clone();
+        }
+        false
+    }
+
     /// Advance past deterministic decisions in-place: commit single-option
     /// and zero-option selections, lift forced entries above open decisions
     /// so their fetch groups inform scoring. Stops at the first multi-option
@@ -267,9 +329,17 @@ impl FieldRoutingSearchSpace {
     /// forced commits to recover through.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
+        let splits_at_entry = state.splits;
         while let Some(top) = state.pending.last() {
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
-                self.recover_doomed(state, &mut trail);
+                if state.splits > splits_at_entry {
+                    let pending = state.pop_pending().unwrap();
+                    if !self.try_split_repush(state, &pending) {
+                        self.drop_unresolvable(state, &pending);
+                    }
+                } else {
+                    self.recover_doomed(state, &mut trail);
+                }
                 continue;
             }
             let options: Arc<Vec<RoutingChoice>> = Arc::new(self.routing_options(top)?);
@@ -304,18 +374,29 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Pop a pending whose site is proven hopeless and recover: rewind an
-    /// ancestor forced commit if one has untried options, otherwise drop the
-    /// selection.
+    /// ancestor forced commit if one has untried options (see
+    /// [`Self::backtrack_forced`]), then try a split re-push (see
+    /// [`Self::try_split_repush`]), otherwise drop the selection. A
+    /// best-effort pending is dropped outright, its loss is tolerated by
+    /// design and must not burn backtracking budget.
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
-        if !self.backtrack_forced(state, trail) {
+        if (pending.best_effort || !self.backtrack_forced(state, trail))
+            && !self.try_split_repush(state, &pending)
+        {
             self.drop_unresolvable(state, &pending);
         }
     }
 
-    /// Pop the top pending and commit its best-ranked option. Multi-option
-    /// forced commits push a trail frame so a later failure can rewind and
-    /// try the next-ranked alternative.
+    /// Pop the top pending selection and commit its best-ranked option.
+    ///
+    /// A failed commit rolls the whole state back to just after the pop:
+    /// `commit_choice` pushes pendings mid-flight, and a graph-only rollback
+    /// would leak entries whose `ordering_dependent` names a node index the
+    /// rollback freed (StableDiGraph reuses indices). A failure first tries
+    /// the pending's own lower-ranked options and then ancestor frames via
+    /// [`Self::backtrack_forced`]; only when nothing recovers is the drop
+    /// counted and penalized by the cost function.
     fn commit_forced(
         &self,
         state: &mut PlanState,
@@ -336,6 +417,7 @@ impl FieldRoutingSearchSpace {
             );
         }
         let failed = result.is_err();
+        let best_effort = pending.best_effort;
         if options.len() > 1 {
             trail.frames.push(ForcedFrame {
                 pending: pending.clone(),
@@ -346,15 +428,25 @@ impl FieldRoutingSearchSpace {
         } else if failed {
             trail.doomed.insert(pending_site(&pending));
         }
-        if failed && !self.backtrack_forced(state, trail) && !pending.best_effort {
+        if failed
+            && !best_effort
+            && !self.backtrack_forced(state, trail)
+            && !self.try_split_repush(state, &pending)
+        {
             state.dropped_fields += 1;
         }
     }
 
     /// Rewind the forced-commit trail after a drop and try alternatives,
-    /// deepest frame first. Returns `true` when the state was rewound to a
-    /// committed alternative. Returns `false` when nothing was attempted
-    /// (empty trail or budget spent).
+    /// deepest frame first, each option in rank order. Returns `true` when
+    /// the state was rewound (an alternative committed, or the greedy choice
+    /// was re-driven after exhausting alternatives). Returns `false` only when
+    /// nothing was attempted (empty trail or budget spent), leaving the
+    /// state untouched so the caller can drop the doomed pending as before.
+    ///
+    /// Bounded by [`FORCED_BACKTRACK_CAP`] attempts per candidate (monotonic
+    /// across rollbacks, like `effort`): the greedy pass has no effort
+    /// budget, so a genuinely unplannable operation must not retry forever.
     fn backtrack_forced(&self, state: &mut PlanState, trail: &mut ForcedTrail) -> bool {
         let mut parked: Option<(Arc<PendingSelection>, RoutingChoice)> = None;
         loop {
@@ -395,7 +487,10 @@ impl FieldRoutingSearchSpace {
         // committed state; descendants that drop again find the budget
         // spent and fall through to plain drops.
         if let Some((pending, choice)) = parked {
-            if self.commit_choice(state, &pending, &choice).is_err() {
+            if self.commit_choice(state, &pending, &choice).is_err()
+                && !pending.best_effort
+                && !self.try_split_repush(state, &pending)
+            {
                 state.dropped_fields += 1;
             }
             return true;
@@ -460,6 +555,37 @@ fn pending_site(pending: &PendingSelection) -> (NodeIndex, PendingSiteKey) {
         ),
     };
     (pending.query_graph_node, key)
+}
+
+/// Wrap child selections back into a parent selection's shape.
+fn wrap_in_parent(parent: &Selection, children: &[Selection]) -> Option<Selection> {
+    let template = parent.selection_set()?;
+    let mut map = crate::operation::SelectionMap::new();
+    for child in children {
+        let child = child
+            .rebase_on(&template.type_position, &template.schema)
+            .ok()?;
+        map.insert(child);
+    }
+    let wrapped_ss = SelectionSet {
+        schema: template.schema.clone(),
+        type_position: template.type_position.clone(),
+        selections: Arc::new(map),
+    };
+    Some(match parent {
+        Selection::Field(field_sel) => {
+            Selection::Field(Arc::new(crate::operation::FieldSelection {
+                field: field_sel.field.clone(),
+                selection_set: Some(wrapped_ss),
+            }))
+        }
+        Selection::InlineFragment(frag_sel) => {
+            Selection::InlineFragment(Arc::new(crate::operation::InlineFragmentSelection {
+                inline_fragment: frag_sel.inline_fragment.clone(),
+                selection_set: wrapped_ss,
+            }))
+        }
+    })
 }
 
 impl BulbSearchSpace for FieldRoutingSearchSpace {
@@ -535,7 +661,9 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
                 error = ?e,
                 "commit_choice failed, dropping field",
             );
-            candidate.dropped_fields += 1;
+            if !self.try_split_repush(candidate, &pending) && !pending.best_effort {
+                candidate.dropped_fields += 1;
+            }
         }
 
         trace!("partial plan after apply");
