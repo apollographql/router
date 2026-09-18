@@ -63,11 +63,14 @@ fn inc_single_subgraph_query_produces_valid_plan() {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-subgraph: key hops and __typename handling
+// Cross-subgraph: key hops, __typename, conditions, errors, cancellation
+//
+// All scenarios below share the same two-subgraph schema where User lives
+// in both `a` (owns name) and `b` (owns email), joined by @key(fields: "id").
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inc_cross_subgraph_key_hop_produces_two_fetches() {
+fn inc_two_subgraph_key_hop() {
     let planner = planner!(
         config = incremental_config(),
         a: r#"
@@ -87,6 +90,8 @@ fn inc_cross_subgraph_key_hop_produces_two_fetches() {
           }
         "#,
     );
+
+    // Querying fields split across subgraphs produces a key-hop fetch chain.
     assert_plan!(
         &planner,
         r#"
@@ -128,29 +133,8 @@ fn inc_cross_subgraph_key_hop_produces_two_fetches() {
         }
         "###
     );
-}
 
-#[test]
-fn inc_explicit_sibling_typename_is_preserved() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            email: String
-          }
-        "#,
-    );
+    // An explicit __typename sibling is preserved in the fetch selection.
     assert_plan!(
         &planner,
         r#"
@@ -174,29 +158,8 @@ fn inc_explicit_sibling_typename_is_preserved() {
         }
         "###
     );
-}
 
-#[test]
-fn inc_root_typename_is_left_to_router_execution() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            email: String
-          }
-        "#,
-    );
+    // Root-level __typename is left to router execution, not fetched.
     assert_plan!(
         &planner,
         r#"
@@ -219,29 +182,8 @@ fn inc_root_typename_is_left_to_router_execution() {
         }
         "###
     );
-}
 
-#[test]
-fn inc_root_typename_alone() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            email: String
-          }
-        "#,
-    );
+    // A bare root __typename produces an empty plan.
     assert_plan!(
         &planner,
         r#"
@@ -252,6 +194,104 @@ fn inc_root_typename_alone() {
         @r###"
         QueryPlan {}
         "###
+    );
+
+    // Conditioned fields hoist their @include/@skip wrappers around the
+    // dependent fetch, keeping the unconditioned root fetch unconditional.
+    assert_plan!(
+        &planner,
+        r#"
+          query Op($a: Boolean!, $b: Boolean!) {
+            user {
+              name
+              email @include(if: $a) @skip(if: $b)
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            user {
+              __typename
+              name
+              id
+            }
+          }
+        },
+        Include(if: $a) {
+          Skip(if: $b) {
+            Flatten(path: "user") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    // Disabling the only subgraph that can resolve a field must produce a
+    // planning error, not a partial plan that silently drops the field.
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ user { email } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let err = planner
+        .build_query_plan(
+            &document,
+            None,
+            QueryPlanOptions {
+                disabled_subgraph_names: std::iter::once("b".to_string()).collect(),
+                ..Default::default()
+            },
+        )
+        .expect_err("email is only resolvable in the disabled subgraph");
+    assert!(
+        err.to_string()
+            .contains("No plan was found when subgraphs were disabled"),
+        "expected the disabled-subgraphs planning error, got: {err}",
+    );
+
+    // Cooperative cancellation: a cancel callback that fires immediately
+    // must cause planning to fail with the cancellation error.
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ user { name email } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let cancel = || std::ops::ControlFlow::Break(());
+    let result = planner.build_query_plan(
+        &document,
+        None,
+        QueryPlanOptions {
+            check_for_cooperative_cancellation: Some(&cancel),
+            ..Default::default()
+        },
+    );
+    let err = result.expect_err("cancelled planning should error");
+    assert!(
+        err.to_string()
+            .contains("the caller requested cancellation"),
+        "expected the cancellation error specifically (not a generic \
+         planning failure), got: {err}",
     );
 }
 
@@ -307,7 +347,7 @@ fn inc_static_override_routes_field_to_overriding_subgraph() {
 }
 
 #[test]
-fn inc_progressive_override_routes_to_overrider_when_label_active() {
+fn inc_progressive_override_routing() {
     let planner = planner!(
         config = incremental_config(),
         a: r#"
@@ -328,6 +368,8 @@ fn inc_progressive_override_routes_to_overrider_when_label_active() {
           }
         "#,
     );
+
+    // When the override label is active, the overrider resolves the field.
     assert_plan!(
         &planner,
         r#"
@@ -355,30 +397,8 @@ fn inc_progressive_override_routes_to_overrider_when_label_active() {
         }
         "###
     );
-}
 
-#[test]
-fn inc_progressive_override_routes_to_original_when_label_inactive() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-            nickname: String @override(from: "b", label: "test")
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            nickname: String
-          }
-        "#,
-    );
+    // When the override label is inactive, the original subgraph keeps the field.
     assert_plan!(
         &planner,
         r#"
@@ -944,107 +964,12 @@ fn inc_shareable_parent_hop_reaches_keyless_child_detail() {
     );
 }
 
-/// A genuinely unplannable state: the only subgraph resolving the field is
-/// disabled, so the greedy pass drops it, no complete candidate is ever
-/// recorded, and planning must fail with the disabled-subgraphs error, not
-/// return a partial plan.
-#[test]
-fn inc_incomplete_plan_is_an_error_not_a_partial_plan() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            email: String
-          }
-        "#,
-    );
-    let api_schema = planner.api_schema();
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        api_schema.schema(),
-        "{ user { email } }",
-        "test.graphql",
-    )
-    .expect("valid graphql document");
-    let err = planner
-        .build_query_plan(
-            &document,
-            None,
-            QueryPlanOptions {
-                disabled_subgraph_names: std::iter::once("b".to_string()).collect(),
-                ..Default::default()
-            },
-        )
-        .expect_err("email is only resolvable in the disabled subgraph");
-    assert!(
-        err.to_string()
-            .contains("No plan was found when subgraphs were disabled"),
-        "expected the disabled-subgraphs planning error, got: {err}",
-    );
-}
-
 // ---------------------------------------------------------------------------
-// Cooperative cancellation
+// Keyless child behind wrong-ranked hop
 // ---------------------------------------------------------------------------
-
-#[test]
-fn inc_cooperative_cancellation_stops_planning() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            email: String
-          }
-        "#,
-    );
-    let api_schema = planner.api_schema();
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        api_schema.schema(),
-        "{ user { name email } }",
-        "test.graphql",
-    )
-    .expect("valid graphql document");
-    let cancel = || std::ops::ControlFlow::Break(());
-    let result = planner.build_query_plan(
-        &document,
-        None,
-        QueryPlanOptions {
-            check_for_cooperative_cancellation: Some(&cancel),
-            ..Default::default()
-        },
-    );
-    let err = result.expect_err("cancelled planning should error");
-    assert!(
-        err.to_string()
-            .contains("the caller requested cancellation"),
-        "expected the cancellation error specifically (not a generic \
-         planning failure), got: {err}",
-    );
-}
 
 /// When a parent field is routable to multiple subgraphs, the greedy pass
-/// (beam=1) picks the best-ranked option — which may lack the needed child
+/// (beam=1) picks the best-ranked option, which may lack the needed child
 /// field. Because the child type has no @key, entity resolution cannot
 /// bridge the gap, so the greedy pass drops the selection. Subsequent BULB
 /// iterations (beam > 1) explore the alternative parent routing that
@@ -1380,7 +1305,7 @@ fn inc_mutation_statistics_accumulate_across_fields() {
 }
 
 // ---------------------------------------------------------------------------
-// Root hops and condition hoisting
+// Root hops
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1459,74 +1384,6 @@ fn inc_query_field_root_hops_to_other_subgraph() {
               b
               b2
             }
-          },
-        },
-      },
-    }
-    "###
-    );
-}
-
-#[test]
-fn inc_fully_conditioned_fetch_hoists_multiple_variables() {
-    let planner = planner!(
-        config = incremental_config(),
-        a: r#"
-          type Query {
-            user: User
-          }
-
-          type User @key(fields: "id") {
-            id: ID!
-            name: String
-          }
-        "#,
-        b: r#"
-          type User @key(fields: "id") {
-            id: ID!
-            email: String
-          }
-        "#,
-    );
-    assert_plan!(
-        &planner,
-        r#"
-          query Op($a: Boolean!, $b: Boolean!) {
-            user {
-              name
-              email @include(if: $a) @skip(if: $b)
-            }
-          }
-        "#,
-        @r###"
-    QueryPlan {
-      Sequence {
-        Fetch(service: "a") {
-          {
-            user {
-              __typename
-              name
-              id
-            }
-          }
-        },
-        Include(if: $a) {
-          Skip(if: $b) {
-            Flatten(path: "user") {
-              Fetch(service: "b") {
-                {
-                  ... on User {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on User {
-                    email
-                  }
-                }
-              },
-            },
           },
         },
       },
