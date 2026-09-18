@@ -695,6 +695,42 @@ impl FieldRoutingSearchSpace {
         Ok(options)
     }
 
+    /// Cached wrapper around `routing_options`: keyed by (node, selection
+    /// pointer, override conditions pointer) so repeated evaluations of the
+    /// same pending at the same position return the prior result immediately.
+    pub(super) fn cached_routing_options(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
+        if pending.provides_anchor.is_some() {
+            return Ok(Arc::new(self.routing_options(pending)?));
+        }
+        let key = (
+            pending.query_graph_node,
+            super::SelectionArcKey::new(&pending.selection),
+            None::<super::ArcKey<std::collections::HashSet<apollo_compiler::Name>>>,
+        );
+        let unfiltered = if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
+            cached.clone()
+        } else {
+            let result = Arc::new(self.routing_options(pending)?);
+            self.caches
+                .routing_options
+                .borrow_mut()
+                .insert(key, result.clone());
+            result
+        };
+        if let Some(avoid) = &pending.split_avoid {
+            let options = unfiltered
+                .iter()
+                .filter(|choice| choice.target_subgraph() != avoid)
+                .cloned()
+                .collect::<Vec<_>>();
+            return Ok(Arc::new(options));
+        }
+        Ok(unfiltered)
+    }
+
     /// Options at the FederatedRootType head node, which fans out to
     /// per-subgraph roots via SubgraphEnteringTransition edges.
     pub(super) fn federated_root_options(
@@ -921,6 +957,52 @@ impl FieldRoutingSearchSpace {
             .supergraph_schema
             .possible_runtime_types(type_cond.clone())?;
         Ok(current_runtime_types.is_subset(&cond_runtime_types))
+    }
+
+    /// Whether any concrete implementer of the abstract type at `node` has a
+    /// cross-subgraph key edge. Type explosion is only useful when at least
+    /// one implementer can be routed to a different subgraph via an entity
+    /// key, so this gates the TypeExplosion option to avoid doubling the
+    /// BULB search tree at every abstract-type field.
+    fn abstract_type_has_cross_subgraph_keys(
+        &self,
+        node: NodeIndex,
+    ) -> Result<bool, FederationError> {
+        let qg = self.qg();
+        let node_data = qg.node_weight(node)?;
+        let current_source = &node_data.source;
+        let Ok(pos) = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone()) else {
+            return Ok(false);
+        };
+        if !pos.is_abstract_type() {
+            return Ok(false);
+        }
+        let schema = qg.schema_by_source(current_source)?;
+        let runtime_types = schema.possible_runtime_types(pos)?;
+        for concrete_type in &runtime_types {
+            let type_name = &concrete_type.type_name;
+            let Ok(nodes) = qg.nodes_for_type(type_name) else {
+                continue;
+            };
+            for &concrete_node in nodes {
+                let concrete_data = qg.node_weight(concrete_node)?;
+                if &concrete_data.source != current_source {
+                    continue;
+                }
+                for edge_idx in self
+                    .cached_query_graph
+                    .out_edges(concrete_node)
+                    .iter()
+                    .copied()
+                {
+                    let edge = qg.edge_weight(edge_idx)?;
+                    if matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Cached key hop enumeration with integrated cycle guard. The guard

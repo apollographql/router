@@ -221,19 +221,8 @@ fn run_bulb_and_finalize(
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
     }
 
-    let result = match result {
-        Some(r) => r,
-        None => {
-            if !parameters.disabled_subgraphs.is_empty() {
-                return Err(
-                    crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into(),
-                );
-            }
-            return Err(FederationError::internal(
-                "BULB planner could not find any complete plan",
-            ));
-        }
-    };
+    let (mut result, stats) =
+        unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?;
 
     debug!(
         pending_remaining = result.pending.len(),
@@ -265,6 +254,8 @@ fn run_bulb_and_finalize(
         )));
     }
 
+    result.graph.merge_sibling_entities();
+
     // Build DeferInfo from the selection set actually being planned (already
     // typename-restored): for mutations that is a single top-level field
     // split from the operation, so each sequential step only sees its own
@@ -281,6 +272,10 @@ fn run_bulb_and_finalize(
         operation_name: &parameters.operation.name,
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
+        skip_validation: parameters
+            .config
+            .incremental_planner
+            .skip_subgraph_operation_validation,
     };
     let (plan, cost) = result
         .graph
@@ -288,6 +283,27 @@ fn run_bulb_and_finalize(
     naming.counter = build_ctx.operation_counter;
 
     Ok(BulbPlan { plan, cost })
+}
+
+/// Unwrap an `Option<PlanState>`, returning an appropriate error when
+/// no plan was found.
+fn unwrap_plan(
+    result: Option<PlanState>,
+    stats: bulb_search::BulbStats,
+    has_disabled_subgraphs: bool,
+) -> Result<(PlanState, bulb_search::BulbStats), FederationError> {
+    match result {
+        Some(r) => Ok((r, stats)),
+        None => {
+            if has_disabled_subgraphs {
+                Err(crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+            } else {
+                Err(FederationError::internal(
+                    "BULB planner could not find any complete plan",
+                ))
+            }
+        }
+    }
 }
 
 /// One pending entry per top-level selection, anchored at the operation
@@ -313,6 +329,8 @@ fn root_pending_selections(
             parent_types: Default::default(),
             context_anchor: Default::default(),
             best_effort: false,
+            split_parent: None,
+            split_avoid: None,
         })
         .collect()
 }
