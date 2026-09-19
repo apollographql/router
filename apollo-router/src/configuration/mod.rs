@@ -1028,7 +1028,7 @@ pub(crate) struct IncrementalPlanner {
 
 impl Default for IncrementalPlanner {
     fn default() -> Self {
-        Self { enabled: true }
+        Self { enabled: false }
     }
 }
 
