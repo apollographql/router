@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -13144,7 +13143,7 @@ expression: "&schema"
       ],
       "default": {
         "beam_width": 16,
-        "enabled": true,
+        "enabled": false,
         "fuel": 5000
       },
       "description": "Configuration for the incremental query planner."
