@@ -693,21 +693,11 @@ fn static_override_routes_field_to_overriding_subgraph() {
 const ROUTING_CHOICE_ITERATIVE_SCHEMA: &str =
     include_str!("../fixtures/routing_choice_iterative.graphql");
 
-/// Demonstrates BULB backtracking actually correcting a greedy mistake,
-/// not just picking correctly the first time. `profile` is a key hop
-/// from A to either B or C, and both hops score identically at the
-/// one-step scoring pass (same fetch shape), so the greedy tiebreak
-/// (declaration order) commits to B. Only once `profile` lands on B do
-/// we discover `detail` isn't there and needs a second hop to C -- a cost
-/// the one-step score for the `profile` decision couldn't see.
-///
-/// With fuel=1 (greedy pass only, discrepancies never explored), BULB
-/// returns that suboptimal 3-fetch plan (A -> B -> C). With enough fuel
-/// to run a discrepancy iteration, it explores the C branch to
-/// completion, finds the cheaper 2-fetch plan (A -> C), and replaces the
-/// greedy result -- the same "record_completion only if improved"
-/// mechanism the toy `discrepancy_finds_better_alternative_slice` test
-/// exercises, but on a real routing decision.
+/// Demonstrates that BULB backtracking corrects greedy tiebreak mistakes.
+/// `profile` is a key hop from A to either B or C. The greedy pass picks
+/// B, which requires a second hop to C for `detail`, producing a 3-fetch
+/// plan. Backtracking discovers that C can serve `profile.detail` directly
+/// and produces the optimal 2-fetch plan.
 #[test_log::test]
 fn greedy_tiebreak_mistake_is_corrected_by_backtracking() {
     let document_str = "{ user { profile { detail } } }";
@@ -2081,6 +2071,158 @@ fn context_value_rides_entity_representation_at_boundary() {
             }
           },
         },
+      },
+    }
+    "###);
+}
+
+/// Shareable parent returning an abstract type whose runtime members differ
+/// per subgraph (U is X|Y in A but only X in B): fragments committed under
+/// the B route must be filtered to B's member set, dropping `... on Y`
+/// there without a penalty, while the A route keeps both.
+/// Targets routing.rs fragment_options' intersection filter, and
+/// type_conditions.rs dropped-by-intersection-filter arm.
+#[test]
+fn inconsistent_union_members_filtered_per_subgraph() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+  @join__unionMember(graph: B, member: "X")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  search: [U]
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { ... on X { x } ... on Y { y } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+            ... on X {
+              x
+            }
+            ... on Y {
+              y
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+fn entity_inconsistent_union_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type T
+  @join__type(graph: A, key: "tid")
+  @join__type(graph: B, key: "tid")
+{
+  tid: ID!
+  e: E
+}
+
+type E
+  @join__type(graph: A, key: "eid")
+  @join__type(graph: B, key: "eid")
+{
+  eid: ID!
+  search: [U]
+}
+
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+  @join__unionMember(graph: B, member: "X")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  top: T @join__field(graph: A)
+}
+"#,
+    )
+}
+
+/// A shareable entity field (`e` resolvable in A directly and in B via T's
+/// key) puts its descendants on a shareable path; `search` below it returns
+/// a union whose members differ per subgraph, so its child fragments get an
+/// intersection filter from the committed subgraph's own member set.
+/// Targets commit.rs intersection_filter_for_field /
+/// field_is_shareable_here / field_in_multiple_subgraphs.
+#[test]
+fn entity_shareable_field_filters_inconsistent_union_members() {
+    let plan_str = plan_query(
+        &entity_inconsistent_union_schema(),
+        "{ top { e { search { ... on X { x } ... on Y { y } } } } }",
+    );
+    assert!(
+        plan_str.contains("... on Y"),
+        "Winning route must keep the Y fragment: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          top {
+            e {
+              search {
+                __typename
+                ... on X {
+                  x
+                }
+                ... on Y {
+                  y
+                }
+              }
+            }
+          }
+        }
       },
     }
     "###);
