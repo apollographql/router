@@ -1026,6 +1026,7 @@ pub(crate) struct IncrementalPlanner {
     pub(crate) enabled: bool,
 }
 
+#[allow(clippy::derivable_impls)] // later branches add fields with non-zero defaults
 impl Default for IncrementalPlanner {
     fn default() -> Self {
         Self { enabled: false }
