@@ -18,7 +18,6 @@ use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
-use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
@@ -49,10 +48,8 @@ fn push_concrete_type_fragments<'a>(
             selection_id: SelectionId::new(),
         };
         let selection_set = make_selection_set(&frag);
-        let wrapped = Selection::InlineFragment(Arc::new(InlineFragmentSelection {
-            inline_fragment: frag,
-            selection_set,
-        }));
+        let wrapped =
+            Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(frag, selection_set)));
         state.push_pending(pending.fork(wrapped));
     }
 }
@@ -125,7 +122,7 @@ impl FieldRoutingSearchSpace {
             if is_vacuous {
                 trace!(
                     type_condition = %type_cond,
-                    "vacuous type condition -- treating as pass-through",
+                    "vacuous type condition, treating as pass-through",
                 );
                 let directives = &frag_sel.inline_fragment.directives;
                 let child_op_path = if !directives.is_empty() {
@@ -146,7 +143,7 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Type explosion: the condition is an abstract type whose runtime types
-    /// partially overlap the current node's -- decompose into
+    /// partially overlap the current node's, so decompose into
     /// concrete-type fragments.
     pub(super) fn try_explode_abstract_type(
         &self,
@@ -175,7 +172,7 @@ impl FieldRoutingSearchSpace {
             if intersection.is_empty() {
                 trace!(
                     type_condition = %type_cond,
-                    "type condition has empty local runtime intersection -- dropping fragment",
+                    "type condition has empty local runtime intersection, dropping fragment",
                 );
                 return Ok(true);
             }
@@ -237,13 +234,10 @@ impl FieldRoutingSearchSpace {
                         &current_type,
                         Default::default(),
                         |frag| {
-                            let mut inner_map = SelectionMap::new();
-                            inner_map.insert(inner_sel.clone());
-                            SelectionSet {
-                                schema: schema.clone(),
-                                type_position: frag.casted_type(),
-                                selections: Arc::new(inner_map),
-                            }
+                            SelectionSet::from_selection(
+                                frag.casted_type(),
+                                inner_sel.clone(),
+                            )
                         },
                     );
                     if exploded {

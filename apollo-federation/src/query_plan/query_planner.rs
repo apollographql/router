@@ -933,7 +933,11 @@ fn compute_plan_internal(
     // eagerly and silently drop the DeferNodes, so deferred operations
     // (including the defer-conditionals path, which always plans with
     // has_defers) fall back to the legacy planner.
-    let use_incremental = parameters.config.incremental_planner.enabled && !has_defers;
+    // It also does not implement type_conditioned_fetching, so queries
+    // relying on that flag fall back to the legacy planner as well.
+    let use_incremental = parameters.config.incremental_planner.enabled
+        && !has_defers
+        && !parameters.config.type_conditioned_fetching;
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
         && use_incremental

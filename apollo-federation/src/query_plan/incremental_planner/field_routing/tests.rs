@@ -75,7 +75,7 @@ fn cross_subgraph_key_hop_produces_two_fetches() {
 
 /// Explicit __typename next to another field is stripped by
 /// optimize_sibling_typenames during normalization (an old-planner
-/// performance workaround) and restored once at bulb entry -- it must
+/// performance workaround) and restored once at bulb entry. It must
 /// appear in the fetch.
 #[test]
 fn explicit_sibling_typename_is_preserved() {
@@ -198,7 +198,7 @@ fn shareable_local_dead_end_reroutes_through_key_hop() {
 /// A forced condition commit whose greedy choice strands a descendant on a
 /// circular key must backtrack to the ancestor's alternative. `target` lives
 /// only in T, keyed on `c { cid cm }`. Routing that key: `c` commits
-/// greedily to A (direct), but A cannot resolve `cm` -- its only hop from C
+/// greedily to A (direct), but A cannot resolve `cm`. Its only hop from C
 /// is T's circular `{cid cm}` key, so the commit fails. The condition `c`
 /// was forced (never a BULB decision), so recovery must come from the
 /// fast-forward trail: rewind `c` to its key hop into B, where the whole
@@ -225,7 +225,7 @@ fn circular_key_drop_backtracks_to_ancestor_condition_alternative() {
 #[test]
 fn incomplete_plan_is_an_error_not_a_partial_plan() {
     // Same schema as the dead-end test, but with fuel=1 the search cannot
-    // backtrack into the key-hop alternative -- the greedy pass strands
+    // backtrack into the key-hop alternative, so the greedy pass strands
     // `detail`. The planner must error rather than emit a partial plan.
     let config = QueryPlannerConfig {
         incremental_planner: IncrementalPlannerConfig {
@@ -247,7 +247,7 @@ fn incomplete_plan_is_an_error_not_a_partial_plan() {
         Err(_) => {}
         Ok(plan) => {
             // If fuel=1 still finds the complete plan (greedy happens to
-            // pick the hop), the plan must contain the field -- silence
+            // pick the hop), the plan must contain the field; silence
             // plus a missing field is the failure mode under test.
             let plan_str = format!("{plan}");
             assert!(
@@ -295,7 +295,7 @@ fn cooperative_cancellation_stops_planning() {
 /// A key hop launched from INSIDE an entity fetch (`extra` hops B->C while
 /// its pending lives in B's entity fetch for P): the shallowest-anchor
 /// dominance check (`parent_key_anchor`) runs against the fetch feeding the
-/// entity fetch -- here it declines (A has no D), so C's group chains behind
+/// entity fetch. Here it declines (A has no D), so C's group chains behind
 /// B's.
 /// Targets commit.rs parent_key_anchor's context-anchor and walk-failure
 /// arms.
@@ -457,7 +457,7 @@ fn try_plan_query(schema: &str, query: &str) -> Result<String, FederationError> 
 const CIRCULAR_REQUIRES_SCHEMA: &str = include_str!("../fixtures/circular_requires.graphql");
 
 /// Circular @requires (B: f requires g, C: g requires f) must terminate
-/// with a planning error -- not recurse until stack overflow, and not
+/// with a planning error, not recurse until stack overflow, and not
 /// silently return an incomplete plan.
 #[test_log::test]
 fn circular_requires_errors_instead_of_recursing() {
@@ -486,7 +486,7 @@ fn requires_fields_added_to_fetch() {
 /// @external: the query enters through B (which owns `shippingCost`
 /// requiring `weight`), but `weight` is only resolvable in A. The field
 /// must move into a second B fetch whose entity representation carries
-/// `weight` fetched from A -- B's root fetch must NOT select the
+/// `weight` fetched from A. B's root fetch must not select the
 /// @external `weight` itself.
 #[test_log::test]
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
@@ -542,8 +542,8 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
 /// (`a`) into nested selections owned by other subgraphs (`s.status` in
 /// s1, `j.m` in s2). The planner must resolve the local prefix in place
 /// and hop from A's key edges for the nested parts, at the merge path of
-/// C's `a` -- not from C's (nonexistent) key edges, and not at some other
-/// A's path.
+/// C's `a`, not from C's (nonexistent) key edges, and not at some other
+/// path from A.
 #[test_log::test]
 fn requires_through_local_field_resolves_nested_parts() {
     let plan_str = plan_query(REQUIRES_SCHEMA, "{ a { c { elig } } }");
@@ -555,7 +555,7 @@ fn requires_through_local_field_resolves_nested_parts() {
         );
     }
     // The nested hops must merge at C's `a` (aliased as a @requires
-    // condition), i.e. path a.c.__require_0_a -- not at the top-level `a`.
+    // condition), i.e. path a.c.__require_0_a, not at the top-level `a`.
     assert!(
         plan_str.contains("a.c.__require_0_a"),
         "Nested requires parts should merge under a.c.__require_0_a: {plan_str}"
@@ -584,14 +584,14 @@ fn static_override_routes_field_to_overriding_subgraph() {
 /// from A to either B or C, and both hops score identically at the
 /// one-step scoring pass (same fetch shape), so the greedy tiebreak
 /// (declaration order) commits to B. Only once `profile` lands on B do
-/// we discover `detail` isn't there and needs a second hop to C -- a cost
+/// we discover `detail` isn't there and needs a second hop to C, a cost
 /// the one-step score for the `profile` decision couldn't see.
 ///
 /// With fuel=1 (greedy pass only, discrepancies never explored), BULB
 /// returns that suboptimal 3-fetch plan (A -> B -> C). With enough fuel
 /// to run a discrepancy iteration, it explores the C branch to
 /// completion, finds the cheaper 2-fetch plan (A -> C), and replaces the
-/// greedy result -- the same "record_completion only if improved"
+/// greedy result. The same "record_completion only if improved"
 /// mechanism the toy `discrepancy_finds_better_alternative_slice` test
 /// exercises, but on a real routing decision.
 #[test_log::test]
@@ -732,7 +732,7 @@ fn progressive_override_routes_to_original_when_label_inactive() {
 // own @requires, the nested @requires resolution can append selections to
 // the wrong entity group. The `last_node` variable drifts as each external
 // part resolves, but the query_graph_node and source_schema stay pinned to
-// the original intermediate -- so the fast-path check validates against the
+// the original intermediate, so the fast-path check validates against the
 // wrong subgraph and appends to whatever entity group `last_node` reached.
 #[test_log::test]
 fn requires_with_multiple_external_parts_and_nested_requires() {
@@ -1044,7 +1044,7 @@ type Query
 
 /// Two sibling fields sharing the same locally-resolvable @requires: the
 /// second commit checks its conditions against the edge's existing condition
-/// input (same field, same arguments -- no conflict) and rides the same
+/// input (same field, same arguments, no conflict) and rides the same
 /// entity representation.
 /// Targets requires.rs has_conflicting_requires_inputs' comparison loops.
 #[test]
@@ -1346,9 +1346,9 @@ type Query
 /// @interfaceObject fake downcast (`... on X` on the io node in B, where X
 /// does not exist): the concrete-type condition is dropped from B's
 /// operation, and `push_interface_object_typename` pushes a best-effort
-/// `__typename` pending that routes generically -- the io node has no
+/// `__typename` pending that routes generically. The io node has no
 /// `__typename` edge, so its only options are key hops to subgraphs where I
-/// is the REAL interface (here A) -- so execution learns each object's
+/// is the real interface (here A), so execution learns each object's
 /// concrete `__typename` to test the condition.
 /// Targets commit.rs push_interface_object_typename + the fake-downcast
 /// op-path arm of target_paths, and routing.rs fragment_options' fake
