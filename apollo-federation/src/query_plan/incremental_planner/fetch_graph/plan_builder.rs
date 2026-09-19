@@ -733,6 +733,7 @@ impl FetchGraph {
 
         // 4. Collect variable definitions narrowed to those actually used.
         let (variable_definitions, variable_usages) = Self::collect_used_variable_definitions(
+            &node.context_variables,
             ctx.variable_definitions,
             ctx.operation_directives,
             &finalized_selection,
@@ -789,7 +790,12 @@ impl FetchGraph {
             operation_kind: node_root_kind.into(),
             input_rewrites: Arc::new(input_rewrites),
             output_rewrites,
-            context_rewrites: Default::default(),
+            context_rewrites: node
+                .context_rewrites
+                .iter()
+                .cloned()
+                .map(|r| Arc::new(r.into()))
+                .collect(),
         }));
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
@@ -958,16 +964,33 @@ impl FetchGraph {
     /// Filter the operation's variable definitions to those actually
     /// referenced by the finalized selection and operation directives.
     fn collect_used_variable_definitions(
+        context_variables: &[(Name, Node<apollo_compiler::ast::Type>)],
         operation_variable_definitions: &[Node<VariableDefinition>],
         operation_directives: &DirectiveList,
         finalized_selection: &SelectionSet,
     ) -> (Vec<Node<VariableDefinition>>, Vec<Name>) {
+        let context_var_defs: Vec<Node<VariableDefinition>> = context_variables
+            .iter()
+            .map(|(name, ty)| {
+                Node::new(VariableDefinition {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    default_value: None,
+                    directives: Default::default(),
+                })
+            })
+            .collect();
+        let all_var_defs: Vec<Node<VariableDefinition>> = operation_variable_definitions
+            .iter()
+            .cloned()
+            .chain(context_var_defs)
+            .collect();
         let variable_definitions = {
             let mut collector = VariableCollector::new();
             collector.visit_directive_list(operation_directives);
             collector.visit_selection_set(finalized_selection);
             let used = collector.into_inner();
-            operation_variable_definitions
+            all_var_defs
                 .iter()
                 .filter(|v| used.contains(&v.name))
                 .cloned()

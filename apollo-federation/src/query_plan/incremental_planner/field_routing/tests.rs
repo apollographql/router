@@ -51,6 +51,21 @@ fn plan_query_with_defer(schema: &str, query: &str) -> String {
     plan_query_with_options(schema, query, config, Default::default())
 }
 
+fn plan_query_with_router_specs(schema: &str, query: &str) -> String {
+    let supergraph = Supergraph::new_with_router_specs(schema).expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        query,
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    format!("{plan}")
+}
+
 const SINGLE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/single_subgraph.graphql");
 
 #[test]
@@ -66,6 +81,9 @@ fn single_subgraph_query_produces_valid_plan() {
     );
 }
 
+/// Kitchen-sink A/B/C User supergraph covering cross-subgraph key hops,
+/// mutations, subscriptions, overrides, shareable fields, and three-way
+/// federation. Individual tests query only the subset they need.
 const CROSS_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/cross_subgraph.graphql");
 
 #[test]
@@ -116,11 +134,9 @@ fn root_typename_is_left_to_router_execution() {
     );
 }
 
-const SUBSCRIPTION_SCHEMA: &str = include_str!("../fixtures/subscription.graphql");
-
 #[test]
 fn subscription_produces_subscription_plan_node() {
-    let supergraph = Supergraph::new(SUBSCRIPTION_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(CROSS_SUBGRAPH_SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -150,12 +166,10 @@ fn subscription_produces_subscription_plan_node() {
     );
 }
 
-const MUTATION_SCHEMA: &str = include_str!("../fixtures/mutation.graphql");
-
 #[test]
 fn mutation_produces_sequential_plan() {
     let plan_str = plan_query(
-        MUTATION_SCHEMA,
+        CROSS_SUBGRAPH_SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name email } }"#,
     );
     assert!(
@@ -171,7 +185,7 @@ fn mutation_produces_sequential_plan() {
 #[test]
 fn mutation_multiple_fields_are_not_merged() {
     let plan_str = plan_query(
-        MUTATION_SCHEMA,
+        CROSS_SUBGRAPH_SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name } updateUser(id: "1", name: "Bob") { id name } }"#,
     );
     assert!(
@@ -188,8 +202,6 @@ fn mutation_multiple_fields_are_not_merged() {
     );
 }
 
-const SHAREABLE_DEAD_END_SCHEMA: &str = include_str!("../fixtures/shareable_dead_end.graphql");
-
 /// Repro for the "local edge suppresses a required key hop" gap: `profile`
 /// is shareable in A and B, but A's copy of `Profile` lacks `detail` and
 /// `Profile` has no key, so once `profile` is routed to A, `detail` is
@@ -198,7 +210,7 @@ const SHAREABLE_DEAD_END_SCHEMA: &str = include_str!("../fixtures/shareable_dead
 /// by BULB backtracking picking the hop.
 #[test_log::test]
 fn shareable_local_dead_end_reroutes_through_key_hop() {
-    let plan_str = plan_query(SHAREABLE_DEAD_END_SCHEMA, "{ user { profile { detail } } }");
+    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { profile { detail } } }");
     assert!(
         plan_str.contains("detail"),
         "Plan should fetch 'detail' via B: {plan_str}"
@@ -251,7 +263,7 @@ fn incomplete_plan_is_an_error_not_a_partial_plan() {
         },
         ..default_config()
     };
-    let supergraph = Supergraph::new(SHAREABLE_DEAD_END_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(CROSS_SUBGRAPH_SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -578,9 +590,6 @@ fn requires_fields_added_to_fetch() {
     );
 }
 
-const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
-    include_str!("../fixtures/requires_local_unsatisfiable.graphql");
-
 /// @requires on a field whose subgraph declares the required fields as
 /// @external: the query enters through B (which owns `shippingCost`
 /// requiring `weight`), but `weight` is only resolvable in A. The field
@@ -589,22 +598,19 @@ const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
 /// @external `weight` itself.
 #[test_log::test]
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
-    let plan_str = plan_query(
-        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
-        "{ product { shippingCost } }",
-    );
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ productFromB { shippingCost } }");
     insta::assert_snapshot!(plan_str, @r###"
         QueryPlan {
           Sequence {
             Fetch(service: "b") {
               {
-                product {
+                productFromB {
                   __typename
                   id
                 }
               }
             },
-            Flatten(path: "product") {
+            Flatten(path: "productFromB") {
               Fetch(service: "a") {
                 {
                   ... on Product {
@@ -619,7 +625,7 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
                 }
               },
             },
-            Flatten(path: "product") {
+            Flatten(path: "productFromB") {
               Fetch(service: "b") {
                 {
                   ... on Product {
@@ -667,11 +673,9 @@ fn requires_through_local_field_resolves_nested_parts() {
     );
 }
 
-const OVERRIDE_SCHEMA: &str = include_str!("../fixtures/override.graphql");
-
 #[test]
 fn static_override_routes_field_to_overriding_subgraph() {
-    let plan_str = plan_query(OVERRIDE_SCHEMA, "{ user { name nickname } }");
+    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name nickname } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name': {plan_str}"
@@ -1242,6 +1246,8 @@ fn y_pending(
         provides_anchor: None,
         best_effort: false,
         defer_ref: None,
+        context_anchor: Default::default(),
+        parent_types: SharedPath::new(),
     }
 }
 
@@ -1271,7 +1277,9 @@ fn cyclic_entity_group_reuse_mints_fresh_group() {
     let s2: Arc<str> = Arc::from("S2");
     // An existing (S2, []) entity group that already feeds b: reusing
     // it for a hop anchored at b would close a cycle.
-    let existing = state.graph.get_or_create_entity_group(&s2, vec![]);
+    let existing = state
+        .graph
+        .get_or_create_entity_group_with_defer(&s2, vec![], None);
     state.graph.add_dependency(existing, b, vec![]);
 
     let pending = Arc::new(y_pending(&space, b, None));
@@ -1746,21 +1754,21 @@ type Query
 #[test]
 fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     let plan_str = plan_query(
-        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
-        "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingCost } } }",
+        REQUIRES_SCHEMA,
+        "query($v: Boolean!) { productFromB { ... on Product @include(if: $v) { shippingCost } } }",
     );
     insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
         Fetch(service: "b") {
           {
-            product {
+            productFromB {
               __typename
               id
             }
           }
         },
-        Flatten(path: "product") {
+        Flatten(path: "productFromB") {
           Fetch(service: "a") {
             {
               ... on Product {
@@ -1776,7 +1784,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
           },
         },
         Include(if: $v) {
-          Flatten(path: "product") {
+          Flatten(path: "productFromB") {
             Fetch(service: "b") {
               {
                 ... on Product {
@@ -1909,14 +1917,12 @@ fn defer_same_subgraph_produces_defer_node() {
     );
 }
 
-const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
-
 /// Multiple @defer siblings at the same level produce distinct deferred
 /// blocks inside a single Defer node.
 #[test]
 fn defer_sibling_blocks_produces_multiple_deferred() {
     let plan_str = plan_query_with_defer(
-        THREE_SUBGRAPH_SCHEMA,
+        CROSS_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email } ... @defer { address } } }",
     );
     assert!(
@@ -1935,4 +1941,147 @@ fn defer_sibling_blocks_produces_multiple_deferred() {
         plan_str.contains("address"),
         "A deferred block should fetch 'address': {plan_str}"
     );
+}
+
+const CONTEXT_SCHEMA: &str = include_str!("../fixtures/context.graphql");
+
+/// @fromContext field: the plan must fetch the context-providing field
+/// (`prop`) from the parent and thread it via a contextualArgument to
+/// the subgraph that resolves the @fromContext-bearing field.
+#[test]
+fn context_from_context_produces_valid_plan() {
+    let plan_str = plan_query_with_router_specs(CONTEXT_SCHEMA, "{ t { u { field } } }");
+    assert!(
+        plan_str.contains("field"),
+        "Plan should fetch 'field': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("prop"),
+        "Plan should fetch 'prop' as context value: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("contextualArgument"),
+        "Plan should include context variable argument: {plan_str}"
+    );
+}
+
+const CONTEXT_BOUNDARY_SCHEMA: &str = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/context/v0.1", import: ["@context"], for: SECURITY)
+{
+  query: Query
+}
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar context__ContextFieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  S1 @join__graph(name: "s1", url: "http://s1")
+  S2 @join__graph(name: "s2", url: "http://s2")
+}
+
+type Query
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+{
+  t: T! @join__field(graph: S1)
+}
+
+type T
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @context(name: "s2__ctx")
+{
+  id: ID!
+  prop: String! @join__field(graph: S1) @join__field(graph: S2)
+  child: T @join__field(graph: S2)
+  field: Int! @join__field(graph: S2, contextArguments: [{context: "s2__ctx", name: "a", type: "String", selection: " { prop }"}])
+}
+"#;
+
+/// @fromContext consumed inside an entity fetch whose entity root type IS
+/// the @context ancestor: the context value rides the entity representation
+/// (no extra isolation hop), the context selection lands on the fetch
+/// feeding the entity fetch, and the rewrite path has no Parent elements.
+#[test]
+fn context_value_rides_entity_representation_at_boundary() {
+    let plan_str =
+        plan_query_with_router_specs(CONTEXT_BOUNDARY_SCHEMA, "{ t { child { field } } }");
+    assert!(
+        plan_str.contains("contextualArgument"),
+        "Plan should pass the context variable: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "s1") {
+          {
+            t {
+              __typename
+              id
+              prop
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s2") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                child {
+                  field(a: $contextualArgument_2_0)
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
 }
