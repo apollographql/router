@@ -233,12 +233,7 @@ impl FieldRoutingSearchSpace {
                         schema,
                         &current_type,
                         Default::default(),
-                        |frag| {
-                            SelectionSet::from_selection(
-                                frag.casted_type(),
-                                inner_sel.clone(),
-                            )
-                        },
+                        |frag| SelectionSet::from_selection(frag.casted_type(), inner_sel.clone()),
                     );
                     if exploded {
                         trace!(
