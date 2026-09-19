@@ -170,7 +170,7 @@ pub struct IncrementalPlannerConfig {
 impl Default for IncrementalPlannerConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             beam_width: 16,
             fuel: 5_000,
             timeout: None,

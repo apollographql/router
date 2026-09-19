@@ -6317,7 +6317,7 @@ expression: "&schema"
       "description": "Configuration for the incremental (BULB) query planner.",
       "properties": {
         "enabled": {
-          "default": true,
+          "default": false,
           "description": "Whether the incremental planner is enabled. When enabled, deferred\noperations still fall back to the default planner.",
           "type": "boolean"
         }
@@ -8211,7 +8211,7 @@ expression: "&schema"
             }
           ],
           "default": {
-            "enabled": true
+            "enabled": false
           },
           "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates. Deferred operations fall\nback to the default planner."
         },
@@ -11664,7 +11664,7 @@ expression: "&schema"
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
             "incremental_planner": {
-              "enabled": true
+              "enabled": false
             },
             "warmed_up_queries": null
           },
@@ -13265,7 +13265,7 @@ expression: "&schema"
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
           "incremental_planner": {
-            "enabled": true
+            "enabled": false
           },
           "warmed_up_queries": null
         },
