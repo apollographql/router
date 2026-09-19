@@ -31,6 +31,16 @@ use crate::query_plan::FetchDataPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 
+/// Shared inputs of one `commit_choice` invocation, threaded through the
+/// @requires stage.
+pub(super) struct CommitCtx<'a> {
+    pub(super) pending: &'a PendingSelection,
+    pub(super) choice: &'a RoutingChoice,
+    /// The parent-to-entity dependency edge, when the choice was a hop.
+    /// @requires inputs ride on this edge.
+    pub(super) key_hop_edge: Option<EdgeIndex>,
+}
+
 /// Where a committed selection's children begin: fetch node, operation
 /// path, and response path.
 pub(super) struct CommitTarget {
@@ -84,7 +94,7 @@ impl FieldRoutingSearchSpace {
         };
 
         // Mutating half: commit the hop or resolve the direct fetch group.
-        let (fetch_node, _key_hop_edge) = match choice {
+        let (fetch_node, key_hop_edge) = match choice {
             RoutingChoice::Provides(_) | RoutingChoice::Local(_) => {
                 (self.direct_fetch_node(state, pending, choice)?, None)
             }
@@ -99,7 +109,20 @@ impl FieldRoutingSearchSpace {
         };
 
         // Pure half: assemble op and response paths for children.
-        let target = self.target_paths(pending, choice, fetch_node, response_path_elements)?;
+        let mut target = self.target_paths(pending, choice, fetch_node, response_path_elements)?;
+        let ctx = CommitCtx {
+            pending,
+            choice,
+            key_hop_edge,
+        };
+        let edge = qg.edge_weight(
+            choice
+                .edge_index()
+                .expect("commit called on non-edge choice"),
+        )?;
+        if let Some(requires_conditions) = &edge.conditions {
+            target = self.apply_requires(state, &ctx, requires_conditions, target)?;
+        }
 
         // Condition selections carry an ordering dependent: their consuming
         // group must run after every group they commit into. A would-be
