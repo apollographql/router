@@ -65,7 +65,9 @@ impl FieldRoutingSearchSpace {
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
         if matches!(choice, RoutingChoice::TypeExplosion) {
-            return if self.try_explode_interface_field(state, pending)? {
+            return if self.try_explode_interface_field(state, pending)?
+                || self.try_explode_abstract_type(state, pending)?
+            {
                 Ok(())
             } else {
                 Err(FederationError::internal(
