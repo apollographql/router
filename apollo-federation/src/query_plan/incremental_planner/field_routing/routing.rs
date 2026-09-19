@@ -876,6 +876,15 @@ impl FieldRoutingSearchSpace {
             options.push(RoutingChoice::TypeExplosion);
         }
 
+        // When no routing option exists (no local edge, not vacuous, no
+        // key hops, concrete type condition), offer StripFragment so the
+        // commit path can detect unsatisfiable conditions (e.g., empty
+        // local runtime intersection) and drop the fragment gracefully
+        // instead of penalizing the plan with dropped_fields.
+        if options.is_empty() {
+            options.push(RoutingChoice::StripFragment);
+        }
+
         Ok(options)
     }
 
