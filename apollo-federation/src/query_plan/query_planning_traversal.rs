@@ -2,6 +2,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -90,6 +91,11 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) override_conditions: OverrideConditions,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
     pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
+    /// Client-visible label per planning label assigned by defer
+    /// normalization (see `NormalizedDefer::client_labels`). The BULB
+    /// planner threads these into DeferInfo so plan generation can restore
+    /// client labels on the emitted DeferNodes.
+    pub(crate) client_labels: Arc<IndexMap<String, Option<String>>>,
 }
 
 impl QueryPlanningParameters<'_> {
@@ -1163,6 +1169,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
             check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
             disabled_subgraphs: self.parameters.disabled_subgraphs.clone(),
+            client_labels: self.parameters.client_labels.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,

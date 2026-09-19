@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tracing::debug;
 use tracing::trace;
 
+use super::super::defer::extract_defer_label;
+use super::super::defer::strip_defer_directive;
 use super::FieldRoutingSearchSpace;
 use super::state::PendingSelection;
 use super::state::PlanState;
@@ -60,6 +62,7 @@ fn push_concrete_type_fragments<'a>(
 impl FieldRoutingSearchSpace {
     /// For an inline fragment with no type condition (which has no query
     /// graph edge), push its sub-selections at the same query graph node.
+    /// Handles @defer on the fragment.
     pub(super) fn try_pass_through_fragment(
         &self,
         state: &mut PlanState,
@@ -68,25 +71,28 @@ impl FieldRoutingSearchSpace {
         if let Selection::InlineFragment(frag_sel) = &pending.selection
             && frag_sel.inline_fragment.type_condition_position.is_none()
         {
+            let child_defer_ref = extract_defer_label(&frag_sel.inline_fragment)
+                .or_else(|| pending.defer_ref.clone());
             // Preserve remaining directives (@skip/@include): the fragment
             // has no edge, but its conditions gate every child, so a
             // condition-carrying element must ride the children's op path.
             // Constant conditions resolve statically: always-false drops
             // the children, always-true is a plain pass-through.
-            let child_op_path =
-                match Conditions::from_directives(&frag_sel.inline_fragment.directives)? {
-                    Conditions::Boolean(false) => return Ok(true),
-                    Conditions::Boolean(true) => pending.op_path.clone(),
-                    Conditions::Variables(_) => {
-                        pending
-                            .op_path
-                            .pushed(Arc::new(OpPathElement::InlineFragment(
-                                frag_sel.inline_fragment.clone(),
-                            )))
-                    }
-                };
+            let stripped = strip_defer_directive(&frag_sel.inline_fragment);
+            let child_op_path = match Conditions::from_directives(&stripped.directives)? {
+                Conditions::Boolean(false) => return Ok(true),
+                Conditions::Boolean(true) => pending.op_path.clone(),
+                Conditions::Variables(_) => pending
+                    .op_path
+                    .pushed(Arc::new(OpPathElement::InlineFragment(stripped))),
+            };
             for sub_sel in frag_sel.selection_set.selections.values().rev().cloned() {
-                state.push_pending(pending.fork(sub_sel).with_op_path(child_op_path.clone()));
+                state.push_pending(
+                    pending
+                        .fork(sub_sel)
+                        .with_defer(child_defer_ref.clone())
+                        .with_op_path(child_op_path.clone()),
+                );
             }
             return Ok(true);
         }
@@ -96,7 +102,7 @@ impl FieldRoutingSearchSpace {
     /// Vacuous type condition: the current node's runtime types are a subset
     /// of the condition's (e.g. `...on Node` when every union member
     /// implements Node), so treat the fragment as pass-through, preserving
-    /// non-routing directives by pushing them onto the op_path.
+    /// directives by pushing it onto the op_path.
     pub(super) fn try_vacuous_type_condition(
         &self,
         state: &mut PlanState,
@@ -125,11 +131,31 @@ impl FieldRoutingSearchSpace {
             if is_vacuous {
                 trace!(
                     type_condition = %type_cond,
-                    "vacuous type condition -- treating as pass-through",
+                    "vacuous type condition — treating as pass-through",
                 );
-                let directives = &frag_sel.inline_fragment.directives;
-                let child_op_path = if !directives.is_empty() {
-                    let stripped = frag_sel.inline_fragment.with_updated_type_condition(None);
+                let has_defer = frag_sel
+                    .inline_fragment
+                    .directives
+                    .iter()
+                    .any(|d| d.name == "defer");
+                let child_defer_ref = if has_defer {
+                    extract_defer_label(&frag_sel.inline_fragment)
+                        .or_else(|| pending.defer_ref.clone())
+                } else {
+                    pending.defer_ref.clone()
+                };
+                let non_defer_directives: DirectiveList = frag_sel
+                    .inline_fragment
+                    .directives
+                    .iter()
+                    .filter(|d| d.name != "defer")
+                    .cloned()
+                    .collect();
+                let child_op_path = if !non_defer_directives.is_empty() {
+                    let stripped = frag_sel
+                        .inline_fragment
+                        .with_updated_directives(non_defer_directives);
+                    let stripped = stripped.with_updated_type_condition(None);
                     pending
                         .op_path
                         .pushed(Arc::new(OpPathElement::InlineFragment(stripped)))
@@ -137,7 +163,12 @@ impl FieldRoutingSearchSpace {
                     pending.op_path.clone()
                 };
                 for sub_sel in frag_sel.selection_set.selections.values().rev().cloned() {
-                    state.push_pending(pending.fork(sub_sel).with_op_path(child_op_path.clone()));
+                    state.push_pending(
+                        pending
+                            .fork(sub_sel)
+                            .with_op_path(child_op_path.clone())
+                            .with_defer(child_defer_ref.clone()),
+                    );
                 }
                 return Ok(true);
             }
