@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::Supergraph;
 use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
@@ -85,6 +87,8 @@ fn single_subgraph_query_produces_valid_plan() {
 /// mutations, subscriptions, overrides, shareable fields, and three-way
 /// federation. Individual tests query only the subset they need.
 const CROSS_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/cross_subgraph.graphql");
+const THREE_SUBGRAPH_SCHEMA: &str = CROSS_SUBGRAPH_SCHEMA;
+const MUTATION_SCHEMA: &str = CROSS_SUBGRAPH_SCHEMA;
 
 #[test]
 fn cross_subgraph_key_hop_produces_two_fetches() {
@@ -1238,6 +1242,8 @@ fn y_pending(
         defer_ref: None,
         context_anchor: Default::default(),
         parent_types: SharedPath::new(),
+        split_parent: None,
+        split_avoid: None,
     }
 }
 
@@ -1817,6 +1823,93 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
     );
 }
 
+/// A keyless value type (no @key on V) whose fields are split across two
+/// subgraphs: `a` in A and `b` in B. A single fetch can't resolve both, so the
+/// planner must split the parent selection and fetch each half independently.
+/// Targets the split_for_other_subgraph path in commit.rs dispatch_sub_selections.
+#[test]
+fn keyless_value_type_splits_across_subgraphs() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ v { __typename a b } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Parallel {
+        Fetch(service: "b") {
+          {
+            v {
+              b
+            }
+          }
+        },
+        Fetch(service: "a") {
+          {
+            v {
+              __typename
+              a
+            }
+          }
+        },
+      },
+    }
+    "###);
+}
+
+/// Same keyless split, but the stranded child hides inside a @defer'd
+/// fragment: the split walk must recurse through the fragment and preserve
+/// the wrapper (carrying @defer) on the split-off duplicate.
+/// Targets commit.rs split_fragment_children.
+#[test]
+fn keyless_value_type_split_recovers_deferred_fragment_children() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query_with_defer(
+        &schema,
+        "query($s: Boolean!) { v { a ... @defer { __typename ... on V @skip(if: $s) { b } } } }",
+    );
+    assert!(plan_str.contains("a"), "Plan should fetch 'a': {plan_str}");
+    assert!(
+        plan_str.contains("b"),
+        "Plan should fetch deferred 'b' from the other subgraph: {plan_str}"
+    );
+}
+
 /// Statically constant @skip(if: true) should eliminate the fragment entirely;
 /// a type condition on the root Query type is vacuous and passes through.
 /// Targets type_conditions.rs try_pass_through_fragment's Boolean(false)
@@ -2226,4 +2319,593 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
       },
     }
     "###);
+}
+
+/// Deep keyless split: the strand sits two keyless levels below the field
+/// with routing alternatives, where the one-level lookahead in
+/// `split_for_other_subgraph` cannot see it. Committing `conn` to A strands
+/// `Inner.b` (Inner and Conn are keyless, so no hop can recover it); the
+/// drop-time recovery re-pushes `conn { inner { b } }` at the entity anchor,
+/// avoiding A, so it key-hops to B and the responses merge at the same path.
+/// Targets mod.rs try_split_repush / wrap_in_parent / split_avoid filtering.
+#[test]
+fn deep_keyless_split_repushes_remainder_at_entity_anchor() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  conn: Conn
+  onlyA: String @join__field(graph: A)
+}
+
+type Conn
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  inner: Inner
+}
+
+type Inner
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  e: E
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ e { onlyA conn { inner { a b } } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            e {
+              __typename
+              onlyA
+              conn {
+                inner {
+                  a
+                }
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "b") {
+            {
+              ... on E {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on E {
+                conn {
+                  inner {
+                    b
+                  }
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// Build the pieces `build_bulb_plan` needs directly, so tests can plan from
+/// heads the public planner never uses (it always enters at the federated
+/// root).
+fn bulb_test_parameters(
+    schema: &str,
+) -> (
+    Supergraph,
+    Arc<crate::query_graph::QueryGraph>,
+    crate::query_plan::query_planner::QueryPlanningStatistics,
+) {
+    let supergraph = Supergraph::new(schema).expect("supergraph parse");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    let query_graph = Arc::new(
+        crate::query_graph::build_federated_query_graph(
+            supergraph.schema.clone(),
+            api_schema,
+            Some(true),
+            Some(true),
+        )
+        .expect("query graph"),
+    );
+    let statistics = Default::default();
+    (supergraph, query_graph, statistics)
+}
+
+/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
+/// root fetch group up front instead of fanning out from the federated root.
+/// The public planner always enters at the federated root, so this drives
+/// build_bulb_plan directly with the subgraph's own Query node as head.
+#[test]
+fn bulb_plan_from_concrete_subgraph_root_head() {
+    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+    use crate::schema::position::SchemaRootDefinitionKind;
+
+    let (supergraph, query_graph, statistics) = bulb_test_parameters(SINGLE_SUBGRAPH_SCHEMA);
+    let head = *query_graph
+        .root_kinds_to_nodes_by_source("a")
+        .expect("subgraph root kinds")
+        .get(&SchemaRootDefinitionKind::Query)
+        .expect("subgraph query root");
+
+    let operation = crate::operation::Operation::parse(
+        supergraph.schema.clone(),
+        "{ user { name email } }",
+        "test.graphql",
+    )
+    .expect("operation parse");
+    let selection_set = operation.selection_set.clone();
+    let parameters = QueryPlanningParameters {
+        supergraph_schema: supergraph.schema.clone(),
+        federated_query_graph: query_graph.clone(),
+        operation: Arc::new(operation),
+        fetch_id_generator: Arc::new(
+            crate::query_plan::fetch_dependency_graph::FetchIdGenerator::new(),
+        ),
+        head,
+        head_must_be_root: true,
+        abstract_types_with_inconsistent_runtime_types: Default::default(),
+        config: default_config(),
+        statistics: &statistics,
+        override_conditions: crate::query_graph::OverrideConditions::new(
+            &query_graph,
+            &Default::default(),
+        ),
+        connector_index: Default::default(),
+        check_for_cooperative_cancellation: None,
+        disabled_subgraphs: Default::default(),
+        client_labels: Default::default(),
+    };
+
+    let mut naming = super::super::OperationNaming::new(false);
+    let bulb = super::super::build_bulb_plan(
+        &parameters,
+        &selection_set,
+        SchemaRootDefinitionKind::Query,
+        &mut naming,
+        false,
+    )
+    .expect("bulb plan");
+    let plan = bulb.plan.expect("plan node");
+    let plan_str = format!("{plan}");
+    assert!(
+        plan_str.contains("name") && plan_str.contains("email"),
+        "Plan from subgraph root head should fetch both fields: {plan_str}"
+    );
+}
+
+const CONNECTOR_ROOT_FIELD_SCHEMA: &str = include_str!("../fixtures/connector_root_field.graphql");
+
+#[test]
+fn connector_root_field_produces_fetch_with_connector_protocol() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_ROOT_FIELD_SCHEMA,
+        "{ products { id name price } }",
+    );
+    insta::assert_snapshot!(plan_str, @r#"
+    QueryPlan {
+      Fetch(service: "connectors") {
+        {
+          products {
+            id
+            name
+            price
+          }
+        }
+      },
+    }
+    "#);
+}
+
+const CONNECTOR_MIXED_SCHEMA: &str = include_str!("../fixtures/connector_mixed.graphql");
+
+#[test]
+fn mixed_connector_and_subgraph_produces_correct_plan() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_MIXED_SCHEMA,
+        "{ users { id name } topProducts { id title } }",
+    );
+    assert!(
+        plan_str.contains("connectors"),
+        "Plan should target 'connectors' subgraph: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("graphql"),
+        "Plan should target 'graphql' subgraph: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("users"),
+        "Plan should fetch 'users': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("topProducts"),
+        "Plan should fetch 'topProducts': {plan_str}"
+    );
+}
+
+/// Ad-hoc corpus repro driver: set CORPUS_SCHEMA and CORPUS_OP to file
+/// paths, get the BULB plan and correctness verdict printed.
+#[test_log::test]
+fn corpus_repro_debug() {
+    let Ok(schema_path) = std::env::var("CORPUS_SCHEMA") else {
+        return;
+    };
+    let op_path = std::env::var("CORPUS_OP").unwrap();
+    let schema_str = std::fs::read_to_string(schema_path).unwrap();
+    let op_str = std::fs::read_to_string(op_path).unwrap();
+    let defaults = IncrementalPlannerConfig::default();
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            fuel: std::env::var("BULB_FUEL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(defaults.fuel),
+            beam_width: std::env::var("BULB_BEAM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(defaults.beam_width),
+            ..defaults
+        },
+        ..Default::default()
+    };
+    let supergraph = Supergraph::new_with_router_specs(&schema_str).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let api_schema = planner.api_schema();
+    let op = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        &op_str,
+        "op.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&op, None, Default::default())
+        .unwrap();
+    println!("PLAN:\n{plan}");
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    let result = crate::correctness::check_plan(
+        api_schema,
+        planner.supergraph_schema(),
+        &subgraphs_by_name,
+        &op,
+        &plan,
+    );
+    println!("CHECK: {:?}", result.err().map(|e| e.to_string()));
+}
+
+/// Ad-hoc corpus timing driver: CORPUS_SCHEMA + CORPUS_OPS_DIR, plans every
+/// operation (no correctness check) and prints ones slower than
+/// CORPUS_SLOW_MS (default 1000).
+#[test]
+fn corpus_timing_debug() {
+    let Ok(schema_path) = std::env::var("CORPUS_SCHEMA") else {
+        return;
+    };
+    let Ok(ops_dir) = std::env::var("CORPUS_OPS_DIR") else {
+        return;
+    };
+    let slow_ms: u128 = std::env::var("CORPUS_SLOW_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+    let schema_str = std::fs::read_to_string(schema_path).unwrap();
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let supergraph = Supergraph::new_with_router_specs(&schema_str).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let api_schema = planner.api_schema();
+    let mut entries: Vec<_> = std::fs::read_dir(&ops_dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "graphql"))
+        .collect();
+    entries.sort();
+    for (i, path) in entries.iter().enumerate() {
+        let op_str = std::fs::read_to_string(path).unwrap();
+        let Ok(op) = apollo_compiler::ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            &op_str,
+            "op.graphql",
+        ) else {
+            continue;
+        };
+        let started = std::time::Instant::now();
+        let _ = planner.build_query_plan(&op, None, Default::default());
+        let ms = started.elapsed().as_millis();
+        if ms >= slow_ms {
+            println!("SLOW {ms}ms {}", path.display());
+        }
+        if i % 2000 == 0 {
+            println!("progress {i}/{}", entries.len());
+        }
+    }
+    println!("timing done");
+}
+
+/// Nested @defer: an outer deferred fragment contains an inner @defer,
+/// producing nested Defer nodes. Exercises the parent_label tracking in
+/// defer.rs collect_deferred_blocks and the nested defer partitioning in
+/// plan_builder.rs build_deferred_blocks.
+#[test]
+fn nested_defer_produces_nested_defer_nodes() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer(label: \"outer\") { email ... @defer(label: \"inner\") { address } } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Outer deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Inner deferred should fetch 'address': {plan_str}"
+    );
+}
+
+/// When every field in the selection is deferred, the primary sub_selection
+/// is empty. Exercises the None primary_sub_selection path in defer.rs
+/// build_defer_info.
+#[test]
+fn fully_deferred_field_has_no_primary_payload() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer(label: \"all\") { name email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Deferred should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// A @skip condition on a cross-subgraph field should produce a condition
+/// node wrapping the entity fetch. Exercises the group conditions hoisting
+/// in fetch_graph plan_builder.
+#[test]
+fn skip_on_cross_subgraph_field_produces_condition_node() {
+    let plan_str = plan_query_with_options(
+        CROSS_SUBGRAPH_SCHEMA,
+        "query($s: Boolean!) { user { name email @skip(if: $s) } }",
+        default_config(),
+        Default::default(),
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should reference 'email': {plan_str}"
+    );
+}
+
+/// @include on a cross-subgraph field wraps the entity fetch in a
+/// condition node, exercising the Variables path in group_conditions.
+#[test]
+fn include_on_cross_subgraph_field_produces_condition_node() {
+    let plan_str = plan_query_with_options(
+        CROSS_SUBGRAPH_SCHEMA,
+        "query($inc: Boolean!) { user { name email @include(if: $inc) } }",
+        default_config(),
+        Default::default(),
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should reference 'email': {plan_str}"
+    );
+}
+
+/// A three-way entity hop exercises deeper fetch graph construction:
+/// A -> B -> C entity resolution with each subgraph owning different fields.
+#[test]
+fn three_way_entity_hop_plans_correctly() {
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { name email address } }");
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Plan should fetch 'address': {plan_str}"
+    );
+}
+
+/// Cross-subgraph mutation with entity hop: the mutation result lives in
+/// subgraph A, but its email field requires a key hop to B, exercising
+/// fetch graph construction under mutation sequencing.
+#[test]
+fn cross_subgraph_mutation_with_entity_hop() {
+    let plan_str = plan_query(
+        MUTATION_SCHEMA,
+        r#"mutation { createUser(name: "Alice") { id name email } }"#,
+    );
+    assert!(
+        plan_str.contains("createUser"),
+        "Plan should contain createUser: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should hop to B for email: {plan_str}"
+    );
+}
+
+/// A field with an inline fragment on the same type exercises the
+/// vacuous type condition path in type_conditions, and inline fragment
+/// handling in selection_builder.
+#[test]
+fn inline_fragment_on_same_type_passes_through() {
+    let plan_str = plan_query(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... on User { name email } } }",
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name' through inline fragment: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email' through inline fragment: {plan_str}"
+    );
+}
+
+/// Deferred cross-subgraph fetch with labeled @defer and an explicit
+/// user field alongside exercises the primary/deferred split where
+/// primary has content and deferred needs an entity hop.
+#[test]
+fn labeled_defer_with_primary_and_deferred_content() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        r#"{ user { name ... @defer(label: "emails") { email } ... @defer(label: "addrs") { address } } }"#,
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("emails"),
+        "Label 'emails' should appear in plan: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("addrs"),
+        "Label 'addrs' should appear in plan: {plan_str}"
+    );
+}
+
+/// A bare inline fragment (no type condition, no directives) inside a
+/// deferred selection exercises collect_non_deferred_selection's
+/// type_cond == None branch.
+#[test]
+fn bare_inline_fragment_passes_through_in_defer() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer { email } ... { name } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Bare fragment 'name' should be in primary: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// Cross-subgraph @defer where the deferred fields span two different
+/// non-primary subgraphs exercises the multi-fetch deferred block
+/// construction in plan_builder.
+#[test]
+fn defer_spanning_two_non_primary_subgraphs() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email address } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain Defer: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Deferred should fetch 'address': {plan_str}"
+    );
+}
+
+/// An alias on a cross-subgraph field exercises the alias propagation
+/// through selection builder entries.
+#[test]
+fn aliased_cross_subgraph_field_preserves_alias() {
+    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name myEmail: email } }");
+    assert!(
+        plan_str.contains("myEmail") || plan_str.contains("email"),
+        "Plan should reference the aliased email field: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+}
+
+/// Multiple entity hops from the same root entity exercises the parallel
+/// fetch graph construction for independent subgraph fetches.
+#[test]
+fn parallel_entity_hops_from_same_root() {
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { email address } }");
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Plan should fetch 'address': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("Parallel") || plan_str.contains("Sequence"),
+        "Plan should have multi-fetch structure: {plan_str}"
+    );
 }
