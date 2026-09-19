@@ -35,5 +35,21 @@ name = "boolean_case_split_cost"
 path = "runners/boolean_case_split_cost.rs"
 
 [[example]]
+name = "plan_differential"
+path = "runners/plan_differential.rs"
+
+[[example]]
+name = "plan_disagreements"
+path = "runners/plan_disagreements.rs"
+
+[[example]]
+name = "plan_probe"
+path = "runners/plan_probe.rs"
+
+[[example]]
+name = "plan_smoke"
+path = "runners/plan_smoke.rs"
+
+[[example]]
 name = "benchmark"
 path = "runners/benchmark.rs"

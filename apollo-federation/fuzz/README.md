@@ -1,4 +1,13 @@
-# Query-inclusion differential fuzzing and 3-way benchmark
+# Differential fuzzing against the Lean models
+
+Two lanes live here, sharing one transport and one architecture:
+
+- **query inclusion** — `query_compare` against `QueryInclusion.includesBool`, plus a 3-way
+  benchmark. Everything below the "Query inclusion" heading is about this lane.
+- **query plan checking** — `correctness::check_plan` and `correctness::legacy::check_plan`
+  against `Federation.checkQueryPlan`. See "Query plan checking" at the end.
+
+# Query inclusion: differential fuzzing and 3-way benchmark
 
 This package checks `apollo_federation::correctness::query_compare` — a Rust port of
 `QueryInclusion.includesBool` from the [graphql-lean](https://github.com/duckki/graphql-lean)
@@ -22,7 +31,7 @@ the grammar exist twice and can drift apart. That is what the `schema` request g
 renders its own copy of the schema tables and every run refuses to proceed unless it matches
 [`model::schema_digest`].
 
-See [PRIOR_ART.md](PRIOR_ART.md) for what this took from an earlier prototype of the same work,
+See [prior-art.md](docs/prior-art.md) for what this took from an earlier prototype of the same work,
 including the reason to distrust a green campaign from the byte grammar alone.
 
 ## Lanes
@@ -157,7 +166,7 @@ covariant type-case shape.
 
 The lane's structural limit is that it cannot reach the Lean oracle — a rewritten document is not
 expressible as a byte string the Lean decoder would produce. Closing that needs a serialized-IR
-protocol; see PRIOR_ART.md.
+protocol; see [prior-art.md](docs/prior-art.md).
 
 ## Benchmark
 
@@ -205,7 +214,7 @@ Checked on 2026-09-15 against Lean commit `06a5d04d6c00b875d7da9c1c4f1c148b32191
   no verdict change and no reflexivity failure, in 20 seconds;
 - `cargo-mutants` over the checker: 113 caught, 64 missed, 29 unviable — 63.8% for the crate's unit
   tests, with roughly 35 of the survivors unkillable by construction. See
-  [MUTATION_REPORT.md](MUTATION_REPORT.md);
+  [mutation-report.md](docs/mutation-report.md);
 - the sentinel is detected;
 - the grammar produces no invalid documents (0% discarded);
 - LLVM source coverage of the module under test, from the two deterministic campaigns:
@@ -236,3 +245,90 @@ variables inside list or input-object argument values, or list-depth variation. 
 is fixed:
 only the operation pair varies, so schema-shaped reasoning is exercised only through the one
 schema both sides hold.
+
+
+# Query plan checking
+
+Checks `apollo_federation::correctness::check_plan` — a Rust port of `Federation.checkQueryPlan`
+from [apollo-graphql-lean](https://github.com/duckki/apollo-graphql-lean) — against the model, and
+reports what the legacy response-shape checker decides beside it.
+
+| lane | implementation | role |
+| --- | --- | --- |
+| `lean` | `Federation.checkQueryPlan` | the model, carrying `checkQueryPlan_correct` |
+| `query_plan_check` | `correctness::check_plan` | the port under test |
+| `legacy` | `correctness::legacy::check_plan` | an independent algorithm for the same question |
+
+`lean` against `query_plan_check` is strict equality. `legacy` is advisory, and is *known* not to
+ask two of the things the model asks — that every entity case is covered by some `requires` entry,
+and that contextual data is available — so its divergences are counted, not failed on.
+
+## The fixture
+
+One composed supergraph, checked in at `fixtures/supergraph.graphql` and never generated: the
+grammar varies the operation and the plan, not the schema. It is small enough to transcribe into
+the Lean oracle by hand and still exercises what the checker decides — an interface root under a
+list, two entity types with `@key(fields: "id")` and a `@requires` field each, and a third
+implementation with no key at all.
+
+## Why a case is an operation plus a perturbation
+
+A plan drawn freely from bytes is almost never correct for the operation beside it, and a lane
+whose every case is rejected exercises only the rejection paths. So a case is decoded in three
+steps: an operation, the plan a miniature planner gives that operation, and one *named*
+perturbation of that plan. The unperturbed plan is correct by construction.
+
+Whether a *perturbed* plan is wrong is deliberately not decided by the generator: `DropKeyField`
+breaks nothing when the operation selects `id` itself, and working that out is the checker's job.
+`plan_model::must_be_accepted` therefore claims only that an unperturbed plan must be accepted;
+the model is the oracle for the rest.
+
+## Lanes that need no Lean
+
+    cargo run --release --example plan_smoke
+
+Walks the whole grammar against both Rust checkers, then plans every generated operation with the
+*real* planner and checks the result. Those are the only plans that are correct by construction
+rather than by the miniature planner agreeing with itself, so a rejection there is a false
+positive in the checker under test.
+
+## Build the Lean oracle
+
+```sh
+scripts/build-plan-oracle.sh /path/to/apollo-graphql-lean
+```
+
+That project declares no `lean_exe`, so unlike the inclusion oracle there is no ready-made linker
+response file; the script links the static libraries instead. The Lean revision is recorded beside
+the binary and `PLAN_MODEL_COMMIT` in `src/plan_oracle.rs` must match, unless
+`QUERY_PLAN_ALLOW_STALE_LEAN_ORACLE=1` is set.
+
+    QUERY_PLAN_LEAN_ORACLE=target/query-plan-checker-lean-oracle \
+        cargo run --release --example plan_differential -- 20000
+
+## Status
+
+The lane is green against `26c8a96`: 12,960 cases exhaustively and 20,000 sampled, **zero
+divergences** between the model and either Rust checker.
+
+Its first campaign reported 1,114, all of which were a fixture bug in the oracle itself —
+[oracle-fixture-drift.md](docs/oracle-fixture-drift.md) records what it was, why the schema digest did not catch it,
+and what the digest now checks so that it would. `plan_disagreements` is the runner that distils a
+campaign's divergences into the operand pairs behind them.
+
+## Tracing a disagreement
+
+The oracle answers more than `check`. `render <hex>` gives the operation and plan as *it* built
+them, so a divergence can be blamed on the grammar rather than the checkers; `halves <hex>` splits
+`checkQueryPlan` into its completeness and soundness bits; `fetchcheck <hex>` decides the soundness
+of the entity fetch alone, with and without the condition it runs under; `guardsplit <hex>` runs
+completeness with each side's guard removed in turn; and `fetched <hex>` renders the left operand
+of the completeness test.
+
+When that bottoms out at the inclusion relation, `plan_probe` takes the two rendered operands and
+runs `query_compare::includes` on them, with no plan machinery left in the way:
+
+    cargo run --release --example plan_probe -- '<left operation>' '<right operation>'
+
+**Beware of hand-written byte strings.** The slot count decides how many slot bytes follow, so
+changing a byte shifts what the later ones mean; a repro should come from the runner's own output.

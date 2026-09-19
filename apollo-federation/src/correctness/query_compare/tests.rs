@@ -239,10 +239,57 @@ fn covariant_return_narrows_the_child_region() {
     .unwrap();
 }
 
+// A directive the model gives no semantics to is still part of the resolver call, so two fields
+// differing only by one are not the same call.
 #[test]
-fn unsupported_directive_is_not_an_inclusion_finding() {
+fn custom_directives_are_compared() {
     let err = error(r#"{ test_i { id } }"#, r#"{ test_i { id @mod(arg: 1) } }"#);
-    assert!(!err.is_inclusion_finding(), "{err}");
+    assert!(err.is_inclusion_finding(), "{err}");
+    insta::assert_snapshot!(err, @r###"
+    left does not include right
+      in response name: test_i
+      over runtime types: {Query}
+      in sub-selection of: test_i -> {R, S}
+      in response name: id
+      over runtime types: {R, S}
+      --> `id` resolves `id` with different directives
+        left:  (none)
+        right: @mod
+    "###);
+}
+
+#[test]
+fn matching_custom_directives_are_included() {
+    check(
+        r#"{ test_i { id @mod(arg: 1) } }"#,
+        r#"{ test_i { id @mod(arg: 1) } }"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn custom_directive_arguments_are_compared() {
+    let err = error(
+        r#"{ test_i { id @mod(arg: 1) } }"#,
+        r#"{ test_i { id @mod(arg: 2) } }"#,
+    );
+    assert!(err.is_inclusion_finding(), "{err}");
+}
+
+// `__typename` is selectable on every composite type and declared by none of them.
+#[test]
+fn typename_is_selectable() {
+    check(
+        r#"{ test_i { __typename id } }"#,
+        r#"{ test_i { __typename } }"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn missing_typename_is_reported() {
+    let err = error(r#"{ test_i { id } }"#, r#"{ test_i { __typename } }"#);
+    assert!(err.is_inclusion_finding(), "{err}");
 }
 
 #[test]

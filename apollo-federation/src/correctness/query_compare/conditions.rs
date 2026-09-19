@@ -17,6 +17,7 @@
 use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::Selection;
 
 use super::error::ComparisonError;
@@ -35,6 +36,25 @@ pub(crate) enum BooleanLiteral {
 }
 
 impl BooleanLiteral {
+    /// The directive this literal was written as: `@include(if: $v)` for a positive literal,
+    /// `@skip(if: $v)` for a negative one.
+    pub(crate) fn to_directive(&self) -> ast::Directive {
+        let (name, variable) = match self {
+            BooleanLiteral::Positive(variable) => ("include", variable),
+            BooleanLiteral::Negative(variable) => ("skip", variable),
+        };
+        ast::Directive {
+            name: Name::new_unchecked(name),
+            arguments: vec![
+                ast::Argument {
+                    name: Name::new_unchecked("if"),
+                    value: ast::Value::Variable(variable.clone()).into(),
+                }
+                .into(),
+            ],
+        }
+    }
+
     pub(crate) fn variable(&self) -> &Name {
         match self {
             BooleanLiteral::Positive(name) | BooleanLiteral::Negative(name) => name,
@@ -105,6 +125,15 @@ fn insert_literal(
         result.extend(inserted);
         Some(result)
     }
+}
+
+/// A conjunction in canonical form: sorted and duplicate-free. `None` when a literal meets its
+/// complement, which is a condition no assignment satisfies.
+pub(crate) fn canonical_boolean_condition(literals: &[BooleanLiteral]) -> Option<BooleanCondition> {
+    let Some((literal, rest)) = literals.split_first() else {
+        return Some(Vec::new());
+    };
+    insert_literal(literal, &canonical_boolean_condition(rest)?)
 }
 
 /// The assignments satisfying `condition` that do *not* satisfy `cover`, as disjoint clauses.
@@ -236,7 +265,10 @@ fn literals_for_directive(directive: &ast::Directive) -> Option<Vec<BooleanLiter
     let is_include = match directive.name.as_str() {
         "include" => true,
         "skip" => false,
-        // Not a modeled directive: rejected before extraction, see `check_supported_directives`.
+        // Any other directive carries no modeled semantics: it gates nothing, so it contributes
+        // no literal. It is still compared as part of a field's resolver call — see
+        // `unmodeled_directives` — so two fields differing only by a custom directive are not
+        // treated as the same call.
         _ => return Some(Vec::new()),
     };
     match directive.specified_argument_by_name("if").map(|arg| &**arg) {
@@ -262,7 +294,9 @@ fn literals_for_directive(directive: &ast::Directive) -> Option<Vec<BooleanLiter
     }
 }
 
-fn literals_for_directives(directives: &ast::DirectiveList) -> Option<Vec<BooleanLiteral>> {
+pub(crate) fn literals_for_directives(
+    directives: &ast::DirectiveList,
+) -> Option<Vec<BooleanLiteral>> {
     let mut literals = Vec::new();
     for directive in directives.iter() {
         literals.extend(literals_for_directive(directive)?);
@@ -317,81 +351,105 @@ impl<'doc> ConditionedField<'doc> {
     }
 }
 
-/// Rejects selections outside the modeled fragment before any verdict is produced.
+/// The three things a fragment contributes, wherever they come from.
 ///
-/// The model covers `@skip` and `@include` only. Silently ignoring another directive would let
-/// the checker answer a question it was not asked — `@defer` in particular changes what a
-/// response contains — so an unmodeled directive is reported rather than dropped.
-fn check_supported_directives(directives: &ast::DirectiveList) -> Result<(), ComparisonError> {
-    for directive in directives.iter() {
-        if directive.name != "skip" && directive.name != "include" {
-            return Err(ComparisonError::new(Mismatch::UnsupportedDirective {
-                name: directive.name.clone(),
-            }));
+/// An inline fragment carries them directly. A spread carries its own directives and borrows the
+/// type condition and selections from its definition. Naming the pieces lets both be handled by
+/// one function, so the two arms that build a `FragmentView` can be read side by side and audited
+/// against each other.
+pub(crate) struct FragmentView<'doc> {
+    pub(crate) type_condition: Option<&'doc Name>,
+    pub(crate) directives: &'doc ast::DirectiveList,
+    pub(crate) selections: &'doc [Selection],
+}
+
+/// The fragment a selection stands for, or `None` for a field.
+pub(crate) fn fragment_view<'doc>(
+    selection: &'doc Selection,
+    fragments: &'doc FragmentMap,
+) -> Result<Option<FragmentView<'doc>>, ComparisonError> {
+    match selection {
+        Selection::Field(_) => Ok(None),
+        Selection::InlineFragment(fragment) => Ok(Some(FragmentView {
+            type_condition: fragment.type_condition.as_ref(),
+            directives: &fragment.directives,
+            selections: &fragment.selection_set.selections,
+        })),
+        Selection::FragmentSpread(spread) => {
+            let definition = fragments.get(&spread.fragment_name).ok_or_else(|| {
+                ComparisonError::new(Mismatch::UndefinedFragment {
+                    name: spread.fragment_name.clone(),
+                })
+            })?;
+            Ok(Some(FragmentView {
+                // A fragment definition always has a type condition; an inline one may not.
+                type_condition: Some(definition.type_condition()),
+                directives: &spread.directives,
+                selections: &definition.selection_set.selections,
+            }))
         }
     }
-    Ok(())
 }
 
 fn extract_selection<'doc>(
     schema: &SchemaView<'_>,
+    fragments: &'doc FragmentMap,
     current: &Condition,
     selection: &'doc Selection,
     out: &mut Vec<ConditionedField<'doc>>,
 ) -> Result<(), ComparisonError> {
-    match selection {
-        Selection::Field(field) => {
-            check_supported_directives(&field.directives)?;
-            let Some(literals) = literals_for_directives(&field.directives) else {
-                return Ok(()); // never active
-            };
-            let Some(condition) = condition_under_literals(current, &literals) else {
-                return Ok(()); // contradicts the enclosing condition
-            };
-            out.push(ConditionedField { condition, field });
-        }
-        Selection::InlineFragment(fragment) => {
-            check_supported_directives(&fragment.directives)?;
-            let mut condition = current.clone();
-            // An inline fragment expands to its type condition first, then its directives.
-            if let Some(type_condition) = &fragment.type_condition {
-                let Some(narrowed) = condition_under_type(schema, &condition, type_condition)
-                else {
-                    return Ok(());
-                };
-                condition = narrowed;
-            }
-            let Some(literals) = literals_for_directives(&fragment.directives) else {
+    if let Some(view) = fragment_view(selection, fragments)? {
+        let mut condition = current.clone();
+        // A fragment expands to its type condition first, then its directives.
+        if let Some(type_condition) = view.type_condition {
+            let Some(narrowed) = condition_under_type(schema, &condition, type_condition) else {
                 return Ok(());
             };
-            let Some(narrowed) = condition_under_literals(&condition, &literals) else {
-                return Ok(());
-            };
-            for nested in &fragment.selection_set.selections {
-                extract_selection(schema, &narrowed, nested, out)?;
-            }
+            condition = narrowed;
         }
-        Selection::FragmentSpread(_) => {
-            return Err(ComparisonError::new(Mismatch::UnsupportedFragmentSpread));
+        let Some(literals) = literals_for_directives(view.directives) else {
+            return Ok(());
+        };
+        let Some(narrowed) = condition_under_literals(&condition, &literals) else {
+            return Ok(());
+        };
+        // Terminates because a valid document has no fragment reference cycles, so resolving a
+        // spread always descends into strictly less remaining syntax.
+        for nested in view.selections {
+            extract_selection(schema, fragments, &narrowed, nested, out)?;
         }
+        return Ok(());
     }
+
+    let Selection::Field(field) = selection else {
+        unreachable!("fragment_view returns None only for a field");
+    };
+    let Some(literals) = literals_for_directives(&field.directives) else {
+        return Ok(()); // never active
+    };
+    let Some(condition) = condition_under_literals(current, &literals) else {
+        return Ok(()); // contradicts the enclosing condition
+    };
+    out.push(ConditionedField { condition, field });
     Ok(())
 }
 
 fn extract_fields<'doc>(
     schema: &SchemaView<'_>,
+    fragments: &'doc FragmentMap,
     current: &Condition,
     selections: &[&'doc Selection],
     out: &mut Vec<ConditionedField<'doc>>,
 ) -> Result<(), ComparisonError> {
     selections
         .iter()
-        .try_for_each(|selection| extract_selection(schema, current, selection, out))
+        .try_for_each(|selection| extract_selection(schema, fragments, current, selection, out))
 }
 
 /// Extracts one selection-set boundary rooted at a named composite type.
 pub(crate) fn of_selection_set<'doc>(
     schema: &SchemaView<'_>,
+    fragments: &'doc FragmentMap,
     parent_type: &Name,
     selections: &[&'doc Selection],
 ) -> Result<Vec<ConditionedField<'doc>>, ComparisonError> {
@@ -400,7 +458,7 @@ pub(crate) fn of_selection_set<'doc>(
         boolean_condition: Vec::new(),
     };
     let mut out = Vec::new();
-    extract_fields(schema, &root, selections, &mut out)?;
+    extract_fields(schema, fragments, &root, selections, &mut out)?;
     Ok(out)
 }
 
@@ -409,6 +467,7 @@ pub(crate) fn of_selection_set<'doc>(
 /// from being widened back to every implementation of its declared interface.
 pub(crate) fn of_type_region<'doc>(
     schema: &SchemaView<'_>,
+    fragments: &'doc FragmentMap,
     region: &[Name],
     selections: &[&'doc Selection],
 ) -> Result<Vec<ConditionedField<'doc>>, ComparisonError> {
@@ -417,6 +476,6 @@ pub(crate) fn of_type_region<'doc>(
         boolean_condition: Vec::new(),
     };
     let mut out = Vec::new();
-    extract_fields(schema, &root, selections, &mut out)?;
+    extract_fields(schema, fragments, &root, selections, &mut out)?;
     Ok(out)
 }

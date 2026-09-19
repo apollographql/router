@@ -46,8 +46,8 @@ pub fn reason_name(reason: &Mismatch) -> &'static str {
         Mismatch::FieldNameMismatch { .. } => "FieldNameMismatch",
         Mismatch::FieldArgumentsMismatch { .. } => "FieldArgumentsMismatch",
         Mismatch::UndefinedField { .. } => "UndefinedField",
-        Mismatch::UnsupportedDirective { .. } => "UnsupportedDirective",
-        Mismatch::UnsupportedFragmentSpread => "UnsupportedFragmentSpread",
+        Mismatch::FieldDirectivesMismatch { .. } => "FieldDirectivesMismatch",
+        Mismatch::UndefinedFragment { .. } => "UndefinedFragment",
         Mismatch::Internal { .. } => "Internal",
     }
 }

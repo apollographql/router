@@ -2,6 +2,7 @@ pub mod query_compare;
 pub mod query_plan_analysis;
 #[cfg(test)]
 pub mod query_plan_analysis_test;
+pub mod query_plan_check;
 mod query_plan_soundness;
 #[cfg(test)]
 pub mod query_plan_soundness_test;
@@ -113,21 +114,21 @@ pub fn compare_operations(
     Ok(compare_response_shapes(schema, &this_rs, &other_rs)?)
 }
 
-/// The response-shape query plan checker.
-///
-/// This is the checker that predates the port of the Lean `checkQueryPlan` model. It is kept
-/// reachable so the two can be run against each other while the new one lands: they decide the
-/// same question by different routes, and the new one is not yet at feature parity.
+/// The response-shape query plan checker, which predates the port of the Lean `checkQueryPlan`
+/// model and is kept reachable so the two can be run against each other.
 ///
 /// Its implementation still lives in this module rather than under `legacy`, to keep the change
-/// that introduces the new checker small.
+/// that introduced the new checker small.
 pub mod legacy {
-    pub use super::check_plan;
+    pub use super::check_plan_with_response_shapes as check_plan;
 }
 
-/// Check the correctness of the query plan against the schema and input operation by comparing
-/// the response shape of the input operation and the response shape of the query plan.
-/// - The input operation's response shape is supposed to be a subset of the input operation's.
+/// Check that a query plan is correct for a client operation.
+///
+/// This is [`query_plan_check`], the port of the Lean `checkQueryPlan` model. It decides the same
+/// question as [`legacy::check_plan`] by a different route, and asks two things legacy does not:
+/// that every entity case of a fetch is covered by some `requires` entry, and that every
+/// contextual value a fetch reads is already fetched wherever the fetch runs.
 pub fn check_plan(
     api_schema: &ValidFederationSchema,
     supergraph_schema: &ValidFederationSchema,
@@ -135,13 +136,34 @@ pub fn check_plan(
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
 ) -> Result<(), CorrectnessError> {
-    // Coerce constant expressions in the input operation document since query planner does it for
-    // subgraph fetch operations. But, this may be unnecessary in the future (see ROUTER-816).
+    let operation_doc = coerce_input_operation(api_schema, operation_doc)?;
+    query_plan_check::check_plan(supergraph_schema, subgraphs_by_name, &operation_doc, plan)?;
+    Ok(())
+}
+
+/// Coerce constant expressions in the input operation document, since the query planner does it
+/// for subgraph fetch operations and the two are compared argument by argument.
+// This may become unnecessary in the future; see ROUTER-816.
+fn coerce_input_operation(
+    api_schema: &ValidFederationSchema,
+    operation_doc: &Valid<ExecutableDocument>,
+) -> Result<Valid<ExecutableDocument>, FederationError> {
     let mut operation_doc = operation_doc.clone().into_inner();
     coerce_executable_values(api_schema.schema(), &mut operation_doc);
-    let operation_doc = operation_doc
-        .validate(api_schema.schema())
-        .map_err(FederationError::from)?;
+    Ok(operation_doc.validate(api_schema.schema())?)
+}
+
+/// Check the correctness of the query plan against the schema and input operation by comparing
+/// the response shape of the input operation and the response shape of the query plan.
+/// - The input operation's response shape is supposed to be a subset of the input operation's.
+pub fn check_plan_with_response_shapes(
+    api_schema: &ValidFederationSchema,
+    supergraph_schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    operation_doc: &Valid<ExecutableDocument>,
+    plan: &QueryPlan,
+) -> Result<(), CorrectnessError> {
+    let operation_doc = coerce_input_operation(api_schema, operation_doc)?;
 
     let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&operation_doc)?;

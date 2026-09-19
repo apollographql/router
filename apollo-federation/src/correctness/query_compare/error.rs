@@ -135,6 +135,18 @@ pub enum Mismatch {
         right: Name,
     },
 
+    /// Both operations resolve the same field for this response name, with different directives.
+    ///
+    /// `@skip` and `@include` are absorbed into conditions and never reach here; these are the
+    /// directives the model gives no semantics to, compared so that two fields differing only by
+    /// one are not treated as the same resolver call.
+    FieldDirectivesMismatch {
+        response_name: Name,
+        field_name: Name,
+        left: String,
+        right: String,
+    },
+
     /// Both operations resolve the same field for this response name, with different arguments.
     FieldArgumentsMismatch {
         response_name: Name,
@@ -147,12 +159,9 @@ pub enum Mismatch {
     /// Reachable only for operations that were not validated against this schema.
     UndefinedField { parent_type: Name, field_name: Name },
 
-    /// A directive outside the modeled `@skip`/`@include` fragment. Not an inclusion finding.
-    UnsupportedDirective { name: Name },
-
-    /// A named fragment spread. Spreads must be inlined before comparison. Not an inclusion
-    /// finding.
-    UnsupportedFragmentSpread,
+    /// A spread naming a fragment the document does not define. Rejected by GraphQL validation,
+    /// so reaching it means the input was not validated. Not an inclusion finding.
+    UndefinedFragment { name: Name },
 
     /// The comparison could not be carried out. Not an inclusion finding.
     Internal { message: String },
@@ -163,9 +172,7 @@ impl Mismatch {
     pub fn is_inclusion_finding(&self) -> bool {
         !matches!(
             self,
-            Mismatch::UnsupportedDirective { .. }
-                | Mismatch::UnsupportedFragmentSpread
-                | Mismatch::Internal { .. }
+            Mismatch::UndefinedFragment { .. } | Mismatch::Internal { .. }
         )
     }
 
@@ -235,18 +242,32 @@ impl Mismatch {
                 state.dedent_no_new_line();
                 Ok(())
             }
+            Mismatch::FieldDirectivesMismatch {
+                response_name,
+                field_name,
+                left,
+                right,
+            } => {
+                state.write(format_args!(
+                    "`{response_name}` resolves `{field_name}` with different directives"
+                ))?;
+                state.indent_no_new_line();
+                state.new_line()?;
+                state.write(format_args!("left:  {left}"))?;
+                state.new_line()?;
+                state.write(format_args!("right: {right}"))?;
+                state.dedent_no_new_line();
+                Ok(())
+            }
             Mismatch::UndefinedField {
                 parent_type,
                 field_name,
             } => state.write(format_args!(
                 "{parent_type}.{field_name} is not defined in the schema"
             )),
-            Mismatch::UnsupportedDirective { name } => state.write(format_args!(
-                "@{name} is outside the modeled @skip/@include fragment"
+            Mismatch::UndefinedFragment { name } => state.write(format_args!(
+                "fragment `{name}` is not defined in the document"
             )),
-            Mismatch::UnsupportedFragmentSpread => {
-                state.write("named fragment spreads must be inlined before comparison")
-            }
             Mismatch::Internal { message } => {
                 state.write(format_args!("internal error: {message}"))
             }

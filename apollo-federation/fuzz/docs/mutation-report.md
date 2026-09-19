@@ -28,7 +28,7 @@ is which survivors the **lanes** can kill, which is measured by hand below.
 
 This measures the *unit tests*, not the fuzz lanes. cargo-mutants cannot reach outside the
 workspace of the package it runs in, and this package is a separate workspace, so `src/properties.rs`
-is invisible to a campaign rooted at the router workspace. See "Still open" in PRIOR_ART.md.
+is invisible to a campaign rooted at the router workspace. See "Still open" in [prior-art.md](prior-art.md).
 
 ## Where the survivors live
 

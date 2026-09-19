@@ -347,8 +347,8 @@ fn main() {
         "FieldNameMismatch",
         "FieldArgumentsMismatch",
         "UndefinedField",
-        "UnsupportedDirective",
-        "UnsupportedFragmentSpread",
+        "FieldDirectivesMismatch",
+        "UndefinedFragment",
         "Internal",
     ] {
         match reasons.get(name) {

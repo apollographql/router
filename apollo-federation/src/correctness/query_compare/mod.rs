@@ -22,8 +22,10 @@
 //! Both are also present in the Lean source and are ported rather than simplified away, since a
 //! divergence in either direction would be a divergence from the model.
 //!
-//! Scope: the model covers `@skip` and `@include` only. Any other directive, and any named
-//! fragment spread, is reported rather than ignored — see [`Mismatch::is_inclusion_finding`].
+//! Scope: the model gives semantics to `@skip` and `@include` only. Any other directive is carried
+//! as part of a field's resolver call and compared, but is otherwise uninterpreted, so two fields
+//! differing only by one are not treated as the same call. Named fragment spreads are resolved
+//! where they are reached, symmetrically with inline fragments — see `conditions::fragment_view`.
 //!
 //! # Divergences from the Lean source
 //!
@@ -36,8 +38,10 @@
 //! `rightFields.isEmpty` fallback in `guardedFieldGroupIncludesForRegionsWithFuel`) are
 //! unreachable from `includesBool`. Rust needs no such measure, so the counter — and with it the
 //! depth guard on the syntactic shortcut — is dropped. Recursion here terminates because every
-//! step descends into a strictly smaller sub-selection of the right operation, and rejecting
-//! fragment spreads rules out the only way a selection set could refer to itself.
+//! step descends into strictly less remaining syntax of the right operation. A fragment spread is
+//! the one step that does not descend into a sub-term, since it resolves to a definition
+//! elsewhere in the document; that still terminates because a valid document has no fragment
+//! reference cycles, which GraphQL validation guarantees and this checker requires of its inputs.
 //!
 //! **Specialized inherited condition.** `extractFields` threads an `inheritedBooleanCondition`
 //! that both entry points pass as empty; see `conditions.rs`.
@@ -46,7 +50,7 @@
 //! sorts by name. Regions are sets, so the verdict is unaffected, and sorting makes the
 //! child-task de-duplication in [`child_tasks_for_parent_types`] canonical.
 
-mod conditions;
+pub(crate) mod conditions;
 mod error;
 mod schema_view;
 
@@ -58,6 +62,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Field;
+use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
@@ -66,6 +71,7 @@ pub use self::conditions::Assignment;
 use self::conditions::BooleanCondition;
 use self::conditions::ConditionedField;
 use self::conditions::boolean_condition_covered_by;
+use self::conditions::fragment_view;
 use self::conditions::of_selection_set;
 use self::conditions::of_type_region;
 pub use self::error::ComparisonError;
@@ -173,7 +179,13 @@ impl<'schema> QueryComparator<'schema> {
             constraint,
             &right_root,
             &left_selections,
+            Scope {
+                fragments: &left.fragments,
+            },
             &right_selections,
+            Scope {
+                fragments: &right.fragments,
+            },
         )
     }
 }
@@ -252,11 +264,24 @@ fn compare_shared_variable_declarations(
 struct GuardedFieldGroup<'doc> {
     response_name: Name,
     entries: Vec<ConditionedField<'doc>>,
+    /// The document these entries came from. Carried on the group rather than threaded through
+    /// the search, because a group always belongs to exactly one side.
+    scope: Scope<'doc>,
+}
+
+/// Selections together with the fragment definitions they may spread.
+///
+/// A spread is only meaningful next to the document that defines it, and the two operations being
+/// compared have different documents, so selections never travel bare.
+#[derive(Clone, Copy)]
+struct Scope<'doc> {
+    fragments: &'doc FragmentMap,
 }
 
 /// Compiles a flat conditioned-field stream into response-name-local groups in one pass,
 /// preserving first-occurrence order of groups and source order within each group.
 fn guarded_field_groups<'doc>(
+    scope: Scope<'doc>,
     entries: Vec<ConditionedField<'doc>>,
 ) -> Vec<GuardedFieldGroup<'doc>> {
     let mut groups: Vec<GuardedFieldGroup<'doc>> = Vec::new();
@@ -270,16 +295,18 @@ fn guarded_field_groups<'doc>(
             None => groups.push(GuardedFieldGroup {
                 response_name,
                 entries: vec![entry],
+                scope,
             }),
         }
     }
     groups
 }
 
-fn empty_group(response_name: &Name) -> GuardedFieldGroup<'static> {
+fn empty_group<'doc>(response_name: &Name, scope: Scope<'doc>) -> GuardedFieldGroup<'doc> {
     GuardedFieldGroup {
         response_name: response_name.clone(),
         entries: Vec::new(),
+        scope,
     }
 }
 
@@ -368,6 +395,8 @@ fn entries_at_runtime_type<'a, 'doc>(
 
 /// One recursive obligation left after the shallow response-name and resolver-call comparison.
 struct ChildTask<'doc, T> {
+    left_scope: Scope<'doc>,
+    right_scope: Scope<'doc>,
     /// The exact object types the field can return. Using the field's own return rather than the
     /// declared interface is what keeps a covariant return from being widened to every
     /// implementation of that interface.
@@ -385,6 +414,7 @@ struct ChildTask<'doc, T> {
 /// the sub-selection. An `Err` is where the Lean `matchInclusionChildTask?` would return a bare
 /// `none`; the four cases are kept apart because "left never selects this" and "left passes
 /// different arguments" call for different fixes.
+#[allow(clippy::too_many_arguments)]
 fn match_child_task<'doc, T: PathConstraint>(
     schema: &SchemaView<'_>,
     constraint: &T,
@@ -392,7 +422,9 @@ fn match_child_task<'doc, T: PathConstraint>(
     response_name: &Name,
     runtime_type: &Name,
     left_fields: &[&'doc Field],
+    left_scope: Scope<'doc>,
     right_fields: &[&'doc Field],
+    right_scope: Scope<'doc>,
 ) -> Result<Option<ChildTask<'doc, T>>, Mismatch> {
     let Some(right_first) = right_fields.first() else {
         return Ok(None);
@@ -417,6 +449,19 @@ fn match_child_task<'doc, T: PathConstraint>(
             field_name: right_first.name.clone(),
             left: error::render_arguments(&left_first.arguments),
             right: error::render_arguments(&right_first.arguments),
+        });
+    }
+    // Directives the model gives no semantics to are still part of the resolver call: two fields
+    // differing only by a custom directive are not the same call. `@skip`/`@include` never reach
+    // here, having been absorbed into the conditions.
+    let left_directives = unmodeled_directives(&left_first.directives);
+    let right_directives = unmodeled_directives(&right_first.directives);
+    if !same_directives(&left_directives, &right_directives) {
+        return Err(Mismatch::FieldDirectivesMismatch {
+            response_name: response_name.clone(),
+            field_name: right_first.name.clone(),
+            left: render_directives(&left_directives),
+            right: render_directives(&right_directives),
         });
     }
     let Some(definition) = schema.lookup_field(parent_type, &right_first.name) else {
@@ -447,7 +492,9 @@ fn match_child_task<'doc, T: PathConstraint>(
             .cloned()
             .collect(),
         left_selections: merged_selections(left_fields),
+        left_scope,
         right_selections: merged_selections(right_fields),
+        right_scope,
         constraint: child_constraint,
     }))
 }
@@ -464,6 +511,7 @@ fn merged_selections<'doc>(fields: &[&'doc Field]) -> Vec<&'doc Selection> {
 /// Computes child obligations for every concrete parent type in the region, de-duplicating the
 /// ones that coincide. Covariant returns that differ only by parent type keep separate
 /// obligations, because their return regions differ.
+#[allow(clippy::too_many_arguments)]
 fn child_tasks_for_parent_types<'doc, T: PathConstraint>(
     schema: &SchemaView<'_>,
     constraint: &T,
@@ -471,7 +519,9 @@ fn child_tasks_for_parent_types<'doc, T: PathConstraint>(
     response_name: &Name,
     runtime_type: &Name,
     left_fields: &[&'doc Field],
+    left_scope: Scope<'doc>,
     right_fields: &[&'doc Field],
+    right_scope: Scope<'doc>,
 ) -> Result<Vec<ChildTask<'doc, T>>, Mismatch> {
     let mut tasks: Vec<ChildTask<'doc, T>> = Vec::new();
     for parent_type in parent_types {
@@ -482,7 +532,9 @@ fn child_tasks_for_parent_types<'doc, T: PathConstraint>(
             response_name,
             runtime_type,
             left_fields,
+            left_scope,
             right_fields,
+            right_scope,
         )?
         else {
             continue;
@@ -509,22 +561,26 @@ fn same_selection_refs(left: &[&Selection], right: &[&Selection]) -> bool {
 //==================================================================================================
 // The search
 
-fn selection_set_includes<T: PathConstraint>(
+fn selection_set_includes<'doc, T: PathConstraint>(
     schema: &SchemaView<'_>,
     constraint: &T,
     parent_type: &Name,
-    left_selections: &[&Selection],
-    right_selections: &[&Selection],
+    left_selections: &[&'doc Selection],
+    left_scope: Scope<'doc>,
+    right_selections: &[&'doc Selection],
+    right_scope: Scope<'doc>,
 ) -> Result<(), ComparisonError> {
-    let left_entries = of_selection_set(schema, parent_type, left_selections)?;
-    let right_entries = of_selection_set(schema, parent_type, right_selections)?;
+    let left_entries =
+        of_selection_set(schema, left_scope.fragments, parent_type, left_selections)?;
+    let right_entries =
+        of_selection_set(schema, right_scope.fragments, parent_type, right_selections)?;
     guarded_field_groups_include(
         schema,
         constraint,
         Some(parent_type),
         &Assignment::default(),
-        &guarded_field_groups(left_entries),
-        &guarded_field_groups(right_entries),
+        &guarded_field_groups(left_scope, left_entries),
+        &guarded_field_groups(right_scope, right_entries),
     )
 }
 
@@ -540,7 +596,7 @@ fn guarded_field_groups_include<T: PathConstraint>(
     right_groups: &[GuardedFieldGroup<'_>],
 ) -> Result<(), ComparisonError> {
     for right in right_groups {
-        let fallback = empty_group(&right.response_name);
+        let fallback = empty_group(&right.response_name, right.scope);
         let left = left_groups
             .iter()
             .find(|group| group.response_name == right.response_name)
@@ -680,23 +736,40 @@ fn group_includes_for_regions<T: PathConstraint>(
             &right.response_name,
             runtime_type,
             &left_fields,
+            left.scope,
             &right_fields,
+            right.scope,
         )
         .map_err(|reason| ComparisonError::new(reason).add_context(region_context()))?;
 
         for task in tasks {
-            if selection_set_syntactically_includes(&task.left_selections, &task.right_selections) {
+            if selection_set_syntactically_includes(
+                &task.left_selections,
+                task.left_scope,
+                &task.right_selections,
+                task.right_scope,
+            ) {
                 continue;
             }
-            let left_child = of_type_region(schema, &task.possible_types, &task.left_selections)?;
-            let right_child = of_type_region(schema, &task.possible_types, &task.right_selections)?;
+            let left_child = of_type_region(
+                schema,
+                task.left_scope.fragments,
+                &task.possible_types,
+                &task.left_selections,
+            )?;
+            let right_child = of_type_region(
+                schema,
+                task.right_scope.fragments,
+                &task.possible_types,
+                &task.right_selections,
+            )?;
             guarded_field_groups_include(
                 schema,
                 &task.constraint,
                 None,
                 assignment,
-                &guarded_field_groups(left_child),
-                &guarded_field_groups(right_child),
+                &guarded_field_groups(task.left_scope, left_child),
+                &guarded_field_groups(task.right_scope, right_child),
             )
             .map_err(|e| {
                 e.add_context(PathSegment::ChildSelection {
@@ -840,7 +913,12 @@ fn composite_field_includes_at_runtime_type(
         left_entry.field.selection_set.selections.iter().collect();
     let right_selections: Vec<&Selection> =
         right_entry.field.selection_set.selections.iter().collect();
-    selection_set_syntactically_includes(&left_selections, &right_selections)
+    selection_set_syntactically_includes(
+        &left_selections,
+        left.scope,
+        &right_selections,
+        right.scope,
+    )
 }
 
 //==================================================================================================
@@ -848,31 +926,62 @@ fn composite_field_includes_at_runtime_type(
 
 /// Selection order and extra left selections do not affect inclusion. This check stays
 /// syntax-only: condition normalization and field merging remain the general search's job.
-fn selection_set_syntactically_includes(left: &[&Selection], right: &[&Selection]) -> bool {
+fn selection_set_syntactically_includes(
+    left: &[&Selection],
+    left_scope: Scope<'_>,
+    right: &[&Selection],
+    right_scope: Scope<'_>,
+) -> bool {
     right.iter().all(|right_selection| {
-        left.iter()
-            .any(|left_selection| selection_syntactically_includes(left_selection, right_selection))
+        left.iter().any(|left_selection| {
+            selection_syntactically_includes(
+                left_selection,
+                left_scope,
+                right_selection,
+                right_scope,
+            )
+        })
     })
 }
 
-fn selection_syntactically_includes(left: &Selection, right: &Selection) -> bool {
-    match (left, right) {
-        (Selection::Field(left), Selection::Field(right)) => {
+fn selection_syntactically_includes(
+    left: &Selection,
+    left_scope: Scope<'_>,
+    right: &Selection,
+    right_scope: Scope<'_>,
+) -> bool {
+    // A spread and an inline fragment with the same condition, directives and selections are one
+    // fragment written two ways, so each side resolves to a view before anything is compared.
+    let (Ok(left_view), Ok(right_view)) = (
+        fragment_view(left, left_scope.fragments),
+        fragment_view(right, right_scope.fragments),
+    ) else {
+        return false;
+    };
+    match (left_view, right_view) {
+        (Some(left_view), Some(right_view)) => {
+            left_view.type_condition == right_view.type_condition
+                && same_directive_list(left_view.directives, right_view.directives)
+                && selection_set_syntactically_includes(
+                    &left_view.selections.iter().collect::<Vec<_>>(),
+                    left_scope,
+                    &right_view.selections.iter().collect::<Vec<_>>(),
+                    right_scope,
+                )
+        }
+        (None, None) => {
+            let (Selection::Field(left), Selection::Field(right)) = (left, right) else {
+                return false;
+            };
             left.response_key() == right.response_key()
                 && left.name == right.name
                 && same_arguments(&left.arguments, &right.arguments)
                 && same_directive_list(&left.directives, &right.directives)
                 && selection_set_syntactically_includes(
                     &left.selection_set.selections.iter().collect::<Vec<_>>(),
+                    left_scope,
                     &right.selection_set.selections.iter().collect::<Vec<_>>(),
-                )
-        }
-        (Selection::InlineFragment(left), Selection::InlineFragment(right)) => {
-            left.type_condition == right.type_condition
-                && same_directive_list(&left.directives, &right.directives)
-                && selection_set_syntactically_includes(
-                    &left.selection_set.selections.iter().collect::<Vec<_>>(),
-                    &right.selection_set.selections.iter().collect::<Vec<_>>(),
+                    right_scope,
                 )
         }
         _ => false,
@@ -882,10 +991,19 @@ fn selection_syntactically_includes(left: &Selection, right: &Selection) -> bool
 //==================================================================================================
 // Syntactic comparison of resolver calls
 
-/// Do these two field occurrences denote the same resolver call? Argument order is immaterial in
-/// GraphQL, so arguments are compared as a set keyed by name.
+/// Do these two field occurrences denote the same resolver call?
+///
+/// Argument order is immaterial in GraphQL, so arguments are compared as a set keyed by name, and
+/// so are the directives the model gives no semantics to. `@skip`/`@include` are absorbed into
+/// conditions and deliberately excluded here: two occurrences of a field under different Boolean
+/// conditions are the same call, made under different circumstances.
 fn same_resolver_call(left: &Field, right: &Field) -> bool {
-    left.name == right.name && same_arguments(&left.arguments, &right.arguments)
+    left.name == right.name
+        && same_arguments(&left.arguments, &right.arguments)
+        && same_directives(
+            &unmodeled_directives(&left.directives),
+            &unmodeled_directives(&right.directives),
+        )
 }
 
 fn same_arguments(left: &[Node<ast::Argument>], right: &[Node<ast::Argument>]) -> bool {
@@ -917,11 +1035,41 @@ fn same_argument_value(left: &ast::Value, right: &ast::Value) -> bool {
     }
 }
 
-/// Directive lists are compared in order, matching the model's `directiveListEqBool`. Only
-/// `@skip` and `@include` can reach here; anything else is rejected during extraction.
+/// Directive lists are compared in order, matching the model's `directiveListEqBool`.
 fn same_directive_list(left: &ast::DirectiveList, right: &ast::DirectiveList) -> bool {
     left.len() == right.len()
         && std::iter::zip(left.iter(), right.iter()).all(|(left, right)| {
             left.name == right.name && same_arguments(&left.arguments, &right.arguments)
         })
+}
+
+/// The directives that carry no modeled semantics: everything but `@skip` and `@include`, which
+/// are absorbed into a selection's condition instead.
+fn unmodeled_directives(directives: &ast::DirectiveList) -> Vec<&Node<ast::Directive>> {
+    directives
+        .iter()
+        .filter(|directive| directive.name != "skip" && directive.name != "include")
+        .collect()
+}
+
+/// Compared as a set by name, like arguments: directive order is not semantically meaningful.
+fn same_directives(left: &[&Node<ast::Directive>], right: &[&Node<ast::Directive>]) -> bool {
+    left.len() == right.len()
+        && left.iter().all(|left_directive| {
+            right.iter().any(|right_directive| {
+                left_directive.name == right_directive.name
+                    && same_arguments(&left_directive.arguments, &right_directive.arguments)
+            })
+        })
+}
+
+fn render_directives(directives: &[&Node<ast::Directive>]) -> String {
+    if directives.is_empty() {
+        return "(none)".to_string();
+    }
+    directives
+        .iter()
+        .map(|directive| format!("@{}", directive.name))
+        .collect::<Vec<_>>()
+        .join(" ")
 }

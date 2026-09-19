@@ -17,4 +17,7 @@
 pub mod harness;
 pub mod lean_oracle;
 pub mod model;
+pub mod plan_fixture;
+pub mod plan_model;
+pub mod plan_oracle;
 pub mod properties;

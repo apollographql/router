@@ -8,14 +8,18 @@
 use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::name;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::FederationError;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
 pub(crate) struct SchemaView<'schema> {
     schema: &'schema ValidFederationSchema,
+    /// The definition of `__typename`, which every composite type carries but no schema lists.
+    typename: ast::FieldDefinition,
     /// Possible object types per composite type name, sorted by name.
     ///
     /// The Lean model returns these in schema declaration order. Sorting instead keeps regions
@@ -45,6 +49,13 @@ impl<'schema> SchemaView<'schema> {
         }
         Ok(SchemaView {
             schema,
+            typename: ast::FieldDefinition {
+                description: None,
+                name: INTROSPECTION_TYPENAME_FIELD_NAME.clone(),
+                arguments: Vec::new(),
+                ty: ast::Type::NonNullNamed(name!("String")),
+                directives: Default::default(),
+            },
             possible_types,
             empty: Vec::new(),
         })
@@ -62,12 +73,28 @@ impl<'schema> SchemaView<'schema> {
         &self,
         parent_type: &Name,
         field_name: &Name,
-    ) -> Option<&'schema ast::FieldDefinition> {
+    ) -> Option<&ast::FieldDefinition> {
+        // `__typename` is selectable on every composite type and declared by none of them. The
+        // model has no introspection at all, so this is the one meta-field the port adds; which
+        // introspection fields a *query plan* need not fetch is a policy that lives with the plan
+        // checker, not here.
+        if field_name == INTROSPECTION_TYPENAME_FIELD_NAME.as_str() {
+            return self
+                .is_composite_type(parent_type)
+                .then_some(&self.typename);
+        }
         match self.schema.schema().types.get(parent_type)? {
             ExtendedType::Object(ty) => ty.fields.get(field_name).map(|field| &***field),
             ExtendedType::Interface(ty) => ty.fields.get(field_name).map(|field| &***field),
             _ => None,
         }
+    }
+
+    fn is_composite_type(&self, type_name: &Name) -> bool {
+        matches!(
+            self.schema.schema().types.get(type_name),
+            Some(ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_))
+        )
     }
 
     /// Does this output type bottom out in an object, interface, or union?
