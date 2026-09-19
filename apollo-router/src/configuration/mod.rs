@@ -444,6 +444,11 @@ impl Configuration {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
+            incremental_planner:
+                apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
+                    enabled: self.supergraph.query_planning.incremental_planner.enabled,
+                    ..Default::default()
+                },
         }
     }
 }
@@ -956,6 +961,12 @@ pub(crate) struct QueryPlanning {
     ///
     /// See [`CooperativeCancellation`] for more details.
     pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
+
+    /// Configuration for the incremental (BULB) query planner, which
+    /// builds plans field-by-field with bounded backtracking instead of
+    /// exhaustively enumerating plan candidates. Deferred operations fall
+    /// back to the default planner.
+    pub(crate) incremental_planner: IncrementalPlanner,
 }
 
 #[buildstructor::buildstructor]
@@ -968,6 +979,7 @@ impl QueryPlanning {
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
+        incremental_planner: Option<IncrementalPlanner>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
@@ -976,7 +988,24 @@ impl QueryPlanning {
             experimental_paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
+            incremental_planner: incremental_planner.unwrap_or_default(),
         }
+    }
+}
+
+/// Configuration for the incremental (BULB) query planner.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct IncrementalPlanner {
+    /// Whether the incremental planner is enabled. When enabled, deferred
+    /// operations still fall back to the default planner.
+    pub(crate) enabled: bool,
+}
+
+#[allow(clippy::derivable_impls)] // later branches add fields with non-zero defaults
+impl Default for IncrementalPlanner {
+    fn default() -> Self {
+        Self { enabled: false }
     }
 }
 

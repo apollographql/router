@@ -1,0 +1,4 @@
+supergraph:
+  query_planning:
+    incremental_planner:
+      enabled: true

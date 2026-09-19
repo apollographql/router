@@ -150,6 +150,7 @@ impl FetchNode {
     }
 
     /// Get the root type if this is a root fetch group.
+    #[allow(dead_code)]
     pub(crate) fn root_type(&self) -> Option<&CompositeTypeDefinitionPosition> {
         match &self.kind {
             FetchGroupKind::Root { root_type } | FetchGroupKind::RootHop { root_type, .. } => {
@@ -458,6 +459,7 @@ impl FetchGraph {
     }
 
     /// Get a reference to an edge's weight.
+    #[allow(dead_code)]
     pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
         &self.graph[edge]
     }
@@ -485,6 +487,7 @@ impl FetchGraph {
     }
 
     /// Get a reference to the node weight.
+    #[allow(dead_code)]
     pub(crate) fn node(&self, node: NodeIndex) -> &FetchNode {
         &self.graph[node]
     }
@@ -495,6 +498,7 @@ impl FetchGraph {
 
     /// Whether `node` refers to a live node (false for placeholder
     /// `NodeIndex` values a caller has not committed yet).
+    #[allow(dead_code)]
     pub(crate) fn contains_node(&self, node: NodeIndex) -> bool {
         self.graph.contains_node(node)
     }
@@ -513,6 +517,7 @@ impl FetchGraph {
         self.graph.node_count()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph.node_indices()
     }
