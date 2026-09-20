@@ -13,8 +13,11 @@ pub mod response_shape_test;
 mod schema_constraint;
 mod subgraph_constraint;
 
+use std::cell::Cell;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexMap;
@@ -37,6 +40,9 @@ pub enum CorrectnessError {
     FederationError(FederationError),
     /// Error in the input that is subject to comparison
     ComparisonError(ComparisonError),
+    /// The check exceeded the timeout given to `check_plan_with_timeout`
+    #[from(ignore)]
+    Timeout(Duration),
 }
 
 impl fmt::Display for CorrectnessError {
@@ -48,9 +54,24 @@ impl fmt::Display for CorrectnessError {
             CorrectnessError::ComparisonError(err) => {
                 write!(f, "Correctness error found:\n{}", err.description())
             }
+            CorrectnessError::Timeout(timeout) => {
+                write!(f, "Correctness check timed out after {timeout:?}")
+            }
         }
     }
 }
+
+// The deadline is thread-local rather than threaded through the analysis and comparison call
+// graphs, whose recursive functions have no shared context parameter to carry it.
+thread_local! {
+    static CHECK_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+pub(crate) fn check_deadline_exceeded() -> bool {
+    CHECK_DEADLINE.with(|d| d.get().is_some_and(|deadline| Instant::now() > deadline))
+}
+
+pub(crate) const DEADLINE_EXCEEDED_MESSAGE: &str = "correctness check deadline exceeded";
 
 /// Check if `this` response shape is a subset of `other` under a single schema.
 /// - Both response shapes must be derived from the given schema.
@@ -95,6 +116,41 @@ pub fn compare_operations(
         "compare_operations:\nResponse shape (left): {this_rs}\nResponse shape (right): {other_rs}"
     );
     Ok(compare_response_shapes(schema, &this_rs, &other_rs)?)
+}
+
+/// Like [`check_plan`], but abandons the check once `timeout` has elapsed, returning
+/// [`CorrectnessError::Timeout`]. The deadline is polled inside the plan analysis and
+/// response shape comparison recursions, so cancellation is cooperative and approximate.
+pub fn check_plan_with_timeout(
+    api_schema: &ValidFederationSchema,
+    supergraph_schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    operation_doc: &Valid<ExecutableDocument>,
+    plan: &QueryPlan,
+    timeout: Option<Duration>,
+) -> Result<(), CorrectnessError> {
+    struct ClearDeadline;
+    impl Drop for ClearDeadline {
+        fn drop(&mut self) {
+            CHECK_DEADLINE.with(|d| d.set(None));
+        }
+    }
+
+    let _clear = ClearDeadline;
+    CHECK_DEADLINE.with(|d| d.set(timeout.map(|t| Instant::now() + t)));
+    let result = check_plan(
+        api_schema,
+        supergraph_schema,
+        subgraphs_by_name,
+        operation_doc,
+        plan,
+    );
+    match (result, timeout) {
+        (Err(_), Some(timeout)) if check_deadline_exceeded() => {
+            Err(CorrectnessError::Timeout(timeout))
+        }
+        (result, _) => result,
+    }
 }
 
 /// Check the correctness of the query plan against the schema and input operation by comparing
