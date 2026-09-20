@@ -866,7 +866,7 @@ impl FieldRoutingSearchSpace {
         }
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = self
-            .query_graph
+            .qg()
             .node_weight(pending.query_graph_node)?
             .source
             .clone();
@@ -970,7 +970,7 @@ impl FieldRoutingSearchSpace {
         &self,
         pending: &PendingSelection,
     ) -> Result<Option<Arc<SelectionSet>>, FederationError> {
-        let qg = &self.cached_query_graph.query_graph;
+        let qg = self.qg();
         let subgraph = &qg.node_weight(pending.query_graph_node)?.source;
         // The self-key edge exists specifically for @defer re-entering a
         // subgraph; out_edges filters self-edges so use the unfiltered view.
