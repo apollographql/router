@@ -44,7 +44,6 @@ fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> Field
     FieldRoutingSearchSpace {
         cached_query_graph: CachedQueryGraph::new(Arc::new(query_graph), Default::default()),
         supergraph_schema: schema,
-        override_conditions: Default::default(),
         inconsistent_abstract_types: Default::default(),
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
