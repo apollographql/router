@@ -10,6 +10,7 @@ use petgraph::graph::NodeIndex;
 use super::super::fetch_graph::FetchGraph;
 use super::super::fetch_graph::FetchGraphCheckpoint;
 use super::super::shared_path::SharedPath;
+use super::routing::RoutingChoice;
 use crate::operation::Selection;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
@@ -91,6 +92,12 @@ pub(crate) struct PendingSelection {
     /// concrete-`__typename` recovery, where no subgraph may be able to
     /// supply the concrete typename.
     pub(crate) best_effort: bool,
+    /// Lazily computed routing options for this exact pending (see
+    /// `cached_routing_options`). Options are a pure function of the pending
+    /// and the immutable query graph, and pendings are only queried once
+    /// frozen behind an `Arc`, so first-query-wins memoization is sound.
+    /// Reset by `fork` since forks change the selection or position.
+    pub(crate) routing_options_memo: std::sync::OnceLock<Arc<Vec<RoutingChoice>>>,
 }
 
 /// Type-narrowing state a pending selection carries down the operation,
@@ -135,6 +142,7 @@ impl PendingSelection {
             parent_types: self.parent_types.clone(),
             context_anchor: self.context_anchor.clone(),
             best_effort: self.best_effort,
+            routing_options_memo: std::sync::OnceLock::new(),
         }
     }
 
@@ -409,6 +417,7 @@ mod tests {
             condition: None,
             provides_anchor: None,
             narrowing: Default::default(),
+            routing_options_memo: Default::default(),
             best_effort: false,
             defer_ref: None,
             context_anchor: Default::default(),

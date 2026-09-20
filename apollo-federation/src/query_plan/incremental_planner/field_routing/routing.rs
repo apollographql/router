@@ -673,6 +673,53 @@ impl FieldRoutingSearchSpace {
 
     /// Enumerate `RoutingChoice`s for a pending selection at its query
     /// graph node.
+    /// Cached wrapper around `routing_options`. A per-pending memo answers
+    /// repeat queries for the same pending object without hashing (a pending
+    /// is only queried once frozen behind an `Arc`, and its options are a
+    /// pure function of the pending and the immutable query graph); the
+    /// shared cache answers for equivalent pendings recreated across
+    /// replays, keyed by (node, selection pointer, intersection filter).
+    /// The provides_anchor path bypasses the shared cache because the anchor
+    /// is not part of the key.
+    pub(super) fn cached_routing_options(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
+        if let Some(memo) = pending.routing_options_memo.get() {
+            return Ok(memo.clone());
+        }
+        let computed = self.cached_routing_options_uncached(pending)?;
+        let _ = pending.routing_options_memo.set(computed.clone());
+        Ok(computed)
+    }
+
+    fn cached_routing_options_uncached(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
+        if pending.provides_anchor.is_some() {
+            return Ok(Arc::new(self.routing_options(pending)?));
+        }
+        let key = (
+            pending.query_graph_node,
+            super::SelectionArcKey::new(&pending.selection),
+            pending
+                .narrowing
+                .intersection_filter
+                .as_ref()
+                .map(super::ArcKey::new),
+        );
+        if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
+            return Ok(cached.clone());
+        }
+        let result = Arc::new(self.routing_options(pending)?);
+        self.caches
+            .routing_options
+            .borrow_mut()
+            .insert(key, result.clone());
+        Ok(result)
+    }
+
     pub(super) fn routing_options(
         &self,
         pending: &PendingSelection,

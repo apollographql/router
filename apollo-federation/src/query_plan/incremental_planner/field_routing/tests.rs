@@ -1178,6 +1178,7 @@ fn t_pending(
         }),
         provides_anchor: None,
         narrowing: Default::default(),
+        routing_options_memo: Default::default(),
         best_effort: false,
         defer_ref: None,
         context_anchor: Default::default(),

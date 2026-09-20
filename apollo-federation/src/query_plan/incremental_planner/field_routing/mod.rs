@@ -290,16 +290,25 @@ impl FieldRoutingSearchSpace {
     /// forced commits to recover through.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
+        // Lift-scan cursor: stack entries above it were already inspected
+        // this call and found unliftable, and an entry's routing options are
+        // fixed — so after a lift the scan resumes where it stopped instead
+        // of rescanning from the top, which is quadratic in stack depth on
+        // operations with long forced chains. Reset whenever recovery may
+        // rewind the stack.
+        let mut lift_scan_floor = usize::MAX;
         while let Some(top) = state.pending.last() {
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
                 self.recover_doomed(state, &mut trail);
+                lift_scan_floor = usize::MAX;
                 continue;
             }
-            let options: Arc<Vec<RoutingChoice>> = Arc::new(self.routing_options(top)?);
+            let options = self.cached_routing_options(top)?;
             match options.len() {
                 0 => {
                     trail.doomed.insert(pending_site(top));
                     self.recover_doomed(state, &mut trail);
+                    lift_scan_floor = usize::MAX;
                 }
                 1 => self.commit_forced(state, options, &mut trail),
                 _ if top.condition.is_some() => self.commit_forced(state, options, &mut trail),
@@ -307,16 +316,7 @@ impl FieldRoutingSearchSpace {
                     // A BULB decision point. Before stopping, commit any
                     // forced pendings deeper in the stack so their fetch
                     // groups inform this decision's scoring.
-                    let mut lifted = false;
-                    for index in (0..state.pending.len().saturating_sub(1)).rev() {
-                        let entry = &state.pending[index];
-                        if entry.condition.is_some() || self.routing_options(entry)?.len() <= 1 {
-                            state.lift_pending(index);
-                            lifted = true;
-                            break;
-                        }
-                    }
-                    if lifted {
+                    if self.lift_forced_below(state, &mut lift_scan_floor)? {
                         continue;
                     }
                     break;
@@ -324,6 +324,34 @@ impl FieldRoutingSearchSpace {
             }
         }
         Ok(())
+    }
+
+    /// Scan below the top-of-stack decision for a forced or condition
+    /// pending and lift it for commit, resuming from `lift_scan_floor` (the
+    /// cursor of `fast_forward`'s decision loop). Returns whether one was
+    /// lifted.
+    fn lift_forced_below(
+        &self,
+        state: &mut PlanState,
+        lift_scan_floor: &mut usize,
+    ) -> Result<bool, FederationError> {
+        let start = (*lift_scan_floor).min(state.pending.len().saturating_sub(1));
+        for index in (0..start).rev() {
+            let entry = &state.pending[index];
+            // Read the per-pending memo directly: the scan runs over
+            // thousands of entries, so even an Arc clone per entry is hot.
+            let liftable = entry.condition.is_some()
+                || match entry.routing_options_memo.get() {
+                    Some(options) => options.len() <= 1,
+                    None => self.cached_routing_options(entry)?.len() <= 1,
+                };
+            if liftable {
+                state.lift_pending(index);
+                *lift_scan_floor = index;
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Pop a pending whose site is proven hopeless and recover: rewind an
@@ -528,7 +556,9 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
 
     /// Enumerate routing options for a decision.
     fn options(&self, decision: &Arc<PendingSelection>) -> Vec<RoutingChoice> {
-        self.routing_options(decision).unwrap_or_default()
+        self.cached_routing_options(decision)
+            .map(|options| options.as_ref().clone())
+            .unwrap_or_default()
     }
 
     /// Apply a routing choice to the candidate in place: pops the decision
