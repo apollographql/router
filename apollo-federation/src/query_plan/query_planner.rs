@@ -481,6 +481,7 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
+            !self.config.incremental_planner.enabled,
         )?;
 
         let NormalizedDefer {

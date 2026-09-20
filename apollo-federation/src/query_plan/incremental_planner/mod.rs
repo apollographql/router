@@ -108,13 +108,9 @@ pub(crate) fn build_bulb_plan(
     let query_graph = &parameters.federated_query_graph;
     let supergraph_schema = &parameters.supergraph_schema;
 
-    // Normalization strips __typename selections and tags a sibling instead
-    // (`optimize_sibling_typenames`). BULB never branches on __typename, so
-    // restore the stripped selections up front and route them like any other
-    // field.
-    let selection_set = selection_set.add_back_typename_in_attachments()?;
-    let selection_set = &selection_set;
-
+    // Normalization skips the sibling-typename strip for the incremental
+    // planner (see `normalize_operation`), so __typename selections arrive
+    // inline and route like any other field.
     let search_space = FieldRoutingSearchSpace {
         cached_query_graph: field_routing::cached_query_graph::CachedQueryGraph::new(
             query_graph.clone(),
