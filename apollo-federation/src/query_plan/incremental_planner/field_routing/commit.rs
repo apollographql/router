@@ -1048,11 +1048,15 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Sorted possible runtime type names of a composite type in the
-    /// supergraph schema.
+    /// supergraph schema, cached per session (see
+    /// `PlannerCaches::possible_type_names`).
     fn possible_type_names(
         &self,
         ty: &CompositeTypeDefinitionPosition,
     ) -> Result<Arc<Vec<Name>>, FederationError> {
+        if let Some(cached) = self.caches.possible_type_names.borrow().get(ty.type_name()) {
+            return Ok(cached.clone());
+        }
         let mut names: Vec<Name> = self
             .supergraph_schema
             .possible_runtime_types(ty.clone())?
@@ -1060,7 +1064,12 @@ impl FieldRoutingSearchSpace {
             .map(|pos| pos.type_name)
             .collect();
         names.sort();
-        Ok(Arc::new(names))
+        let names = Arc::new(names);
+        self.caches
+            .possible_type_names
+            .borrow_mut()
+            .insert(ty.type_name().clone(), names.clone());
+        Ok(names)
     }
 
     /// Possible-types tracking for a committed selection's children: a field

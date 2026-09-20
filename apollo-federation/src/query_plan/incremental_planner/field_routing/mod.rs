@@ -137,6 +137,11 @@ pub(super) struct PlannerCaches {
     pub(super) conditions_routable: ConditionsRoutableCache,
     pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingSiteKey)>>,
     pub(super) guard_hits: std::cell::Cell<u64>,
+    /// Sorted possible runtime type names per composite type in the
+    /// supergraph schema, for narrowing. Computed on demand, immutable per
+    /// session; `child_possible_types` runs on every dispatch, so building
+    /// the sorted Vec fresh each time dominated allocation on small graphs.
+    pub(super) possible_type_names: RefCell<HashMap<Name, Arc<Vec<Name>>>>,
 }
 
 impl PlannerCaches {
@@ -148,6 +153,7 @@ impl PlannerCaches {
             conditions_routable: RefCell::new(HashMap::new()),
             key_hops_in_flight: RefCell::new(HashSet::new()),
             guard_hits: std::cell::Cell::new(0),
+            possible_type_names: RefCell::new(HashMap::new()),
         }
     }
 }
