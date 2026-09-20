@@ -2833,20 +2833,36 @@ fn inc_defer_named_fragment_spread_across_subgraphs() {
         }, [
           Deferred(depends: [0], path: "t") {
             { ... on T { __typename y } }:
-            Flatten(path: "t") {
-              Fetch(service: "Subgraph2") {
-                {
-                  ... on T {
-                    __typename
-                    id
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      y
+                    }
                   }
-                } =>
-                {
-                  ... on T {
-                    __typename
-                    y
+                },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __typename
+                    }
                   }
-                }
+                },
               },
             },
           },

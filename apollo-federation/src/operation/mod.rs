@@ -3275,6 +3275,7 @@ pub(crate) fn normalize_operation(
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
     check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    strip_sibling_typenames: bool,
 ) -> Result<Operation, FederationError> {
     let fragment_cache = FragmentSpreadCache::init(fragments, schema, check_cancellation);
     let mut normalized_selection_set = SelectionSet::from_selection_set(
@@ -3290,7 +3291,15 @@ pub(crate) fn normalize_operation(
     normalized_selection_set = normalized_selection_set
         .flatten_unnecessary_fragments(&normalized_selection_set.type_position, schema)?;
     remove_introspection(&mut normalized_selection_set);
-    normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    // The strip is an exhaustive-planner optimization whose fetch
+    // construction restores the attachments; the incremental planner routes
+    // __typename like any other field and would immediately rebuild the
+    // stripped branches, retaining a rewritten copy of the operation for the
+    // whole planning session.
+    if strip_sibling_typenames {
+        normalized_selection_set
+            .optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    }
 
     let normalized_operation = Operation {
         schema: schema.clone(),

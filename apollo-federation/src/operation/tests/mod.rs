@@ -94,6 +94,7 @@ pub(super) fn parse_and_expand(
         schema,
         &Default::default(),
         &never_cancel,
+        true,
     )
 }
 
@@ -218,6 +219,7 @@ fn can_remove_introspection_selections() {
             &schema,
             &IndexSet::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -936,6 +938,7 @@ scalar FieldSet
             &schema,
             &interface_objects,
             &never_cancel,
+            true,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1071,6 +1074,7 @@ mod make_selection_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1170,6 +1174,7 @@ mod lazy_map_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1229,6 +1234,7 @@ mod lazy_map_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1435,6 +1441,7 @@ fn test_expand_all_fragments1() {
             &schema,
             &IndexSet::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
         insta::assert_snapshot!(normalized_operation, @r###"
