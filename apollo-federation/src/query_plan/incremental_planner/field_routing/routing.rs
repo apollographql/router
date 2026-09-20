@@ -797,6 +797,21 @@ impl FieldRoutingSearchSpace {
     ) -> Result<Vec<RoutingChoice>, FederationError> {
         let mut options = Vec::new();
 
+        // Under a shareable parent returning an inconsistent abstract type,
+        // only intersection members may appear as fragment conditions —
+        // others would make results depend on which subgraph resolved the
+        // parent.
+        if let Some(filter) = &pending.narrowing.intersection_filter
+            && let Some(type_cond) = &fragment_selection.inline_fragment.type_condition_position
+        {
+            let cond_types = self
+                .supergraph_schema
+                .possible_runtime_types(type_cond.clone())?;
+            if cond_types.iter().all(|t| !filter.contains(&t.type_name)) {
+                return Ok(options);
+            }
+        }
+
         if let Some(edge_idx) = self.edge_for_inline_fragment(
             pending.query_graph_node,
             &fragment_selection.inline_fragment,
@@ -906,7 +921,7 @@ impl FieldRoutingSearchSpace {
 
     /// Enumerate key hops into a fresh Vec; the cycle guard lives in
     /// `append_key_hop_options`.
-    fn key_hops_guarded(
+    pub(super) fn key_hops_guarded(
         &self,
         node: NodeIndex,
         key: RoutingCacheKey,

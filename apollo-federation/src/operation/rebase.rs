@@ -40,12 +40,15 @@ impl Selection {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
+        on_non_intersecting: OnNonIntersecting,
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => field
-                .rebase_inner(parent_type, schema)
+                .rebase_inner(parent_type, schema, on_non_intersecting)
                 .map(|field| field.into()),
-            Selection::InlineFragment(inline) => inline.rebase_inner(parent_type, schema),
+            Selection::InlineFragment(inline) => {
+                inline.rebase_inner(parent_type, schema, on_non_intersecting)
+            }
         }
     }
 
@@ -54,7 +57,7 @@ impl Selection {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<Selection, FederationError> {
-        self.rebase_inner(parent_type, schema)
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error)
     }
 
     fn can_add_to(
@@ -67,6 +70,27 @@ impl Selection {
             Selection::InlineFragment(inline) => inline.can_add_to(parent_type, schema),
         }
     }
+}
+
+/// How rebasing treats a fragment whose type condition cannot intersect the
+/// target type: fail the whole rebase, or prune just that branch. Pruning is
+/// sound when the caller narrows to a concrete runtime type (type explosion),
+/// where a non-intersecting condition can never match at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OnNonIntersecting {
+    Error,
+    Prune,
+}
+
+fn prunable_rebase_error(err: &FederationError) -> bool {
+    matches!(
+        err,
+        FederationError::SingleFederationError(
+            crate::error::SingleFederationError::InternalRebaseError(
+                RebaseError::NonIntersectingCondition { .. } | RebaseError::EmptySelectionSet,
+            )
+        )
+    )
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -290,6 +314,7 @@ impl FieldSelection {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
+        on_non_intersecting: OnNonIntersecting,
     ) -> Result<FieldSelection, FederationError> {
         if &self.field.schema == schema && &self.field.field_position.parent() == parent_type {
             // we are rebasing field on the same parent within the same schema - we can just return self
@@ -322,7 +347,8 @@ impl FieldSelection {
             });
         }
 
-        let rebased_selection_set = selection_set.rebase_inner(&rebased_base_type, schema)?;
+        let rebased_selection_set =
+            selection_set.rebase_inner(&rebased_base_type, schema, on_non_intersecting)?;
         if rebased_selection_set.selections.is_empty() {
             Err(RebaseError::EmptySelectionSet.into())
         } else {
@@ -458,6 +484,7 @@ impl InlineFragmentSelection {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
+        on_non_intersecting: OnNonIntersecting,
     ) -> Result<Selection, FederationError> {
         if &self.inline_fragment.schema == schema
             && self.inline_fragment.parent_type_position == *parent_type
@@ -474,9 +501,11 @@ impl InlineFragmentSelection {
             // we are within the same schema - selection set does not have to be rebased
             Ok(InlineFragmentSelection::new(rebased_fragment, self.selection_set.clone()).into())
         } else {
-            let rebased_selection_set = self
-                .selection_set
-                .rebase_inner(&rebased_casted_type, schema)?;
+            let rebased_selection_set = self.selection_set.rebase_inner(
+                &rebased_casted_type,
+                schema,
+                on_non_intersecting,
+            )?;
             if rebased_selection_set.selections.is_empty() {
                 // empty selection set
                 Err(RebaseError::EmptySelectionSet.into())
@@ -515,18 +544,25 @@ impl SelectionSet {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
+        on_non_intersecting: OnNonIntersecting,
     ) -> Result<SelectionSet, FederationError> {
-        let rebased_results = self
-            .selections
-            .values()
-            .map(|selection| selection.rebase_inner(parent_type, schema));
+        let mut selections = super::SelectionMap::new();
+        for selection in self.selections.values() {
+            match selection.rebase_inner(parent_type, schema, on_non_intersecting) {
+                Ok(rebased) => {
+                    selections.insert(rebased);
+                }
+                Err(err)
+                    if on_non_intersecting == OnNonIntersecting::Prune
+                        && prunable_rebase_error(&err) => {}
+                Err(err) => return Err(err),
+            }
+        }
 
         Ok(SelectionSet {
             schema: schema.clone(),
             type_position: parent_type.clone(),
-            selections: rebased_results
-                .collect::<Result<super::SelectionMap, _>>()?
-                .into(),
+            selections: selections.into(),
         })
     }
 
@@ -538,7 +574,19 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<SelectionSet, FederationError> {
-        self.rebase_inner(parent_type, schema)
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error)
+    }
+
+    /// Like [`Self::rebase_on`], but fragments whose type conditions cannot
+    /// intersect the target type are pruned instead of failing the rebase.
+    /// For use when narrowing to a concrete runtime type, where such branches
+    /// can never match.
+    pub(crate) fn rebase_on_pruning_non_intersecting(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<SelectionSet, FederationError> {
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Prune)
     }
 
     /// Returns true if the selection set would select cleanly from the given type in the given

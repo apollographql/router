@@ -44,6 +44,7 @@ fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> Field
         query_graph: Arc::new(query_graph),
         supergraph_schema: schema,
         override_conditions: Default::default(),
+        inconsistent_abstract_types: Default::default(),
         disabled_subgraphs: Default::default(),
         key_hops_in_flight: Default::default(),
     }

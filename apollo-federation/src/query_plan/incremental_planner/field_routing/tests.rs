@@ -1163,6 +1163,7 @@ fn t_pending(
             depth: 1,
         }),
         provides_anchor: None,
+        narrowing: Default::default(),
         best_effort: false,
     }
 }
@@ -1413,7 +1414,7 @@ fn interface_object_key_hop_from_concrete_type() {
             }
           }
         },
-        Flatten(path: "items.@") {
+        Flatten(path: "items.@|[X]") {
           Fetch(service: "b") {
             {
               ... on X {
@@ -1587,7 +1588,7 @@ type Query
             }
           }
         },
-        Flatten(path: "animals.@") {
+        Flatten(path: "animals.@|[Cat]") {
           Fetch(service: "b") {
             {
               ... on Cat {
@@ -1711,6 +1712,231 @@ type Query
         {
           search {
             __typename
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// Fragment-path narrowing: `es` returns E (members X, Y), and `... on L`
+/// (members X, Y, Z) explodes at L's node where Z is locally possible — but
+/// no Z can ever appear under an E-typed field. The Z branch must be routed
+/// as dead code, not key-hopped into an entity fetch whose inputs demand a
+/// Z key the response state can never satisfy.
+/// Targets TypeNarrowing.possible_types and the dead-fragment early return
+/// in dispatch_sub_selections.
+#[test]
+fn narrowing_drops_exploded_member_outside_enclosing_context() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+interface E
+  @join__type(graph: A)
+{
+  id: ID!
+}
+
+interface L
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type X implements E & L
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__implements(graph: A, interface: "E")
+  @join__implements(graph: A, interface: "L")
+  @join__implements(graph: B, interface: "L")
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type Y implements E & L
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__implements(graph: A, interface: "E")
+  @join__implements(graph: A, interface: "L")
+  @join__implements(graph: B, interface: "L")
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type Z implements L
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__implements(graph: A, interface: "L")
+  @join__implements(graph: B, interface: "L")
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  es: [E] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ es { ... on L { url } } }");
+    assert!(
+        !plan_str.contains("... on Z"),
+        "no Z can appear under an E-typed field, but the plan references it:\n{plan_str}"
+    );
+}
+
+/// Shareable parent returning an abstract type whose runtime members differ
+/// per subgraph (U is X|Y in A but only X in B): fragments committed under
+/// the B route must be filtered to B's member set, dropping `... on Y`
+/// there without a penalty, while the A route keeps both.
+/// Targets routing.rs fragment_options' intersection filter, and
+/// type_conditions.rs dropped-by-intersection-filter arm.
+#[test]
+fn inconsistent_union_members_filtered_per_subgraph() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+  @join__unionMember(graph: B, member: "X")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  search: [U]
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { ... on X { x } ... on Y { y } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+            ... on X {
+              x
+            }
+            ... on Y {
+              y
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+fn entity_inconsistent_union_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type T
+  @join__type(graph: A, key: "tid")
+  @join__type(graph: B, key: "tid")
+{
+  tid: ID!
+  e: E
+}
+
+type E
+  @join__type(graph: A, key: "eid")
+  @join__type(graph: B, key: "eid")
+{
+  eid: ID!
+  search: [U]
+}
+
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+  @join__unionMember(graph: B, member: "X")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  top: T @join__field(graph: A)
+}
+"#,
+    )
+}
+
+/// A shareable entity field (`e` resolvable in A directly and in B via T's
+/// key) puts its descendants on a shareable path; `search` below it returns
+/// a union whose members differ per subgraph, so its child fragments get an
+/// intersection filter from the committed subgraph's own member set.
+/// Targets commit.rs intersection_filter_for_field /
+/// field_is_shareable_here / field_in_multiple_subgraphs.
+#[test]
+fn entity_shareable_field_filters_inconsistent_union_members() {
+    let plan_str = plan_query(
+        &entity_inconsistent_union_schema(),
+        "{ top { e { search { ... on X { x } ... on Y { y } } } } }",
+    );
+    assert!(
+        plan_str.contains("... on Y"),
+        "Winning route must keep the Y fragment: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          top {
+            e {
+              search {
+                __typename
+                ... on X {
+                  x
+                }
+                ... on Y {
+                  y
+                }
+              }
+            }
           }
         }
       },

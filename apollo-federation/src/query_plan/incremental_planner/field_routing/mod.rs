@@ -63,6 +63,10 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) query_graph: Arc<QueryGraph>,
     pub(crate) supergraph_schema: ValidFederationSchema,
     pub(crate) override_conditions: OverrideConditions,
+    /// Abstract types whose runtime members differ between subgraphs, from
+    /// supergraph analysis. Drives the cross-subgraph intersection filter
+    /// (see [`state::TypeNarrowing`]).
+    pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
     /// In-flight guard for breaking the mutual recursion between
@@ -149,6 +153,23 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Find the outgoing edge for a field at a query graph node.
+    /// For an inconsistent abstract type, the runtime-type names present in
+    /// the given subgraph's schema. `None` for consistent types.
+    pub(super) fn allowed_inconsistent_members(
+        &self,
+        type_name: &Name,
+        subgraph: &Arc<str>,
+    ) -> Option<Arc<HashSet<Name>>> {
+        if !self.inconsistent_abstract_types.contains(type_name) {
+            return None;
+        }
+        let schema = self.query_graph.schema_by_source(subgraph).ok()?;
+        let ty = schema.get_type(type_name).ok()?;
+        let pos = CompositeTypeDefinitionPosition::try_from(ty).ok()?;
+        let types = schema.possible_runtime_types(pos).ok()?;
+        Some(Arc::new(types.into_iter().map(|t| t.type_name).collect()))
+    }
+
     pub(super) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
         self.query_graph
             .edge_for_field(node, field, &self.override_conditions)
