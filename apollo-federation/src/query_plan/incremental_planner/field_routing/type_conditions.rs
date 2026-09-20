@@ -290,6 +290,21 @@ impl FieldRoutingSearchSpace {
                 if let Ok(runtime_types) =
                     current_schema.possible_runtime_types(current_type.clone())
                 {
+                    if runtime_types.is_empty() {
+                        // The abstract type has no runtime members in this
+                        // subgraph, so no object can ever appear at this
+                        // position: the selection is dead code. Drop it
+                        // without a penalty, mirroring the exhaustive
+                        // planner, instead of failing the commit (which
+                        // would penalize every candidate that probes the
+                        // explosion and can starve the search of complete
+                        // plans).
+                        trace!(
+                            field = %field_sel.field.field_position,
+                            "abstract position has no local runtime types, dropping selection",
+                        );
+                        return Ok(true);
+                    }
                     let exploded = !runtime_types.is_empty();
                     let inner_sel = Selection::Field(field_sel.clone());
                     let schema = field_sel.field.schema();
