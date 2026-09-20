@@ -36,8 +36,8 @@ fn push_concrete_type_fragments<'a>(
     schema: &ValidFederationSchema,
     parent_type: &CompositeTypeDefinitionPosition,
     directives: DirectiveList,
-    make_selection_set: impl Fn(&InlineFragment) -> SelectionSet,
-) {
+    make_selection_set: impl Fn(&InlineFragment) -> Result<SelectionSet, FederationError>,
+) -> Result<(), FederationError> {
     for concrete_type in concrete_types.rev() {
         let concrete_composite: CompositeTypeDefinitionPosition = concrete_type.clone().into();
         let frag = InlineFragment {
@@ -47,11 +47,17 @@ fn push_concrete_type_fragments<'a>(
             directives: directives.clone(),
             selection_id: SelectionId::new(),
         };
-        let selection_set = make_selection_set(&frag);
+        let selection_set = make_selection_set(&frag)?;
+        if selection_set.selections.is_empty() {
+            // Every branch was pruned for this concrete type; the fragment
+            // would select nothing, so skip it entirely.
+            continue;
+        }
         let wrapped =
             Selection::InlineFragment(Arc::new(InlineFragmentSelection::new(frag, selection_set)));
         state.push_pending(pending.fork(wrapped));
     }
+    Ok(())
 }
 
 impl FieldRoutingSearchSpace {
@@ -166,10 +172,28 @@ impl FieldRoutingSearchSpace {
 
             let intersection: Vec<_> = current_runtime_types
                 .intersection(&cond_runtime_types)
+                .filter(|t| {
+                    pending
+                        .narrowing
+                        .intersection_filter
+                        .as_ref()
+                        .is_none_or(|filter| filter.contains(&t.type_name))
+                })
                 .cloned()
                 .collect();
 
             if intersection.is_empty() {
+                if pending.narrowing.intersection_filter.is_some() {
+                    // The filter already handles correctness; drop without
+                    // penalizing — a doom penalty here would make ALL routes
+                    // equally expensive when subgraphs define disjoint union
+                    // members.
+                    trace!(
+                        type_condition = %type_cond,
+                        "fragment dropped by intersection filter",
+                    );
+                    return Ok(true);
+                }
                 trace!(
                     type_condition = %type_cond,
                     "type condition has empty local runtime intersection, dropping fragment",
@@ -190,6 +214,7 @@ impl FieldRoutingSearchSpace {
                 "type-exploding abstract type condition into concrete types",
             );
             let sel_set = frag_sel.selection_set.clone();
+            let schema = frag_sel.inline_fragment.schema.clone();
             push_concrete_type_fragments(
                 state,
                 pending,
@@ -197,8 +222,13 @@ impl FieldRoutingSearchSpace {
                 &frag_sel.inline_fragment.schema,
                 &frag_sel.inline_fragment.parent_type_position,
                 frag_sel.inline_fragment.directives.clone(),
-                |_| sel_set.clone(),
-            );
+                // The original set is typed at the abstract condition; each
+                // exploded fragment needs it retyped at its concrete cast.
+                // Inner conditions disjoint with a given cast can never match
+                // at runtime, so they are pruned rather than failing the
+                // explosion.
+                |frag| sel_set.rebase_on_pruning_non_intersecting(&frag.casted_type(), &schema),
+            )?;
             return Ok(true);
         }
         Ok(false)
@@ -233,8 +263,13 @@ impl FieldRoutingSearchSpace {
                         schema,
                         &current_type,
                         Default::default(),
-                        |frag| SelectionSet::from_selection(frag.casted_type(), inner_sel.clone()),
-                    );
+                        |frag| {
+                            Ok(SelectionSet::from_selection(
+                                frag.casted_type(),
+                                inner_sel.clone(),
+                            ))
+                        },
+                    )?;
                     if exploded {
                         trace!(
                             field = %field_sel.field.field_position,

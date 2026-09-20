@@ -2,8 +2,10 @@
 //! under construction, and O(1) checkpoint/rollback over both.
 
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use petgraph::graph::NodeIndex;
 
 use super::super::fetch_graph::FetchGraph;
@@ -58,6 +60,8 @@ pub(crate) struct PendingSelection {
     /// own edges carry the provenance (inside a copy layer) or no @provides
     /// is in scope.
     pub(crate) provides_anchor: Option<NodeIndex>,
+    /// Cross-subgraph type-narrowing state (see [`TypeNarrowing`]).
+    pub(crate) narrowing: TypeNarrowing,
     /// Best-effort selection: dropping it (zero routing options, or a failed
     /// commit) is tolerated silently instead of counting toward
     /// `dropped_fields` and failing the plan. Inherited by forks, so
@@ -66,6 +70,31 @@ pub(crate) struct PendingSelection {
     /// concrete-`__typename` recovery, whose fused predecessor silently did
     /// nothing when no candidate subgraph existed.
     pub(crate) best_effort: bool,
+}
+
+/// Type-narrowing state a pending selection carries down the operation,
+/// propagated as a unit from parent to child in `dispatch_sub_selections`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TypeNarrowing {
+    /// True when some ancestor field had routing options in multiple
+    /// subgraphs (a shareable fork); inconsistent abstract types downstream
+    /// must then restrict fragment conditions to the cross-subgraph
+    /// intersection.
+    pub(crate) shareable_path: bool,
+    /// When the parent field returns an inconsistent abstract type reachable
+    /// from multiple subgraphs, fragment conditions are restricted to the
+    /// cross-subgraph intersection (matching the exhaustive planner's
+    /// simultaneous-paths behavior). `None` means no restriction.
+    pub(crate) intersection_filter: Option<Arc<HashSet<Name>>>,
+    /// Sorted possible runtime type names at this selection's position,
+    /// narrowed by the inline fragments crossed since the nearest enclosing
+    /// field. `None` when the position is not under a composite-typed field.
+    pub(crate) possible_types: Option<Arc<Vec<Name>>>,
+    /// The possible runtime types of the nearest enclosing field's output
+    /// type, before fragment narrowing. When `possible_types` is a proper
+    /// subset, the enclosing response-path element carries the narrowed set
+    /// as type conditions.
+    pub(crate) possible_types_after_last_field: Option<Arc<Vec<Name>>>,
 }
 
 impl PendingSelection {
@@ -80,6 +109,7 @@ impl PendingSelection {
             path_in_fetch: self.path_in_fetch.clone(),
             condition: self.condition,
             provides_anchor: self.provides_anchor,
+            narrowing: self.narrowing.clone(),
             best_effort: self.best_effort,
         }
     }
@@ -105,6 +135,11 @@ impl PendingSelection {
 
     pub(super) fn with_provides_anchor(mut self, provides_anchor: Option<NodeIndex>) -> Self {
         self.provides_anchor = provides_anchor;
+        self
+    }
+
+    pub(super) fn with_narrowing(mut self, narrowing: TypeNarrowing) -> Self {
+        self.narrowing = narrowing;
         self
     }
 
@@ -327,6 +362,7 @@ mod tests {
             path_in_fetch: SharedPath::new(),
             condition: None,
             provides_anchor: None,
+            narrowing: Default::default(),
             best_effort: false,
         };
         let ids = |state: &PlanState| -> Vec<usize> {
