@@ -110,6 +110,9 @@ fn assert_compare_operation_docs(this: &str, other: &str) {
             CorrectnessError::ComparisonError(err) => {
                 panic!("compare_operation_docs failed: {err}");
             }
+            CorrectnessError::Timeout(timeout) => {
+                panic!("compare_operation_docs timed out after {timeout:?}");
+            }
         }
     }
 }

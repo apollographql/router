@@ -221,6 +221,9 @@ fn interpret_plan_node(
     conditions: &[Literal],
     node: &PlanNode,
 ) -> Result<ResponseShape, String> {
+    if super::check_deadline_exceeded() {
+        return Err(super::DEADLINE_EXCEEDED_MESSAGE.to_string());
+    }
     match node {
         PlanNode::Fetch(fetch) => interpret_fetch_node(context, state, conditions, fetch),
         PlanNode::Sequence(sequence) => {
