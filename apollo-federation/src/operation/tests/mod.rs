@@ -1983,3 +1983,75 @@ fn fragments_with_non_intersecting_types() {
         }
     "###);
 }
+
+/// A concrete object's field must not rebase onto an unrelated interface
+/// that happens to declare a same-named field; that would let planners
+/// merge concrete-typed selections to interface positions without
+/// narrowing. Only @interfaceObject targets accept this cross-type rebase
+/// (can_rebase_on case 3).
+#[test]
+fn field_does_not_rebase_onto_unrelated_interface() {
+    let src = r#"
+query TestQuery { cat { name } }
+
+type Query { cat: Cat }
+type Cat { name: String }
+"#;
+    let (schema, mut executable_document) = parse_schema_and_operation(src);
+    let operation = executable_document
+        .operations
+        .named
+        .get_mut("TestQuery")
+        .expect("operation");
+    let normalized = normalize_operation(
+        operation,
+        &executable_document.fragments,
+        &schema,
+        &IndexSet::default(),
+        &never_cancel,
+        true,
+    )
+    .expect("normalizes");
+    let Selection::Field(cat_sel) = normalized
+        .selection_set
+        .selections
+        .values()
+        .next()
+        .expect("cat selection")
+    else {
+        panic!("expected field selection");
+    };
+    let Selection::Field(name_sel) = cat_sel
+        .selection_set
+        .as_ref()
+        .expect("cat sub-selections")
+        .selections
+        .values()
+        .next()
+        .expect("name selection")
+    else {
+        panic!("expected field selection");
+    };
+
+    let target = Schema::parse_and_validate(
+        r#"
+type Query { animals: [Animal] }
+interface Animal { name: String }
+type Dog implements Animal { name: String }
+"#,
+        "target.graphql",
+    )
+    .expect("target schema parses");
+    let target = ValidFederationSchema::new(target).expect("valid federation schema");
+    let animal: crate::schema::position::CompositeTypeDefinitionPosition = target
+        .get_type(&name!("Animal"))
+        .expect("Animal exists")
+        .try_into()
+        .expect("composite type");
+
+    let result = name_sel.field.rebase_on(&animal, &target);
+    assert!(
+        result.is_err(),
+        "Cat.name must not rebase onto unrelated interface Animal: {result:?}"
+    );
+}

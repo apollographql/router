@@ -150,7 +150,7 @@ impl Field {
     }
 
     /// Like `rebase_on`, but allows rebasing a concrete type's field onto
-    /// an interface or @interfaceObject target. Used by the incremental
+    /// an @interfaceObject target. Used by the incremental
     /// planner's plan builder where entity fetch paths cross the
     /// concrete-to-interface boundary in @interfaceObject schemas.
     pub(crate) fn rebase_on_for_incremental_planner(
@@ -213,9 +213,9 @@ impl Field {
     }
 
     /// `allow_interface_target` adds a third case: a concrete type's field on
-    /// an interface target, the reverse of case 2. An @interfaceObject source
-    /// declares the type as a plain object while the target subgraph has the
-    /// interface. `rebase_on` still fails if the interface lacks the field.
+    /// an @interfaceObject target, the reverse of case 2. Plain interface
+    /// targets stay rejected so concrete fields cannot rebase onto unrelated
+    /// interfaces that happen to share a field name.
     fn can_rebase_on_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -239,7 +239,7 @@ impl Field {
         if allow_interface_target {
             let target_is_iface_obj =
                 target_schema.is_interface_object_type(parent_type.clone().into())?;
-            return Ok(parent_type.is_interface_type() || target_is_iface_obj);
+            return Ok(target_is_iface_obj);
         }
         Ok(false)
     }
@@ -640,7 +640,7 @@ mod tests {
     }
 
     fn assert_cannot_rebase(result: Result<Field, crate::error::FederationError>) {
-        let error = result.expect_err("legacy rebase should reject a concrete-to-interface hop");
+        let error = result.expect_err("rebase should reject a concrete-to-interface hop");
         assert!(
             error
                 .to_string()
@@ -662,18 +662,15 @@ mod tests {
     }
 
     #[test]
-    fn case_3_interface_target_accepted_on_incremental_planner_path() {
+    fn case_3_interface_target_rejected_on_incremental_planner_path() {
         let schema = schema(INTERFACE_SUBGRAPH);
         let field = concrete_field(&schema);
         let target = CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
             type_name: apollo_compiler::name!("I"),
         });
 
-        assert!(field.can_rebase_on_inner(&target, &schema, true).unwrap());
-        let rebased = field
-            .rebase_on_for_incremental_planner(&target, &schema)
-            .expect("incremental planner rebase onto interface");
-        assert_eq!(rebased.field_position.parent(), target);
+        assert!(!field.can_rebase_on_inner(&target, &schema, true).unwrap());
+        assert_cannot_rebase(field.rebase_on_for_incremental_planner(&target, &schema));
     }
 
     #[test]

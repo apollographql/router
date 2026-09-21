@@ -45,6 +45,9 @@ pub(crate) struct KeyHopInfo {
     /// selecting the locally satisfiable subset and failing if it
     /// doesn't cover the key.
     pub(crate) conditions_unroutable: bool,
+    /// Whether this hop re-enters the same subgraph entity to resolve
+    /// @requires that cannot be satisfied in place.
+    pub(crate) self_entity_reentry: bool,
 }
 
 /// One leg of a multi-hop key chain: an intermediate node and the key
@@ -89,6 +92,10 @@ pub(crate) enum RoutingChoice {
     StripFragment,
     /// Per-concrete-type explosion at an abstract position.
     TypeExplosion,
+    /// Fetch an ancestor field again from another subgraph, carrying only
+    /// the stranded remainder. The rescue when a keyless position leaves a
+    /// selection with no local edge and no key hop out.
+    RefetchAncestor,
 }
 
 impl RoutingChoice {
@@ -104,7 +111,7 @@ impl RoutingChoice {
             | Self::KeyHopWithExternalKey { edge: e, .. }
             | Self::ChainedKeyHop { edge: e, .. }
             | Self::CircularKeyHop { edge: e, .. } => Some(e),
-            Self::StripFragment | Self::TypeExplosion => None,
+            Self::StripFragment | Self::TypeExplosion | Self::RefetchAncestor => None,
         }
     }
 
@@ -122,18 +129,26 @@ impl RoutingChoice {
 
     /// Target subgraph name (synthetic label for non-edge choices).
     pub(crate) fn target_subgraph(&self) -> &Arc<str> {
-        match self.edge() {
-            Some(e) => &e.target_subgraph,
-            None if matches!(self, Self::TypeExplosion) => {
+        if let Some(e) = self.edge() {
+            return &e.target_subgraph;
+        }
+        match self {
+            Self::TypeExplosion => {
                 static LABEL: std::sync::LazyLock<Arc<str>> =
                     std::sync::LazyLock::new(|| Arc::from("<type-explosion>"));
                 &LABEL
             }
-            None => {
+            Self::StripFragment => {
                 static LABEL: std::sync::LazyLock<Arc<str>> =
                     std::sync::LazyLock::new(|| Arc::from("<strip-fragment>"));
                 &LABEL
             }
+            Self::RefetchAncestor => {
+                static LABEL: std::sync::LazyLock<Arc<str>> =
+                    std::sync::LazyLock::new(|| Arc::from("<refetch-ancestor>"));
+                &LABEL
+            }
+            _ => unreachable!("all edge-based variants handled by edge()"),
         }
     }
 
@@ -152,6 +167,11 @@ impl RoutingChoice {
     /// Whether this is a direct resolution (no hop needed).
     pub(crate) fn is_direct(&self) -> bool {
         matches!(self, Self::Provides(_) | Self::Local(_))
+    }
+
+    /// Whether this is the ancestor-refetch rescue choice.
+    pub(crate) fn is_refetch_ancestor(&self) -> bool {
+        matches!(self, Self::RefetchAncestor)
     }
 
     /// Whether this is a key hop (entity-based, not root-type-resolution).
@@ -192,14 +212,18 @@ impl RoutingChoice {
         let variant = match self {
             Self::Provides(_) => 0,
             Self::Local(_) => 1,
-            Self::KeyHopWithLocalKey { .. } => 2,
-            Self::KeyHopWithProvidedKey { .. } => 3,
-            Self::KeyHopWithExternalKey { .. } => 4,
-            Self::RootHop(_) => 5,
-            Self::ChainedKeyHop { .. } => 6,
-            Self::CircularKeyHop { .. } => 7,
-            Self::StripFragment => 8,
-            Self::TypeExplosion => 9,
+            // Same-subgraph entity re-entry for in-place-unresolvable @requires
+            // ranks above regular key hops but below direct local.
+            Self::KeyHopWithLocalKey { key, .. } if key.self_entity_reentry => 2,
+            Self::KeyHopWithLocalKey { .. } => 3,
+            Self::KeyHopWithProvidedKey { .. } => 4,
+            Self::KeyHopWithExternalKey { .. } => 5,
+            Self::RootHop(_) => 6,
+            Self::ChainedKeyHop { .. } => 7,
+            Self::CircularKeyHop { .. } => 8,
+            Self::StripFragment => 9,
+            Self::TypeExplosion => 10,
+            Self::RefetchAncestor => 11,
         };
         let key_size = self
             .key_opt()
@@ -312,6 +336,7 @@ impl FieldRoutingSearchSpace {
                     key_conditions: Arc::new(key),
                     requires_resolvable_in_place: in_place,
                     conditions_unroutable: false,
+                    self_entity_reentry: true,
                 },
             });
         }
@@ -488,6 +513,7 @@ impl FieldRoutingSearchSpace {
                             requires_resolvable_in_place: self
                                 .requires_conditions_resolvable_in_place(origin_node, found_edge)?,
                             conditions_unroutable: first_conditions_unroutable,
+                            self_entity_reentry: false,
                         };
                         if first_conditions_unroutable {
                             options.push(RoutingChoice::CircularKeyHop {
@@ -652,6 +678,7 @@ impl FieldRoutingSearchSpace {
                 requires_resolvable_in_place: self
                     .requires_conditions_resolvable_in_place(pending_node, c.found_edge_idx)?,
                 conditions_unroutable,
+                self_entity_reentry: false,
             };
 
             if conditions_unroutable {
@@ -685,6 +712,12 @@ impl FieldRoutingSearchSpace {
         &self,
         pending: &PendingSelection,
     ) -> Result<Arc<Vec<RoutingChoice>>, FederationError> {
+        // Per-pending memo: a pending is queried only once frozen behind an
+        // Arc, and its options are a pure function of the pending and the
+        // immutable query graph, so the first computed result holds for the
+        // pending's whole lifetime — including across search rollbacks that
+        // would otherwise redo the shared-cache key hashing millions of
+        // times on replayed forced chains.
         if let Some(memo) = pending.routing_options_memo.get() {
             return Ok(memo.clone());
         }
@@ -708,16 +741,30 @@ impl FieldRoutingSearchSpace {
                 .intersection_filter
                 .as_ref()
                 .map(super::ArcKey::new),
+            (
+                super::context::boundary_type_name(pending),
+                pending.context_anchor.fetch.is_some(),
+            ),
         );
-        if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
-            return Ok(cached.clone());
+        let unfiltered = if let Some(cached) = self.caches.routing_options.borrow().get(&key) {
+            cached.clone()
+        } else {
+            let result = Arc::new(self.routing_options(pending)?);
+            self.caches
+                .routing_options
+                .borrow_mut()
+                .insert(key, result.clone());
+            result
+        };
+        if let Some(avoid) = &pending.split_avoid {
+            let options = unfiltered
+                .iter()
+                .filter(|choice| choice.target_subgraph() != avoid)
+                .cloned()
+                .collect::<Vec<_>>();
+            return Ok(Arc::new(options));
         }
-        let result = Arc::new(self.routing_options(pending)?);
-        self.caches
-            .routing_options
-            .borrow_mut()
-            .insert(key, result.clone());
-        Ok(result)
+        Ok(unfiltered)
     }
 
     pub(super) fn routing_options(
@@ -739,6 +786,16 @@ impl FieldRoutingSearchSpace {
                     self.fragment_options(pending, fragment_selection)?
                 }
             };
+            // The ancestor refetch rescues weak positions: with no route it
+            // is the pool (a forced rescue), with exactly one route it sits
+            // in the forced-trail frame and is tried only when the real
+            // route's commit fails. Forcedness counts real options, so
+            // neither case creates a decision point, and positions with
+            // real alternatives recover through those instead. Viability of
+            // the ancestor walk is checked only at commit time.
+            if options.len() <= 1 && pending.split_parent.is_some() && !pending.best_effort {
+                options.push(RoutingChoice::RefetchAncestor);
+            }
             options.sort_by_key(RoutingChoice::rank);
             options
         };
@@ -965,7 +1022,12 @@ impl FieldRoutingSearchSpace {
         )?;
         options.extend(hops.iter().cloned());
 
-        if type_cond.is_abstract_type() {
+        // TypeExplosion decomposes the fragment into per-concrete-type
+        // fragments, or drops it if the runtime intersection is empty.
+        // For abstract type conditions it's a genuine alternative (ranked
+        // last); for concrete conditions with no other options it handles
+        // the "type absent in this subgraph" case.
+        if type_cond.is_abstract_type() || options.is_empty() {
             options.push(RoutingChoice::TypeExplosion);
         }
 
@@ -1235,9 +1297,9 @@ impl FieldRoutingSearchSpace {
         count
     }
 
-    /// True when every descendant field is local, so the whole subtree
-    /// can be added in one shot.
-    #[allow(dead_code)]
+    /// True when the node has no reachable cross-subgraph edges: every
+    /// descendant field is local, so the entire subtree can be added in one
+    /// shot instead of field-by-field.
     pub(super) fn is_fully_local(
         &self,
         query_graph_node: NodeIndex,
@@ -1247,8 +1309,8 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Recursively check that every sub-selection has an edge at the given
-    /// node.
-    #[allow(dead_code)]
+    /// node and that no edge carries @fromContext conditions (which need
+    /// special plumbing the bulk-insert path skips).
     pub(super) fn all_sub_selections_available(
         &self,
         node: NodeIndex,
@@ -1266,6 +1328,10 @@ impl FieldRoutingSearchSpace {
                     {
                         None => return Ok(false),
                         Some(edge_idx) => {
+                            let edge = self.cached_query_graph.query_graph.edge_weight(edge_idx)?;
+                            if !edge.required_contexts.is_empty() {
+                                return Ok(false);
+                            }
                             if let Some(sub_ss) = field_sel.selection_set.as_ref() {
                                 let target = self
                                     .qg()
@@ -1395,6 +1461,7 @@ mod tests {
                 key_conditions: key_selection(&space, "k x"),
                 requires_resolvable_in_place: false,
                 conditions_unroutable: false,
+                self_entity_reentry: false,
             },
         };
         let provided = RoutingChoice::KeyHopWithProvidedKey {
@@ -1406,6 +1473,7 @@ mod tests {
                 key_conditions: key_selection(&space, "k"),
                 requires_resolvable_in_place: false,
                 conditions_unroutable: false,
+                self_entity_reentry: false,
             },
         };
         let unsatisfiable_small = RoutingChoice::KeyHopWithExternalKey {
@@ -1417,6 +1485,7 @@ mod tests {
                 key_conditions: key_selection(&space, "k"),
                 requires_resolvable_in_place: true,
                 conditions_unroutable: false,
+                self_entity_reentry: false,
             },
         };
         let unsatisfiable_large = RoutingChoice::KeyHopWithExternalKey {
@@ -1428,6 +1497,7 @@ mod tests {
                 key_conditions: key_selection(&space, "k x"),
                 requires_resolvable_in_place: false,
                 conditions_unroutable: false,
+                self_entity_reentry: false,
             },
         };
 
