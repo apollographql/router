@@ -641,6 +641,12 @@ impl CacheControl {
         self.remaining_duration(self.max_age(), Some(now))
     }
 
+    /// [`can_use`](Self::can_use) evaluated at the given Unix timestamp rather than the current
+    /// clock, so boundary cases can be asserted without racing a second rollover.
+    fn can_use_at(&self, now: u64) -> bool {
+        !self.no_cache && self.remaining_ttl_at(now).is_none_or(|ttl| ttl > 0)
+    }
+
     /// Sets `created` to 0, making time-dependent fields deterministic in snapshot tests.
     #[allow(dead_code)]
     pub(crate) fn zero_out_created(&mut self) {
@@ -1356,5 +1362,72 @@ mod tests {
     #[test]
     fn max_age_getter_returns_none_when_neither_set() {
         assert_eq!(CacheControl::default().max_age(), None);
+    }
+
+    // --- merge_inner: TTL ratchet (regression guard for the storage fix in plugin.rs) ---
+
+    const NOW: u64 = 1_700_000_000; // fixed to avoid racing a real-clock second rollover
+
+    fn advertised(created: u64, s_max_age: u64) -> CacheControl {
+        CacheControl {
+            created,
+            s_max_age: Some(s_max_age),
+            public: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn fresh_entity_inherits_shortened_ttl_from_batch_sibling() {
+        let now = NOW;
+
+        let cached_sibling = advertised(now - 25, 30);
+        assert_eq!(cached_sibling.remaining_ttl_at(now), Some(5));
+        assert!(cached_sibling.can_use_at(now));
+
+        let fresh = advertised(now, 30);
+        assert_eq!(fresh.ttl(), Some(30));
+
+        let stored = fresh.merge_inner(&cached_sibling, now, true);
+        assert_eq!(stored.ttl(), Some(5));
+        assert!(stored.should_store());
+    }
+
+    #[test]
+    fn inherited_ttl_ratchets_down_across_generations() {
+        let now = NOW;
+
+        let gen0 = advertised(now - 25, 30);
+        assert_eq!(gen0.ttl(), Some(30));
+
+        let t1 = now;
+        let gen1 = advertised(t1, 30).merge_inner(&gen0, t1, true);
+        assert_eq!(gen1.ttl(), Some(5));
+
+        let t2 = t1 + 4;
+        let gen2 = advertised(t2, 30).merge_inner(&gen1, t2, true);
+        assert_eq!(gen2.ttl(), Some(1));
+
+        let t3 = t2 + 1;
+        let gen3 = advertised(t3, 30).merge_inner(&gen2, t3, true);
+        assert_eq!(gen3.ttl(), Some(0));
+    }
+
+    #[test]
+    fn ratchet_floors_at_one_second_because_zero_remaining_is_not_a_hit() {
+        let now = NOW;
+
+        // Zero remaining is a miss (can_use requires strict >), so it never reaches the merge.
+        let expired_sibling = advertised(now - 1, 1);
+        assert_eq!(expired_sibling.remaining_ttl_at(now), Some(0));
+        assert!(!expired_sibling.can_use_at(now));
+
+        let oldest_hit = advertised(now - 29, 30);
+        assert_eq!(oldest_hit.remaining_ttl_at(now), Some(1));
+        assert!(oldest_hit.can_use_at(now));
+
+        let stored = advertised(now, 30).merge_inner(&oldest_hit, now, true);
+        assert_eq!(stored.ttl(), Some(1));
+        assert!(stored.should_store());
     }
 }
