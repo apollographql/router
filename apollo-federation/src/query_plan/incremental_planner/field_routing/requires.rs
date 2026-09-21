@@ -518,9 +518,11 @@ impl FieldRoutingSearchSpace {
             };
             let dest = if has_input_conflict || rewrites_collide {
                 let merge_at = state.graph.merge_at(target.fetch_node).to_vec();
-                let split_group = state
-                    .graph
-                    .add_entity_group(choice.target_subgraph(), merge_at);
+                let split_group = state.graph.add_entity_group_with_defer(
+                    choice.target_subgraph(),
+                    merge_at,
+                    pending.defer_ref.clone(),
+                );
                 let mut inputs = state.graph.clone_key_inputs(key_hop_edge.unwrap());
                 inputs.push(input);
                 state

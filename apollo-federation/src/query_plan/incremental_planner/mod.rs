@@ -271,7 +271,8 @@ fn run_bulb_and_finalize(
     // split from the operation, so each sequential step only sees its own
     // defer blocks.
     let defer_info = has_defers
-        .then(|| defer::build_defer_info(selection_set, parameters.client_labels.clone()));
+        .then(|| defer::build_defer_info(selection_set, parameters.client_labels.clone()))
+        .transpose()?;
 
     let mut build_ctx = fetch_graph::plan_builder::PlanBuildContext {
         supergraph_schema: &parameters.supergraph_schema,

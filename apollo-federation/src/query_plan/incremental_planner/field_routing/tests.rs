@@ -2152,3 +2152,127 @@ fn defer_sibling_blocks_produces_multiple_deferred() {
         "A deferred block should fetch 'address': {plan_str}"
     );
 }
+
+/// Nested @defer: an outer deferred fragment contains an inner @defer,
+/// producing nested Defer nodes. Exercises the parent_label tracking in
+/// defer.rs collect_deferred_blocks and the nested defer partitioning in
+/// plan_builder.rs build_deferred_blocks.
+#[test]
+fn nested_defer_produces_nested_defer_nodes() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer(label: \"outer\") { email ... @defer(label: \"inner\") { address } } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Outer deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Inner deferred should fetch 'address': {plan_str}"
+    );
+}
+
+/// When every field in the selection is deferred, the primary sub_selection
+/// is empty. Exercises the None primary_sub_selection path in defer.rs
+/// build_defer_info.
+#[test]
+fn fully_deferred_field_has_no_primary_payload() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer(label: \"all\") { name email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Deferred should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// A bare inline fragment (no type condition, no directives) inside a
+/// deferred selection exercises collect_non_deferred_selection's
+/// type_cond == None branch.
+#[test]
+fn bare_inline_fragment_passes_through_in_defer() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer { email } ... { name } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Bare fragment 'name' should be in primary: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// Deferred cross-subgraph fetch with labeled @defer and an explicit
+/// user field alongside exercises the primary/deferred split where
+/// primary has content and deferred needs an entity hop.
+#[test]
+fn labeled_defer_with_primary_and_deferred_content() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        r#"{ user { name ... @defer(label: "emails") { email } ... @defer(label: "addrs") { address } } }"#,
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("emails"),
+        "Label 'emails' should appear in plan: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("addrs"),
+        "Label 'addrs' should appear in plan: {plan_str}"
+    );
+}
+
+/// Cross-subgraph @defer where the deferred fields span two different
+/// non-primary subgraphs exercises the multi-fetch deferred block
+/// construction in plan_builder.
+#[test]
+fn defer_spanning_two_non_primary_subgraphs() {
+    let plan_str = plan_query_with_defer(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email address } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain Defer: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Deferred should fetch 'address': {plan_str}"
+    );
+}
