@@ -179,6 +179,7 @@ fn split_subgraph(
     subgraph: ValidFederationSubgraph,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
     let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
+    let validate_default_values = subgraph.schema.schema().validate_default_values;
 
     // Fork based on ConnectSpec version:
     // - v0.1/v0.2/v0.3: Use legacy visitor-based expansion (frozen for compatibility)
@@ -191,10 +192,11 @@ fn split_subgraph(
             .map(|connector| {
                 // Build a subgraph using only the necessary fields from the directive
                 let schema = expander.expand(&connector)?;
-                let subgraph = Subgraph::new(
+                let subgraph = Subgraph::new_with_options(
                     connector.id.synthetic_name().as_str(),
                     &subgraph.url,
                     &schema.schema().serialize().to_string(),
+                    validate_default_values,
                 )?;
 
                 // We only validate during debug builds since we should realistically only generate valid schemas
@@ -222,10 +224,11 @@ fn split_subgraph(
             .map(|connector| {
                 // Build a subgraph using only the necessary fields from the directive
                 let schema = expander.expand(&connector)?;
-                let subgraph = Subgraph::new(
+                let subgraph = Subgraph::new_with_options(
                     connector.id.synthetic_name().as_str(),
                     &subgraph.url,
                     &schema.schema().serialize().to_string(),
+                    validate_default_values,
                 )?;
 
                 // We only validate during debug builds since we should realistically only generate valid schemas
@@ -399,7 +402,8 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_federation_2_subgraph_schema()?;
+            let validate_default_values = self.original_schema.schema().validate_default_values;
+            let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -1067,7 +1071,8 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_federation_2_subgraph_schema()?;
+            let validate_default_values = self.original_schema.schema().validate_default_values;
+            let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
             let query_alias = self
                 .original_schema
                 .schema()
