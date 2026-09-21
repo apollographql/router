@@ -83,6 +83,7 @@ use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
+use apollo_compiler::executable::FragmentMap;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
@@ -742,8 +743,11 @@ impl Checker<'_> {
         let operation = self.operation;
         let mut built = operation.clone();
         built.variables = self.variable_declarations(None);
-        built.selection_set.selections =
-            without_unfetched_introspection(&operation.selection_set.selections, true);
+        built.selection_set.selections = without_unfetched_introspection(
+            &operation.selection_set.selections,
+            &source.fragments,
+            true,
+        );
         // The operation's fragment definitions come with it: spreads are resolved where they are
         // reached, so the definitions have to still be there to reach.
         let mut document = ExecutableDocument::new();
@@ -781,7 +785,19 @@ impl Checker<'_> {
 
 /// The client operation, with the introspection a query plan is not expected to fetch removed:
 /// `__schema` and `__type` anywhere, and `__typename` at the operation's root only.
-fn without_unfetched_introspection(selections: &[Selection], at_root: bool) -> Vec<Selection> {
+///
+/// A field opens a new response level; an inline fragment does not, and neither does a named
+/// fragment spread, which is read through at the root. Reading through happens at the use rather
+/// than in the definition, so spreads of the same fragment deeper in the operation are untouched.
+///
+/// `__schema` and `__type` are meta-fields of the query root type, so the only place this walk can
+/// miss one is inside a non-root named fragment of a schema whose query type is reachable from
+/// itself.
+fn without_unfetched_introspection(
+    selections: &[Selection],
+    fragments: &FragmentMap,
+    at_root: bool,
+) -> Vec<Selection> {
     selections
         .iter()
         .filter_map(|selection| match selection {
@@ -791,18 +807,60 @@ fn without_unfetched_introspection(selections: &[Selection], at_root: bool) -> V
                 {
                     return None;
                 }
-                Some(selection.clone())
+                // A field opens a new response level, so `__typename` below it is fetched like
+                // any other field and only `__schema` and `__type` keep being dropped.
+                let mut copy = (**field).clone();
+                copy.selection_set.selections = without_unfetched_introspection(
+                    &field.selection_set.selections,
+                    fragments,
+                    false,
+                );
+                if !field.selection_set.selections.is_empty()
+                    && copy.selection_set.selections.is_empty()
+                {
+                    // Everything under it was introspection, which no fetch carries.
+                    return None;
+                }
+                Some(Selection::Field(Node::new(copy)))
             }
             // A fragment is transparent: it does not open a new response level, so selections
             // inside one at the root are still at the root.
             Selection::InlineFragment(fragment) => {
                 let mut copy = (**fragment).clone();
-                copy.selection_set.selections =
-                    without_unfetched_introspection(&fragment.selection_set.selections, at_root);
+                copy.selection_set.selections = without_unfetched_introspection(
+                    &fragment.selection_set.selections,
+                    fragments,
+                    at_root,
+                );
                 if copy.selection_set.selections.is_empty() {
                     return None;
                 }
                 Some(Selection::InlineFragment(Node::new(copy)))
+            }
+            Selection::FragmentSpread(spread) if at_root => {
+                // Read as an inline fragment, which is what `query_compare` reads a spread as.
+                let Some(definition) = fragments.get(&spread.fragment_name) else {
+                    // Undefined: leave it for the comparison to report.
+                    return Some(selection.clone());
+                };
+                let selections = without_unfetched_introspection(
+                    &definition.selection_set.selections,
+                    fragments,
+                    at_root,
+                );
+                if selections.is_empty() {
+                    return None;
+                }
+                let mut selection_set =
+                    executable::SelectionSet::new(definition.selection_set.ty.clone());
+                selection_set.selections = selections;
+                Some(Selection::InlineFragment(Node::new(
+                    executable::InlineFragment {
+                        type_condition: Some(definition.type_condition().clone()),
+                        directives: spread.directives.clone(),
+                        selection_set,
+                    },
+                )))
             }
             Selection::FragmentSpread(_) => Some(selection.clone()),
         })
