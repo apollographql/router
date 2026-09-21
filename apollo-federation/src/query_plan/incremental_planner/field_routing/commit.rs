@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
-
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use tracing::trace;
