@@ -312,7 +312,11 @@ pub(crate) fn extract_subgraphs_from_supergraph(
         crate::validate_supergraph_for_query_planning(supergraph_schema)?;
     let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-        collect_empty_subgraphs(supergraph_schema, join_spec_definition, validate_default_values)?;
+        collect_empty_subgraphs(
+            supergraph_schema,
+            join_spec_definition,
+            validate_default_values,
+        )?;
 
     let filtered_types: Vec<_> = supergraph_schema
         .get_types()
