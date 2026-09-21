@@ -5447,28 +5447,15 @@ async fn include_cache_control_header_on_router_response_true_sends_headers() {
     assert!(cache_control_contains_public(&cache_control_header));
 }
 
-/// FAILING TEST - documents a defect that is still present. It asserts the behaviour we want, not
-/// the behaviour we have, and should start passing once the defect is fixed.
+/// An entity that misses the cache is stored under its own subgraph-advertised TTL. Organization
+/// 3 is fetched fresh with `s-maxage=20` in the same `_entities` request as 1 and 2, which hit
+/// cache with only `AGED_BY` seconds of their own TTL left; 3's stored TTL stays at 20.
 ///
-/// An entity that misses the cache must be stored under the lifetime *its own* subgraph response
-/// advertises. Today it is not: on a partial hit, `cache_lookup_entities` merges the fresh
-/// subgraph `Cache-Control` with the merged `Cache-Control` of the entries that *hit*
-/// (`plugin.rs`, `cache_control = cache_control.merge(&control_from_cached)`), and
-/// `insert_entities_in_result` then uses that merged value as the `expire` and stored `control`
-/// for every newly fetched entity in the batch. `CacheControl::merge_inner` takes the *minimum*
-/// remaining lifetime of the two sides, so a brand new entity inherits however little time an
-/// unrelated sibling in the same `_entities` fetch had left.
-///
-/// That is a ratchet: each generation of entities is stored with a shorter lifetime than the
-/// subgraph asked for, and the batch minimum keeps shrinking, so entities lose their independent
-/// lifetimes and collapse into synchronized expiry cohorts. It bottoms out at one second rather
-/// than zero, because a sibling at zero remaining no longer counts as a hit and so never reaches
-/// the merge. See also the unit tests in `cache_control.rs`, which pin the arithmetic this test
-/// exercises end-to-end.
+/// See the `merge_inner` tests in `cache_control.rs` for the arithmetic this exercises end to end.
 ///
 /// Requires a local Redis on 127.0.0.1:6379.
 #[tokio::test(flavor = "multi_thread")]
-async fn fresh_entity_is_stored_with_its_own_ttl_not_the_batch_minimum() {
+async fn fresh_entity_is_stored_with_its_own_advertised_ttl() {
     /// The lifetime the `orga` subgraph advertises on every response.
     const ADVERTISED_TTL: u64 = 20;
     /// How long we let the first generation age before the second request.
