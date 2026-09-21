@@ -20,6 +20,14 @@
 //! The halves sit under different type conditions — the key at `require_type`, how the supergraph
 //! declares the entity, and the `@requires` at `entity_type`, how the subgraph does. The two
 //! differ when the subgraph declares the entity as an interface object.
+//!
+//! A `@key` need not typecheck at the type it is read against, and that is ordinary rather than
+//! wrong. Entries and cases are matched many-to-many, so the caller asks about pairs the planner
+//! never meant to go together — one entity type's key against another's entry — and two entity
+//! types under one interface need not share a key at all. The model converts a field set
+//! syntactically and lets the comparison reject such a pair; parsing is how this port builds a
+//! requirement at all, so failing to parse is that same rejection, reported as an `Err` the caller
+//! reads as a non-match.
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -220,7 +228,9 @@ pub(super) fn to_requires_field_set(
 /// the key's own fields.
 ///
 /// `__typename` is included because every entity representation carries it, as
-/// `compute_response_shape_for_field_set_with_typename` has it.
+/// `compute_response_shape_for_field_set_with_typename` has it. `Err` means the key does not
+/// typecheck at `require_type`, which is a pair that does not match rather than a malformed plan;
+/// see the module docs.
 pub(super) fn key_half(
     supergraph_schema: &ValidFederationSchema,
     entity_type: &Name,

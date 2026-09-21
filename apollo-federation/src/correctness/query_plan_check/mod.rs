@@ -595,7 +595,18 @@ impl Checker<'_> {
             }
             // `entityFetchRequirement`, in its two halves: the conversion to a field set
             // distributes over concatenation, so the halves can be read separately.
-            let key_selections = key_half(self.supergraph_schema, require_type, &key.fields)?;
+            let key_selections = match key_half(self.supergraph_schema, require_type, &key.fields) {
+                Ok(selections) => selections,
+                // A key that does not typecheck here is this pair saying no; see `key_half`.
+                Err(reason) => {
+                    unmatched.push(format!(
+                        "  @key({}): does not apply to `{require_type}`:\n{}",
+                        key.fields,
+                        indent(&reason.to_string())
+                    ));
+                    continue;
+                }
+            };
             let mut demanded = to_requires_field_set(&key_selections);
             demanded.extend(requires_field_set.iter().cloned());
             if !condition_matches_requirement(
