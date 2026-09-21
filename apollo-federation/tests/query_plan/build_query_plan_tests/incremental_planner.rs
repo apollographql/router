@@ -2733,36 +2733,26 @@ fn inc_partial_overlap_explodes_abstract_type() {
             }
           }
         },
-        Parallel {
-          Flatten(path: "u|[C]") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on C {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on C {
-                  v
-                }
+        Flatten(path: "u") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on B {
+                __typename
+                id
               }
-            },
-          },
-          Flatten(path: "u|[B]") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on B {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on B {
-                  v
-                }
+              ... on C {
+                __typename
+                id
               }
-            },
+            } =>
+            {
+              ... on B {
+                v
+              }
+              ... on C {
+                v
+              }
+            }
           },
         },
       },

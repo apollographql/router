@@ -361,6 +361,20 @@ fn classify_placement(
 /// Whether every context condition's nearest @context ancestor is the
 /// entity boundary type, the one the entity representation carries, so the
 /// context data rides the representation and no isolating hop is needed.
+/// The type at the entity boundary, paired with op_path's first element.
+/// Context isolation depends on it, so it keys the routing-options cache.
+pub(super) fn boundary_type_name(pending: &super::PendingSelection) -> Option<Name> {
+    let depth = pending.op_path.len();
+    if depth == 0 {
+        return None;
+    }
+    let mut types = pending.parent_types.clone();
+    for _ in 1..depth {
+        types = types.parent();
+    }
+    types.last().map(|t| t.type_name().clone())
+}
+
 fn at_entity_boundary(
     pending: &super::PendingSelection,
     required_contexts: &[ContextCondition],
