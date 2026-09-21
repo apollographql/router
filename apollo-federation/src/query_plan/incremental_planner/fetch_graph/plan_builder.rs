@@ -75,7 +75,8 @@ struct PlanScope<'a> {
     fetch_ids: Option<&'a HashMap<NodeIndex, u64>>,
 }
 
-/// Stamp a fetch ID on the innermost FetchNode (bare or Flatten-wrapped).
+/// Stamp a fetch ID on the innermost FetchNode: bare, Flatten-wrapped, or
+/// gated behind variable @skip/@include Condition wrappers.
 fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
     match plan_node {
         PlanNode::Fetch(fetch) => {
@@ -83,6 +84,14 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
         }
         PlanNode::Flatten(flatten) => {
             stamp_fetch_id(&mut flatten.node, id);
+        }
+        PlanNode::Condition(condition) => {
+            if let Some(node) = condition.if_clause.as_deref_mut() {
+                stamp_fetch_id(node, id);
+            }
+            if let Some(node) = condition.else_clause.as_deref_mut() {
+                stamp_fetch_id(node, id);
+            }
         }
         _ => {}
     }
@@ -506,7 +515,10 @@ impl FetchGraph {
             } else if nodes.is_empty() {
                 None
             } else {
-                let (deferred_plan, _cost) = self.plan_for_nodes(ctx, nodes, depth, None)?;
+                // Leaf blocks still stamp assigned ids: a sibling block can
+                // depend on a fetch planned here.
+                let (deferred_plan, _cost) =
+                    self.plan_for_nodes(ctx, nodes, depth, Some(node_fetch_ids))?;
                 deferred_plan.map(Box::new)
             };
 

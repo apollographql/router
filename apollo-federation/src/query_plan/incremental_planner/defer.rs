@@ -5,7 +5,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::executable;
+
+use crate::error::FederationError;
 use crate::operation::InlineFragment;
+use crate::operation::InlineFragmentSelection;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_plan::QueryPathElement;
@@ -91,57 +95,34 @@ pub(super) fn defer_context(selection: &Selection) -> (Option<String>, Option<In
 pub(super) fn build_defer_info(
     selection_set: &SelectionSet,
     client_labels: Arc<apollo_compiler::collections::IndexMap<String, Option<String>>>,
-) -> DeferInfo {
+) -> Result<DeferInfo, FederationError> {
     let mut info = DeferInfo {
         client_labels,
         ..DeferInfo::default()
     };
-    let primary = collect_non_deferred_selection(selection_set);
-    info.primary_sub_selection = (!primary.is_empty()).then(|| format!("{{ {primary} }}"));
-    collect_deferred_blocks(selection_set, &mut info.blocks, &[], None);
+    info.primary_sub_selection = non_deferred_subset(selection_set)
+        .map(|primary| serialize_selection_set(&primary))
+        .transpose()?;
+    collect_deferred_blocks(selection_set, &mut info.blocks, &[], None)?;
 
-    info
+    Ok(info)
 }
 
-/// Collect a string representation of non-deferred selections.
-fn collect_non_deferred_selection(selection_set: &SelectionSet) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for sel in selection_set.selections.values() {
-        match sel {
-            Selection::Field(field_sel) => {
-                let response_name = field_sel.field.response_name();
-                if let Some(sub_sel) = field_sel.selection_set.as_ref() {
-                    let inner = collect_non_deferred_selection(sub_sel);
-                    // A composite field whose entire sub-selection is
-                    // deferred contributes nothing to the primary.
-                    if !inner.is_empty() {
-                        parts.push(format!("{response_name} {{ {inner} }}"));
-                    }
-                } else {
-                    parts.push(response_name.to_string());
-                }
-            }
-            Selection::InlineFragment(frag_sel) => {
-                if extract_defer_label(&frag_sel.inline_fragment).is_some() {
-                    continue;
-                }
-                let type_cond = frag_sel
-                    .inline_fragment
-                    .type_condition_position
-                    .as_ref()
-                    .map(|t| format!("... on {} ", t.type_name()));
-                let inner = collect_non_deferred_selection(&frag_sel.selection_set);
-                if !inner.is_empty() {
-                    if let Some(tc) = type_cond {
-                        parts.push(format!("{tc}{{ {inner} }}"));
-                    } else {
-                        parts.push(inner);
-                    }
-                }
-            }
-        }
-    }
-    parts.join(" ")
+/// The selection set minus deferred fragments (and any branches emptied by
+/// their removal), or None when everything is deferred. Deferred content is
+/// delivered by its own response chunk.
+fn non_deferred_subset(selection_set: &SelectionSet) -> Option<SelectionSet> {
+    let filtered = selection_set.filter_recursive_depth_first(&mut |sel| match sel {
+        Selection::Field(_) => true,
+        Selection::InlineFragment(frag_sel) => !frag_sel
+            .inline_fragment
+            .directives
+            .iter()
+            .any(|d| d.name == "defer"),
+    });
+    filtered
+        .without_empty_branches()
+        .map(|set| set.into_owned())
 }
 
 /// Recursively find @defer blocks and populate the DeferInfo blocks map;
@@ -151,7 +132,7 @@ fn collect_deferred_blocks(
     blocks: &mut HashMap<String, DeferBlockInfo>,
     current_path: &[QueryPathElement],
     parent_defer_label: Option<&str>,
-) {
+) -> Result<(), FederationError> {
     for sel in selection_set.selections.values() {
         match sel {
             Selection::Field(field_sel) => {
@@ -161,7 +142,7 @@ fn collect_deferred_blocks(
                     response_key: response_name.clone(),
                 });
                 if let Some(sub_sel) = field_sel.selection_set.as_ref() {
-                    collect_deferred_blocks(sub_sel, blocks, &child_path, parent_defer_label);
+                    collect_deferred_blocks(sub_sel, blocks, &child_path, parent_defer_label)?;
                 }
             }
             Selection::InlineFragment(frag_sel) => {
@@ -182,18 +163,28 @@ fn collect_deferred_blocks(
                         // The type condition stays out of the query path:
                         // the chunk is delivered at the enclosing field's
                         // path, the condition wrapping the sub-selection.
+                        // The chunk carries only this block's own content;
+                        // nested deferred fragments arrive in their own
+                        // chunks.
                         let query_path = current_path.to_vec();
-                        let inner = serialize_selection_set(&frag_sel.selection_set);
-                        let sub_sel_str = match &frag_sel.inline_fragment.type_condition_position {
-                            Some(tc) => format!("{{ ... on {} {} }}", tc.type_name(), inner),
-                            None => inner,
-                        };
+                        let sub_selection = non_deferred_subset(&frag_sel.selection_set)
+                            .map(|own| {
+                                let stripped = strip_defer_directive(&frag_sel.inline_fragment);
+                                let wrapper = SelectionSet::from_selection(
+                                    stripped.parent_type_position.clone(),
+                                    Selection::InlineFragment(Arc::new(
+                                        InlineFragmentSelection::new(stripped, own),
+                                    )),
+                                );
+                                serialize_selection_set(&wrapper)
+                            })
+                            .transpose()?;
 
                         blocks.insert(
                             label.clone(),
                             DeferBlockInfo {
                                 query_path,
-                                sub_selection: Some(sub_sel_str),
+                                sub_selection,
                                 parent_label: parent_defer_label.map(|s| s.to_owned()),
                             },
                         );
@@ -204,7 +195,7 @@ fn collect_deferred_blocks(
                             blocks,
                             current_path,
                             Some(label),
-                        );
+                        )?;
                     }
                 } else {
                     let mut child_path = current_path.to_vec();
@@ -218,41 +209,24 @@ fn collect_deferred_blocks(
                         blocks,
                         &child_path,
                         parent_defer_label,
-                    );
+                    )?;
                 }
             }
         }
     }
+    Ok(())
 }
 
-/// Serialize a SelectionSet into a brace-wrapped (`{ ... }`) string for
-/// `DeferredDeferBlock.sub_selection`.
-pub(super) fn serialize_selection_set(selection_set: &SelectionSet) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for sel in selection_set.selections.values() {
-        match sel {
-            Selection::Field(field_sel) => {
-                let response_name = field_sel.field.response_name();
-                if let Some(sub_sel) = field_sel.selection_set.as_ref() {
-                    let inner = serialize_selection_set(sub_sel);
-                    parts.push(format!("{response_name} {inner}"));
-                } else {
-                    parts.push(response_name.to_string());
-                }
-            }
-            Selection::InlineFragment(frag_sel) => {
-                let tc = frag_sel
-                    .inline_fragment
-                    .type_condition_position
-                    .as_ref()
-                    .map(|t| format!("... on {} ", t.type_name()))
-                    .unwrap_or_default();
-                let inner = serialize_selection_set(&frag_sel.selection_set);
-                parts.push(format!("{tc}{inner}"));
-            }
-        }
-    }
-    format!("{{ {} }}", parts.join(" "))
+/// Serialize a SelectionSet into the brace-wrapped string form the router
+/// re-parses from `sub_selection` fields, via the executable serializer so
+/// aliases, arguments, and directives survive.
+pub(super) fn serialize_selection_set(
+    selection_set: &SelectionSet,
+) -> Result<String, FederationError> {
+    Ok(executable::SelectionSet::try_from(selection_set)?
+        .serialize()
+        .no_indent()
+        .to_string())
 }
 
 #[cfg(test)]
@@ -278,6 +252,7 @@ mod tests {
         type User implements Node {
           id: ID
           name: String
+          avatar(size: Int): String
           address: Address
         }
 
@@ -375,7 +350,8 @@ mod tests {
             }"#,
         );
 
-        let info = build_defer_info(&op.selection_set, Default::default());
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
 
         // Non-deferred inline fragments stay in the primary with their type
         // condition; the deferred fragment is excluded from it.
@@ -402,7 +378,8 @@ mod tests {
     fn build_defer_info_fully_deferred_field_has_no_primary() {
         let op = parse(r#"{ user { ... on User @defer(label: "d3") { name } } }"#);
 
-        let info = build_defer_info(&op.selection_set, Default::default());
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
 
         // `user`'s entire sub-selection is deferred, so it contributes
         // nothing to the primary.
@@ -423,7 +400,8 @@ mod tests {
             }"#,
         );
 
-        let info = build_defer_info(&op.selection_set, Default::default());
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
 
         let block = info.blocks.get("d4").expect("deferred block recorded");
         // The enclosing non-defer fragment contributes an InlineFragment
@@ -440,5 +418,119 @@ mod tests {
             ]
         );
         assert_eq!(block.parent_label, None);
+    }
+
+    #[test]
+    fn nested_defer_records_parent_label() {
+        let op = parse(
+            r#"{
+              user {
+                ... on User @defer(label: "outer") {
+                  name
+                  ... on User @defer(label: "inner") { address { street } }
+                }
+              }
+            }"#,
+        );
+
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
+
+        let outer = info.blocks.get("outer").expect("outer block");
+        assert_eq!(outer.parent_label, None);
+        let inner = info.blocks.get("inner").expect("inner block");
+        assert_eq!(inner.parent_label.as_deref(), Some("outer"));
+    }
+
+    /// Aliases, arguments, and non-defer directives must survive into the
+    /// sub_selection strings; the router re-parses them to match response
+    /// chunks against the operation.
+    #[test]
+    fn sub_selections_keep_aliases_arguments_and_directives() {
+        let op = parse(
+            r#"query($v: Boolean!) {
+              user {
+                name
+                ... on User @defer(label: "d6") {
+                  pic: avatar(size: 64) @include(if: $v)
+                }
+              }
+            }"#,
+        );
+
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
+
+        let block = info.blocks.get("d6").expect("deferred block recorded");
+        let sub = block.sub_selection.as_deref().expect("sub selection");
+        assert!(
+            sub.contains("pic: avatar(size: 64)"),
+            "alias and arguments must survive: {sub}"
+        );
+        assert!(
+            sub.contains("@include(if: $v)"),
+            "directives must survive: {sub}"
+        );
+    }
+
+    #[test]
+    fn serialize_selection_set_handles_inline_fragments() {
+        let op = parse(r#"{ node { ... on User { name address { street } } } }"#);
+        let Selection::Field(node_sel) = op.selection_set.selections.values().next().unwrap()
+        else {
+            panic!("expected field");
+        };
+        let sub = node_sel.selection_set.as_ref().unwrap();
+        let result = serialize_selection_set(sub).expect("serializes");
+        assert!(
+            result.contains("... on User"),
+            "Should contain type condition: {result}"
+        );
+        assert!(result.contains("name"), "Should contain name: {result}");
+        assert!(result.contains("street"), "Should contain street: {result}");
+    }
+
+    #[test]
+    fn collect_non_deferred_bare_fragment_inlines_contents() {
+        let op = parse(r#"{ user { name ... { address { street } } } }"#);
+
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
+
+        let primary = info.primary_sub_selection.as_deref().unwrap();
+        assert!(
+            primary.contains("name"),
+            "Primary should contain 'name': {primary}"
+        );
+        assert!(
+            primary.contains("address"),
+            "Primary should contain 'address' from bare fragment: {primary}"
+        );
+    }
+
+    #[test]
+    fn mixed_deferred_and_non_deferred_at_same_level() {
+        let op =
+            parse(r#"{ user { name ... on User @defer(label: "d5") { address { street } } } }"#);
+
+        let info =
+            build_defer_info(&op.selection_set, Default::default()).expect("defer info builds");
+
+        let primary = info.primary_sub_selection.as_deref().unwrap();
+        assert!(
+            primary.contains("name"),
+            "Primary should contain 'name': {primary}"
+        );
+        assert!(
+            !primary.contains("street"),
+            "Primary should not contain deferred 'street': {primary}"
+        );
+
+        let block = info.blocks.get("d5").unwrap();
+        let sub = block.sub_selection.as_deref().unwrap();
+        assert!(
+            sub.contains("street"),
+            "Deferred sub_selection should contain 'street': {sub}"
+        );
     }
 }

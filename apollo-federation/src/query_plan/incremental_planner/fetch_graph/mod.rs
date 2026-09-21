@@ -386,7 +386,10 @@ impl FetchGraph {
         })
     }
 
-    /// Create a new entity fetch group (no defer scope).
+    /// Test convenience: a new entity fetch group with no defer scope.
+    /// Production callers thread the pending's defer_ref via
+    /// add_entity_group_with_defer.
+    #[cfg(test)]
     pub(crate) fn add_entity_group(
         &mut self,
         subgraph: &Arc<str>,
