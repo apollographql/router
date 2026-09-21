@@ -74,6 +74,8 @@ mod requires;
 mod selections;
 mod subgraph;
 
+use std::sync::Arc;
+
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -84,7 +86,6 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
-use std::sync::Arc;
 
 use self::context::check_context_rewrites;
 use self::context::context_variables;

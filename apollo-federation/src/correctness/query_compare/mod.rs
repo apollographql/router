@@ -48,7 +48,7 @@
 //!
 //! **Canonical region order.** `getPossibleTypes` returns schema declaration order; this port
 //! sorts by name. Regions are sets, so the verdict is unaffected, and sorting makes the
-//! child-task de-duplication in [`child_tasks_for_parent_types`] canonical.
+//! child-task de-duplication in `child_tasks_for_parent_types` canonical.
 
 pub(crate) mod conditions;
 mod error;

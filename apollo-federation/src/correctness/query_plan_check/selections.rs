@@ -43,7 +43,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 
 use super::super::query_compare::conditions::BooleanLiteral;
-
 use super::ComparisonError;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
