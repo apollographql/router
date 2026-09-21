@@ -741,6 +741,16 @@ mod helpers {
                 .iter()
                 .any(|d| d.name == self.interface_object_name);
 
+            // Only copy keys for `@interfaceObject` types, and always as
+            // `resolvable: false`. Copying a declared `@key` onto a non-entity
+            // connector's output type (e.g. a `Query` field connector mapping
+            // from `$args`) as resolvable would give the query planner a second,
+            // spurious entity path and let it route reference resolution through
+            // the wrong connector.
+            if !is_interface_object {
+                return Ok(());
+            }
+
             let pos = ObjectTypeDefinitionPosition {
                 type_name: original_output_type.name.clone(),
             };
@@ -754,21 +764,18 @@ mod helpers {
                     .argument_by_name("fields", self.original_schema.schema())
                     .map_err(|_| internal_error!("@key(fields:) argument missing"))?;
 
-                let mut arguments = vec![Node::new(Argument {
-                    name: name!("fields"),
-                    value: key_fields.clone(),
-                })];
-
-                if is_interface_object {
-                    arguments.push(Node::new(Argument {
-                        name: name!("resolvable"),
-                        value: Node::new(Value::Boolean(false)),
-                    }));
-                }
-
                 let key = Directive {
                     name: key.name.clone(),
-                    arguments,
+                    arguments: vec![
+                        Node::new(Argument {
+                            name: name!("fields"),
+                            value: key_fields.clone(),
+                        }),
+                        Node::new(Argument {
+                            name: name!("resolvable"),
+                            value: Node::new(Value::Boolean(false)),
+                        }),
+                    ],
                 };
                 pos.insert_directive(to_schema, Component::new(key))?;
             }
@@ -1385,8 +1392,10 @@ mod helpers {
 
         /// If the type has @interfaceObject and it doesn't have a key at this point
         /// we'll need to add a key — this is a requirement for using @interfaceObject.
-        /// For now we'll just copy over keys from the original supergraph as resolvable: false
-        /// but we need to think through the implications of that.
+        /// Keys are copied over from the original supergraph as `resolvable: false`,
+        /// and only for @interfaceObject types. That is the specified behavior in both
+        /// expanders; see `Expander::copy_interface_object_keys` for why a resolvable
+        /// key here would be wrong.
         fn copy_interface_object_keys(
             &self,
             type_name: Name,
