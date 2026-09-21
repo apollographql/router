@@ -2372,6 +2372,29 @@ fn matches_graphql_js_directive_applications() {
 }
 
 #[test]
+fn one_of_preserved_in_api_schema() {
+    let api_schema = inaccessible_to_api_schema(
+        r#"
+        input Choice @oneOf {
+            a: String
+            b: Int
+        }
+
+        type Query {
+            pick(choice: Choice!): String
+        }
+        "#,
+    )
+    .expect("should succeed");
+
+    let serialized = api_schema.serialize().to_string();
+    assert!(
+        serialized.contains("input Choice @oneOf"),
+        "API schema must preserve @oneOf, got:\n{serialized}",
+    );
+}
+
+#[test]
 fn rejects_deprecated_with_null_reason() {
     let result = inaccessible_to_api_schema(
         r#"
