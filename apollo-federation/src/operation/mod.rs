@@ -3051,6 +3051,30 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     }
 }
 
+impl Operation {
+    /// Build an executable document without validation. The caller is
+    /// responsible for ensuring correctness (e.g. structurally-constructed
+    /// operations from the query planner). Debug builds still validate to
+    /// catch construction bugs early.
+    pub(crate) fn into_document_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        let operation = executable::Operation::try_from(&self)?;
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        coerce_executable_values(self.schema.schema(), &mut document);
+        // Debug builds still validate but surface a planning error instead
+        // of panicking the process on a malformed operation.
+        #[cfg(debug_assertions)]
+        if let Err(err) = document.clone().validate(self.schema.schema()) {
+            return Err(FederationError::internal(format!(
+                "into_document_unchecked produced invalid document: {err}"
+            )));
+        }
+        Ok(Valid::assume_valid(document))
+    }
+}
+
 // Display implementations for the operation types.
 
 impl Display for Operation {

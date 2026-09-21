@@ -66,6 +66,9 @@ pub(crate) struct PlanBuildContext<'a> {
     /// Numbers fetch nodes referenced by deferred blocks' `depends`; spans
     /// the whole plan so per-field mutation planning cannot collide ids.
     pub(crate) fetch_id_counter: u64,
+    /// When true, generated subgraph operations skip document validation
+    /// and selection-set validation (valid by construction).
+    pub(crate) skip_validation: bool,
 }
 
 /// The slice of the graph one plan covers (the whole graph, the primary
@@ -727,6 +730,7 @@ impl FetchGraph {
             &parent_type,
             subgraph_schema,
             ctx.variable_definitions,
+            ctx.skip_validation,
         )?;
 
         // 3. Materialize entity inputs from incoming edges.
@@ -784,7 +788,9 @@ impl FetchGraph {
                 &op_name,
             )?
         };
-        let operation_document = ctx.operation_compression.compress(operation)?;
+        let operation_document = ctx
+            .operation_compression
+            .compress(operation, ctx.skip_validation)?;
 
         // 6. Build requires (trim to the router-expected format).
         let requires = requires_selection
@@ -860,6 +866,7 @@ impl FetchGraph {
         parent_type: &CompositeTypeDefinitionPosition,
         subgraph_schema: &ValidFederationSchema,
         variable_definitions: &[Node<VariableDefinition>],
+        skip_validation: bool,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let stripped = remove_conditions_from_selection_set(selection_set, group_conditions)?;
         let selection_without_conditions = if is_entity {
@@ -895,7 +902,9 @@ impl FetchGraph {
             selection_without_conditions.add_typename_field_for_abstract_types(None)?;
         let (finalized_selection, output_rewrites) =
             selection_with_typenames.add_aliases_for_non_merging_fields()?;
-        finalized_selection.validate(variable_definitions)?;
+        if !skip_validation {
+            finalized_selection.validate(variable_definitions)?;
+        }
         Ok((finalized_selection, output_rewrites))
     }
 
@@ -965,7 +974,9 @@ impl FetchGraph {
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
-            selection_set.validate(ctx.variable_definitions)?;
+            if !ctx.skip_validation {
+                selection_set.validate(ctx.variable_definitions)?;
+            }
             merged_selections.extend_ref(&selection_set.selections);
         }
         let result = SelectionSet {
@@ -1134,6 +1145,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            skip_validation: false,
         };
 
         let err = graph
@@ -1192,6 +1204,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            skip_validation: false,
         };
         assert!(
             graph.to_query_plan_with_defer(&mut ctx, None).is_err(),
@@ -1260,6 +1273,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            skip_validation: false,
         };
 
         let (plan, cost) = graph
@@ -1317,6 +1331,7 @@ mod tests {
             operation_compression: compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            skip_validation: false,
         }
     }
 

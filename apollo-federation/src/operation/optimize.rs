@@ -131,6 +131,22 @@ impl Operation {
     pub(crate) fn generate_fragments(
         self,
     ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        self.generate_fragments_inner(true)
+    }
+
+    /// Like `generate_fragments` but skips document validation, which is
+    /// redundant for structurally-constructed operations. Debug builds still
+    /// validate to catch construction bugs early.
+    pub(crate) fn generate_fragments_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        self.generate_fragments_inner(false)
+    }
+
+    fn generate_fragments_inner(
+        self,
+        validate: bool,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
         let mut generator = FragmentGenerator::new(&self.selection_set);
         let minified_selection = generator.minify(&self.selection_set)?;
         let fragments = generator.into_inner();
@@ -148,7 +164,19 @@ impl Operation {
         document.operations.insert(operation);
         document.fragments = fragments;
         coerce_executable_values(self.schema.schema(), &mut document);
-        Ok(document.validate(self.schema.schema())?)
+        if validate {
+            Ok(document.validate(self.schema.schema())?)
+        } else {
+            // Debug builds still validate but surface a planning error
+            // instead of panicking the process on a malformed operation.
+            #[cfg(debug_assertions)]
+            if let Err(err) = document.clone().validate(self.schema.schema()) {
+                return Err(FederationError::internal(format!(
+                    "generate_fragments_unchecked produced invalid document: {err}"
+                )));
+            }
+            Ok(Valid::assume_valid(document))
+        }
     }
 }
 
