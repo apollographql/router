@@ -10,7 +10,6 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
-use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::ty;
 use itertools::Itertools;
@@ -492,7 +491,8 @@ impl LinkSpecDefinition {
     /// ```
     fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
         definition.repeatable
-            && definition.locations == IndexSet::from_iter([DirectiveLocation::Schema])
+            && definition.locations.len() == 1
+            && definition.locations.contains(&DirectiveLocation::Schema)
             && definition.argument_by_name("url").is_some_and(|argument| {
                 // The "true" type of `url` in the @link spec is actually `String` (nullable), and this
                 // for future-proofing reasons (the idea was that we may introduce later other
@@ -519,7 +519,8 @@ impl LinkSpecDefinition {
         // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
         // removed when those are updated.
         definition.repeatable
-            && definition.locations == IndexSet::from_iter([DirectiveLocation::Schema])
+            && definition.locations.len() == 1
+            && definition.locations.contains(&DirectiveLocation::Schema)
             && definition
                 .argument_by_name("feature")
                 .is_some_and(|argument| {

@@ -1314,7 +1314,7 @@ fn extract_union_type_content(
                     })
                     .collect::<Vec<_>>();
                 for member in subgraph_members {
-                    pos.insert_member(&mut subgraph.schema, member.clone())?;
+                    pos.insert_member(&mut subgraph.schema, Name::clone(member).to_node(None))?;
                 }
             }
         } else {
@@ -3044,5 +3044,107 @@ mod tests {
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);
+    }
+
+    #[test]
+    fn extracted_union_members_have_no_extension_origin() {
+        // Supergraph where union U has members A and B, both in subgraph S1.
+        // Member B is declared via `extend union` in the supergraph SDL, which
+        // gives it a non-None extension_id. The extracted subgraph must still
+        // serialize as `union U = A | B`, not split across base and extension.
+        let supergraph = r###"schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            input join__ContextArgument {
+                name: String!
+                type: String!
+                context: String!
+                selection: join__FieldValue!
+            }
+
+            scalar join__DirectiveArguments
+
+            scalar join__FieldSet
+
+            scalar join__FieldValue
+
+            enum join__Graph {
+              S1 @join__graph(name: "s1", url: "http://s1")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
+
+            type Query
+              @join__type(graph: S1)
+            {
+              u: U @join__field(graph: S1)
+            }
+
+            union U @join__type(graph: S1) = A
+
+            extend union U = B
+
+            type A @join__type(graph: S1) {
+              a: String @join__field(graph: S1)
+            }
+
+            type B @join__type(graph: S1) {
+              b: String @join__field(graph: S1)
+            }
+        "###;
+
+        let schema = Schema::parse(supergraph, "supergraph.graphql").unwrap();
+        let ValidFederationSubgraphs { subgraphs } = super::extract_subgraphs_from_supergraph(
+            &FederationSchema::new(schema).unwrap(),
+            Some(true),
+        )
+        .unwrap();
+
+        let s1 = subgraphs.get("s1").unwrap();
+        let schema_str = s1.schema.schema().to_string();
+
+        // The union must appear as a single definition, not split into
+        // base + extension.
+        assert!(
+            !schema_str.contains("extend union"),
+            "extracted subgraph should not contain 'extend union', got:\n{schema_str}"
+        );
+        assert!(
+            schema_str.contains("union U"),
+            "extracted subgraph should contain union U definition"
+        );
+
+        // Both members must be present.
+        let union_type = s1.schema.schema().get_union("U").unwrap();
+        let member_names: Vec<&str> = union_type
+            .members
+            .iter()
+            .map(|m| m.as_str())
+            .collect();
+        assert!(member_names.contains(&"A"), "union should contain member A");
+        assert!(member_names.contains(&"B"), "union should contain member B");
     }
 }

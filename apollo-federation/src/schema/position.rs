@@ -637,21 +637,14 @@ impl HasMutableDirectives for InputObjectFieldDefinitionPosition {
 }
 
 /// A trait that exposes the list of applied directives on a given schema position.
-///
-/// Depending on the underlying GraphQL type, `apollo-rs` exposes the associated directives
-/// as either wrapped in `Node<Directive>` (reference-counter smart pointer) or `Node<Directive>`
-/// (wraps node and tracks its origin in the schema). By defining `AppliedDirective` associated
-/// type as `AsRef<Directive>` we can define a common trait that works with both wrappers.
 pub(crate) trait HasAppliedDirectives {
-    type AppliedDirective: AsRef<Directive>;
-
-    fn filter_directives<'dir, T: AsRef<Directive>>(
-        directives: impl IntoIterator<Item = &'dir T>,
+    fn filter_directives<'dir>(
+        directives: impl IntoIterator<Item = &'dir Node<Directive>>,
         name: &Name,
-    ) -> Vec<&'dir T> {
+    ) -> Vec<&'dir Node<Directive>> {
         directives
             .into_iter()
-            .filter(|directive| &directive.as_ref().name == name)
+            .filter(|directive| &directive.name == name)
             .collect()
     }
 
@@ -659,12 +652,10 @@ pub(crate) trait HasAppliedDirectives {
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Self::AppliedDirective>;
+    ) -> Vec<&'schema Node<Directive>>;
 }
 
 impl HasAppliedDirectives for SchemaDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -676,8 +667,6 @@ impl HasAppliedDirectives for SchemaDefinitionPosition {
 }
 
 impl HasAppliedDirectives for TypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -707,8 +696,6 @@ impl HasAppliedDirectives for TypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -729,8 +716,6 @@ impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for FieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -749,8 +734,6 @@ impl HasAppliedDirectives for FieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -764,8 +747,6 @@ impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -783,8 +764,6 @@ impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -797,8 +776,6 @@ impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -811,8 +788,6 @@ impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -825,8 +800,6 @@ impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -839,8 +812,6 @@ impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -853,8 +824,6 @@ impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -867,7 +836,6 @@ impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -880,7 +848,6 @@ impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for UnionTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -893,7 +860,6 @@ impl HasAppliedDirectives for UnionTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for EnumTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -906,7 +872,6 @@ impl HasAppliedDirectives for EnumTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for EnumValueDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -919,7 +884,6 @@ impl HasAppliedDirectives for EnumValueDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -932,7 +896,6 @@ impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -945,7 +908,6 @@ impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -958,7 +920,6 @@ impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for DirectiveTargetPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -2735,7 +2696,7 @@ impl ScalarTypeDefinitionPosition {
             .directives
             .iter_mut()
         {
-            *directive = Node::new((**directive).clone());
+            *directive = directive.same_location((**directive).clone());
         }
         Ok(())
     }
@@ -3275,7 +3236,7 @@ impl ObjectTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            *directive = Node::new((**directive).clone());
+            *directive = directive.same_location((**directive).clone());
         }
         type_.implements_interfaces = type_
             .implements_interfaces
@@ -3283,7 +3244,7 @@ impl ObjectTypeDefinitionPosition {
             .map(|i| Name::clone(i).to_node(None))
             .collect();
         for (_, field) in type_.fields.iter_mut() {
-            *field = Node::new((**field).clone());
+            *field = field.same_location((**field).clone());
         }
         Ok(())
     }
@@ -4598,7 +4559,7 @@ impl InterfaceTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            *directive = Node::new((**directive).clone());
+            *directive = directive.same_location((**directive).clone());
         }
         type_.implements_interfaces = type_
             .implements_interfaces
@@ -4606,7 +4567,7 @@ impl InterfaceTypeDefinitionPosition {
             .map(|i| Name::clone(i).to_node(None))
             .collect();
         for (_, field) in type_.fields.iter_mut() {
-            *field = Node::new((**field).clone());
+            *field = field.same_location((**field).clone());
         }
         Ok(())
     }
@@ -5703,7 +5664,7 @@ impl UnionTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            *directive = Node::new((**directive).clone());
+            *directive = directive.same_location((**directive).clone());
         }
         type_.members = type_
             .members
@@ -6121,10 +6082,10 @@ impl EnumTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            *directive = Node::new((**directive).clone());
+            *directive = directive.same_location((**directive).clone());
         }
         for (_, v) in type_.values.iter_mut() {
-            *v = Node::new((**v).clone());
+            *v = v.same_location((**v).clone());
         }
         Ok(())
     }
@@ -6672,10 +6633,10 @@ impl InputObjectTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            *directive = Node::new((**directive).clone());
+            *directive = directive.same_location((**directive).clone());
         }
         for (_, field) in type_.fields.iter_mut() {
-            *field = Node::new((**field).clone());
+            *field = field.same_location((**field).clone());
         }
         Ok(())
     }
@@ -8329,5 +8290,62 @@ mod tests {
               B
             }
         "#);
+    }
+
+    #[test]
+    fn remove_extensions_preserves_source_locations() {
+        let sdl = r#"
+            directive @custom repeatable on OBJECT | FIELD_DEFINITION
+
+            type Query {
+                q: T
+            }
+
+            type T @custom {
+                a: Int
+            }
+
+            extend type T @custom {
+                b: String
+            }
+        "#;
+
+        let mut schema = FederationSchema::new(
+            Schema::parse_and_validate(sdl, "schema.graphql")
+                .unwrap()
+                .into_inner(),
+        )
+        .unwrap();
+
+        let pos = ObjectTypeDefinitionPosition::new(name!("T"));
+        let type_before = pos.get(schema.schema()).unwrap();
+
+        // All directives and fields should have source locations before removal.
+        for d in &type_before.directives {
+            assert!(d.location().is_some(), "directive should have location before remove_extensions");
+        }
+        for (_, f) in &type_before.fields {
+            assert!(f.location().is_some(), "field should have location before remove_extensions");
+        }
+
+        pos.remove_extensions(&mut schema).unwrap();
+
+        let type_after = pos.get(schema.schema()).unwrap();
+
+        // Locations must survive after clearing extension origins.
+        for d in &type_after.directives {
+            assert!(d.location().is_some(), "directive lost its source location after remove_extensions");
+        }
+        for (_, f) in &type_after.fields {
+            assert!(f.location().is_some(), "field lost its source location after remove_extensions");
+        }
+
+        // Extension IDs should be cleared.
+        for d in &type_after.directives {
+            assert!(d.extension_id().is_none(), "directive should have no extension_id after remove_extensions");
+        }
+        for (_, f) in &type_after.fields {
+            assert!(f.extension_id().is_none(), "field should have no extension_id after remove_extensions");
+        }
     }
 }

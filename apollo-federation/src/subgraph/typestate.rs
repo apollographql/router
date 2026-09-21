@@ -896,7 +896,7 @@ pub(crate) fn schema_as_fed2_subgraph(
     // PORT_NOTE: We are adding the fed spec link to the schema definition unconditionally, not
     //            considering extensions. This seems consistent with the JS version. But, it's
     //            not consistent with the `add_to_schema`'s behavior. We may change to use the
-    //            `schema_definition.origin_to_use()` method in the future.
+    //            `schema_definition.origin_extension_id()` method in the future.
     let inner_schema = schema.schema_mut();
     inner_schema
         .schema_definition
@@ -2124,7 +2124,7 @@ mod tests {
     /// When a schema has both an explicit `schema { ... }` definition and an
     /// `extend schema @link(...) { ... }` extension, the link-to-link `@link` directive
     /// should be added to the definition (not the extension), because a definition exists.
-    /// This tests the `origin_to_use()` fix.
+    /// This tests the `origin_extension_id()` fix.
     #[test]
     fn link_to_link_goes_on_definition_when_both_definition_and_extension_exist() {
         let subgraph = build_and_validate(
@@ -2152,7 +2152,7 @@ mod tests {
         let schema_str = subgraph.schema_string();
         let first_lines: String = schema_str.lines().take(9).collect::<Vec<_>>().join("\n");
         // The link-to-link @link should be on the schema definition (first block),
-        // NOT on the extension block. Before the fix, origin_to_use() would return
+        // NOT on the extension block. Before the fix, origin_extension_id() would return
         // Extension whenever any extensions existed, causing the @link to end up on
         // the extend schema block instead of the definition.
         insta::assert_snapshot!(first_lines, @r#"
