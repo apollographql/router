@@ -276,6 +276,10 @@ fn run_bulb_and_finalize(
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
         fetch_id_counter: naming.fetch_id_counter,
+        skip_validation: parameters
+            .config
+            .incremental_planner
+            .skip_subgraph_operation_validation,
     };
     let (plan, cost) = result
         .graph
