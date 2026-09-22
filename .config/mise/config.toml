@@ -12,7 +12,7 @@ rust = { version = "1.98.1", profile = "default" }
 "cargo:cargo-machete" = "0.9.2"
 "cargo:cargo-llvm-cov" = "0.9.1"
 "cargo:typos-cli" = "1.50.2"
-protoc = "36.1"
+protoc = "36.2"
 gh = "2.101.0"
 helm = "4.3.0"
 helm-docs = "1.14.2"
