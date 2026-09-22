@@ -286,7 +286,9 @@ fn validate_input_value(
                         fmt_path(path),
                     )));
                 }
-                if let Some((field_name, field_value)) = obj.iter().next()
+                if let Some((field_name, field_value)) = obj
+                    .iter()
+                    .find(|(k, _)| def.fields.contains_key(k.as_str()))
                     && field_value.is_null()
                 {
                     return Err(InvalidInputValue(format!(

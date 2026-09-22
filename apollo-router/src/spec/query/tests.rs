@@ -3700,6 +3700,30 @@ fn variable_validation_oneof_input() {
 }
 
 #[test]
+fn variable_validation_oneof_null_with_unknown_field_in_measure_mode() {
+    let schema =
+        "input Choice @oneOf { a: Int, b: String } type Query { x(choice: Choice!): String }";
+    let query = "query($c: Choice!) { x(choice: $c) }";
+
+    // In measure mode, unknown fields are warned but not rejected. The @oneOf
+    // null check must inspect the recognized field, not just the first key in
+    // iteration order.
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"unknownField": "x", "a": null}}),
+        Mode::Measure,
+    );
+    let err = res
+        .expect_err("null recognized field on @oneOf should fail even with unknown fields present");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("non-null"),
+        "should report a non-null error for the recognized field, got: {msg}"
+    );
+}
+
+#[test]
 #[rstest::rstest]
 #[case::top_level_unexpected_field(
     json!({"content": "Hello", "canvas": [], "unknownField": "unknown"}),
