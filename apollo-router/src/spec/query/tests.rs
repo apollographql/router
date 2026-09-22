@@ -3616,7 +3616,8 @@ fn variable_validation_enforce_mode() {
 
 #[test]
 fn variable_validation_oneof_input() {
-    let schema = "input Choice @oneOf { a: Int, b: String } type Query { x(choice: Choice!): String }";
+    let schema =
+        "input Choice @oneOf { a: Int, b: String } type Query { x(choice: Choice!): String }";
     let query = "query($c: Choice!) { x(choice: $c) }";
 
     // Exactly one non-null field: valid
@@ -3684,8 +3685,8 @@ fn variable_validation_oneof_input() {
     // rejects this at parse time since two fields are present in the literal
     // regardless of whether the variable has a runtime value.
     let supergraph = with_supergraph_boilerplate(schema, "Query");
-    let parsed_schema = Schema::parse(&supergraph, &Default::default())
-        .expect("could not parse schema");
+    let parsed_schema =
+        Schema::parse(&supergraph, &Default::default()).expect("could not parse schema");
     let parse_result = Query::parse(
         "query($b: String) { x(choice: { a: 1, b: $b }) }",
         None,
