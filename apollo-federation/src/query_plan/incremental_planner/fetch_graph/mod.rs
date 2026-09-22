@@ -483,12 +483,12 @@ impl FetchGraph {
         new_rewrites: &[(Name, Name)],
     ) -> bool {
         let existing = &self.graph[edge].inputs;
-        for (_alias, original) in new_rewrites {
+        for (alias, original) in new_rewrites {
             for input in existing {
                 if input
                     .condition_alias_rewrites()
                     .iter()
-                    .any(|(_, orig)| orig == original)
+                    .any(|(a, orig)| orig == original && a != alias)
                 {
                     return true;
                 }
