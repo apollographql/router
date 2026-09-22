@@ -296,6 +296,18 @@ impl Opt {
         &self,
         current_directory: &std::path::Path,
     ) -> Result<LicenseSource, anyhow::Error> {
+        // Validate that license sources are not conflicting
+        if self.apollo_router_license_path.is_some() && self.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "--license and --graph-artifact-reference cannot be used together. Please specify only one license source."
+            ));
+        }
+        if self.apollo_router_license.is_some() && self.graph_artifact_reference.is_some() {
+            return Err(anyhow!(
+                "APOLLO_ROUTER_LICENSE and --graph-artifact-reference cannot be used together. Please specify only one license source."
+            ));
+        }
+
         Ok(
             match (
                 &self.apollo_router_license,
@@ -1337,7 +1349,11 @@ mod tests {
         }
 
         #[test]
-        fn explicit_license_path_takes_precedence_over_graph_artifact_reference() {
+        fn conflicting_license_path_and_graph_artifact_reference_errors() {
+            // An explicit license file and a graph artifact reference are both
+            // fully-specified license sources: having both set is a
+            // contradiction, not a precedence question, so this must fail
+            // fast instead of silently picking one.
             let opt = Opt {
                 apollo_router_license_path: Some(std::path::PathBuf::from("license.jwt")),
                 graph_artifact_reference: Some(
@@ -1347,15 +1363,21 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let err = opt
+                .license_source(&current_directory)
+                .expect_err("Should fail with conflicting license sources");
+            let error_msg = err.to_string();
             assert!(
-                matches!(source, LicenseSource::File { .. }),
-                "expected File license source, got {source:?}"
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
             );
         }
 
         #[test]
-        fn explicit_license_env_takes_precedence_over_graph_artifact_reference() {
+        fn conflicting_license_env_and_graph_artifact_reference_errors() {
+            // Same contradiction as above, but for the literal
+            // APOLLO_ROUTER_LICENSE env value instead of a license file path.
             let opt = Opt {
                 apollo_router_license: Some("test-license".to_string()),
                 graph_artifact_reference: Some(
@@ -1365,10 +1387,14 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let err = opt
+                .license_source(&current_directory)
+                .expect_err("Should fail with conflicting license sources");
+            let error_msg = err.to_string();
             assert!(
-                matches!(source, LicenseSource::Env),
-                "expected Env license source, got {source:?}"
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
             );
         }
     }
