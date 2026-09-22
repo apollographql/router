@@ -2052,7 +2052,7 @@ impl SchemaDefinitionPosition {
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(schema_definition.directives.deref())?;
+        validate_directives(schema_definition.directives.deref())?;
         for directive_reference in schema_definition.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -2620,7 +2620,7 @@ impl ScalarTypeDefinitionPosition {
         type_: &Node<ScalarType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -3024,7 +3024,7 @@ impl ObjectTypeDefinitionPosition {
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -4409,7 +4409,7 @@ impl InterfaceTypeDefinitionPosition {
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -5565,7 +5565,7 @@ impl UnionTypeDefinitionPosition {
         type_: &Node<UnionType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -6000,7 +6000,7 @@ impl EnumTypeDefinitionPosition {
         type_: &Node<EnumType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -6562,7 +6562,7 @@ impl InputObjectTypeDefinitionPosition {
         type_: &Node<InputObjectType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -7788,7 +7788,7 @@ pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
 
 pub(crate) static INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
 
-fn validate_component_directives(directives: &[Node<Directive>]) -> Result<(), FederationError> {
+fn validate_directives(directives: &[Node<Directive>]) -> Result<(), FederationError> {
     for directive in directives.iter() {
         if directives
             .iter()
