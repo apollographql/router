@@ -1,8 +1,8 @@
-### Add the `->withProblem` and `->withError` mapping methods for connectors
+### Add the `->withWarning` and `->withError` mapping methods for connectors
 
-Connector mappings can now report a problem without failing the field. Both methods return their input unchanged and record an error, so a mapping that recognizes a value it cannot vouch for can say so and still return the data. They differ in who reads the result.
+Connector mappings can now report a problem without failing the field. Both methods return their input unchanged and record a problem, so a mapping that recognizes a value it cannot vouch for can say so and still return the data. They differ in the severity they record and in who reads the result.
 
-`->withProblem` records a diagnostic for the mapping author. It reaches the connectors debugger and the mapping-problems telemetry selectors, and never a client:
+`->withWarning` records a diagnostic for the mapping author. It reaches the connectors debugger and the mapping-problems telemetry selectors, and never a client:
 
 ```graphql
 @connect(
@@ -12,7 +12,7 @@ Connector mappings can now report a problem without failing the field. Both meth
   availability: stock_code->match(
     ["A", "IN_STOCK"],
     ["B", "BACKORDERED"],
-    [@, @->withProblem("Unrecognized stock code")]
+    [@, @->withWarning("Unrecognized stock code")]
   )
   """
 )
@@ -27,9 +27,11 @@ availability: stock_code ?? $("UNKNOWN")->withError({
 })
 ```
 
+The names describe severity, not container. Both methods record a `Problem`, which is why the connectors debugger and the `connector_response_mapping_problems` selector carry both: "problem" is the category, and the method names the severity within it. Only `->withError` escalates past the category, into the client's response and the router's error counters. Further levels can be added under the same category without renaming anything.
+
 Each method takes exactly one argument, and what that argument means is fixed by the method's name rather than by its shape.
 
-For `->withProblem`, a string is the message as written and any other value is JSON-encoded into it. For `->withError`, a string is the error's `message` and an object is `{ message, extensions }` taken as written; anything else is a mistake reported at composition or at request time rather than coerced, so a client never receives an error whose message reads `42`.
+For `->withWarning`, a string is the message as written and any other value is JSON-encoded into it. For `->withError`, a string is the error's `message` and an object is `{ message, extensions }` taken as written; anything else is a mistake reported at composition or at request time rather than coerced, so a client never receives an error whose message reads `42`.
 
 Composition is also stricter for every mapping method, not only these two. A selection whose field shape is an error, which is what a method called with the wrong arguments produces, is now rejected at composition with the method's own diagnostic. Previously that diagnosis was computed and discarded, the selection type-checked, and the field silently produced nothing at request time. A subgraph carrying such a mapping composes today and will not after this change; the fix is the one the diagnostic names.
 
@@ -42,12 +44,12 @@ Several errors about one value are several calls. Both methods pass their input 
 To build a message out of prose and data, build the string:
 
 ```
-@->withProblem(["Unrecognized stock code:", @.stock_code]->joinNotNull(" "))
+@->withWarning(["Unrecognized stock code:", @.stock_code]->joinNotNull(" "))
 ```
 
 A failed argument costs the message, never the value. If the argument produces nothing, the field still resolves with the value it had and two problems are reported: why the argument produced nothing, and that the message was never recorded. This matters most for `x ?? $(default)->withError(...)`, where deleting the value would destroy the default the author supplied. Use `??` inside the argument to spell an absence out in the text instead of losing the message to it.
 
-Note that neither method can annotate a value that is not there. In `@.missing->withProblem("...")` the chain stops before the method runs, so nothing is recorded. Supply a value first, as in `@.missing ?? $(null)->withProblem("...")`.
+Note that neither method can annotate a value that is not there. In `@.missing->withWarning("...")` the chain stops before the method runs, so nothing is recorded. Supply a value first, as in `@.missing ?? $(null)->withWarning("...")`.
 
 Errors declared with `->withError` are reported in the response's `extensions`, under a `connectorErrors` array, with the author's `code` and `extensions` and a `path` naming the field they were declared at. Given an API response of `{ "id": "1", "stock_code": "C" }`, the client receives the value the API sent and the author's account of why it is suspect:
 
@@ -81,6 +83,6 @@ Reporting is governed by [`include_subgraph_errors`](https://www.apollographql.c
 
 The connector's `service` and `connector.coordinate` extensions are preserved alongside the author's fields.
 
-Both methods' messages appear in the connectors debugger, and in telemetry through the `connector_response_mapping_problems` selector, as all mapping problems do. A declared error is additionally counted as an error, in both of the places an error in the `errors` array is counted: by `apollo.router.graphql_error` under the author's `code`, and by `apollo.router.operations.error` when `telemetry.apollo.errors.preview_extended_error_metrics` is enabled, with `service` naming the connector's subgraph. `apollo.router.graphql_error` counts these for the same reason it already counts response-validation failures, which clients read in `extensions.valueCompletion` and which are likewise absent from `errors`: the instrument counts errors the response reports, not only the ones the `errors` array carries. Counting is decided at the connector, so withholding an error from a client through `include_subgraph_errors` does not suppress its metrics. A problem is never counted as an error by either instrument.
+Both methods' messages appear in the connectors debugger, and in telemetry through the `connector_response_mapping_problems` selector, as all mapping problems do. A declared error is additionally counted as an error, in both of the places an error in the `errors` array is counted: by `apollo.router.graphql_error` under the author's `code`, and by `apollo.router.operations.error` when `telemetry.apollo.errors.preview_extended_error_metrics` is enabled, with `service` naming the connector's subgraph. `apollo.router.graphql_error` counts these for the same reason it already counts response-validation failures, which clients read in `extensions.valueCompletion` and which are likewise absent from `errors`: the instrument counts errors the response reports, not only the ones the `errors` array carries. Counting is decided at the connector, so withholding an error from a client through `include_subgraph_errors` does not suppress its metrics. A warning is never counted as an error by either instrument.
 
 By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10050 and [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160

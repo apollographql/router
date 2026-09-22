@@ -65,7 +65,7 @@ pub fn aggregate_apply_to_errors(
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem) while preserving [`ProblemLocation`]
-pub fn aggregate_apply_to_errors_with_problem_locations(
+pub fn aggregate_apply_to_errors_with_warning_locations(
     errors: Vec<(ProblemLocation, ApplyToError)>,
 ) -> impl Iterator<Item = Problem> {
     errors
@@ -98,7 +98,7 @@ mod tests {
     /// which is what lets repeats from different elements land in one bucket.
     #[test]
     fn repeated_messages_aggregate_into_one_problem_with_a_count() {
-        let (value, errors) = JSONSelection::parse(r#"codes: rows->map(@.code->withProblem(@))"#)
+        let (value, errors) = JSONSelection::parse(r#"codes: rows->map(@.code->withWarning(@))"#)
             .unwrap()
             .apply_to(&json!({
                 "rows": [{ "code": 7 }, { "code": 7 }, { "code": 7 }],
@@ -132,9 +132,9 @@ mod tests {
     fn problems_keep_the_order_the_mapping_produced_them_in() {
         let (_, errors) = JSONSelection::parse(
             r#"
-            one: x->withProblem("diagnostic about x")
+            one: x->withWarning("diagnostic about x")
             two: y->withError("declared about y")
-            three: z->withProblem("diagnostic about z")
+            three: z->withWarning("diagnostic about z")
             "#,
         )
         .unwrap()
@@ -160,7 +160,7 @@ mod tests {
     /// messages stay distinct and the collapsing cannot hide anything.
     #[test]
     fn distinct_messages_aggregate_into_distinct_problems() {
-        let (_, errors) = JSONSelection::parse(r#"codes: rows->map(@.code->withProblem(@))"#)
+        let (_, errors) = JSONSelection::parse(r#"codes: rows->map(@.code->withWarning(@))"#)
             .unwrap()
             .apply_to(&json!({
                 "rows": [{ "code": 7 }, { "code": 9 }, { "code": 7 }],

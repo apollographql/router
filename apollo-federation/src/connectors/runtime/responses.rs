@@ -535,9 +535,9 @@ pub(super) fn map_response(
     // are the language's, addressed to the author. The split decides what
     // *additionally* travels to the client — it does not decide what reaches
     // the debugger, which is why `warnings` below still receives both kinds.
-    // `->withProblem` is the debugger and telemetry feature, and mapping problems
-    // are what both of those read, so removing declared errors from them would
-    // be a regression dressed up as a feature: an author who declares a
+    // Mapping problems are the debugger and telemetry channel, and both
+    // severities are problems, so removing declared errors from them would be
+    // a regression dressed up as a feature: an author who declares a
     // client-facing error still wants to see it while debugging.
     //
     // Selecting rather than partitioning, for the same reason: the errors are
@@ -1345,10 +1345,10 @@ mod tests {
     }
 
     /// Surfacing a declared error to the client must not take it away from the
-    /// author. `->withProblem` is the debugger and telemetry feature, and
-    /// mapping problems are what both of those read, so a declared error has
-    /// to appear in *both* places — the split decides what additionally
-    /// reaches the client, not what stops reaching the debugger.
+    /// author. Mapping problems are the debugger and telemetry channel and
+    /// both severities are problems, so a declared error has to appear in
+    /// *both* places: the split decides what additionally reaches the client,
+    /// not what stops reaching the debugger.
     #[test]
     fn a_declared_error_reaches_the_debugger_as_well_as_the_client() {
         let connector = make_connector(None, ConnectSpec::V0_5);

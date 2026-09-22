@@ -116,7 +116,7 @@ type Query @join__type(graph: CONNECTORS) {
                 http: { GET: "/posts" }
                 selection: """
                 id
-                title: title ?? $("")->withProblem("Post title was missing")
+                title: title ?? $("")->withWarning("Post title was missing")
                 body: body ?? $("")->withError({
                   message: "Post body was missing"
                   extensions: { code: "POST_BODY_MISSING" }

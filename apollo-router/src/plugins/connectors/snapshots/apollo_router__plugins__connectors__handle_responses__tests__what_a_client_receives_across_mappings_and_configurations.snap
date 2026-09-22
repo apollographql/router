@@ -205,8 +205,8 @@ expression: report
     ext:     service = "subgraph_name"
 
 
-=== `->withProblem` alone, which reaches no client
-    status: code->withProblem("Unrecognized code")
+=== `->withWarning` alone, which reaches no client
+    status: code->withWarning("Unrecognized code")
 
   --- include_subgraph_errors: all: true
   data: {"account":{"status":7}}
@@ -225,7 +225,7 @@ expression: report
   (nothing reported)
 
 === both methods on one value
-    status: code->withProblem("for the author")->withError("for the client")
+    status: code->withWarning("for the author")->withError("for the client")
 
   --- include_subgraph_errors: all: true
   data: {"account":{"status":7}}

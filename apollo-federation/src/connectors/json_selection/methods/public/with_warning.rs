@@ -14,7 +14,7 @@ use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
-impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
+impl_arrow_method!(WithWarningMethod, with_warning_method, with_warning_shape);
 /// Returns its input unmodified, but records an [`ApplyToError`] built from
 /// the method's argument, evaluated against the input value (so `@` refers to
 /// the value flowing through). Together with conditional methods like
@@ -24,7 +24,7 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// ```text
 /// status: type_code->match(
 ///     ["2", "VAN"],
-///     [@, @->withProblem("Unrecognized type code")]
+///     [@, @->withWarning("Unrecognized type code")]
 /// )
 /// ```
 ///
@@ -34,6 +34,10 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// declared with [`->withError`](super::WithErrorMethod) instead, which is a
 /// separate method because it is a separate audience, not a separate spelling.
 ///
+/// "Problem" is the category, not a peer: both methods record a `Problem`,
+/// which is why the debugger and `connector_response_mapping_problems` carry
+/// both. Only `->withError` escalates to the client and the error counters.
+///
 /// # The argument
 ///
 /// Exactly one, of any type. A string is the message as written; every other
@@ -41,7 +45,7 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// so a structured value survives legibly:
 ///
 /// ```text
-/// @->withProblem(@.type_code)
+/// @->withWarning(@.type_code)
 /// ```
 ///
 /// One argument rather than several deliberately. A variadic form would have to
@@ -51,14 +55,14 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// because this method passes its input through.
 ///
 /// ```text
-/// @->withProblem("Code is unrecognized")->withProblem(@.audit)
+/// @->withWarning("Code is unrecognized")->withWarning(@.audit)
 /// ```
 ///
 /// An author who wants data inside one sentence builds the sentence, with the
 /// primitive the language already has for it:
 ///
 /// ```text
-/// @->withProblem(["Unrecognized type code:", @.type_code]->joinNotNull(" "))
+/// @->withWarning(["Unrecognized type code:", @.type_code]->joinNotNull(" "))
 /// ```
 ///
 /// # Failure
@@ -69,7 +73,7 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// diagnostic, not about the field: a method whose whole purpose is to record
 /// something without interrupting the value must not interrupt the value when
 /// its own argument misses. The alternative deletes the field the author was
-/// annotating, and does it most often to `x ?? $(default)->withProblem(...)`,
+/// annotating, and does it most often to `x ?? $(default)->withWarning(...)`,
 /// which exists precisely to keep a value in place.
 ///
 /// Two errors are reported when the argument fails: the one from evaluating it,
@@ -82,18 +86,18 @@ impl_arrow_method!(WithProblemMethod, with_problem_method, with_problem_shape);
 /// says so with `??`, which supplies a value where there would have been none:
 ///
 /// ```text
-/// @->withProblem(["type code:", @.type_code ?? "<absent>"]->joinNotNull(" "))
+/// @->withWarning(["type code:", @.type_code ?? "<absent>"]->joinNotNull(" "))
 /// ```
 ///
 /// That spells the absence out in the message text instead of losing the
 /// message to it.
 ///
-/// Note that this is a different trap from a missing *input*. `->withProblem` can
-/// only annotate a value that exists: in `@.missing->withProblem("...")` the
+/// Note that this is a different trap from a missing *input*. `->withWarning` can
+/// only annotate a value that exists: in `@.missing->withWarning("...")` the
 /// chain aborts before the method runs, so nothing is recorded at all. Saying
 /// something about an absent field means supplying a value first, as in
-/// `@.missing ?? $(null)->withProblem("...")`.
-fn with_problem_method(
+/// `@.missing ?? $(null)->withWarning("...")`.
+fn with_warning_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
@@ -179,7 +183,7 @@ fn with_problem_method(
 // the value. The argument's shape is still computed so mistakes inside it
 // (unknown fields, mistyped paths) surface at validation time. Its shape is
 // otherwise unconstrained, since any value can become a diagnostic message.
-fn with_problem_shape(
+fn with_warning_shape(
     context: &ShapeContext,
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -236,17 +240,17 @@ mod tests {
     /// its author while a declared error reaches a client, and the difference
     /// should be visible in what they say.
     #[test]
-    fn every_with_problem_diagnostic() {
+    fn every_with_warning_diagnostic() {
         let cases = [
-            ("no arguments", r#"$->withProblem"#),
-            ("two arguments", r#"$->withProblem("a", "b")"#),
+            ("no arguments", r#"$->withWarning"#),
+            ("two arguments", r#"$->withWarning("a", "b")"#),
             (
                 "an argument that produces nothing",
-                r#"$->withProblem(@.nope)"#,
+                r#"$->withWarning(@.nope)"#,
             ),
             (
                 "a non-string argument, which is serialized rather than refused",
-                r#"$->withProblem($(42))"#,
+                r#"$->withWarning($(42))"#,
             ),
         ];
 
@@ -270,7 +274,7 @@ mod tests {
         assert_eq!(
             value.as_ref(),
             Some(data),
-            "->withProblem must leave the value alone",
+            "->withWarning must leave the value alone",
         );
         errors
             .iter()
@@ -279,14 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn with_problem_should_return_input_and_record_error() {
+    fn with_warning_should_return_input_and_record_error() {
         assert_eq!(
-            selection!("$->withProblem('This is an error')").apply_to(&json!(null)),
+            selection!("$->withWarning('This is an error')").apply_to(&json!(null)),
             (
                 Some(json!(null)),
                 vec![ApplyToError::from_json(&json!({
                     "message": "This is an error",
-                    "path": ["->withProblem"],
+                    "path": ["->withWarning"],
                     "range": [14, 34],
                 }))],
             ),
@@ -296,8 +300,8 @@ mod tests {
     /// What it records is addressed to the mapping author, not to a client, so
     /// it is a diagnostic. A client-facing error is a different method.
     #[test]
-    fn with_problem_records_a_diagnostic_and_never_a_declared_error() {
-        let (_, errors) = selection!(r#"$->withProblem("anything")"#).apply_to(&json!(null));
+    fn with_warning_records_a_diagnostic_and_never_a_declared_error() {
+        let (_, errors) = selection!(r#"$->withWarning("anything")"#).apply_to(&json!(null));
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind(), ApplyToErrorKind::Diagnostic);
@@ -306,16 +310,16 @@ mod tests {
     /// A string is the message as written; every other value is JSON-encoded
     /// into it, so a structured value survives legibly.
     #[test]
-    fn with_problem_should_json_encode_a_non_string_message() {
+    fn with_warning_should_json_encode_a_non_string_message() {
         assert_eq!(
-            selection!("$->withProblem({ hi: @.name }) { name }").apply_to(&json!({
+            selection!("$->withWarning({ hi: @.name }) { name }").apply_to(&json!({
                 "name": "Alice",
             })),
             (
                 Some(json!({ "name": "Alice" })),
                 vec![ApplyToError::from_json(&json!({
                     "message": "{\"hi\":\"Alice\"}",
-                    "path": ["->withProblem"],
+                    "path": ["->withWarning"],
                     "range": [14, 30],
                 }))],
             ),
@@ -329,7 +333,7 @@ mod tests {
     #[test]
     fn several_diagnostics_about_one_value_are_several_calls() {
         let (value, errors) =
-            selection!(r#"$->withProblem("code is unrecognized")->withProblem(@.type_code)"#)
+            selection!(r#"$->withWarning("code is unrecognized")->withWarning(@.type_code)"#)
                 .apply_to(&json!({ "type_code": 7 }));
 
         assert_eq!(value, Some(json!({ "type_code": 7 })));
@@ -345,7 +349,7 @@ mod tests {
     #[test]
     fn a_message_can_be_built_from_parts_with_join_not_null() {
         let (value, errors) = selection!(
-            r#"$->withProblem(["Unrecognized type code:", @.type_code]->joinNotNull(" ")) { id }"#
+            r#"$->withWarning(["Unrecognized type code:", @.type_code]->joinNotNull(" ")) { id }"#
         )
         .apply_to(&json!({ "id": "acct-1", "type_code": 7 }));
 
@@ -366,7 +370,7 @@ mod tests {
     /// argument misses.
     #[test]
     fn a_failed_argument_costs_the_message_and_not_the_value() {
-        let (value, errors) = selection!(r#"$->withProblem(@.nope)"#).apply_to(&json!({ "id": 1 }));
+        let (value, errors) = selection!(r#"$->withWarning(@.nope)"#).apply_to(&json!({ "id": 1 }));
 
         assert_eq!(value, Some(json!({ "id": 1 })));
         assert_eq!(
@@ -374,7 +378,7 @@ mod tests {
             vec![
                 "Property .nope not found in object",
                 concat!(
-                    "Method ->withProblem(@.nope) recorded no message ",
+                    "Method ->withWarning(@.nope) recorded no message ",
                     "because argument @.nope produced no value",
                 ),
             ],
@@ -388,7 +392,7 @@ mod tests {
     #[test]
     fn a_defaulted_field_survives_a_diagnostic_whose_argument_fails() {
         let (value, errors) =
-            selection!(r#"balance: $.amount ?? $("<missing>")->withProblem(@.nope)"#)
+            selection!(r#"balance: $.amount ?? $("<missing>")->withWarning(@.nope)"#)
                 .apply_to(&json!({ "id": "acct-1" }));
 
         assert_eq!(value, Some(json!({ "balance": "<missing>" })));
@@ -407,9 +411,9 @@ mod tests {
     /// swallows the failed path's own error, since the fallback counts as a
     /// successful evaluation.
     #[test]
-    fn with_problem_should_accept_a_coalesced_argument_in_place_of_a_missing_one() {
+    fn with_warning_should_accept_a_coalesced_argument_in_place_of_a_missing_one() {
         let (value, errors) =
-            selection!(r#"$->withProblem(@.nope ?? "<absent>")"#).apply_to(&json!({ "id": 1 }));
+            selection!(r#"$->withWarning(@.nope ?? "<absent>")"#).apply_to(&json!({ "id": 1 }));
 
         assert_eq!(value, Some(json!({ "id": 1 })));
         assert_eq!(
@@ -429,11 +433,11 @@ mod tests {
         let absent = json!({ "id": "acct-1" });
         let null = json!({ "id": "acct-1", "code": null });
 
-        let nullish = selection!(r#"$->withProblem(@.code ?? "<absent>")"#);
+        let nullish = selection!(r#"$->withWarning(@.code ?? "<absent>")"#);
         assert_eq!(recorded(&nullish, &absent), vec!["<absent>"]);
         assert_eq!(recorded(&nullish, &null), vec!["<absent>"]);
 
-        let none_only = selection!(r#"$->withProblem(@.code ?! "<absent>")"#);
+        let none_only = selection!(r#"$->withWarning(@.code ?! "<absent>")"#);
         assert_eq!(recorded(&none_only, &absent), vec!["<absent>"]);
         assert_eq!(recorded(&none_only, &null), vec!["null"]);
     }
@@ -444,9 +448,9 @@ mod tests {
     /// still yields a value, and the author's message is recorded alongside
     /// that error rather than being discarded by it.
     #[test]
-    fn with_problem_should_record_a_message_whose_argument_also_reported_errors() {
+    fn with_warning_should_record_a_message_whose_argument_also_reported_errors() {
         let (value, errors) =
-            selection!(r#"$->withProblem(@.rows { id }) { count }"#).apply_to(&json!({
+            selection!(r#"$->withWarning(@.rows { id }) { count }"#).apply_to(&json!({
                 "count": 2,
                 "rows": [{ "id": "a" }, { "name": "b" }],
             }));
@@ -463,12 +467,12 @@ mod tests {
     /// selection without the tap rather than against a hardcoded result, since
     /// the claim is an equality between the two.
     #[test]
-    fn with_problem_should_leave_the_rest_of_the_chain_unchanged() {
+    fn with_warning_should_leave_the_rest_of_the_chain_unchanged() {
         let data = json!({ "cents": 250 });
 
         let (untapped, no_errors) = selection!("dollars: cents->div(100)").apply_to(&data);
         let (tapped, errors) =
-            selection!(r#"dollars: cents->withProblem(@)->div(100)"#).apply_to(&data);
+            selection!(r#"dollars: cents->withWarning(@)->div(100)"#).apply_to(&data);
 
         assert_eq!(tapped, untapped);
         assert_eq!(no_errors, vec![]);
@@ -482,11 +486,11 @@ mod tests {
     /// flowing through, which is what lets a tap name the request that produced
     /// the response it is complaining about.
     #[test]
-    fn with_problem_should_evaluate_variables_inside_a_message() {
+    fn with_warning_should_evaluate_variables_inside_a_message() {
         let mut vars = IndexMap::default();
         vars.insert("$args".to_string(), json!({ "id": "acct-1" }));
 
-        let (value, errors) = selection!(r#"$->withProblem($args.id)"#)
+        let (value, errors) = selection!(r#"$->withWarning($args.id)"#)
             .apply_with_vars(&json!({ "region": "us-east" }), &vars);
 
         assert_eq!(value, Some(json!({ "region": "us-east" })));
@@ -501,17 +505,17 @@ mod tests {
     /// wrongly. The shape function reports it as well, so this should not
     /// survive composition.
     #[test]
-    fn with_problem_should_report_a_call_with_no_arguments() {
+    fn with_warning_should_report_a_call_with_no_arguments() {
         assert_eq!(
-            selection!("$->withProblem").apply_to(&json!("value")),
+            selection!("$->withWarning").apply_to(&json!("value")),
             (
                 None,
                 vec![ApplyToError::from_json(&json!({
                     "message": concat!(
-                        "Method ->withProblem requires exactly one argument, ",
+                        "Method ->withWarning requires exactly one argument, ",
                         "the value to record as the message, got 0",
                     ),
-                    "path": ["->withProblem"],
+                    "path": ["->withWarning"],
                     "range": [3, 14],
                 }))],
             ),
@@ -521,29 +525,29 @@ mod tests {
     /// Likewise a call with several. The arity is one because the message is
     /// one value, and a second argument has no meaning to fall back on.
     #[test]
-    fn with_problem_should_report_a_call_with_several_arguments() {
-        let (value, errors) = selection!(r#"$->withProblem("a", "b")"#).apply_to(&json!("value"));
+    fn with_warning_should_report_a_call_with_several_arguments() {
+        let (value, errors) = selection!(r#"$->withWarning("a", "b")"#).apply_to(&json!("value"));
 
         assert_eq!(value, None);
         assert_eq!(
             errors.iter().map(ApplyToError::message).collect::<Vec<_>>(),
             vec![concat!(
-                r#"Method ->withProblem("a", "b") requires exactly one argument, "#,
+                r#"Method ->withWarning("a", "b") requires exactly one argument, "#,
                 "the value to record as the message, got 2",
             )],
         );
     }
 
-    /// The ->match arms give each branch its own ->withProblem, so which error
+    /// The ->match arms give each branch its own ->withWarning, so which error
     /// is recorded depends on which branch actually runs — the tap pattern
     /// this method exists for.
     #[test]
-    fn with_problem_should_fire_only_in_the_taken_match_branch() {
+    fn with_warning_should_fire_only_in_the_taken_match_branch() {
         let match_error_selection = selection!(
             r#"
             result: input->match(
-                ["hi", $("hello")->withProblem("Ok error")],
-                [@, @->withProblem({ "unknown": @ })]
+                ["hi", $("hello")->withWarning("Ok error")],
+                [@, @->withWarning({ "unknown": @ })]
             )
             "#
         );
@@ -554,7 +558,7 @@ mod tests {
                 Some(json!({ "result": "hello" })),
                 vec![ApplyToError::from_json(&json!({
                     "message": "Ok error",
-                    "path": ["input", "->match", "->withProblem"],
+                    "path": ["input", "->match", "->withWarning"],
                     "range": [81, 93],
                 }))],
             ),
@@ -566,7 +570,7 @@ mod tests {
                 Some(json!({ "result": null })),
                 vec![ApplyToError::from_json(&json!({
                     "message": "{\"unknown\":null}",
-                    "path": ["input", "->match", "->withProblem"],
+                    "path": ["input", "->match", "->withWarning"],
                     "range": [130, 148],
                 }))],
             ),
@@ -596,12 +600,12 @@ mod tests {
 
     /// Which errors a mapping reports already depends on the client's query
     /// shape, and it is worth pinning that here rather than leaving it to be
-    /// discovered and mistaken for something `->withProblem` introduced. The
+    /// discovered and mistaken for something `->withWarning` introduced. The
     /// router narrows a mapping to the requested selection set before running
     /// it, so an expression producing a field nobody asked for is gone before
     /// evaluation starts, and the error it would have recorded never happens.
     #[test]
-    fn with_problem_does_not_fire_for_a_selection_the_client_did_not_request() {
+    fn with_warning_does_not_fire_for_a_selection_the_client_did_not_request() {
         let schema = Schema::parse_and_validate(
             r#"
             type Query { t: T }
@@ -612,7 +616,7 @@ mod tests {
         .unwrap();
 
         let selection =
-            JSONSelection::parse("id name: full_name->withProblem('name is deprecated')").unwrap();
+            JSONSelection::parse("id name: full_name->withWarning('name is deprecated')").unwrap();
         let data = json!({ "id": "1", "full_name": "Alice" });
 
         // Requested: the error fires.

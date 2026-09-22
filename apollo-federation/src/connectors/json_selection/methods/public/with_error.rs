@@ -18,8 +18,8 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// Returns its input unmodified, but declares an error about it, addressed to
 /// the client and reported under `extensions.connectorErrors`.
 ///
-/// The sibling of [`->withProblem`](super::WithProblemMethod), and the difference
-/// between them is only who reads the result. `->withProblem` records a
+/// The sibling of [`->withWarning`](super::WithWarningMethod), and the difference
+/// between them is only who reads the result. `->withWarning` records a
 /// diagnostic for the mapping author, visible in the debugger and in telemetry.
 /// `->withError` declares an error the schema author intends a client to
 /// see. Writing it is the statement that this text is fit to leave the router.
@@ -57,7 +57,7 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// coerced. An object with no `message` declares nothing; a `message`
 /// that is not a string, or `extensions` that are not an object, would reach a
 /// client malformed; and a bare number or array would reach one as a message
-/// reading `42`. Unlike `->withProblem`, which serializes any value into a
+/// reading `42`. Unlike `->withWarning`, which serializes any value into a
 /// diagnostic only its author reads, nothing here is stringified on the
 /// author's behalf.
 ///
@@ -71,7 +71,7 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// # Failure
 ///
 /// A failed argument costs the error, never the value, exactly as in
-/// `->withProblem`. A method that exists to annotate a value without interrupting
+/// `->withWarning`. A method that exists to annotate a value without interrupting
 /// it must not delete that value when its own argument misses, and this method
 /// is reached through `??` more often than not, where deleting the value would
 /// destroy the very default the author supplied.
@@ -228,7 +228,7 @@ fn with_error_method(
             (message, extensions)
         }
 
-        // Deliberately not serialized into a message the way ->withProblem would.
+        // Deliberately not serialized into a message the way ->withWarning would.
         // A diagnostic reading `42` is a curiosity for its author; a
         // client-facing error reading `42` is a defect nobody chose.
         other => {
@@ -593,7 +593,7 @@ mod tests {
         );
     }
 
-    /// Nothing is stringified on the author's behalf here, unlike `->withProblem`
+    /// Nothing is stringified on the author's behalf here, unlike `->withWarning`
     /// where a JSON-encoded diagnostic is useful to the one person who reads
     /// it. A client-facing error whose message reads `42` is a defect nobody
     /// chose.

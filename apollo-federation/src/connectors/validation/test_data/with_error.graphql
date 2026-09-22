@@ -12,7 +12,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withProblem("Unrecognized code")
+        status: code->withWarning("Unrecognized code")
         """
     )
 
@@ -42,7 +42,7 @@ type Query {
         """
     )
 
-    # INVALID - caught at composition: `with_problem_shape` returns a
+    # INVALID - caught at composition: `with_warning_shape` returns a
     # `Shape::error`, which the selection walker now reports rather than
     # treating the field as an ordinary scalar leaf.
     noArguments: T
@@ -51,7 +51,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withProblem
+        status: code->withWarning
         """
     )
 
@@ -63,7 +63,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withProblem("saw:", @)
+        status: code->withWarning("saw:", @)
         """
     )
 
@@ -85,7 +85,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code->withProblem(@.nonexistent)
+        status: code->withWarning(@.nonexistent)
         """
     )
 
@@ -136,7 +136,7 @@ type Query {
         http: { GET: "/t" }
         selection: """
         id
-        status: code ?? $("<missing>")->withProblem()
+        status: code ?? $("<missing>")->withWarning()
         """
     )
 

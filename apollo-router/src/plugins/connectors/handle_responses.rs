@@ -540,20 +540,20 @@ mod tests {
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
-    /// `->withProblem` has to be reachable from a connector schema, and the
+    /// `->withWarning` has to be reachable from a connector schema, and the
     /// `is_public()` gate that decides so cannot be observed from
     /// apollo-federation's own tests: `ArrowMethod::lookup` resolves every
     /// method under `cfg!(test)`, public or not. Here apollo-federation is a
     /// dependency compiled without `--test`, so the gate is live and demoting
-    /// `->withProblem` back to the `future` namespace fails this test.
+    /// `->withWarning` back to the `future` namespace fails this test.
     #[test]
-    fn with_problem_is_available_to_connector_schemas() {
+    fn with_warning_is_available_to_connector_schemas() {
         let selection =
-            JSONSelection::parse("id status: code->withProblem('unrecognized type code')").unwrap();
+            JSONSelection::parse("id status: code->withWarning('unrecognized type code')").unwrap();
 
         let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
 
-        // The value flows through untouched: ->withProblem records, never rewrites.
+        // The value flows through untouched: ->withWarning records, never rewrites.
         assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
         assert_eq!(
             errors.iter().map(|error| error.message()).collect_vec(),
@@ -721,7 +721,7 @@ mod tests {
     ///
     /// Read as a table. Rows are what the mapping author wrote — a plain
     /// field, a rename, a `??` default, a `->map` over rows, a chain, the
-    /// structured argument, `->withProblem` alone, and both methods together.
+    /// structured argument, `->withWarning` alone, and both methods together.
     /// Columns are what the operator configured, including the default, which
     /// omits everything.
     ///
@@ -732,7 +732,7 @@ mod tests {
     ///
     /// Three things worth watching in the output, because each was a bug or
     /// nearly one: every reported error carries both `connector.coordinate`
-    /// and `connector.selectionPath`; `->withProblem` never contributes a row
+    /// and `connector.selectionPath`; `->withWarning` never contributes a row
     /// at all; and `path` names the field the mapping *writes*, so the
     /// rename's path says `balance` rather than `amount`.
     #[test]
@@ -772,15 +772,15 @@ mod tests {
                 json!({ "id": "acct-1" }),
             ),
             (
-                "`->withProblem` alone, which reaches no client",
+                "`->withWarning` alone, which reaches no client",
                 "account",
-                r#"status: code->withProblem("Unrecognized code")"#,
+                r#"status: code->withWarning("Unrecognized code")"#,
                 json!({ "code": 7 }),
             ),
             (
                 "both methods on one value",
                 "account",
-                r#"status: code->withProblem("for the author")->withError("for the client")"#,
+                r#"status: code->withWarning("for the author")->withError("for the client")"#,
                 json!({ "code": 7 }),
             ),
         ];
