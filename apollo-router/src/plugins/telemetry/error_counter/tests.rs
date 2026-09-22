@@ -33,7 +33,6 @@ use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::plugins::telemetry::apollo::SubgraphErrorConfig;
-use crate::plugins::telemetry::error_counter::CountsAsGraphqlError;
 use crate::plugins::telemetry::error_counter::count_connector_errors;
 use crate::plugins::telemetry::error_counter::count_execution_errors;
 use crate::plugins::telemetry::error_counter::count_operation_errors;
@@ -188,14 +187,11 @@ async fn test_count_connector_errors_counts_declared_errors() {
             "apollo.router.error.service" = "accounts"
         );
 
-        // Deliberately absent. A declared error describes a field that
-        // resolved, so the response carries no GraphQL error to count, and
-        // `apollo.router.graphql_error` carries only `code` — an operator
-        // watching its total would see it move for successful responses with
-        // nothing to filter the movement out by.
-        assert_counter_not_exists!(
+        // And in `graphql_error`, the counter nothing gates, which is the
+        // only one a router with no telemetry config would show this on.
+        assert_counter!(
             "apollo.router.graphql_error",
-            u64,
+            1,
             code = "CONNECTORS_MAPPING_ERROR"
         );
     }
@@ -288,12 +284,7 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
         // And so the dedup set does not stop a second count. Only the fetch
         // service lift does.
         let same_error: graphql::Error = declared.into();
-        count_operation_errors(
-            std::iter::once(&same_error),
-            &context,
-            &config,
-            CountsAsGraphqlError::Yes,
-        );
+        count_operation_errors(std::iter::once(&same_error), &context, &config);
 
         // The doubling shows in `operations.error`: nothing stopped the
         // second count.
@@ -311,14 +302,11 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
             "apollo.router.error.service" = "accounts"
         );
 
-        // And `graphql_error` records exactly one: the connector count skips
-        // it, and the second call — standing in for a later layer that found
-        // the error still in the `errors` array — is the only one that counts
-        // it there. Which is also why the lift matters: that second count
-        // should never happen in a real request.
+        // And in `graphql_error`, for the same reason. Which is why the
+        // lift matters: this second count cannot happen in a real request.
         assert_counter!(
             "apollo.router.graphql_error",
-            1,
+            2,
             code = "CONNECTORS_MAPPING_ERROR"
         );
     }
@@ -906,7 +894,7 @@ async fn test_count_operation_errors_with_extended_config_enabled() {
             .build();
 
         let errors = [error];
-        count_operation_errors(errors.iter(), &context, &config, CountsAsGraphqlError::Yes);
+        count_operation_errors(errors.iter(), &context, &config);
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -966,7 +954,7 @@ async fn test_count_operation_errors_with_all_json_types_and_extended_config_ena
             .unwrap()
         });
 
-        count_operation_errors(errors.iter(), &context, &config, CountsAsGraphqlError::Yes);
+        count_operation_errors(errors.iter(), &context, &config);
 
         assert_counter!(
             "apollo.router.operations.error",
@@ -1059,7 +1047,7 @@ async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_e
             .unwrap()
         });
 
-        count_operation_errors(errors.iter(), &context, &config, CountsAsGraphqlError::Yes);
+        count_operation_errors(errors.iter(), &context, &config);
 
         assert_counter!(
             "apollo.router.operations.error",

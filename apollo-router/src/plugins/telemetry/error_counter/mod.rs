@@ -41,12 +41,7 @@ pub(crate) async fn count_subgraph_errors(
 
     let response_body = response.response.body();
     if !response_body.errors.is_empty() {
-        count_operation_errors(
-            response_body.errors.iter(),
-            &context,
-            &errors_config,
-            CountsAsGraphqlError::Yes,
-        );
+        count_operation_errors(response_body.errors.iter(), &context, &errors_config);
         // Refresh context with the most up-to-date list of errors
         let _ = context.insert(COUNTED_ERRORS, to_set(response_body.errors.iter()));
     }
@@ -60,25 +55,15 @@ pub(crate) async fn count_subgraph_errors(
 
 /// Count the errors a connector mapping declared with `->withError`.
 ///
-/// These reach `apollo.router.operations.error`, under
-/// `telemetry.apollo.errors.preview_extended_error_metrics` like every other
-/// error the router counts there, and deliberately **not**
-/// `apollo.router.graphql_error` — hence [`CountsAsGraphqlError::No`], the only
-/// caller that passes it. A declared error describes a field that resolved, so
-/// the response carries no GraphQL error, and `graphql_error` carries only
-/// `code`, so an operator watching its total would see movement for successful
-/// responses with nothing to filter on.
+/// Counted like any error in the `errors` array: by `graphql_error` always,
+/// and by `operations.error` under `preview_extended_error_metrics`.
+/// `graphql_error` takes these despite the field having resolved, because it
+/// already counts valueCompletion the same way, and because it is the only
+/// error counter nothing gates.
 ///
-/// The consequence is worth stating: a router without
-/// `preview_extended_error_metrics` counts these nowhere. That is the same
-/// posture as every other error's extended attributes, but declared errors have
-/// no unconditional counter to fall back on the way an error in the `errors`
-/// array does.
-///
-/// Counted at the connector rather than from the reported extension, so that
-/// `include_subgraph_errors` withholding an error from a client cannot also
-/// suppress its metric. What leaves as telemetry is still decided by
-/// `telemetry.apollo.errors.subgraph`, which [`count_operation_errors`] honours.
+/// Counted at the connector, not off the reported extension, so
+/// `include_subgraph_errors` withholding an error from a client does not
+/// suppress its metric.
 ///
 /// Counted once per declared error, not once per delivered copy. An entity
 /// fetch's errors are rebuilt one per client position by
@@ -109,12 +94,7 @@ pub(crate) fn count_connector_errors(
     // `RuntimeError::extensions` stamps `service` and the connector's
     // coordinate, so the counted attributes match what the client would see.
     let errors: Vec<Error> = declared_errors.iter().cloned().map(Into::into).collect();
-    count_operation_errors(
-        errors.iter(),
-        &response.context,
-        errors_config,
-        CountsAsGraphqlError::No,
-    );
+    count_operation_errors(errors.iter(), &response.context, errors_config);
 }
 
 pub(crate) async fn count_supergraph_errors(
@@ -132,12 +112,7 @@ pub(crate) async fn count_supergraph_errors(
     let stream = stream.inspect(move |response_body| {
         let _enter = span.enter();
         if response_body.contains_errors() {
-            count_operation_errors(
-                response_body.all_errors(),
-                &context,
-                &errors_config,
-                CountsAsGraphqlError::Yes,
-            );
+            count_operation_errors(response_body.all_errors(), &context, &errors_config);
         }
         if let Some(value_completion) = response_body
             .extensions
@@ -149,12 +124,7 @@ pub(crate) async fn count_supergraph_errors(
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
-            count_operation_errors(
-                errors.iter(),
-                &context,
-                &errors_config,
-                CountsAsGraphqlError::Yes,
-            );
+            count_operation_errors(errors.iter(), &context, &errors_config);
         }
 
         // Refresh context with the most up-to-date list of errors
@@ -189,12 +159,7 @@ pub(crate) async fn count_execution_errors(
     let stream = stream.inspect(move |response_body| {
         let _enter = span.enter();
         if response_body.contains_errors() {
-            count_operation_errors(
-                response_body.all_errors(),
-                &context,
-                &errors_config,
-                CountsAsGraphqlError::Yes,
-            );
+            count_operation_errors(response_body.all_errors(), &context, &errors_config);
             // Refresh context with the most up-to-date list of errors
             let _ = context.insert(COUNTED_ERRORS, to_set(response_body.all_errors()));
         }
@@ -229,12 +194,7 @@ pub(crate) async fn count_router_errors(
         .map(|(id, error)| error.with_apollo_id(*id))
         .collect();
     if !errors.is_empty() {
-        count_operation_errors(
-            errors.iter(),
-            &context,
-            &errors_config,
-            CountsAsGraphqlError::Yes,
-        );
+        count_operation_errors(errors.iter(), &context, &errors_config);
         // Router layer handling is unique in that the list of new errors from context may not
         // include errors we previously counted. Thus, we must combine the set of previously counted
         // errors with the set of new errors here before adding to context.
@@ -253,26 +213,10 @@ fn to_set<'a>(errors: impl Iterator<Item = &'a Error>) -> HashSet<Uuid> {
     errors.map(Error::apollo_id).collect()
 }
 
-/// Whether the errors being counted are GraphQL errors — entries in a
-/// response's `errors` array — and so belong in `apollo.router.graphql_error`.
-///
-/// Every error the router counts is one, with one exception: an error a
-/// connector mapping declared with `->withError`. The field it describes
-/// resolved, so the response carries no GraphQL error to count, and an
-/// operator alerting on `apollo.router.graphql_error` — which carries only
-/// `code`, with nothing to filter on — would see its total move for responses
-/// that succeeded.
-#[derive(Clone, Copy, PartialEq)]
-enum CountsAsGraphqlError {
-    Yes,
-    No,
-}
-
 fn count_operation_errors<'a>(
     errors: impl Iterator<Item = &'a Error>,
     context: &Context,
     errors_config: &ErrorsConfiguration,
-    counts_as_graphql_error: CountsAsGraphqlError,
 ) {
     let previously_counted_errors_map: HashSet<Uuid> = unwrap_from_context(context, COUNTED_ERRORS);
 
@@ -364,9 +308,7 @@ fn count_operation_errors<'a>(
                 "apollo.router.error.service" = service
             );
         }
-        if counts_as_graphql_error == CountsAsGraphqlError::Yes {
-            count_graphql_error(1, maybe_code);
-        }
+        count_graphql_error(1, maybe_code);
     }
 }
 
