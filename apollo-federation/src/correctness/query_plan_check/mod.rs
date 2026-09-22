@@ -136,6 +136,10 @@ struct Reached<'a> {
 
 pub(crate) struct Checker<'a> {
     supergraph_schema: &'a ValidFederationSchema,
+    /// The schema index every inclusion test runs against. Built once: it is derived from the
+    /// schema alone, and rebuilding it per test costs more than the tests themselves on a
+    /// supergraph with many types.
+    comparator: query_compare::QueryComparator<'a>,
     /// Read for each fetch's `@key` and `@requires` declarations.
     subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
     /// Every operation the walk builds inherits its declarations and operation type.
@@ -158,15 +162,17 @@ impl<'a> Checker<'a> {
         operation: &'a executable::Operation,
         plan: &QueryPlan,
         root_type: Name,
-    ) -> Self {
-        Checker {
+    ) -> Result<Self, ComparisonError> {
+        Ok(Checker {
             supergraph_schema,
+            comparator: query_compare::QueryComparator::new(supergraph_schema)
+                .map_err(|e| ComparisonError::new(e.to_string()))?,
             subgraphs_by_name,
             operation,
             constraint: SubgraphConstraint::new(subgraphs_by_name),
             condition_variables: condition_variables(plan),
             root_type,
-        }
+        })
     }
 }
 
@@ -503,51 +509,97 @@ impl Checker<'_> {
             per_case.push((subgraph.keys(entity_type)?, selections, field_set));
         }
 
-        // The table: one outcome per (`requires` entry, entity case) pair.
-        let mut table = Vec::with_capacity(require_types.len());
-        for (require_item, require_type) in fetch.requires.iter().zip(&require_types) {
-            let mut row = Vec::with_capacity(cases.len());
-            for (case, hoisted) in cases.iter().zip(&per_case) {
-                row.push(self.requirement_matches_case(
-                    require_item,
-                    require_type,
-                    case.0,
-                    hoisted,
+        // The table of outcomes, one per (`requires` entry, entity case) pair. Cells are filled
+        // in on demand: the two checks below only ask whether *some* cell of a row, and of a
+        // column, is a match, and a plan writes one entry per case it means to serve, so the
+        // pairs of equal type usually settle every row and column between them. A cell is a
+        // verdict and never an error, so a cell not computed cannot hide one; a row or column
+        // that fails is filled in completely before it is described.
+        let mut table: Table = vec![vec![None; cases.len()]; require_types.len()];
+        let mut matched_entry = vec![false; require_types.len()];
+        let mut matched_case = vec![false; cases.len()];
+        let case_of_type: IndexMap<&Name, usize> = cases
+            .iter()
+            .enumerate()
+            .map(|(index, case)| (case.0, index))
+            .collect();
+
+        let fill = |checker: &Self,
+                    table: &mut Table,
+                    entry: usize,
+                    case: usize|
+         -> Result<bool, ComparisonError> {
+            if table[entry][case].is_none() {
+                table[entry][case] = Some(checker.requirement_matches_case(
+                    &fetch.requires[entry],
+                    require_types[entry],
+                    cases[case].0,
+                    &per_case[case],
                     reached,
                     available,
                     &available_doc,
                 )?);
             }
-            table.push(row);
+            Ok(is_match(&table[entry][case]))
+        };
+
+        // The pairs the plan meant to go together: entry `... on X` against the case `X`.
+        for entry in 0..require_types.len() {
+            let Some(&case) = case_of_type.get(require_types[entry]) else {
+                continue;
+            };
+            if fill(self, &mut table, entry, case)? {
+                matched_entry[entry] = true;
+                matched_case[case] = true;
+            }
         }
 
         // Every entry must be there for a reason: some case is matched by it.
-        for (index, row) in table.iter().enumerate() {
-            if row.iter().any(|outcome| outcome.is_none()) {
+        for entry in 0..require_types.len() {
+            if matched_entry[entry] {
                 continue;
             }
-            return Err(ComparisonError::new(format!(
-                "fetch to {}: `requires` entry {} is matched by no entity case:\n{}",
-                fetch.subgraph_name,
-                fetch.requires[index],
-                describe(cases.iter().map(|case| case.0).zip(row.iter()))
-            )));
+            for (case, matched) in matched_case.iter_mut().enumerate() {
+                if fill(self, &mut table, entry, case)? {
+                    matched_entry[entry] = true;
+                    *matched = true;
+                    break;
+                }
+            }
+            if !matched_entry[entry] {
+                return Err(ComparisonError::new(format!(
+                    "fetch to {}: `requires` entry {} is matched by no entity case:\n{}",
+                    fetch.subgraph_name,
+                    fetch.requires[entry],
+                    describe(computed(
+                        cases.iter().map(|case| case.0),
+                        table[entry].iter()
+                    ))
+                )));
+            }
         }
         // Every case must be accounted for: some entry is matched to it.
-        for (index, (entity_type, _)) in cases.iter().enumerate() {
-            if table.iter().any(|row| row[index].is_none()) {
+        for case in 0..cases.len() {
+            if matched_case[case] {
                 continue;
             }
-            return Err(ComparisonError::new(format!(
-                "fetch to {}: entity case `{entity_type}` is covered by no `requires` entry:\n{}",
-                fetch.subgraph_name,
-                describe(
-                    require_types
-                        .iter()
-                        .copied()
-                        .zip(table.iter().map(|row| &row[index]))
-                )
-            )));
+            for entry in 0..require_types.len() {
+                if fill(self, &mut table, entry, case)? {
+                    matched_case[case] = true;
+                    break;
+                }
+            }
+            if !matched_case[case] {
+                return Err(ComparisonError::new(format!(
+                    "fetch to {}: entity case `{}` is covered by no `requires` entry:\n{}",
+                    fetch.subgraph_name,
+                    cases[case].0,
+                    describe(computed(
+                        require_types.iter().copied(),
+                        table.iter().map(|row| &row[case])
+                    ))
+                )));
+            }
         }
         check_context_rewrites(
             self.supergraph_schema,
@@ -637,8 +689,7 @@ impl Checker<'_> {
                 ),
             );
             let required_doc = self.operation_with(required);
-            if let Err(e) = query_compare::includes_with_constraint(
-                self.supergraph_schema,
+            if let Err(e) = self.comparator.includes_with_constraint(
                 &self.constraint,
                 available_doc,
                 &required_doc,
@@ -872,6 +923,27 @@ fn is_introspection_field(name: &Name) -> bool {
 }
 
 /// Renders the outcomes of one row or column of the requirement table.
+/// An outcome that has been computed: `None` is a match, `Some(why)` says why not.
+type Cell = Option<Option<String>>;
+type Table = Vec<Vec<Cell>>;
+
+/// Whether a computed cell is a match. An uncomputed cell is not one.
+fn is_match(cell: &Cell) -> bool {
+    matches!(cell, Some(None))
+}
+
+/// A row or column of the outcome table paired with its names, skipping cells never computed.
+/// Pairing before skipping is what keeps a name with its own outcome; the failing row or column
+/// is filled in by the time it is described, so nothing is dropped in practice.
+fn computed<'a>(
+    names: impl Iterator<Item = &'a Name>,
+    cells: impl Iterator<Item = &'a Cell>,
+) -> impl Iterator<Item = (&'a Name, &'a Option<String>)> {
+    names
+        .zip(cells)
+        .filter_map(|(name, cell)| cell.as_ref().map(|outcome| (name, outcome)))
+}
+
 fn describe<'a>(outcomes: impl Iterator<Item = (&'a Name, &'a Option<String>)>) -> String {
     outcomes
         .map(|(name, outcome)| match outcome {
@@ -978,7 +1050,7 @@ pub fn check_plan(
         operation,
         plan,
         root_type.clone(),
-    );
+    )?;
     let Some(node) = &plan.node else {
         // A plan with no node fetches nothing, which is correct only for an operation that asks
         // for nothing fetchable.
@@ -991,15 +1063,12 @@ pub fn check_plan(
     // which subgraphs can resolve a field.
     let plan_doc = checker.operation_with(walked.fetched);
     let operation_doc = checker.without_introspection(operation_doc);
-    query_compare::includes_with_constraint(
-        supergraph_schema,
-        &checker.constraint,
-        &plan_doc,
-        &operation_doc,
-    )
-    .map_err(|e| {
-        ComparisonError::new(format!(
-            "query plan does not fetch everything the operation requests:\n{e}"
-        ))
-    })
+    checker
+        .comparator
+        .includes_with_constraint(&checker.constraint, &plan_doc, &operation_doc)
+        .map_err(|e| {
+            ComparisonError::new(format!(
+                "query plan does not fetch everything the operation requests:\n{e}"
+            ))
+        })
 }
