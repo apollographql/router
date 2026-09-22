@@ -129,7 +129,6 @@ impl Supergraph<Merged> {
     pub fn hints_mut(&mut self) -> &mut Vec<CompositionHint> {
         &mut self.state.hints
     }
-
 }
 
 impl Supergraph<Satisfiable> {
