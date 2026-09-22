@@ -286,14 +286,14 @@ fn validate_input_value(
                         fmt_path(path),
                     )));
                 }
-                if let Some((field_name, field_value)) = obj.iter().next() {
-                    if field_value.is_null() {
-                        return Err(InvalidInputValue(format!(
-                            "invalid {}: `@oneOf` input type `{type_name}` field `{}` must be non-null",
-                            fmt_path(path),
-                            field_name.as_str(),
-                        )));
-                    }
+                if let Some((field_name, field_value)) = obj.iter().next()
+                    && field_value.is_null()
+                {
+                    return Err(InvalidInputValue(format!(
+                        "invalid {}: `@oneOf` input type `{type_name}` field `{}` must be non-null",
+                        fmt_path(path),
+                        field_name.as_str(),
+                    )));
                 }
             }
 
