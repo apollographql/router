@@ -411,87 +411,15 @@ cors:
 
 #[test]
 fn validate_project_config_files() {
-    #[cfg(not(unix))]
-    let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
-    #[cfg(unix)]
-    let filename_matcher = Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
-    // Blocks with extra attributes after the title (e.g. `novalidate`) are intentionally
-    // excluded: they contain intentionally-invalid or version-specific config examples.
-    #[cfg(not(unix))]
-    let embedded_yaml_matcher =
-        Regex::from_str(r#"(?ms)```yaml title="router.yaml"\n(.+?)```"#).unwrap();
-    #[cfg(unix)]
-    let embedded_yaml_matcher =
-        Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"\n(.+?)```"#).unwrap();
+    let mocked_env_vars = super::test_discovery::discovery_env_vars();
+    for doc in super::test_discovery::discover_project_configs() {
+        let expansion = Expansion::default_builder()
+            .mocked_env_vars(mocked_env_vars.clone())
+            .build()
+            .unwrap();
 
-    fn it(path: &str) -> impl Iterator<Item = DirEntry> + use<> {
-        WalkDir::new(path).into_iter().filter_map(|e| e.ok())
-    }
-
-    for entry in it(".")
-        .chain(it("../examples"))
-        .chain(it("../docs"))
-        .chain(it("../dockerfiles"))
-    {
-        if entry
-            .path()
-            .with_file_name(".skipconfigvalidation")
-            .exists()
-        {
-            continue;
-        }
-        #[cfg(not(feature = "telemetry_next"))]
-        if entry.path().to_string_lossy().contains("telemetry_next") {
-            continue;
-        }
-
-        let name = entry.file_name().to_string_lossy();
-        if filename_matcher.is_match(&name) {
-            let config = fs::read_to_string(entry.path()).expect("failed to read file");
-            let yamls = if name.ends_with(".mdx") {
-                #[cfg(unix)]
-                let index = 2usize;
-                #[cfg(not(unix))]
-                let index = 1usize;
-                // Extract yaml from docs
-                embedded_yaml_matcher
-                    .captures_iter(&config)
-                    .map(|i| i.get(index).unwrap().as_str().into())
-                    .collect()
-            } else {
-                vec![config]
-            };
-
-            for yaml in yamls {
-                let expansion = Expansion::default_builder()
-                    .mocked_env_var("DATADOG_AGENT_HOST", "http://example.com")
-                    .mocked_env_var("JAEGER_HOST", "http://example.com")
-                    .mocked_env_var("JAEGER_USERNAME", "username")
-                    .mocked_env_var("JAEGER_PASSWORD", "pass")
-                    .mocked_env_var("REDIS_USERNAME", "username")
-                    .mocked_env_var("REDIS_PASSWORD", "pass")
-                    .mocked_env_var("ZIPKIN_HOST", "http://example.com")
-                    .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
-                    .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
-                    .mocked_env_var("PARSER_MAX_RECURSION", "500")
-                    .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
-                    .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
-                    .mocked_env_var(
-                        "INVALIDATION_SHARED_KEY_PRODUCTS",
-                        "invalidation-for-products",
-                    )
-                    .mocked_env_var("DISTRIBUTED_TRACING_ENDPOINT", "http://example.com")
-                    .build()
-                    .unwrap();
-
-                if let Err(e) = validate_yaml_configuration(&yaml, expansion, Mode::NoUpgrade) {
-                    panic!(
-                        "{} configuration error: \n{}",
-                        entry.path().to_string_lossy(),
-                        e
-                    )
-                }
-            }
+        if let Err(e) = validate_yaml_configuration(&doc.yaml, expansion, Mode::NoUpgrade) {
+            panic!("{} configuration error: \n{}", doc.path.display(), e)
         }
     }
 }
