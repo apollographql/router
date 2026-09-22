@@ -3615,6 +3615,90 @@ fn variable_validation_enforce_mode() {
 }
 
 #[test]
+fn variable_validation_oneof_input() {
+    let schema = "input Choice @oneOf { a: Int, b: String } type Query { x(choice: Choice!): String }";
+    let query = "query($c: Choice!) { x(choice: $c) }";
+
+    // Exactly one non-null field: valid
+    assert_validation(schema, query, json!({"c": {"a": 1}}));
+    assert_validation(schema, query, json!({"c": {"b": "hello"}}));
+
+    // Multiple fields: invalid, error should mention field count
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"a": 1, "b": "hello"}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("multiple fields on @oneOf should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("exactly one") && !msg.contains("non-null"),
+        "multiple fields should report a field count error, got: {msg}"
+    );
+
+    // Empty object: invalid, error should mention field count
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("empty @oneOf input should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("exactly one") && !msg.contains("non-null"),
+        "empty object should report a field count error, got: {msg}"
+    );
+
+    // Single field with explicit null: invalid, error should mention null
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"a": null}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("null value on @oneOf field should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("non-null"),
+        "null field should report a non-null error, got: {msg}"
+    );
+
+    // Two fields where one is explicitly null: still two keys provided,
+    // so rejected as a field count error per the spec, not a null error.
+    let res = run_validation(
+        with_supergraph_boilerplate(schema, "Query"),
+        query,
+        json!({"c": {"a": 1, "b": null}}),
+        Mode::Enforce,
+    );
+    let err = res.expect_err("two fields with one null on @oneOf should fail validation");
+    let msg = err.errors[0].message.as_str();
+    assert!(
+        msg.contains("exactly one") && !msg.contains("non-null"),
+        "two keys (one null) should report a field count error, got: {msg}"
+    );
+
+    // Mixed inline literal + variable: apollo-compiler's static validation
+    // rejects this at parse time since two fields are present in the literal
+    // regardless of whether the variable has a runtime value.
+    let supergraph = with_supergraph_boilerplate(schema, "Query");
+    let parsed_schema = Schema::parse(&supergraph, &Default::default())
+        .expect("could not parse schema");
+    let parse_result = Query::parse(
+        "query($b: String) { x(choice: { a: 1, b: $b }) }",
+        None,
+        &parsed_schema,
+        &Default::default(),
+    );
+    assert!(
+        parse_result.is_err(),
+        "inline @oneOf with two fields should fail static validation"
+    );
+}
+
+#[test]
 #[rstest::rstest]
 #[case::top_level_unexpected_field(
     json!({"content": "Hello", "canvas": [], "unknownField": "unknown"}),

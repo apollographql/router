@@ -273,6 +273,30 @@ fn validate_input_value(
                 tracing::warn!(variables = ?unknown_input_fields, "encountered unexpected variable(s)");
             }
 
+            // Pre-coercion @oneOf check: exactly one field provided and non-null.
+            if def.directives.get("oneOf").is_some() {
+                let provided_count = obj
+                    .keys()
+                    .filter(|k| def.fields.contains_key(k.as_str()))
+                    .count();
+                if provided_count != 1 {
+                    return Err(InvalidInputValue(format!(
+                        "invalid {}: `@oneOf` input type `{type_name}` requires exactly one field, \
+                         but {provided_count} were provided",
+                        fmt_path(path),
+                    )));
+                }
+                if let Some((field_name, field_value)) = obj.iter().next() {
+                    if field_value.is_null() {
+                        return Err(InvalidInputValue(format!(
+                            "invalid {}: `@oneOf` input type `{type_name}` field `{}` must be non-null",
+                            fmt_path(path),
+                            field_name.as_str(),
+                        )));
+                    }
+                }
+            }
+
             // Validate all fields present on def
             def.fields.values().try_for_each(|field| {
                 let path = JsonValuePath::ObjectKey {
