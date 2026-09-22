@@ -46,7 +46,19 @@ pub struct Subgraph {
 
 impl Subgraph {
     pub fn new(name: &str, url: &str, schema_str: &str) -> Result<Self, FederationError> {
-        let schema = Schema::parse(schema_str, name)?;
+        Self::new_with_options(name, url, schema_str, true)
+    }
+
+    pub fn new_with_options(
+        name: &str,
+        url: &str,
+        schema_str: &str,
+        validate_default_values: bool,
+    ) -> Result<Self, FederationError> {
+        let schema = Schema::builder()
+            .validate_default_values(validate_default_values)
+            .parse(schema_str, name)
+            .build()?;
         // TODO: federation-specific validation
         Ok(Self {
             name: name.to_string(),

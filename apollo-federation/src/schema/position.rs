@@ -8322,10 +8322,16 @@ mod tests {
 
         // All directives and fields should have source locations before removal.
         for d in &type_before.directives {
-            assert!(d.location().is_some(), "directive should have location before remove_extensions");
+            assert!(
+                d.location().is_some(),
+                "directive should have location before remove_extensions"
+            );
         }
         for (_, f) in &type_before.fields {
-            assert!(f.location().is_some(), "field should have location before remove_extensions");
+            assert!(
+                f.location().is_some(),
+                "field should have location before remove_extensions"
+            );
         }
 
         pos.remove_extensions(&mut schema).unwrap();
@@ -8334,18 +8340,30 @@ mod tests {
 
         // Locations must survive after clearing extension origins.
         for d in &type_after.directives {
-            assert!(d.location().is_some(), "directive lost its source location after remove_extensions");
+            assert!(
+                d.location().is_some(),
+                "directive lost its source location after remove_extensions"
+            );
         }
         for (_, f) in &type_after.fields {
-            assert!(f.location().is_some(), "field lost its source location after remove_extensions");
+            assert!(
+                f.location().is_some(),
+                "field lost its source location after remove_extensions"
+            );
         }
 
         // Extension IDs should be cleared.
         for d in &type_after.directives {
-            assert!(d.extension_id().is_none(), "directive should have no extension_id after remove_extensions");
+            assert!(
+                d.extension_id().is_none(),
+                "directive should have no extension_id after remove_extensions"
+            );
         }
         for (_, f) in &type_after.fields {
-            assert!(f.extension_id().is_none(), "field should have no extension_id after remove_extensions");
+            assert!(
+                f.extension_id().is_none(),
+                "field should have no extension_id after remove_extensions"
+            );
         }
     }
 }
