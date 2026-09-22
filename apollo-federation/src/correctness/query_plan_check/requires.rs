@@ -36,6 +36,7 @@ use apollo_compiler::executable::Selection;
 
 use super::ComparisonError;
 use super::selections::admitted_types;
+use super::selections::possible_types;
 use super::selections::under_directives;
 use super::selections::wrap_non_empty;
 use super::subgraph::Subgraph;
@@ -63,7 +64,7 @@ struct LevelEntry<'a> {
 
 fn level_entries<'a>(
     schema: &ValidFederationSchema,
-    guards: &[Name],
+    reached_at: &GroundTypes,
     field_set: &[&'a requires_selection::Selection],
     out: &mut Vec<LevelEntry<'a>>,
 ) {
@@ -71,19 +72,81 @@ fn level_entries<'a>(
         match selection {
             requires_selection::Selection::Field(field) => out.push(LevelEntry {
                 key: field.alias.clone().unwrap_or_else(|| field.name.clone()),
-                reached_at: admitted_types(schema, guards),
+                reached_at: reached_at.clone(),
                 selected: field.selections.iter().collect(),
             }),
             requires_selection::Selection::InlineFragment(fragment) => {
-                let mut guards = guards.to_vec();
+                let mut narrowed = reached_at.clone();
                 if let Some(type_condition) = &fragment.type_condition {
-                    guards.push(type_condition.clone());
+                    narrowed = intersect_types(
+                        narrowed,
+                        admitted_types(schema, std::slice::from_ref(type_condition)),
+                    );
                 }
                 let nested: Vec<&requires_selection::Selection> =
                     fragment.selections.iter().collect();
-                level_entries(schema, &guards, &nested, out);
+                level_entries(schema, &narrowed, &nested, out);
             }
         }
+    }
+}
+
+/// The intersection of two type conditions. `None` is unrestricted, and so is absorbed.
+fn intersect_types(left: GroundTypes, right: GroundTypes) -> GroundTypes {
+    match (left, right) {
+        (None, right) => right,
+        (left, None) => left,
+        (Some(left), Some(right)) => {
+            Some(left.into_iter().filter(|ty| right.contains(ty)).collect())
+        }
+    }
+}
+
+/// The object types the position under `key` reaches, given the types `key` itself is reached at.
+///
+/// A field's own type is what bounds its sub-selection, so a type condition written there that
+/// admits all of it narrows nothing. Without this the two sides are compared at different
+/// positions: an unrestricted sub-selection reads as wider than one under a condition that is
+/// vacuous where it sits. `None` — the position is unknown — keeps the older, unbounded reading.
+fn child_types(
+    schema: &ValidFederationSchema,
+    key: &Name,
+    reached_at: &GroundTypes,
+) -> GroundTypes {
+    let Some(parents) = reached_at else {
+        return None;
+    };
+    let mut child: Vec<Name> = Vec::new();
+    for parent in parents {
+        let Some(definition) = lookup_field(schema, parent, key) else {
+            // A key the schema does not place here bounds nothing.
+            return None;
+        };
+        for name in possible_types(schema, definition.ty.inner_named_type()) {
+            if !child.contains(&name) {
+                child.push(name);
+            }
+        }
+    }
+    child.sort();
+    Some(child)
+}
+
+/// A field definition on an object or interface type. `__typename` is selectable everywhere and
+/// declared nowhere; it is a leaf, so it never bounds a sub-selection.
+fn lookup_field<'a>(
+    schema: &'a ValidFederationSchema,
+    parent_type: &Name,
+    field_name: &Name,
+) -> Option<&'a apollo_compiler::ast::FieldDefinition> {
+    match schema.schema().types.get(parent_type)? {
+        apollo_compiler::schema::ExtendedType::Object(ty) => {
+            ty.fields.get(field_name).map(|field| &***field)
+        }
+        apollo_compiler::schema::ExtendedType::Interface(ty) => {
+            ty.fields.get(field_name).map(|field| &***field)
+        }
+        _ => None,
     }
 }
 
@@ -162,10 +225,21 @@ pub(super) fn condition_matches_requirement(
     requirement: &[&requires_selection::Selection],
     condition: &[&requires_selection::Selection],
 ) -> bool {
+    condition_matches_requirement_at(schema, &None, requirement, condition)
+}
+
+/// `condition_matches_requirement`, at a known position. `reached_at` is the object types the
+/// enclosing field can return, which is what a type condition written here is read against.
+fn condition_matches_requirement_at(
+    schema: &ValidFederationSchema,
+    reached_at: &GroundTypes,
+    requirement: &[&requires_selection::Selection],
+    condition: &[&requires_selection::Selection],
+) -> bool {
     let mut requirement_level = Vec::new();
-    level_entries(schema, &[], requirement, &mut requirement_level);
+    level_entries(schema, reached_at, requirement, &mut requirement_level);
     let mut condition_level = Vec::new();
-    level_entries(schema, &[], condition, &mut condition_level);
+    level_entries(schema, reached_at, condition, &mut condition_level);
 
     let mut keys = level_keys(&requirement_level);
     for key in level_keys(&condition_level) {
@@ -185,8 +259,16 @@ pub(super) fn condition_matches_requirement(
             )
             // Terminates because the merge is strictly smaller: the key was reached by one of
             // the two levels. This is what the model needs fuel for.
-            && condition_matches_requirement(
+            && condition_matches_requirement_at(
                 schema,
+                &child_types(
+                    schema,
+                    key,
+                    &union_types(
+                        reached_types(key, &requirement_level),
+                        reached_types(key, &condition_level),
+                    ),
+                ),
                 &selected_under(key, &requirement_level),
                 &selected_under(key, &condition_level),
             )
