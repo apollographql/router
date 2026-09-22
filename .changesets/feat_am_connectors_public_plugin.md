@@ -25,13 +25,13 @@ On the request:
 On the response:
 
 - `Response.context` is readable and writable.
-- `Response.transport_result` exposes the raw transport outcome: status, headers, and transport-level errors.
+- `Response.transport_outcome` exposes the raw transport outcome, naming each state it can be in: `Response` (the call was made over HTTP and the upstream responded — the only state carrying a status and headers), `MappingOnly` (a mapping-only connector, which has no transport at all), `Error` (the call was attempted and failed at the transport level), or `ServedFromCache` (no call was made — the response came from the router's response cache).
 - `Response::data()` / `set_data()` and `Response::error()` / `set_error_message()` / `set_error_code()` read and change what is returned to the client.
 
 Two things are worth knowing when moving a customization between a coprocessor and a plugin:
 
 - The coprocessor `ConnectorRequest` stage cannot change the HTTP method; a plugin can.
-- Changing `Response.transport_result` does not recompute the mapped response, so telemetry will report the transport outcome you set while the client receives the unchanged mapped data. Change both, or neither.
+- Changing `Response.transport_outcome` does not recompute the mapped response, so telemetry will report the transport outcome you set while the client receives the unchanged mapped data. Change both, or neither.
 
 The coprocessor `ConnectorRequest` and `ConnectorResponse` stages already covered this, and still do. The difference is that this runs in process, without a round trip per connector request.
 

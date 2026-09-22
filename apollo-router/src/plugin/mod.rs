@@ -504,9 +504,9 @@ pub trait PluginUnstable: Send + Sync + 'static {
     ///   `Control::Break`.
     ///
     /// On the response, a plugin can read and write [`Response::context`], read and
-    /// rewrite the raw transport outcome through [`Response::transport_result`], and
+    /// rewrite the raw transport outcome through [`Response::transport_outcome`], and
     /// read or replace what is returned to the client through [`Response::data`],
-    /// [`Response::error`] and their setters. Rewriting `transport_result` does not
+    /// [`Response::error`] and their setters. Rewriting `transport_outcome` does not
     /// recompute the mapped response, so changing one without the other makes
     /// telemetry disagree with what the client receives.
     ///
@@ -515,7 +515,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// [`Request::context`]: crate::services::connector::request_service::Request::context
     /// [`Request::into_error_response`]: crate::services::connector::request_service::Request::into_error_response
     /// [`Response::context`]: crate::services::connector::request_service::Response::context
-    /// [`Response::transport_result`]: crate::services::connector::request_service::Response::transport_result
+    /// [`Response::transport_outcome`]: crate::services::connector::request_service::Response::transport_outcome
     /// [`Response::data`]: crate::services::connector::request_service::Response::data
     /// [`Response::error`]: crate::services::connector::request_service::Response::error
     fn connector_request_service(

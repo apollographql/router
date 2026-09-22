@@ -2716,7 +2716,6 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -2759,6 +2758,7 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
@@ -3450,11 +3450,11 @@ mod tests {
                                     let response = Response {
                                         context: context.clone(),
                                         subgraph_name: String::new(),
-                                        transport_result: Some(Ok(TransportResponse::Http(
+                                        transport_outcome: TransportOutcome::Response(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
                                             },
-                                        ))),
+                                        ),
                                         mapped_response: MappedResponse::Data {
                                             data: json!({})
                                                 .try_into()

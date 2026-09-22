@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -31,10 +30,13 @@ use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
+use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::services::PipelineStep;
 use crate::services::connector::request_service;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::externalize_header_map;
@@ -424,6 +426,69 @@ where
     Ok(ControlFlow::Continue(request))
 }
 
+/// Whether this operand cannot be resolved for a response served from the cache.
+///
+/// Only a selector that reads the transport response is affected, and only when it actually
+/// yields nothing: a `connector_http_response_header` with a configured `default` still
+/// resolves on a cache hit, so it stays decidable.
+fn operand_is_inconclusive(
+    operand: &SelectorOrValue<ConnectorSelector>,
+    response: &request_service::Response,
+) -> bool {
+    matches!(
+        operand,
+        SelectorOrValue::Selector(selector)
+            if selector.reads_transport_response() && selector.on_response(response).is_none()
+    )
+}
+
+/// Evaluate a connector response-stage condition against a response served from the cache.
+///
+/// Returns `None` when the condition cannot be decided because it rests on the transport
+/// response that a cache hit does not have. Those atoms are inconclusive rather than false:
+/// they neither trigger nor veto the stage, while every other atom still gates normally. The
+/// combinators follow three-valued logic — a definite `false` in an `all` still wins over an
+/// inconclusive sibling, and a definite `true` in an `any` still wins.
+fn evaluate_condition_on_cache_hit(
+    condition: &Condition<ConnectorSelector>,
+    response: &request_service::Response,
+) -> Option<bool> {
+    match condition {
+        Condition::Eq(operands) | Condition::Gt(operands) | Condition::Lt(operands) => operands
+            .iter()
+            .all(|operand| !operand_is_inconclusive(operand, response))
+            .then(|| condition.evaluate_response(response)),
+        Condition::Exists(selector) => (!selector.reads_transport_response()
+            || selector.on_response(response).is_some())
+        .then(|| selector.on_response(response).is_some()),
+        Condition::All(conditions) => {
+            let mut inconclusive = false;
+            for condition in conditions {
+                match evaluate_condition_on_cache_hit(condition, response) {
+                    Some(false) => return Some(false),
+                    None => inconclusive = true,
+                    Some(true) => {}
+                }
+            }
+            (!inconclusive).then_some(true)
+        }
+        Condition::Any(conditions) => {
+            let mut inconclusive = false;
+            for condition in conditions {
+                match evaluate_condition_on_cache_hit(condition, response) {
+                    Some(true) => return Some(true),
+                    None => inconclusive = true,
+                    Some(false) => {}
+                }
+            }
+            (!inconclusive).then_some(false)
+        }
+        Condition::Not(inner) => evaluate_condition_on_cache_hit(inner, response).map(|it| !it),
+        Condition::True => Some(true),
+        Condition::False => Some(false),
+    }
+}
+
 /// This function receives a mutable `executed` flag so the caller can know
 /// whether this stage actually ran before an early return or error. This is
 /// required because metric recording happens outside this function.
@@ -450,18 +515,26 @@ where
         + 'static,
     <C as tower::Service<HttpRequest>>::Future: Send + 'static,
 {
-    // `None` means no HTTP call was made because the response came out of the router's response
-    // cache. A cache hit has no status or headers, so any condition built on transport selectors
-    // (status/headers) would evaluate false and skip the stage. Cache hits must still reach the
-    // coprocessor — the payload says so explicitly via `cacheHit: true` rather than looking like a
-    // transport failure — so the condition only gates the stage when an HTTP call actually happened.
-    let served_from_cache = response.transport_result.is_none();
-    if !served_from_cache && !response_config.condition.evaluate_response(&response) {
+    // `TransportOutcome::ServedFromCache` means no HTTP call was made because the response came
+    // out of the router's response cache. A cache hit has no status or headers, so a condition
+    // built on transport selectors cannot be decided for it — but the rest of the condition still
+    // can, and must still gate the stage. Deciding the whole condition false would skip the stage
+    // on every hit and silence the `cacheHit: true` payload; ignoring the condition outright would
+    // stop `connector_response_mapping_problems`, `connector_on_response_error` and `context_id`
+    // from gating at all. So transport-derived atoms are inconclusive, and an undecidable
+    // condition runs the stage.
+    let served_from_cache = response.transport_outcome.served_from_cache();
+    let condition_matches = if served_from_cache {
+        evaluate_condition_on_cache_hit(&response_config.condition, &response).unwrap_or(true)
+    } else {
+        response_config.condition.evaluate_response(&response)
+    };
+    if !condition_matches {
         return Ok(response);
     }
 
-    let (headers_to_send, status_to_send) = match &response.transport_result {
-        Some(Ok(TransportResponse::Http(http_response))) => {
+    let (headers_to_send, status_to_send) = match &response.transport_outcome {
+        TransportOutcome::Response(http_response) => {
             let headers = response_config
                 .headers
                 .then(|| externalize_header_map(&http_response.inner.headers));
@@ -484,7 +557,9 @@ where
                 .then(|| http_response.inner.status.as_u16());
             (headers, status)
         }
-        None | Some(Ok(TransportResponse::MappingOnly)) | Some(Err(_)) => (None, None),
+        TransportOutcome::ServedFromCache
+        | TransportOutcome::MappingOnly
+        | TransportOutcome::Error(_) => (None, None),
     };
 
     // Extract body from mapped response
@@ -552,14 +627,13 @@ where
     if let Some(control) = co_processor_output.control {
         let new_status = control.get_http_status()?;
         // Update the transport result status if it was successful
-        if let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
-        {
+        if let TransportOutcome::Response(ref mut http_response) = response.transport_outcome {
             http_response.inner.status = new_status;
         }
     }
 
     if let Some(headers) = co_processor_output.headers
-        && let Some(Ok(TransportResponse::Http(ref mut http_response))) = response.transport_result
+        && let TransportOutcome::Response(ref mut http_response) = response.transport_outcome
     {
         http_response.inner.headers = internalize_header_map(headers)?;
     }
@@ -666,6 +740,7 @@ mod tests {
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router::body;
     use crate::services::router::body::RouterBody;
 
@@ -745,7 +820,7 @@ mod tests {
             serde_json_bytes::json!({}),
             None,
         );
-        response.transport_result = None;
+        response.transport_outcome = TransportOutcome::ServedFromCache;
 
         let response_config = ConnectorResponseConf {
             condition: status_eq_599(),
@@ -813,6 +888,98 @@ mod tests {
         assert!(
             !executed,
             "connector_response stage must be skipped when a transport condition is unmatched on a real HTTP response"
+        );
+    }
+
+    // A condition the router *can* decide for a cached response: `mapped_response` is replayed on
+    // a hit, so `connector_on_response_error` still yields a value.
+    fn on_response_error_eq(expected: bool) -> Condition<ConnectorSelector> {
+        Condition::Eq([
+            SelectorOrValue::Selector(ConnectorSelector::OnResponseError {
+                connector_on_response_error: true,
+            }),
+            SelectorOrValue::Value(AttributeValue::Bool(expected)),
+        ])
+    }
+
+    #[tokio::test]
+    async fn connector_response_stage_still_gated_by_decidable_condition_on_cache_hit() {
+        // The cache-hit bypass must not ignore the condition wholesale: a condition built on a
+        // selector that a cached response *can* answer still gates the stage. Here the cached
+        // response carries data rather than an error, so `on_response_error == true` is false.
+        let context = Context::new();
+        let mut response = request_service::Response::test_new(
+            context.clone(),
+            root_field_key(),
+            vec![],
+            serde_json_bytes::json!({}),
+            None,
+        );
+        response.transport_outcome = TransportOutcome::ServedFromCache;
+
+        let response_config = ConnectorResponseConf {
+            condition: on_response_error_eq(true),
+            status_code: true,
+            ..Default::default()
+        };
+
+        let mut executed = false;
+        let result = process_connector_response_stage(
+            mock_coprocessor(echo_and_assert_cache_hit),
+            "http://test".to_string(),
+            "test_service".to_string(),
+            response,
+            response_config,
+            context,
+            &mut executed,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "skipped stage should not error: {result:?}");
+        assert!(
+            !executed,
+            "a condition the cached response can answer must still gate the stage"
+        );
+    }
+
+    #[tokio::test]
+    async fn connector_response_stage_definite_false_beats_inconclusive_on_cache_hit() {
+        // `all` of an inconclusive transport atom and a decidable atom that is false: the
+        // definite false wins, so the stage is skipped rather than run.
+        let context = Context::new();
+        let mut response = request_service::Response::test_new(
+            context.clone(),
+            root_field_key(),
+            vec![],
+            serde_json_bytes::json!({}),
+            None,
+        );
+        response.transport_outcome = TransportOutcome::ServedFromCache;
+
+        let response_config = ConnectorResponseConf {
+            condition: Condition::All(vec![status_eq_599(), on_response_error_eq(true)]),
+            status_code: true,
+            ..Default::default()
+        };
+
+        let mut executed = false;
+        let result = process_connector_response_stage(
+            mock_coprocessor(echo_and_assert_cache_hit),
+            "http://test".to_string(),
+            "test_service".to_string(),
+            response,
+            response_config,
+            context,
+            &mut executed,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok(), "skipped stage should not error: {result:?}");
+        assert!(
+            !executed,
+            "a decidable false atom must outweigh an inconclusive transport atom on a cache hit"
         );
     }
 }
