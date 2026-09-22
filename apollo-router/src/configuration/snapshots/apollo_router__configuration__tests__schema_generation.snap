@@ -6321,10 +6321,32 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for the incremental (BULB) query planner.",
       "properties": {
+        "beam_width": {
+          "default": 16,
+          "description": "Beam width: how many states advance together per depth in the beam.\nWider beams capture more diversity, reducing expensive backtracking.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "enabled": {
           "default": false,
           "description": "Whether the incremental planner is enabled. When enabled, deferred\noperations still fall back to the default planner.",
           "type": "boolean"
+        },
+        "fuel": {
+          "default": 5000,
+          "description": "Cap on optimization effort beyond the first draft of the plan, measured in\npending-selection visits. `fuel: 0` returns the first complete plan found.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": null,
+          "description": "Optional wall-clock time limit for the search. When set, the search\nreturns the best complete plan found so far once the limit is reached.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8218,7 +8240,10 @@ expression: "&schema"
             }
           ],
           "default": {
-            "enabled": false
+            "beam_width": 16,
+            "enabled": false,
+            "fuel": 5000,
+            "timeout": null
           },
           "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates. Deferred operations fall\nback to the default planner."
         },
@@ -11674,7 +11699,10 @@ expression: "&schema"
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
             "incremental_planner": {
-              "enabled": false
+              "beam_width": 16,
+              "enabled": false,
+              "fuel": 5000,
+              "timeout": null
             },
             "warmed_up_queries": null
           },
@@ -13282,7 +13310,10 @@ expression: "&schema"
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
           "incremental_planner": {
-            "enabled": false
+            "beam_width": 16,
+            "enabled": false,
+            "fuel": 5000,
+            "timeout": null
           },
           "warmed_up_queries": null
         },

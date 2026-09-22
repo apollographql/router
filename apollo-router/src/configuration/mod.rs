@@ -463,7 +463,13 @@ impl Configuration {
             incremental_planner:
                 apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
                     enabled: self.supergraph.query_planning.incremental_planner.enabled,
-                    ..Default::default()
+                    beam_width: self
+                        .supergraph
+                        .query_planning
+                        .incremental_planner
+                        .beam_width,
+                    fuel: self.supergraph.query_planning.incremental_planner.fuel,
+                    timeout: self.supergraph.query_planning.incremental_planner.timeout,
                 },
         }
     }
@@ -1024,12 +1030,30 @@ pub(crate) struct IncrementalPlanner {
     /// Whether the incremental planner is enabled. When enabled, deferred
     /// operations still fall back to the default planner.
     pub(crate) enabled: bool,
+
+    /// Beam width: how many states advance together per depth in the beam.
+    /// Wider beams capture more diversity, reducing expensive backtracking.
+    pub(crate) beam_width: usize,
+
+    /// Cap on optimization effort beyond the first draft of the plan, measured in
+    /// pending-selection visits. `fuel: 0` returns the first complete plan found.
+    pub(crate) fuel: u64,
+
+    /// Optional wall-clock time limit for the search. When set, the search
+    /// returns the best complete plan found so far once the limit is reached.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) timeout: Option<Duration>,
 }
 
-#[allow(clippy::derivable_impls)] // later branches add fields with non-zero defaults
 impl Default for IncrementalPlanner {
     fn default() -> Self {
-        Self { enabled: false }
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+            timeout: None,
+        }
     }
 }
 

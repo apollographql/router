@@ -2,3 +2,6 @@ supergraph:
   query_planning:
     incremental_planner:
       enabled: true
+      beam_width: 32
+      fuel: 10000
+      timeout: 5s
