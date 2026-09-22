@@ -1,4 +1,4 @@
-### Fix connector mappings silently misreading names that begin with a keyword or a number ([PR #PULL_NUMBER](https://github.com/apollographql/router/pull/PULL_NUMBER))
+### Fix connector mappings silently misreading names that begin with a keyword or a number ([PR #10260](https://github.com/apollographql/router/pull/10260))
 
 `JSONSelection` could stop reading a name part of the way through and treat the remainder as a separate selection. Two forms of this existed, both with the same cause and the same worst case.
 
@@ -12,4 +12,4 @@ Both keywords and numeric literals now stop at a boundary: a keyword is a litera
 
 Separately, a selection list no longer accepts two items that abut with an identifier character on each side and nothing between them, since that can only arise from a name the parser stopped reading early. Input like `alias: 1b: 2`, which previously parsed as two selections, is now reported as an error. Whitespace-free input remains valid wherever the items are genuinely distinct tokens, so `{a{x}b}` still parses.
 
-By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10260
