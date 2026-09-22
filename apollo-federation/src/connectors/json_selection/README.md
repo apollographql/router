@@ -116,7 +116,8 @@ LitExpr              ::= LitOpChain | LitPath | LitPrimitive | LitObject | LitAr
 LitOpChain           ::= LitExpr (LitOp LitExpr)+
 LitOp                ::= "??" | "?!"
 LitPath              ::= (LitPrimitive | LitObject | LitArray) NonEmptyPathTail
-LitPrimitive         ::= LitString | LitNumber | "true" | "false" | "null"
+LitPrimitive         ::= LitString | LitNumber | LitKeyword
+LitKeyword           ::= "true" | "false" | "null"
 LitString            ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'
 LitNumber            ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
 LitObject            ::= SubSelection
@@ -126,6 +127,29 @@ SpacesOrComments     ::= (Spaces | Comment)+
 Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
+
+### Lexical conventions
+
+Two rules apply throughout the grammar and are not repeated in each
+production.
+
+**Whitespace and comments may appear between tokens.** `SpacesOrComments`
+is permitted wherever one token ends and the next begins, which is why it
+appears in almost no production explicitly. Where it is *not* permitted,
+`NO_SPACE` says so: `Identifier` uses it to keep a name from containing a
+space, and `VarPath` uses it to keep `$ args` from reading as `$args`.
+
+**Terminals are longest-match.** At any position a terminal matches only if no
+longer token could match there. This is what keeps the word-shaped terminals
+`true`, `false`, and `null` from matching inside a longer name: `nullField`
+is one `Identifier`, so `LitKeyword` does not match its first four
+characters. The rule holds for any word-shaped terminal added later, which is
+why `LitKeyword` needs no lookahead written into it.
+
+`LitNumber` states an exception to the second rule; see its section below.
+And because the longest-match rule constrains individual tokens rather
+than sequences of them, `NamedSelectionList` carries a related constraint of
+its own, described in its section.
 
 The grammar above describes `connect/v0.4` and later. Earlier spec versions
 used a stricter grammar in which `LitObject` was a distinct rule from
@@ -306,6 +330,25 @@ whitespace-only separation — the two styles cannot be mixed within a
 single list. This rule is shared by the top-level `JSONSelection` and
 by `SubSelection` bodies, so braced and unbraced selection lists accept
 exactly the same separator conventions.
+
+One constraint on this rule is not expressible in the EBNF above, because
+it is about the absence of a token rather than the presence of one:
+**two whitespace-separated items may not abut with an identifier character
+on each side of the seam.** In a whitespace-separated list the separator can
+be empty, so without this rule a `NamedSelection` that stops part of the way
+through a name is not reported as an error at all: the leftover characters
+are simply read as the next item. That is how `alias: nullFoo` once became
+`alias: null Foo`, two selections where the author wrote one, silently and
+with a null in place of the value they asked for.
+
+The rule is the longest-match principle applied to a sequence of items
+rather than to a single token, and it costs nothing in
+legitimate input: for two items to abut this way the first would have to end
+in an identifier character and the second begin with one, which is just a
+longer identifier. Seams following a self-delimiting token are untouched, so
+minified input such as `{a{x}b}` parses as it always did. Its purpose is that
+any future prefix ambiguity the lookaheads miss surfaces as a diagnosable
+error instead of a wrong answer.
 
 ### `SubSelection ::= "{" NamedSelectionList "}"`
 
@@ -1171,13 +1214,38 @@ This rule and the JSON-superset property are independent: the
 JSON (JSON requires `:` or `,` between values), so JSON-shaped input
 pasted into a `LitExpr` context never triggers it.
 
-### `LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"`
+### `LitPrimitive ::= LitString | LitNumber | LitKeyword`
 
 ![LitPrimitive](./grammar/LitPrimitive.svg)
 
-Analogous to a JSON primitive value, with the only differences being that
-`LitNumber` does not currently support the exponential syntax, and `LitString`
-values can be single-quoted as well as double-quoted.
+Analogous to a JSON primitive value, with four differences: `LitNumber` does
+not currently support the exponential syntax, `LitString` values can be
+single-quoted as well as double-quoted, and `LitNumber` accepts two spellings
+JSON does not, a trailing `.` with no fractional digits (`123.`) and a leading
+`.` with no integer part (`.5`). Both of the latter come from JavaScript
+rather than JSON, and the trailing form is discussed under `LitNumber` below,
+since it is the reason that rule needs an exception to the longest-match
+rule.
+
+### `LitKeyword ::= "true" | "false" | "null"`
+
+![LitKeyword](./grammar/LitKeyword.svg)
+
+The three word-shaped literals, grouped under one name because they are the
+only terminals in the grammar that are shaped like an `Identifier` and so the
+only ones the longest-match rule has real work to do on.
+
+That convention is doing the work here, which is why nothing in this
+production mentions boundaries. `nullField` and `falsePositives` (both
+perfectly ordinary names in a REST payload) are single `Identifier`s, so
+`LitKeyword` does not match their first few characters. `null` and `null.foo`
+are literals; `nullField` is a `Key`.
+
+Note that the keywords are *not* reserved words. `null`, `true`, and `false`
+are all valid `Identifier`s elsewhere, including as `Key`s: `null { x }`
+selects a field actually named `null` (see "Literals followed by a
+SubSelection" above), and `$.null` is the unambiguous way to write it in a
+`LitExpr` context.
 
 ### `LitString ::= "'" ("\\'" | [^'])* "'" | '"' ('\\"' | [^"])* '"'`
 
@@ -1207,6 +1275,31 @@ present, and the fractional component can have zero digits when the integer
 component is present (as in `-123.`), but the fractional component must have at
 least one digit when there is no integer component, since `.` is not a valid
 numeric literal by itself.
+
+**This rule is the one exception to the longest-match rule**, and
+the exception is deliberate rather than an oversight, so it is worth spelling
+out.
+
+Allowing a fractional component with no digits puts `LitNumber` in direct
+competition with `PathStep ::= "." Key`, because `LitPath` permits a path
+rooted at a number. In `1.foo` the longest number is `1.`, so a strict
+longest-match reading takes it and leaves `foo` stranded with nowhere to
+attach. That is not a hypothetical failure mode: it is precisely why
+JavaScript rejects `1.toString()` and why people there write `1..toString()`
+instead.
+
+We resolve it the other way. Where the `.` is followed by something that
+could begin a `Key`, it belongs to the `PathStep` and the number ends before
+it. So `1.` and `1.->add(2)` are numbers, while `1.foo` and `1."quoted"` are
+paths rooted at `1`. Note that `1.5.foo` never depended on this, since by the
+second `.` the number is already complete.
+
+The EBNF above is left deliberately loose here. Writing the condition into
+the production would take a lookahead over the characters a `Key` may start
+with, which reads as though it followed from a principle when it is really a
+judgment call about which of two valid readings we prefer. The parser
+implements the rule described in this paragraph; the grammar records the
+shape.
 
 ### `LitObject ::= SubSelection`
 
