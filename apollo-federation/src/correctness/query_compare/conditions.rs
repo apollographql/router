@@ -462,6 +462,33 @@ pub(crate) fn of_selection_set<'doc>(
     Ok(out)
 }
 
+/// `of_type_region`, for contributions that each arrive under a Boolean condition.
+///
+/// Seeding the boundary's starting condition is what lets an occurrence's guard be re-derived one
+/// boundary down instead of being decided where the occurrence sits; see
+/// `group_symbolically_includes`. A child guard contradicting the seed drops out here, exactly as
+/// the assignment search would have found it inactive.
+///
+/// This is the model's `SelectionConditions.ofTypeRegionUnder`. The seed is the boundary's
+/// starting condition, not the separate `inheritedBooleanCondition` that `extractFields` threads
+/// for branch satisfiability, which this port does not model.
+pub(crate) fn of_type_region_under<'doc>(
+    schema: &SchemaView<'_>,
+    fragments: &'doc FragmentMap,
+    region: &[Name],
+    contributions: &[(BooleanCondition, Vec<&'doc Selection>)],
+) -> Result<Vec<ConditionedField<'doc>>, ComparisonError> {
+    let mut out = Vec::new();
+    for (inherited, selections) in contributions {
+        let root = Condition {
+            possible_types: region.to_vec(),
+            boolean_condition: inherited.clone(),
+        };
+        extract_fields(schema, fragments, &root, selections, &mut out)?;
+    }
+    Ok(out)
+}
+
 /// Extracts a boundary whose root is an exact set of possible object types rather than the
 /// possible types of one named interface or union. This is what keeps a covariant field return
 /// from being widened back to every implementation of its declared interface.

@@ -34,6 +34,14 @@ path = "runners/metamorphic.rs"
 name = "boolean_case_split_cost"
 path = "runners/boolean_case_split_cost.rs"
 
+# Symbols in release, so a profiler attached to `check_bench` resolves frames.
+[profile.release]
+debug = true
+
+[[example]]
+name = "check_bench"
+path = "runners/check_bench.rs"
+
 [[example]]
 name = "plan_differential"
 path = "runners/plan_differential.rs"

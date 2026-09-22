@@ -168,6 +168,132 @@ fn conditional_left_does_not_cover_unconditional_right() {
     );
 }
 
+// The three cases `Tests/GraphQL/Theories/QueryInclusion.lean` added for the model's
+// `guardedFieldGroupSymbolicallyIncludesWithFuel`, transcribed onto this schema. The model states
+// them over the rule directly; here they go through `includes`, which reaches the same rule.
+
+// `guardedFieldGroup_symbolicIndependentChildrenSmoke`: two independent guards share a parent
+// response name but belong to different child response names.
+#[test]
+fn independent_guards_sharing_a_parent_response_name() {
+    let query = r#"query($leftBranch: Boolean!, $rightBranch: Boolean!) {
+        test_i @include(if: $leftBranch) { left_name: id }
+        test_i @include(if: $rightBranch) { right_name: id }
+    }"#;
+    check(query, query).unwrap();
+}
+
+// `guardedFieldGroup_symbolicRejectsGuardedCoverageGapSmoke`: a conditional occurrence cannot
+// cover an unconditional one, so the witness declines and the fallback reaches the rejection.
+#[test]
+fn guarded_parent_does_not_cover_unconditional_parent() {
+    insta::assert_snapshot!(
+        error(
+            r#"query($leftBranch: Boolean!) { test_i @include(if: $leftBranch) { id } }"#,
+            r#"{ test_i { id } }"#,
+        ),
+        @r###"
+    left does not include right
+      in response name: test_i
+      assuming: ¬$leftBranch
+      over runtime types: {Query}
+      --> left does not select `test_i` on Query
+    "###
+    );
+}
+
+// `guardedFieldGroup_symbolicDropsContradictoryChildSmoke`: the right child's `@skip` contradicts
+// the parent occurrence's `@include`, so that contribution is unreachable and needs no cover.
+#[test]
+fn contradictory_right_child_needs_no_cover() {
+    check(
+        r#"query($leftBranch: Boolean!) {
+            test_i @include(if: $leftBranch) { id }
+        }"#,
+        r#"query($leftBranch: Boolean!) {
+            test_i @include(if: $leftBranch) {
+                id
+                impossible: id @skip(if: $leftBranch)
+            }
+        }"#,
+    )
+    .unwrap();
+}
+
+// The shape `group_symbolically_includes` exists for: one composite response name carrying
+// several guarded occurrences, whose children are guarded independently of each other. The rule
+// carries each occurrence's guard into the child boundary, so `$v0` and `$v1` are decided where
+// they are read instead of being multiplied out here.
+#[test]
+fn guarded_occurrences_merge_into_the_child_boundary() {
+    check(
+        r#"query($v0: Boolean!, $v1: Boolean!) {
+            test_i { id }
+            test_i @include(if: $v0) { data(arg: 1) }
+            test_i @include(if: $v1) { r_or_s: __typename }
+        }"#,
+        r#"query($v0: Boolean!, $v1: Boolean!) {
+            test_i {
+                id
+                data(arg: 1) @include(if: $v0)
+                r_or_s: __typename @include(if: $v1)
+            }
+        }"#,
+    )
+    .unwrap();
+}
+
+// The same shape, with the right side asking unconditionally for what the left only fetches under
+// `$v0`. Carrying the guard down must not lose it.
+#[test]
+fn guarded_left_occurrence_does_not_cover_unconditional_child() {
+    insta::assert_snapshot!(
+        error(
+            r#"query($v0: Boolean!) {
+                test_i { id }
+                test_i @include(if: $v0) { data(arg: 1) }
+            }"#,
+            r#"{ test_i { id data(arg: 1) } }"#,
+        ),
+        @r###"
+    left does not include right
+      in response name: test_i
+      assuming: ¬$v0
+      over runtime types: {Query}
+      in sub-selection of: test_i -> {R, S}
+      in response name: data
+      over runtime types: {R, S}
+      --> left does not select `data` on R
+    "###
+    );
+}
+
+// A child guard contradicting the occupancy it is carried under makes that child unreachable, so
+// it covers nothing. Seeding the child boundary has to reach the same conclusion the assignment
+// search does by finding the occurrence inactive.
+#[test]
+fn child_guard_contradicting_its_occurrence_covers_nothing() {
+    insta::assert_snapshot!(
+        error(
+            r#"query($v0: Boolean!) {
+                test_i { id }
+                test_i @include(if: $v0) { data(arg: 1) @skip(if: $v0) }
+            }"#,
+            r#"query($v0: Boolean!) { test_i { id data(arg: 1) @include(if: $v0) } }"#,
+        ),
+        @r###"
+    left does not include right
+      in response name: test_i
+      assuming: $v0
+      over runtime types: {Query}
+      in sub-selection of: test_i -> {R, S}
+      in response name: data
+      over runtime types: {R, S}
+      --> left does not select `data` on R
+    "###
+    );
+}
+
 // The left covers `test_i` under every assignment at the top level, but `data` is only selected
 // when `$v0` holds. The per-assignment split has to catch the nested gap.
 #[test]

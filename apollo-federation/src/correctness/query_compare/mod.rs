@@ -17,10 +17,12 @@
 //! 4. recurses into the merged sub-selection of a composite field, over the field's *exact*
 //!    return region rather than its declared interface.
 //!
-//! Two shortcuts bypass the search when a cheaper witness exists: a symbolic clause-subtraction
-//! check for scalar fields, and a syntactic inclusion check for one-to-one composite fields.
-//! Both are also present in the Lean source and are ported rather than simplified away, since a
-//! divergence in either direction would be a divergence from the model.
+//! Three witnesses bypass the search when a cheaper proof exists: a symbolic clause-subtraction
+//! check for scalar fields, a syntactic inclusion check for one-to-one composite fields, and a
+//! recursive symbolic check that carries each occurrence's guard into the child boundary instead
+//! of case-splitting on it here. All three are present in the Lean source and are ported rather
+//! than simplified away, since a divergence in either direction would be a divergence from the
+//! model. Each is a witness only: declining one costs nothing but the general search.
 //!
 //! Scope: the model gives semantics to `@skip` and `@include` only. Any other directive is carried
 //! as part of a field's resolver call and compared, but is otherwise uninterpreted, so two fields
@@ -45,6 +47,17 @@
 //!
 //! **Specialized inherited condition.** `extractFields` threads an `inheritedBooleanCondition`
 //! that both entry points pass as empty; see `conditions.rs`.
+//!
+//! **When the symbolic witness is attempted.** The model tries
+//! `guardedFieldGroupSymbolicallyIncludesWithFuel` for any group that mentions a Boolean variable
+//! at all; `group_symbolically_includes` is tried only when some such variable is still unbound,
+//! since with all of them bound the general search does no splitting and keeps its own shortcuts.
+//! That is strictly fewer attempts, and a witness not attempted decides nothing.
+//!
+//! **Region representative in the symbolic witness.** The model's rule runs over every runtime
+//! type of a region; this port takes the region's first, as both do in the general search. A
+//! region is refined until every one of its types satisfies the same conditions, and the runtime
+//! type feeds nothing but the entry filter, so the two agree.
 //!
 //! **Canonical region order.** `getPossibleTypes` returns schema declaration order; this port
 //! sorts by name. Regions are sets, so the verdict is unaffected, and sorting makes the
@@ -74,6 +87,7 @@ use self::conditions::boolean_condition_covered_by;
 use self::conditions::fragment_view;
 use self::conditions::of_selection_set;
 use self::conditions::of_type_region;
+use self::conditions::of_type_region_under;
 pub use self::error::ComparisonError;
 pub use self::error::Mismatch;
 pub use self::error::PathSegment;
@@ -626,6 +640,24 @@ fn guarded_field_groups_include<T: PathConstraint>(
             continue;
         }
         let variables = guarded_field_group_boolean_variables(left, right);
+        // Only worth attempting where the search would actually branch; with every variable
+        // already bound the enumeration below does no splitting and keeps its own shortcuts.
+        let would_split = variables
+            .iter()
+            .any(|variable| assignment.get(variable).is_none());
+        if would_split
+            && group_symbolically_includes(
+                schema,
+                constraint,
+                fixed_parent_type,
+                assignment,
+                left,
+                right,
+                &regions,
+            )
+        {
+            continue;
+        }
         group_includes_under_assignments(
             schema,
             constraint,
@@ -643,6 +675,151 @@ fn guarded_field_groups_include<T: PathConstraint>(
         })?;
     }
     Ok(())
+}
+
+//==================================================================================================
+// Symbolic descent
+//
+// The enumeration below binds every variable a response name mentions before it looks at the
+// sub-selection, so two guarded subtrees that share nothing but a parent still cost the product
+// of their assignments. Deciding the guard symbolically and re-deriving it one boundary down
+// turns that product back into a sum, which is the difference between 2^13 and 2^7 + 2^6 on a
+// query whose root field carries every fetch of the plan.
+
+/// Decides one response name without case-splitting, by carrying each occurrence's Boolean
+/// condition into the child comparison instead of binding it here.
+///
+/// Applicable at a runtime type when every occurrence of the response name, on both sides, makes
+/// the same resolver call, and the left side's clauses cover each right clause — the same two
+/// facts `scalar_field_includes` establishes, decided the same symbolic way, but now also usable
+/// for a composite field because the child comparison re-derives the guards it needs. A variable
+/// is then split only at the depth that reads it.
+///
+/// Returns whether inclusion was *proved*. A `false` is "no proof by this route" and never a
+/// verdict: the caller runs the general search, which owns both the answer and its explanation.
+#[allow(clippy::too_many_arguments)]
+fn group_symbolically_includes<T: PathConstraint>(
+    schema: &SchemaView<'_>,
+    constraint: &T,
+    fixed_parent_type: Option<&Name>,
+    assignment: &Assignment,
+    left: &GuardedFieldGroup<'_>,
+    right: &GuardedFieldGroup<'_>,
+    regions: &[Vec<Name>],
+) -> bool {
+    if left.response_name != right.response_name {
+        return false;
+    }
+    for region in regions {
+        // Every type in a region satisfies the same conditions, so the first one stands for all.
+        let Some(runtime_type) = region.first() else {
+            continue;
+        };
+        let left_entries = entries_at_runtime_type(left, runtime_type);
+        let right_entries = entries_at_runtime_type(right, runtime_type);
+        let Some(right_head) = right_entries.first() else {
+            continue; // the right side never produces this response name here
+        };
+
+        // One resolver call across the whole slice, so that whichever occurrences an assignment
+        // makes active, they agree on the call and on what the child boundary is.
+        let same_call =
+            |entry: &&ConditionedField<'_>| same_resolver_call(entry.field, right_head.field);
+        if !left_entries.iter().all(same_call) || !right_entries.iter().all(same_call) {
+            return false;
+        }
+
+        // Some left occurrence is active whenever a right one is.
+        let left_clauses: Vec<BooleanCondition> = left_entries
+            .iter()
+            .map(|entry| entry.condition.boolean_condition.clone())
+            .collect();
+        if !right_entries.iter().all(|entry| {
+            boolean_condition_covered_by(&entry.condition.boolean_condition, &left_clauses)
+        }) {
+            return false;
+        }
+
+        let left_fields: Vec<&Field> = left_entries.iter().map(|entry| entry.field).collect();
+        let right_fields: Vec<&Field> = right_entries.iter().map(|entry| entry.field).collect();
+        let parent_types: Vec<Name> = match fixed_parent_type {
+            Some(parent_type) => vec![parent_type.clone()],
+            None => region.clone(),
+        };
+        // The model asks for a composite field here and declines otherwise, leaving a scalar one
+        // to `scalar_field_includes` — which decides it on the two facts just established, so
+        // nothing is lost by matching that.
+        let composite_everywhere = parent_types.iter().all(|parent_type| {
+            schema
+                .lookup_field(parent_type, &right_head.field.name)
+                .is_some_and(|definition| schema.is_composite(&definition.ty))
+        });
+        if !composite_everywhere {
+            return false;
+        }
+        let Ok(tasks) = child_tasks_for_parent_types(
+            schema,
+            constraint,
+            &parent_types,
+            &right.response_name,
+            runtime_type,
+            &left_fields,
+            left.scope,
+            &right_fields,
+            right.scope,
+        ) else {
+            return false;
+        };
+
+        let left_contributions = conditioned_contributions(&left_entries);
+        let right_contributions = conditioned_contributions(&right_entries);
+        for task in tasks {
+            let (Ok(left_child), Ok(right_child)) = (
+                of_type_region_under(
+                    schema,
+                    task.left_scope.fragments,
+                    &task.possible_types,
+                    &left_contributions,
+                ),
+                of_type_region_under(
+                    schema,
+                    task.right_scope.fragments,
+                    &task.possible_types,
+                    &right_contributions,
+                ),
+            ) else {
+                return false;
+            };
+            if guarded_field_groups_include(
+                schema,
+                &task.constraint,
+                None,
+                assignment,
+                &guarded_field_groups(task.left_scope, left_child),
+                &guarded_field_groups(task.right_scope, right_child),
+            )
+            .is_err()
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Each occurrence's sub-selections, paired with the condition that gates the occurrence.
+fn conditioned_contributions<'doc>(
+    entries: &[&ConditionedField<'doc>],
+) -> Vec<(BooleanCondition, Vec<&'doc Selection>)> {
+    entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.condition.boolean_condition.clone(),
+                entry.field.selection_set.selections.iter().collect(),
+            )
+        })
+        .collect()
 }
 
 /// Enumerates the Boolean assignments that can change this group, then checks the type regions
