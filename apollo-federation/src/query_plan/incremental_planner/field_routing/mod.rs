@@ -324,7 +324,10 @@ impl FieldRoutingSearchSpace {
         }
         // Re-drive the greedy choice so the caller resumes from a
         // committed state; descendants that drop again find the budget
-        // spent and fall through to plain drops.
+        // spent and fall through to plain drops. Returns true so the
+        // caller in commit_forced skips its own dropped_fields increment,
+        // which is correct: if the re-drive fails, the increment happens
+        // here; if it succeeds, no field was dropped.
         if let Some((pending, choice)) = parked {
             if self.commit_choice(state, &pending, &choice).is_err() {
                 state.dropped_fields += 1;

@@ -617,6 +617,44 @@ fn y_pending(
     }
 }
 
+/// Like `y_pending` but for an arbitrary subgraph's T node and schema.
+fn y_pending_for(
+    space: &FieldRoutingSearchSpace,
+    subgraph: &str,
+    fetch_node: NodeIndex,
+    dependent: Option<NodeIndex>,
+) -> PendingSelection {
+    let op = crate::operation::Operation::parse(
+        space.supergraph_schema.clone(),
+        r#"{ t { y } }"#,
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let Some(Selection::Field(t_sel)) = op.selection_set.selections.values().next() else {
+        panic!("expected t field");
+    };
+    let y_sel = t_sel
+        .selection_set
+        .as_ref()
+        .expect("t has sub-selections")
+        .selections
+        .values()
+        .next()
+        .expect("y selection")
+        .clone();
+    PendingSelection {
+        selection: y_sel,
+        query_graph_node: test_support::node_for(space, subgraph, "T"),
+        fetch_node,
+        op_path: SharedPath::new(),
+        path_in_fetch: SharedPath::new(),
+        condition: dependent.map(|dependent| ConditionScope {
+            dependent,
+            depth: 1,
+        }),
+    }
+}
+
 /// State with root group A feeding entity group B, so an ordering
 /// dependent of A cycles when a new group hangs beneath B.
 fn cyclic_fixture() -> (PlanState, NodeIndex, NodeIndex) {
@@ -665,8 +703,11 @@ fn cyclic_entity_group_reuse_mints_fresh_group() {
 /// trail, so a sibling at the same site also fails fast. The doomed
 /// set is deliberately coarse (keyed on node + selection name, not
 /// the full routing context) to avoid re-proving dead ends whose
-/// key conditions recurse. A false positive is a drop, not a wrong
-/// plan, and the trail is scoped to one fast_forward call.
+/// key conditions recurse. Coarseness can cause false positives that
+/// doom a site that would otherwise succeed, which surfaces as a
+/// dropped field and a hard planning error, not a silently wrong plan.
+/// The trail is scoped to one fast_forward call, limiting the blast
+/// radius.
 #[test]
 fn failed_commit_dooms_site_for_siblings() {
     let space = search_space();
@@ -685,6 +726,67 @@ fn failed_commit_dooms_site_for_siblings() {
     assert_eq!(
         state.dropped_fields, 2,
         "doomed-site collision drops both pendings",
+    );
+    assert!(state.pending.is_empty());
+}
+
+/// When a forced condition pending has multiple options and all fail,
+/// `backtrack_forced` exhausts the trail frame and re-drives the greedy
+/// choice to restore state. The re-drive also fails, incrementing
+/// `dropped_fields` inside `backtrack_forced`. The caller must not
+/// double-count, so `backtrack_forced` returns true. Net: exactly 1 drop.
+#[test]
+fn exhausted_alternatives_redrive_counts_one_drop() {
+    // Three subgraphs: S2 and S3 both provide y, giving the condition
+    // pending two key-hop options. Both cycle with the A → B dependency.
+    let space = test_support::search_space(&[
+        (
+            "S1",
+            r#"
+            type Query { t: T }
+            type T @key(fields: "k") { k: ID }
+            "#,
+        ),
+        (
+            "S2",
+            r#"
+            type T @key(fields: "k") { k: ID, y: Int }
+            "#,
+        ),
+        (
+            "S3",
+            r#"
+            type T @key(fields: "k") { k: ID, y: Int }
+            "#,
+        ),
+    ]);
+
+    let (mut state, a, b) = cyclic_fixture();
+
+    // Condition pending anchored at B with ordering dependent A.
+    // Routing options: key hop to S2 or S3. Both create a new group
+    // reachable from A (via A → B → new_group), so the ordering edge
+    // back to A cycles in both cases.
+    let pending = y_pending_for(&space, "S1", b, Some(a));
+    let options = space
+        .routing_options(&Arc::new(pending.clone()))
+        .expect("has options");
+    assert!(
+        options.len() >= 2,
+        "expected multiple routing options for y, got {}",
+        options.len(),
+    );
+
+    state.pending = vec![Arc::new(pending)];
+    space.fast_forward(&mut state).expect("fast forward runs");
+
+    assert!(
+        state.forced_backtracks > 0,
+        "backtracking must have been attempted to exercise the re-drive path",
+    );
+    assert_eq!(
+        state.dropped_fields, 1,
+        "exhausted alternatives should count exactly one drop",
     );
     assert!(state.pending.is_empty());
 }

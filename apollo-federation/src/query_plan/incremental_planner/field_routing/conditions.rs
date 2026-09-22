@@ -121,6 +121,7 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Filter key conditions to the subset the source subgraph can resolve.
+    #[allow(dead_code)] // Used in later PRs in the stack.
     pub(super) fn locally_satisfiable_subset(
         &self,
         conditions: &Arc<SelectionSet>,
