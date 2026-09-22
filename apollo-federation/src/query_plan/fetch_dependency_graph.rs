@@ -2910,6 +2910,7 @@ impl FetchDependencyGraphNode {
                     ty: ty.clone(),
                     default_value: None,
                     directives: Default::default(),
+                    description: None,
                 })
             })
         });
@@ -3420,6 +3421,7 @@ pub(crate) fn operation_for_entities_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
@@ -3438,6 +3440,7 @@ pub(crate) fn operation_for_query_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
@@ -3456,6 +3459,7 @@ fn representations_variable_definition(
         ty: Type::Named(any_name).non_null().list().non_null().into(),
         default_value: None,
         directives: Default::default(),
+        description: None,
     }
     .into())
 }

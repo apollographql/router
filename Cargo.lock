@@ -179,9 +179,9 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.33.0"
+version = "2.0.0-beta.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cf9cb85c9c600cc8ff8154d502a4c8bbf9abb8c3f915d34914c1950a1a6273a"
+checksum = "f5f6d0efa38a950a9429c90ccb422a68f4a382e5b67abd5ff9a6b8885d787c84"
 dependencies = [
  "ahash",
  "apollo-parser",
@@ -275,9 +275,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.8.6"
+version = "0.9.0-beta.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11f6e2be4b3474e5890d34d3e483d49ec9b5cbf9e358bc62c9cc5423376df54b"
+checksum = "0c72cf951e113a1a27378bdddb82ccf08bbe2f49436cf597eb851ae8cb012ea3"
 dependencies = [
  "memchr",
  "rowan",
@@ -479,9 +479,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.16.0"
+version = "0.17.0-beta.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "231b846cb1c3fd7c15d1a96eeab979883105ca1be4e238ee9cdad32658984c18"
+checksum = "c75e0aa74f34bd906db5b991ef9e4d8ea5c85011f333affd2ca11684366395b7"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
@@ -6491,7 +6491,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7013,7 +7013,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]

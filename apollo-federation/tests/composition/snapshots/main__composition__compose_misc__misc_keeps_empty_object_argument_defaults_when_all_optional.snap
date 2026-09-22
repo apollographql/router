@@ -53,12 +53,7 @@ input join__ContextArgument {
 }
 
 type Query @join__type(graph: SUBGRAPH) {
-  fieldA(filter: InputWithRequired = {}): String
   fieldB(filter: InputAllOptional = {}): String
-}
-
-input InputWithRequired @join__type(graph: SUBGRAPH) {
-  required: String!
 }
 
 input InputAllOptional @join__type(graph: SUBGRAPH) {

@@ -185,6 +185,7 @@ fn build_witness_operation(witness: &TransitionGraphPath) -> Result<Operation, F
         selection_set,
         variables: Default::default(),
         directives: Default::default(),
+        description: None,
     })
 }
 

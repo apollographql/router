@@ -57,6 +57,14 @@ pub fn expand_connectors(
     supergraph_str: &str,
     api_schema_options: &ApiSchemaOptions,
 ) -> Result<ExpansionResult, FederationError> {
+    expand_connectors_with_options(supergraph_str, api_schema_options, true)
+}
+
+pub fn expand_connectors_with_options(
+    supergraph_str: &str,
+    api_schema_options: &ApiSchemaOptions,
+    validate_default_values: bool,
+) -> Result<ExpansionResult, FederationError> {
     // TODO: Don't rely on finding the URL manually to short out
     let connect_url = ConnectSpec::identity();
     let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
@@ -64,7 +72,11 @@ pub fn expand_connectors(
         return Ok(ExpansionResult::Unchanged);
     }
 
-    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+    let supergraph = Supergraph::new_with_spec_check_and_options(
+        supergraph_str,
+        &crate::router_supported_supergraph_specs(),
+        validate_default_values,
+    )?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let all_subgraphs: Vec<_> = supergraph.extract_subgraphs()?.into_iter().collect();
@@ -167,6 +179,7 @@ fn split_subgraph(
     subgraph: ValidFederationSubgraph,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
     let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
+    let validate_default_values = subgraph.schema.schema().validate_default_values;
 
     // Fork based on ConnectSpec version:
     // - v0.1/v0.2/v0.3: Use legacy visitor-based expansion (frozen for compatibility)
@@ -179,10 +192,11 @@ fn split_subgraph(
             .map(|connector| {
                 // Build a subgraph using only the necessary fields from the directive
                 let schema = expander.expand(&connector)?;
-                let subgraph = Subgraph::new(
+                let subgraph = Subgraph::new_with_options(
                     connector.id.synthetic_name().as_str(),
                     &subgraph.url,
                     &schema.schema().serialize().to_string(),
+                    validate_default_values,
                 )?;
 
                 // We only validate during debug builds since we should realistically only generate valid schemas
@@ -210,10 +224,11 @@ fn split_subgraph(
             .map(|connector| {
                 // Build a subgraph using only the necessary fields from the directive
                 let schema = expander.expand(&connector)?;
-                let subgraph = Subgraph::new(
+                let subgraph = Subgraph::new_with_options(
                     connector.id.synthetic_name().as_str(),
                     &subgraph.url,
                     &schema.schema().serialize().to_string(),
+                    validate_default_values,
                 )?;
 
                 // We only validate during debug builds since we should realistically only generate valid schemas
@@ -387,7 +402,8 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_federation_2_subgraph_schema()?;
+            let validate_default_values = self.original_schema.schema().validate_default_values;
+            let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
             let query_alias = self
                 .original_schema
                 .schema()
@@ -1055,7 +1071,8 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_federation_2_subgraph_schema()?;
+            let validate_default_values = self.original_schema.schema().validate_default_values;
+            let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
             let query_alias = self
                 .original_schema
                 .schema()
