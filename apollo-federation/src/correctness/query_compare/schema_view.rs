@@ -5,6 +5,10 @@
 //! for every inline fragment and every type region — so possible-type sets are materialized up
 //! front rather than recomputed from the referencers map on each call.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
@@ -27,7 +31,16 @@ pub(crate) struct SchemaView<'schema> {
     /// relies on; the verdict does not depend on the order either way, since regions are sets.
     possible_types: IndexMap<Name, Vec<Name>>,
     empty: Vec<Name>,
+    /// Memo for `guarded_field_group_type_regions`, whose result is a pure function of the parent
+    /// region and the conditions refining it. A boundary reached many times over -- which is what
+    /// a shared fragment spread at several sites produces -- refines the same region every time.
+    regions: RefCell<HashMap<RegionKey, Regions>>,
 }
+
+/// A parent region and the conditions refining it: what the refinement is a function of.
+type RegionKey = (Vec<Name>, Vec<Vec<Name>>);
+/// A refinement, shared by every boundary that asks for the same one.
+pub(crate) type Regions = Rc<Vec<Vec<Name>>>;
 
 impl<'schema> SchemaView<'schema> {
     pub(crate) fn new(schema: &'schema ValidFederationSchema) -> Result<Self, FederationError> {
@@ -58,7 +71,24 @@ impl<'schema> SchemaView<'schema> {
             },
             possible_types,
             empty: Vec::new(),
+            regions: Default::default(),
         })
+    }
+
+    /// The refinement of `parent_region` by `conditions`, computed once per distinct input.
+    pub(crate) fn cached_regions(
+        &self,
+        parent_region: &[Name],
+        conditions: Vec<Vec<Name>>,
+        compute: impl FnOnce() -> Vec<Vec<Name>>,
+    ) -> Regions {
+        let key = (parent_region.to_vec(), conditions);
+        if let Some(hit) = self.regions.borrow().get(&key) {
+            return hit.clone();
+        }
+        let computed = Rc::new(compute());
+        self.regions.borrow_mut().insert(key, computed.clone());
+        computed
     }
 
     /// The object types a composite type can resolve to. Empty for leaf types and unknown names,

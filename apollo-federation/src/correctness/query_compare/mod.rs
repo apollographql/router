@@ -325,24 +325,55 @@ fn empty_group<'doc>(response_name: &Name, scope: Scope<'doc>) -> GuardedFieldGr
     }
 }
 
+/// What splitting a region by a type condition did to it.
+///
+/// A condition that admits all of a region, or none of it, leaves it alone. Saying so lets the
+/// refinement move the region on rather than rebuild it, which is what keeps a boundary whose
+/// every runtime type carries its own condition from allocating two vectors per type per entry.
+enum Split {
+    Whole(Vec<Name>),
+    Parts(Vec<Name>, Vec<Name>),
+}
+
 /// Splits `region` into the part `allowed` admits and the part it excludes, dropping empties.
-fn split_possible_type_region(region: &[Name], allowed: &[Name]) -> Vec<Vec<Name>> {
-    let (included, excluded): (Vec<Name>, Vec<Name>) =
-        region.iter().cloned().partition(|ty| allowed.contains(ty));
-    let mut result = Vec::new();
-    if !included.is_empty() {
-        result.push(included);
+fn split_possible_type_region(region: Vec<Name>, allowed: &[Name]) -> Split {
+    let mut admits = false;
+    let mut excludes = false;
+    for ty in &region {
+        if allowed.contains(ty) {
+            admits = true;
+        } else {
+            excludes = true;
+        }
+        if admits && excludes {
+            let (included, excluded) = region.into_iter().partition(|ty| allowed.contains(ty));
+            return Split::Parts(included, excluded);
+        }
     }
-    if !excluded.is_empty() {
-        result.push(excluded);
-    }
-    result
+    Split::Whole(region)
 }
 
 /// Refines the parent's runtime types into regions on which every condition of this response
 /// name is constant. Every type in a region is therefore interchangeable, which is why the
 /// per-region checks below only ever look at the region's first type.
 fn guarded_field_group_type_regions(
+    schema: &SchemaView<'_>,
+    parent_region: &[Name],
+    left: &GuardedFieldGroup<'_>,
+    right: &GuardedFieldGroup<'_>,
+) -> schema_view::Regions {
+    let conditions: Vec<Vec<Name>> = left
+        .entries
+        .iter()
+        .chain(right.entries.iter())
+        .map(|entry| entry.condition.possible_types.clone())
+        .collect();
+    schema.cached_regions(parent_region, conditions, || {
+        refine_type_regions(parent_region, left, right)
+    })
+}
+
+fn refine_type_regions(
     parent_region: &[Name],
     left: &GuardedFieldGroup<'_>,
     right: &GuardedFieldGroup<'_>,
@@ -353,10 +384,18 @@ fn guarded_field_group_type_regions(
         vec![parent_region.to_vec()]
     };
     for entry in left.entries.iter().chain(right.entries.iter()) {
-        regions = regions
-            .iter()
-            .flat_map(|region| split_possible_type_region(region, &entry.condition.possible_types))
-            .collect();
+        let allowed = &entry.condition.possible_types;
+        let mut refined = Vec::with_capacity(regions.len());
+        for region in regions {
+            match split_possible_type_region(region, allowed) {
+                Split::Whole(region) => refined.push(region),
+                Split::Parts(included, excluded) => {
+                    refined.push(included);
+                    refined.push(excluded);
+                }
+            }
+        }
+        regions = refined;
     }
     regions
 }
@@ -633,7 +672,7 @@ fn guarded_field_groups_include<T: PathConstraint>(
                 region
             }
         };
-        let regions = guarded_field_group_type_regions(&parent_region, left, right);
+        let regions = guarded_field_group_type_regions(schema, &parent_region, left, right);
 
         // The local shortcuts are witnesses, not obligations: when one succeeds the group is
         // settled, and when none does the general search produces the explanation.
