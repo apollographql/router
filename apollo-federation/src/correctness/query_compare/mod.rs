@@ -83,6 +83,7 @@ use apollo_compiler::validation::Valid;
 pub use self::conditions::Assignment;
 use self::conditions::BooleanCondition;
 use self::conditions::ConditionedField;
+use self::conditions::FragmentView;
 use self::conditions::boolean_condition_covered_by;
 use self::conditions::fragment_view;
 use self::conditions::of_selection_set;
@@ -921,6 +922,8 @@ fn group_includes_for_regions<T: PathConstraint>(
 
         for task in tasks {
             if selection_set_syntactically_includes(
+                schema,
+                &task.possible_types,
                 &task.left_selections,
                 task.left_scope,
                 &task.right_selections,
@@ -1091,6 +1094,8 @@ fn composite_field_includes_at_runtime_type(
     let right_selections: Vec<&Selection> =
         right_entry.field.selection_set.selections.iter().collect();
     selection_set_syntactically_includes(
+        schema,
+        schema.possible_types(definition.ty.inner_named_type()),
         &left_selections,
         left.scope,
         &right_selections,
@@ -1101,27 +1106,136 @@ fn composite_field_includes_at_runtime_type(
 //==================================================================================================
 // Syntactic inclusion shortcut
 
+/// Is this fragment's type condition doing nothing where it sits?
+///
+/// A condition admitting every object type the position can hold selects exactly what its body
+/// selects, so the two are the same selection written two ways. Recognizing that is what keeps
+/// `{ ...F }` and the body of `F` comparable; a query plan writes the first where the operation
+/// it is checked against writes the second, and without this the shortcut below fails on every
+/// such pair. A directive is uninterpreted here and so is never nothing, and an unknown position
+/// (empty) makes no claim.
+fn fragment_narrows_nothing(
+    schema: &SchemaView<'_>,
+    position: &[Name],
+    view: &FragmentView<'_>,
+) -> bool {
+    if !view.directives.is_empty() {
+        return false;
+    }
+    match view.type_condition {
+        None => true,
+        Some(type_condition) => {
+            let admitted = schema.possible_types(type_condition);
+            !position.is_empty() && position.iter().all(|name| admitted.contains(name))
+        }
+    }
+}
+
+/// A selection set with every fragment that narrows nothing at `position` replaced by its body,
+/// so that the same selections compare equal however they are packaged.
+///
+/// Terminates for the same reason the rest of this module does: a valid document has no fragment
+/// reference cycles.
+fn without_transparent_fragments<'doc>(
+    schema: &SchemaView<'_>,
+    position: &[Name],
+    selections: &[&'doc Selection],
+    scope: Scope<'doc>,
+    out: &mut Vec<&'doc Selection>,
+) {
+    for selection in selections {
+        match fragment_view(selection, scope.fragments) {
+            Ok(Some(view)) if fragment_narrows_nothing(schema, position, &view) => {
+                let nested: Vec<&Selection> = view.selections.iter().collect();
+                without_transparent_fragments(schema, position, &nested, scope, out);
+            }
+            _ => out.push(selection),
+        }
+    }
+}
+
+/// The object types a field's sub-selection is written against. Empty when the schema does not
+/// place the field at every type of `position`, which makes no claim about any condition there.
+fn child_position(schema: &SchemaView<'_>, position: &[Name], field_name: &Name) -> Vec<Name> {
+    let mut child: Vec<Name> = Vec::new();
+    for parent in position {
+        let Some(definition) = schema.lookup_field(parent, field_name) else {
+            return Vec::new();
+        };
+        for name in schema.possible_types(definition.ty.inner_named_type()) {
+            if !child.contains(name) {
+                child.push(name.clone());
+            }
+        }
+    }
+    child.sort();
+    child
+}
+
+/// `position` narrowed by a type condition written at it.
+fn narrowed_position(
+    schema: &SchemaView<'_>,
+    position: &[Name],
+    type_condition: Option<&Name>,
+) -> Vec<Name> {
+    let Some(type_condition) = type_condition else {
+        return position.to_vec();
+    };
+    let admitted = schema.possible_types(type_condition);
+    position
+        .iter()
+        .filter(|name| admitted.contains(name))
+        .cloned()
+        .collect()
+}
+
+/// Is there anything here a position could say something about? Only a fragment can be vacuous,
+/// so a set of plain fields needs neither flattening nor a position to compare -- and working one
+/// out costs a schema lookup per type the parent can hold.
+fn holds_a_fragment(selections: &[&Selection]) -> bool {
+    selections
+        .iter()
+        .any(|selection| !matches!(selection, Selection::Field(_)))
+}
+
 /// Selection order and extra left selections do not affect inclusion. This check stays
-/// syntax-only: condition normalization and field merging remain the general search's job.
+/// syntax-only, apart from asking the schema which type conditions are vacuous where they sit:
+/// condition normalization and field merging remain the general search's job.
 fn selection_set_syntactically_includes(
+    schema: &SchemaView<'_>,
+    position: &[Name],
     left: &[&Selection],
     left_scope: Scope<'_>,
     right: &[&Selection],
     right_scope: Scope<'_>,
 ) -> bool {
-    right.iter().all(|right_selection| {
-        left.iter().any(|left_selection| {
-            selection_syntactically_includes(
-                left_selection,
-                left_scope,
-                right_selection,
-                right_scope,
-            )
+    let matches = |left: &[&Selection], right: &[&Selection]| {
+        right.iter().all(|right_selection| {
+            left.iter().any(|left_selection| {
+                selection_syntactically_includes(
+                    schema,
+                    position,
+                    left_selection,
+                    left_scope,
+                    right_selection,
+                    right_scope,
+                )
+            })
         })
-    })
+    };
+    if !holds_a_fragment(left) && !holds_a_fragment(right) {
+        return matches(left, right);
+    }
+    let mut left_flat = Vec::with_capacity(left.len());
+    without_transparent_fragments(schema, position, left, left_scope, &mut left_flat);
+    let mut right_flat = Vec::with_capacity(right.len());
+    without_transparent_fragments(schema, position, right, right_scope, &mut right_flat);
+    matches(&left_flat, &right_flat)
 }
 
 fn selection_syntactically_includes(
+    schema: &SchemaView<'_>,
+    position: &[Name],
     left: &Selection,
     left_scope: Scope<'_>,
     right: &Selection,
@@ -1140,6 +1254,9 @@ fn selection_syntactically_includes(
             left_view.type_condition == right_view.type_condition
                 && same_directive_list(left_view.directives, right_view.directives)
                 && selection_set_syntactically_includes(
+                    schema,
+                    // Both sides carry the same condition, so the body sits where it narrows to.
+                    &narrowed_position(schema, position, left_view.type_condition),
                     &left_view.selections.iter().collect::<Vec<_>>(),
                     left_scope,
                     &right_view.selections.iter().collect::<Vec<_>>(),
@@ -1154,12 +1271,25 @@ fn selection_syntactically_includes(
                 && left.name == right.name
                 && same_arguments(&left.arguments, &right.arguments)
                 && same_directive_list(&left.directives, &right.directives)
-                && selection_set_syntactically_includes(
-                    &left.selection_set.selections.iter().collect::<Vec<_>>(),
-                    left_scope,
-                    &right.selection_set.selections.iter().collect::<Vec<_>>(),
-                    right_scope,
-                )
+                && {
+                    let left_sub: Vec<&Selection> = left.selection_set.selections.iter().collect();
+                    let right_sub: Vec<&Selection> =
+                        right.selection_set.selections.iter().collect();
+                    // Only worth locating the sub-selection when something there could be vacuous.
+                    let child = if holds_a_fragment(&left_sub) || holds_a_fragment(&right_sub) {
+                        child_position(schema, position, &right.name)
+                    } else {
+                        Vec::new()
+                    };
+                    selection_set_syntactically_includes(
+                        schema,
+                        &child,
+                        &left_sub,
+                        left_scope,
+                        &right_sub,
+                        right_scope,
+                    )
+                }
         }
         _ => false,
     }

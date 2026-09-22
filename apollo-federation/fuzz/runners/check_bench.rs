@@ -39,7 +39,18 @@ fn main() {
     let started = Instant::now();
     let sdl = std::fs::read_to_string(&schema_path).expect("read supergraph");
     let supergraph = Supergraph::new_with_router_specs(&sdl).expect("valid supergraph");
-    let planner = QueryPlanner::new(&supergraph, Default::default()).expect("planner");
+    // The corpus harness plans with these; fragment generation in particular changes the shape
+    // of every fetch operation the checker walks, so a bench without it measures something else.
+    let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+        generate_query_fragments: flag("--no-generate-fragments").is_none(),
+        type_conditioned_fetching: flag("--type-conditioned-fetching").is_some(),
+        incremental_delivery:
+            apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
+                enable_defer: true,
+            },
+        ..Default::default()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner");
     let subgraphs = supergraph
         .extract_subgraphs()
         .expect("subgraphs")
@@ -60,6 +71,11 @@ fn main() {
         .build_query_plan(&document, None, Default::default())
         .expect("query plan");
     println!("plan:  {:?}", planned.elapsed());
+
+    if flag("--dump-plan").is_some() {
+        println!("{plan}");
+        return;
+    }
 
     let check_new = || {
         correctness::check_plan(
