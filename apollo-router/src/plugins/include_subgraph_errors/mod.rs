@@ -63,12 +63,12 @@ impl Plugin for IncludeSubgraphErrors {
 
         service
             .map_request(move |req: SupergraphRequest| {
-                // Published for the code that builds errors it must not hand to
-                // the response hook below. Connectors' `->withError` errors are
-                // reported in `extensions`, not `errors`, so they never pass
-                // through the redaction pass and have to consult the config
-                // where they are built. See `apply_subgraph_error_config` in
-                // the connectors plugin.
+                // On the request because the reader runs before the
+                // response hook exists: `declared_error_for_client` in the
+                // connectors plugin consults this while mapping a connector
+                // response. It also needs this because declared errors ride
+                // in `extensions`, which the hook below never walks. Missing
+                // config drops the error rather than leaking it.
                 req.context
                     .extensions()
                     .with_lock(|lock| lock.insert::<Arc<EffectiveConfig>>(request_config.clone()));
