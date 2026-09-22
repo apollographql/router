@@ -569,7 +569,9 @@ impl FieldRoutingSearchSpace {
 
     /// Whether adding `new_conditions` to `edge` would collide in the entity
     /// representation: two conditions sharing a response name but differing
-    /// in arguments.
+    /// in arguments, or a plain condition whose response name matches the
+    /// original name of an existing alias rewrite (the rename-back would
+    /// overwrite the plain data).
     fn has_conflicting_requires_inputs(
         &self,
         graph: &super::super::fetch_graph::FetchGraph,
@@ -578,23 +580,55 @@ impl FieldRoutingSearchSpace {
     ) -> bool {
         let existing = &graph.edge_weight_raw(edge).inputs;
         for input in existing {
-            if input.rewrite_info().is_some() {
-                continue;
+            let rewrites = input.condition_alias_rewrites();
+            if rewrites.is_empty() {
+                if Self::plain_input_has_argument_conflict(input.conditions(), new_conditions) {
+                    return true;
+                }
+            } else if Self::aliased_input_collides_with_plain(rewrites, new_conditions) {
+                return true;
             }
-            for existing_sel in input.conditions().selections.values() {
-                let Selection::Field(existing_field) = existing_sel else {
+        }
+        false
+    }
+
+    /// Two plain inputs share a response name but differ in arguments.
+    fn plain_input_has_argument_conflict(
+        existing_conditions: &SelectionSet,
+        new_conditions: &Arc<SelectionSet>,
+    ) -> bool {
+        for existing_sel in existing_conditions.selections.values() {
+            let Selection::Field(existing_field) = existing_sel else {
+                continue;
+            };
+            let existing_name = existing_field.field.response_name();
+            for new_sel in new_conditions.selections.values() {
+                let Selection::Field(new_field) = new_sel else {
                     continue;
                 };
-                let existing_name = existing_field.field.response_name();
-                for new_sel in new_conditions.selections.values() {
-                    let Selection::Field(new_field) = new_sel else {
-                        continue;
-                    };
-                    if new_field.field.response_name() == existing_name
-                        && new_field.field.arguments != existing_field.field.arguments
-                    {
-                        return true;
-                    }
+                if new_field.field.response_name() == existing_name
+                    && new_field.field.arguments != existing_field.field.arguments
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// A new plain condition's response name matches a rewrite's original
+    /// name, so the rename-back would overwrite the plain data at runtime.
+    fn aliased_input_collides_with_plain(
+        rewrites: &[(Name, Name)],
+        new_conditions: &Arc<SelectionSet>,
+    ) -> bool {
+        for (_alias, original) in rewrites {
+            for new_sel in new_conditions.selections.values() {
+                let Selection::Field(new_field) = new_sel else {
+                    continue;
+                };
+                if new_field.field.response_name() == original {
+                    return true;
                 }
             }
         }

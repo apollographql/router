@@ -2212,3 +2212,115 @@ type C
         "There should be non-A entity fetches: {plan_str}"
     );
 }
+
+// A plain @requires input arriving after an aliased one on the same edge
+// must not overwrite the plain input at runtime. The KeyRenamer's
+// remove-then-insert replaces whatever sits under the original name, so
+// both inputs cannot share a single entity group.
+#[test]
+fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+        type Query { t: T }
+        type T @key(fields: "id") { id: ID!  a: A }
+        type A @key(fields: "id") { id: ID!  y: Int }
+        "#,
+        S3: r#"
+        type A @key(fields: "id") { id: ID!  x: Int }
+        "#,
+        S2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            a: A @external
+            b: Int @requires(fields: "a { x }")
+            c: Int @requires(fields: "a { y }")
+        }
+        type A @key(fields: "id") {
+            id: ID!
+            x: Int @external
+            y: Int @external
+        }
+        "#,
+    );
+    // b's requires needs S3 (aliased), c's requires is resolvable from S1
+    // (plain). Both orderings must produce a valid plan.
+    let _plan_bc = assert_plan!(
+        &planner,
+        "{ t { b c } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_a: a {
+                __typename
+                id
+              }
+              __require_1_a: a {
+                y
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t") {
+            Fetch(service: "S2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_1_a: a {
+                    y
+                  }
+                }
+              } =>
+              {
+                ... on T {
+                  c
+                }
+              }
+            },
+          },
+          Flatten(path: "t.__require_0_a") {
+            Fetch(service: "S3") {
+              {
+                ... on A {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on A {
+                  x
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_a: a {
+                  x
+                }
+              }
+            } =>
+            {
+              ... on T {
+                b
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
