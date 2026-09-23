@@ -200,10 +200,10 @@ pub(crate) fn parse_http_client_inputs(
         create_certificate_store(&configuration.tls.subgraph.all)
             .transpose()?
             .unwrap_or_else(HttpClientService::native_roots_store);
-    let connector_tls_root_store: RootCertStore =
-        create_certificate_store(&configuration.tls.connector.all)
-            .transpose()?
-            .unwrap_or_else(HttpClientService::native_roots_store);
+    // The connector store falls back to the OS trust store lazily, below, so a schema
+    // without connector sources doesn't pay for reading it.
+    let mut connector_tls_root_store: Option<RootCertStore> =
+        create_certificate_store(&configuration.tls.connector.all).transpose()?;
 
     // One DNS resolver per resolution strategy, shared across every client below.
     let mut dns_resolvers = DnsResolverCache::default();
@@ -248,10 +248,12 @@ pub(crate) fn parse_http_client_inputs(
 
     let mut connector_inputs = IndexMap::new();
     for name in connector_sources.iter() {
+        let connector_tls_root_store =
+            connector_tls_root_store.get_or_insert_with(HttpClientService::native_roots_store);
         let inputs = HttpClientInputs::for_connector(
             name,
             configuration,
-            &connector_tls_root_store,
+            connector_tls_root_store,
             shaping.connector_client_config(name),
             &mut dns_resolvers,
         )?;
