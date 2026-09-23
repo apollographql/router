@@ -6342,7 +6342,7 @@ expression: "&schema"
         },
         "timeout": {
           "default": null,
-          "description": "Optional wall-clock time limit for the search. When set, the search\nreturns the best complete plan found so far once the limit is reached.",
+          "description": "Optional wall-clock time limit for the search. When set, the search\nreturns the best complete plan found so far once the limit is reached.\nMust be shorter than an enforced cooperative cancellation timeout.",
           "type": [
             "string",
             "null"

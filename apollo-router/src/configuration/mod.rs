@@ -583,6 +583,8 @@ impl Configuration {
             });
         }
 
+        self.validate_incremental_planner_timeout()?;
+
         // PQs.
         if self.persisted_queries.enabled {
             if self.persisted_queries.safelist.enabled && self.apq.enabled {
@@ -614,6 +616,34 @@ impl Configuration {
         }
 
         Ok(self)
+    }
+
+    /// The incremental planner timeout returns a best-effort plan, so it must
+    /// expire before an enforced cancellation deadline aborts planning.
+    fn validate_incremental_planner_timeout(&self) -> Result<(), ConfigurationError> {
+        let query_planning = &self.supergraph.query_planning;
+        let cancellation = &query_planning.experimental_cooperative_cancellation;
+        let (Some(bulb_timeout), Some(cancellation_timeout)) = (
+            query_planning.incremental_planner.timeout,
+            cancellation.timeout(),
+        ) else {
+            return Ok(());
+        };
+        let enforced = cancellation.is_enabled() && matches!(cancellation.mode(), Mode::Enforce);
+        if query_planning.incremental_planner.enabled
+            && enforced
+            && bulb_timeout >= cancellation_timeout
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'supergraph.query_planning.incremental_planner.timeout' configuration",
+                error: format!(
+                    "incremental_planner.timeout ({}) must be shorter than experimental_cooperative_cancellation.timeout ({}), otherwise planning is cancelled before the incremental planner can return its best plan",
+                    humantime::format_duration(bulb_timeout),
+                    humantime::format_duration(cancellation_timeout),
+                ),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -1040,6 +1070,7 @@ pub(crate) struct IncrementalPlanner {
 
     /// Optional wall-clock time limit for the search. When set, the search
     /// returns the best complete plan found so far once the limit is reached.
+    /// Must be shorter than an enforced cooperative cancellation timeout.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) timeout: Option<Duration>,

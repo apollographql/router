@@ -1560,3 +1560,49 @@ mod reload {
         assert_eq!(config.reload.retry_delay, Duration::from_secs(30));
     }
 }
+
+mod incremental_planner_timeout {
+    use std::str::FromStr;
+
+    use super::*;
+
+    fn config(bulb_timeout: &str, mode: &str, cancellation_timeout: &str) -> String {
+        format!(
+            r#"
+supergraph:
+  query_planning:
+    incremental_planner:
+      enabled: true
+      timeout: {bulb_timeout}
+    experimental_cooperative_cancellation:
+      enabled: true
+      mode: {mode}
+      timeout: {cancellation_timeout}
+"#
+        )
+    }
+
+    #[test]
+    fn rejects_timeout_not_below_enforced_cancellation_timeout() {
+        for bulb_timeout in ["1s", "2s"] {
+            let err = Configuration::from_str(&config(bulb_timeout, "enforce", "1s"))
+                .expect_err("timeout at or above the cancellation deadline must be rejected");
+            assert!(
+                err.to_string().contains("incremental_planner.timeout"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_timeout_below_enforced_cancellation_timeout() {
+        Configuration::from_str(&config("500ms", "enforce", "1s"))
+            .expect("timeout below the cancellation deadline must be valid");
+    }
+
+    #[test]
+    fn accepts_any_timeout_when_cancellation_only_measures() {
+        Configuration::from_str(&config("2s", "measure", "1s"))
+            .expect("measure mode never cancels planning");
+    }
+}
