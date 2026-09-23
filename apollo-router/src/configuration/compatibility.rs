@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
 use apollo_configuration::expansion::MapVariables;
 use apollo_configuration::provenance::Injection;
@@ -13,11 +12,13 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::Configuration;
+use super::apollo_configuration_parse::apollo_configuration_options as router_options;
+use super::apollo_configuration_parse::parse_via_apollo_configuration;
+use super::apollo_configuration_parse::router_config_schema;
 use super::expansion::Expansion;
 use super::expansion::Override;
 use super::expansion::ValueType;
 use super::schema::Mode;
-use super::schema::router_schema;
 use super::schema::validate_yaml_configuration;
 use super::test_discovery;
 use super::upgrade::UpgradeMode;
@@ -28,18 +29,10 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 
-// Configuration's Deserialize implementation already runs its cross-field validation.
-impl apollo_configuration::Validate for Configuration {}
-impl apollo_configuration::Configuration for Configuration {}
-
 fn current_major_version() -> i64 {
     env!("CARGO_PKG_VERSION_MAJOR")
         .parse()
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
-}
-
-fn router_options() -> ParseYamlOptions {
-    ParseYamlOptions::default().schema(router_schema().clone())
 }
 
 /// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
@@ -246,7 +239,7 @@ fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Opti
     let router_json = serde_json::to_value(router).expect("Configuration serializes");
     let shared_json = serde_json::to_value(shared).expect("Configuration serializes");
     let path = first_difference(&router_json, &shared_json)?;
-    let secrets = SecretRedactor::new(router_schema());
+    let secrets = SecretRedactor::new(router_config_schema());
     let describe =
         |json: &Value| secrets.redact_at(&path, json.pointer(&path).unwrap_or(&Value::Null));
     Some(format!(
@@ -406,7 +399,7 @@ fn effective_settings_agree_for_the_shared_corpus() {
 
 #[test]
 fn schema_derived_boolean_values_agree_between_parsers() {
-    let schema = router_schema();
+    let schema = router_config_schema();
     let default = schema["properties"]["experimental_type_conditioned_fetching"]["default"]
         .as_bool()
         .expect("the schema declares a boolean default");
@@ -577,38 +570,6 @@ fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
     );
 }
 
-/// Retains document values without adding defaults from `Configuration::serialize`.
-/// The parse options supply Router's schema, including its expansion coercion rules.
-#[derive(serde::Deserialize, schemars::JsonSchema)]
-#[serde(transparent)]
-struct ExpandedDocument(Value);
-
-impl apollo_configuration::Validate for ExpandedDocument {}
-impl apollo_configuration::Configuration for ExpandedDocument {}
-
-/// Applies within-major migrations, parses settings, and separately parses the expanded
-/// document for configuration-usage and licence selectors using the same shared options.
-/// Providers must be stable across both calls. `raw_yaml` keeps the original input.
-/// Like the corpus migration pre-pass, this rejects invalid migrated input; it does not
-/// implement the production loader's fallback to validating the original document.
-fn parse_via_apollo_configuration(
-    text: &str,
-    options: &ParseYamlOptions,
-) -> Result<Configuration, String> {
-    // Do not let migration's serialization hide duplicate keys in the supplied document.
-    super::yaml::parse(text).map_err(|error| error.to_string())?;
-    let migrated = migrate(text, UpgradeMode::Minor(current_major_version()))?;
-    let mut config: Configuration = options
-        .parse(&migrated)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))?;
-    let document: ExpandedDocument = options
-        .parse(&migrated)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))?;
-    config.validated_yaml = Some(document.0);
-    config.raw_yaml = Some(Arc::from(text));
-    Ok(config)
-}
-
 #[test]
 fn adapter_document_uses_shared_expansion_and_injections() {
     let text = r#"
@@ -668,7 +629,7 @@ fn adapter_rejects_duplicate_keys_before_migration() {
         &router_options(),
     )
     .expect_err("migration must not erase duplicate keys");
-    assert!(error.contains("duplicated keys"), "{error}");
+    assert!(error.to_string().contains("duplicated keys"), "{error}");
 }
 
 #[test]
@@ -1119,7 +1080,7 @@ fn effective_settings_agree_for_discovered_project_documents() {
 /// generated schema and produce matching effective settings.
 #[test]
 fn schema_declared_top_level_defaults_agree_between_parsers() {
-    let schema = router_schema();
+    let schema = router_config_schema();
     let properties = schema["properties"]
         .as_object()
         .expect("the root schema declares properties");
