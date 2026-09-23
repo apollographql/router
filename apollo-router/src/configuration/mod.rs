@@ -13,6 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use apollo_redaction::Redacted;
 use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -61,6 +62,8 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
+#[cfg(test)]
+mod compatibility;
 pub(crate) mod connector;
 pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
@@ -73,6 +76,8 @@ pub(crate) mod schema;
 pub(crate) mod server;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
+#[cfg(test)]
+mod test_discovery;
 #[cfg(test)]
 mod tests;
 mod upgrade;
@@ -1006,9 +1011,21 @@ pub(crate) struct QueryPlanRedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1098,9 +1115,21 @@ pub(crate) struct RedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1204,9 +1233,9 @@ pub(crate) struct TlsSupergraph {
     #[schemars(with = "String")]
     pub(crate) certificate: CertificateDer<'static>,
     /// server key in PEM format
-    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
-    #[schemars(with = "String")]
-    pub(crate) key: PrivateKeyDer<'static>,
+    #[serde(deserialize_with = "deserialize_redacted_key", skip_serializing)]
+    #[schemars(with = "Redacted<String>")]
+    pub(crate) key: Redacted<PrivateKeyDer<'static>>,
     /// list of certificate authorities in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
@@ -1220,7 +1249,7 @@ impl TlsSupergraph {
 
         let mut config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(certificates, self.key.clone_key())
+            .with_single_cert(certificates, self.key.unredact().clone_key())
             .map_err(ApolloRouterError::Rustls)?;
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
@@ -1258,13 +1287,16 @@ where
     load_certs(&data).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>
+fn deserialize_redacted_key<'de, D>(
+    deserializer: D,
+) -> Result<Redacted<PrivateKeyDer<'static>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let data = String::deserialize(deserializer)?;
-
-    load_key(&data).map_err(serde::de::Error::custom)
+    let data = crate::plugin::serde::deserialize_redacted_string(deserializer)?;
+    load_key(data.unredact())
+        .map(Redacted::new)
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1277,39 +1309,41 @@ pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>>
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, LoadCertError(error)))
 }
 
-pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(data.as_bytes());
-    let mut key_iterator = iter::from_fn(|| rustls_pemfile::read_one(&mut reader).transpose());
+/// Why PEM data could not be loaded as a TLS private key.
+///
+/// Each message is fixed so that it never repeats any of the key material.
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub(crate) enum LoadKeyError {
+    #[error("could not parse TLS private key: the PEM data is malformed")]
+    Malformed,
+    #[error(
+        "could not parse TLS private key: the PEM data contains another item, such as a certificate, instead of a private key"
+    )]
+    NotAPrivateKey,
+    #[error("could not parse TLS private key: the data contains no PEM private key")]
+    Missing,
+    #[error(
+        "could not parse TLS private key: the PEM data contains more than one item; expected exactly one private key"
+    )]
+    MultipleItems,
+}
 
-    let private_key = match key_iterator.next() {
+pub(crate) fn load_key(data: &str) -> Result<PrivateKeyDer<'static>, LoadKeyError> {
+    let mut reader = BufReader::new(data.as_bytes());
+    let mut items = iter::from_fn(|| rustls_pemfile::read_one(&mut reader).transpose());
+
+    let private_key = match items.next() {
         Some(Ok(rustls_pemfile::Item::Pkcs1Key(key))) => PrivateKeyDer::from(key),
         Some(Ok(rustls_pemfile::Item::Pkcs8Key(key))) => PrivateKeyDer::from(key),
         Some(Ok(rustls_pemfile::Item::Sec1Key(key))) => PrivateKeyDer::from(key),
-        Some(Err(e)) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("could not parse the key: {e}"),
-            ));
-        }
-        Some(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "expected a private key",
-            ));
-        }
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find a private key",
-            ));
-        }
+        // The parser's own error can describe the input, so it is deliberately discarded.
+        Some(Err(_)) => return Err(LoadKeyError::Malformed),
+        Some(Ok(_)) => return Err(LoadKeyError::NotAPrivateKey),
+        None => return Err(LoadKeyError::Missing),
     };
 
-    if key_iterator.next().is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "expected exactly one private key",
-        ));
+    if items.next().is_some() {
+        return Err(LoadKeyError::MultipleItems);
     }
     Ok(private_key)
 }
@@ -1354,9 +1388,9 @@ pub(crate) struct TlsClientAuth {
     #[schemars(with = "String")]
     pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
     /// key in PEM format
-    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
-    #[schemars(with = "String")]
-    pub(crate) key: PrivateKeyDer<'static>,
+    #[serde(deserialize_with = "deserialize_redacted_key", skip_serializing)]
+    #[schemars(with = "Redacted<String>")]
+    pub(crate) key: Redacted<PrivateKeyDer<'static>>,
 }
 
 /// Configuration for router reload behavior.

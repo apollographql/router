@@ -298,11 +298,11 @@ impl RedisCacheStorage {
         let is_cluster = client_config.server.is_clustered();
 
         if let Some(username) = config.username {
-            client_config.username = Some(username);
+            client_config.username = Some(username.unredact().clone());
         }
 
         if let Some(password) = config.password {
-            client_config.password = Some(password);
+            client_config.password = Some(password.unredact().clone());
         }
 
         if let Some(tls) = config.tls.as_ref() {
