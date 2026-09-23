@@ -132,6 +132,19 @@
             '''^docs/source/routing/performance/caching/response-caching/invalidation.mdx$''',
         ]
 
+        # Synthetic credentials used by the Redis and OTLP redaction tests.
+        # Match only this fixture value, including occurrences in Git history.
+        regexTarget = "secret"
+        regexes = ['''^(hunter2-super-secret|synthetic-otlp-private-key)$''']
+
+[[ rules ]]
+    id = "aws-access-token"
+    [ rules.allowlist ]
+        # Synthetic ID used by redacted_aws_credentials_are_hidden_from_debug_output.
+        # Do not allowlist Redacted wrappers: they can still contain real credentials.
+        regexTarget = "secret"
+        regexes = ['''^AKIASCRATCHACCESSKEY$''']
+
 [[ rules ]]
     id = "curl-auth-header"
 
