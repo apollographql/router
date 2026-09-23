@@ -61,3 +61,7 @@ path = "runners/plan_smoke.rs"
 [[example]]
 name = "benchmark"
 path = "runners/benchmark.rs"
+
+[[example]]
+name = "compose_fixture"
+path = "runners/compose_fixture.rs"
