@@ -42,7 +42,7 @@ const SCHEMA_STR: &str = r#"
         s: Int!
     }
 
-    directive @mod(arg: Int!) on FIELD
+    directive @mod(arg: Int!) on FIELD | INLINE_FRAGMENT | FRAGMENT_SPREAD
 "#;
 
 fn check(left: &str, right: &str) -> Result<(), ComparisonError> {
@@ -566,4 +566,125 @@ fn what_the_left_selects_is_included() {
         "{ items { f { g { __typename } } } }",
     )
     .expect("an operation includes itself");
+}
+
+//==================================================================================================
+// How a selection is packaged
+
+/// How many response-name groups deciding this pair costs. A shortcut that fires settles a group
+/// without walking what is under it, so this distinguishes "the same verdict" from "the same work"
+/// -- and the shortcut's own result is what these tests are about.
+fn groups_to_decide(left: &str, right: &str) -> u64 {
+    let before = groups_decided();
+    check(left, right).expect("expected inclusion");
+    groups_decided() - before
+}
+
+// `... on I` inside a field of type `I` admits everything the position holds, so it selects what
+// its body selects. The three spellings are the same selection, and must cost the same to decide.
+#[test]
+fn a_vacuous_wrapper_costs_what_its_body_costs() {
+    let bare = groups_to_decide(r#"{ test_i { id } }"#, r#"{ test_i { id } }"#);
+    let inline = groups_to_decide(
+        r#"{ test_i { ... on I { id } } }"#,
+        r#"{ test_i { ... on I { id } } }"#,
+    );
+    let named = groups_to_decide(
+        r#"{ test_i { ...F } } fragment F on I { id }"#,
+        r#"{ test_i { ...F } } fragment F on I { id }"#,
+    );
+    assert_eq!(
+        (bare, inline),
+        (bare, bare),
+        "an inline wrapper changed the work"
+    );
+    assert_eq!(
+        (bare, named),
+        (bare, bare),
+        "a named spread changed the work"
+    );
+}
+
+// The same, across spellings: one side wrapped and the other bare must still match, and still cost
+// what the bare pair costs. This is the shape a query plan takes against the operation it is
+// checked against, and getting it wrong is invisible in the verdict alone.
+#[test]
+fn a_vacuous_wrapper_matches_the_bare_body() {
+    for (left, right) in [
+        (r#"{ test_i { ... on I { id } } }"#, r#"{ test_i { id } }"#),
+        (r#"{ test_i { id } }"#, r#"{ test_i { ... on I { id } } }"#),
+        (
+            r#"{ test_i { ...F } } fragment F on I { id }"#,
+            r#"{ test_i { id } }"#,
+        ),
+        (
+            r#"{ test_i { id } }"#,
+            r#"{ test_i { ...F } } fragment F on I { id }"#,
+        ),
+        (
+            r#"{ test_i { ...F } } fragment F on I { id }"#,
+            r#"{ test_i { ... on I { id } } }"#,
+        ),
+    ] {
+        let cost = groups_to_decide(left, right);
+        let bare = groups_to_decide(r#"{ test_i { id } }"#, r#"{ test_i { id } }"#);
+        assert_eq!(cost, bare, "packaging changed the work:\n{left}\n{right}");
+    }
+}
+
+// Two transparent wrappers with different names are still both transparent.
+#[test]
+fn differently_named_wrappers_match() {
+    check(
+        r#"{ test_i { ...Left } } fragment Left on I { id }"#,
+        r#"{ test_i { ...Right } } fragment Right on I { id }"#,
+    )
+    .unwrap();
+}
+
+// A condition that does narrow must not be flattened away. `... on R` keeps `id` off `S`, so a
+// right side asking for `id` across the whole position is not included.
+#[test]
+fn a_narrowing_wrapper_is_not_flattened() {
+    insta::assert_snapshot!(
+        error(r#"{ test_i { ... on R { id } } }"#, r#"{ test_i { id } }"#),
+        @r###"
+    left does not include right
+      in response name: test_i
+      over runtime types: {Query}
+      in sub-selection of: test_i -> {R, S}
+      in response name: id
+      over runtime types: {S}
+      --> left does not select `id` on S
+    "###
+    );
+}
+
+// A directive is uninterpreted, so a wrapper carrying one is never *nothing*, even where its type
+// condition admits the whole position. The verdict does not show this -- the general search drops
+// an unmodeled directive on a fragment, so it accepts either way -- but the work does: the
+// shortcut declines and the search runs.
+#[test]
+fn a_wrapper_carrying_a_directive_is_not_transparent() {
+    let bare = groups_to_decide(r#"{ test_i { id } }"#, r#"{ test_i { id } }"#);
+    let carrying = groups_to_decide(
+        r#"{ test_i { ... on I @mod(arg: 1) { id } } }"#,
+        r#"{ test_i { id } }"#,
+    );
+    assert!(
+        carrying > bare,
+        "the shortcut treated a directive-carrying wrapper as transparent \
+         ({carrying} groups against {bare} for the bare pair)"
+    );
+}
+
+// A covariant return narrows what the child position holds, so a wrapper transparent at the
+// interface's position need not be transparent at the narrower one.
+#[test]
+fn a_wrapper_is_read_against_the_narrowed_child_position() {
+    check(
+        r#"{ test_entity { next { ... on Entity { id } } } }"#,
+        r#"{ test_entity { next { id } } }"#,
+    )
+    .unwrap();
 }
