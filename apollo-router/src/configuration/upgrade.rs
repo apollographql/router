@@ -79,6 +79,18 @@ pub(crate) enum UpgradeMode {
     Minor(i64),
 }
 
+impl UpgradeMode {
+    /// The within-major migrations for this router's own major version, which startup and
+    /// reload apply automatically.
+    pub(crate) fn current_minor() -> Self {
+        Self::Minor(
+            env!("CARGO_PKG_VERSION_MAJOR")
+                .parse()
+                .expect("CARGO_PKG_VERSION_MAJOR should be an integer"),
+        )
+    }
+}
+
 pub(crate) fn upgrade_configuration(
     config: &serde_json::Value,
     log_warnings: bool,

@@ -31,12 +31,6 @@ use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 
-fn current_major_version() -> i64 {
-    env!("CARGO_PKG_VERSION_MAJOR")
-        .parse()
-        .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
-}
-
 /// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
 #[derive(Clone, Copy)]
 enum Migration {
@@ -119,11 +113,12 @@ const CASES: &[Case] = &[
     },
 ];
 
-/// Applies `mode`'s migrations and serializes the result for a parser that accepts YAML text.
-/// The existing loader instead validates the migrated value without reserializing it.
-fn migrate(text: &str, mode: UpgradeMode) -> Result<String, String> {
+/// Applies the major-version migrations and serializes the result, as `router config upgrade`
+/// does before an operator starts the upgraded router.
+fn upgrade_major(text: &str) -> Result<String, String> {
     let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-    let migrated = upgrade_configuration(&raw, false, mode).map_err(|error| error.to_string())?;
+    let migrated = upgrade_configuration(&raw, false, UpgradeMode::Major)
+        .map_err(|error| error.to_string())?;
     serde_yaml::to_string(&migrated).map_err(|error| error.to_string())
 }
 
@@ -139,7 +134,7 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
                 .map_err(|error| error.to_string())
         }
         Migration::Major => {
-            let upgraded_yaml = migrate(text, UpgradeMode::Major)?;
+            let upgraded_yaml = upgrade_major(text)?;
             validate_yaml_configuration(
                 &upgraded_yaml,
                 Expansion::builder().build(),
@@ -150,17 +145,15 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
     }
 }
 
-/// Migrates legacy fixtures before passing them to the shared parser.
+/// Parses `case` through the shared-parser adapter, which applies within-major migrations
+/// itself. A case needing a major migration is pre-upgraded first, as for router.
 fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
-    let text = case.text;
     let text = match case.migration {
-        Migration::None => text.to_string(),
-        Migration::Minor => migrate(text, UpgradeMode::Minor(current_major_version()))?,
-        Migration::Major => migrate(text, UpgradeMode::Major)?,
+        Migration::None | Migration::Minor => case.text.to_string(),
+        Migration::Major => upgrade_major(case.text)?,
     };
-    router_options()
-        .parse::<Configuration>(&text)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))
+    parse_via_apollo_configuration(&text, ExternalValues::default())
+        .map_err(|error| error.to_string())
 }
 
 /// Returns a JSON pointer to the first difference, or `None` when the values match.
@@ -286,8 +279,8 @@ fn disagreements_about_secrets_are_detected_without_printing_them() {
     assert!(!mismatch.contains("synthetic-redis-password"), "{mismatch}");
 }
 
-/// Current-format inputs, and inputs migrated ahead of time exactly as a real deployment would
-/// migrate them, must produce the same effective settings through both parsers. A mismatch
+/// Current-format inputs, and inputs each loader migrates the way a real deployment would, must
+/// produce the same effective settings through both parsers. A mismatch
 /// names the case and the configuration path where the two disagree.
 #[test]
 fn effective_settings_agree_for_the_shared_corpus() {

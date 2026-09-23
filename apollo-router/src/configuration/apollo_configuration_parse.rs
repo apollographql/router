@@ -130,11 +130,8 @@ pub(crate) fn parse_via_apollo_configuration(
             error: error.to_string(),
         })?
     };
-    let major = env!("CARGO_PKG_VERSION_MAJOR")
-        .parse()
-        .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
     // Log what migration changed, as the production loader does.
-    let migrated = upgrade_configuration(&raw, true, UpgradeMode::Minor(major))?;
+    let migrated = upgrade_configuration(&raw, true, UpgradeMode::current_minor())?;
     let options = external.into_options();
     let (mut config, document) = if migrated == raw {
         parse_both_passes(text, &options)?

@@ -118,12 +118,7 @@ pub(crate) fn validate_yaml_configuration(
     });
 
     if migration == Mode::Upgrade {
-        let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
-            .parse()
-            .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
-
-        let upgraded =
-            upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::current_minor())?;
         let expanded_yaml = expansion.expand(&upgraded)?;
         if validator.is_valid(&expanded_yaml) {
             yaml = upgraded;
