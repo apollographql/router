@@ -994,8 +994,7 @@ pub(crate) struct QueryPlanning {
 
     /// Configuration for the incremental (BULB) query planner, which
     /// builds plans field-by-field with bounded backtracking instead of
-    /// exhaustively enumerating plan candidates. Deferred operations fall
-    /// back to the default planner.
+    /// exhaustively enumerating plan candidates.
     pub(crate) incremental_planner: IncrementalPlanner,
 }
 
@@ -1027,8 +1026,8 @@ impl QueryPlanning {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct IncrementalPlanner {
-    /// Whether the incremental planner is enabled. When enabled, deferred
-    /// operations still fall back to the default planner.
+    /// Whether the incremental planner is enabled. When enabled, it plans
+    /// all operations, including deferred ones.
     pub(crate) enabled: bool,
 
     /// Beam width: how many states advance together per depth in the beam.
