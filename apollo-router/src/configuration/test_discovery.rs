@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::OnceLock;
 
 use regex::Regex;
 use walkdir::DirEntry;
@@ -23,8 +24,14 @@ pub(crate) struct DiscoveredConfig {
 /// `title="router_unix.yaml"` on Unix) blocks inside `.mdx` docs. A block with extra attributes
 /// after the title, such as `novalidate`, is intentionally invalid or version-specific and is not
 /// discovered. A sibling `.skipconfigvalidation` marker file excludes a path from discovery
-/// entirely.
-pub(crate) fn discover_project_configs() -> Vec<DiscoveredConfig> {
+/// entirely. Results are shared within one test process; nextest's separate processes
+/// each perform their own discovery.
+pub(crate) fn discover_project_configs() -> &'static [DiscoveredConfig] {
+    static DISCOVERED: OnceLock<Vec<DiscoveredConfig>> = OnceLock::new();
+    DISCOVERED.get_or_init(load_project_configs)
+}
+
+fn load_project_configs() -> Vec<DiscoveredConfig> {
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
     #[cfg(unix)]
