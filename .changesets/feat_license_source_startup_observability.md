@@ -11,4 +11,4 @@ and reports it as a new `opt.apollo.license.source` attribute on the existing
 `apollo.router.config.env` metric, alongside the other CLI/env-derived startup facts already
 reported there.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/####
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10269
