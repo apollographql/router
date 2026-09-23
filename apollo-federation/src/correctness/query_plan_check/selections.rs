@@ -185,9 +185,13 @@ fn type_condition_admits(
     let (Some(type_names), Some(fragment_type)) = (pending, fragment_type) else {
         return true;
     };
+    // The path's condition names the concrete types the data there is narrowed to; the fragment's
+    // own condition may be abstract. So the question is whether the fragment reaches those types,
+    // not whether they reach it -- asking it the other way admits only a fragment written on the
+    // exact same object type, and skips one written on any interface or union above it.
     type_names
         .iter()
-        .any(|type_name| type_includes_object(schema, type_name, fragment_type))
+        .any(|type_name| type_includes_object(schema, fragment_type, type_name))
 }
 
 /// The object types a type name grounds to, sorted. Empty if the schema does not declare it, or it
@@ -501,4 +505,83 @@ fn type_filter_admits(
     filter_types
         .iter()
         .all(|type_name| guard_types.contains(type_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use apollo_compiler::schema::Schema;
+
+    use super::*;
+
+    const SCHEMA: &str = r#"
+        type Query { feed: [Item!]! }
+        interface Item { id: ID! }
+        interface Media implements Item { id: ID! }
+        type Book implements Item { id: ID! }
+        type Film implements Item & Media { id: ID!, minutes: Int! }
+        union Printed = Book
+    "#;
+
+    fn schema() -> ValidFederationSchema {
+        let schema = Schema::parse_and_validate(SCHEMA, "schema.graphql").unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    /// A path element's type condition names the concrete types the data there is narrowed to;
+    /// the fragment guarding a fetched selection may be written on anything above them. The two
+    /// meet when the fragment reaches those types -- asking it the other way round admits only a
+    /// fragment on the exact same object type, which is what once made the checker report
+    /// type-conditioned plans as fetching nothing.
+    #[test]
+    fn a_path_condition_is_admitted_by_a_fragment_above_it() {
+        let schema = schema();
+        let at_film = vec![name!("Film")];
+        for guard in [name!("Film"), name!("Media"), name!("Item")] {
+            assert!(
+                type_condition_admits(&schema, Some(&at_film), Some(&guard)),
+                "`... on {guard}` should reach data narrowed to Film"
+            );
+        }
+    }
+
+    #[test]
+    fn a_path_condition_is_not_admitted_by_a_fragment_beside_it() {
+        let schema = schema();
+        let at_film = vec![name!("Film")];
+        for guard in [name!("Book"), name!("Printed")] {
+            assert!(
+                !type_condition_admits(&schema, Some(&at_film), Some(&guard)),
+                "`... on {guard}` should not reach data narrowed to Film"
+            );
+        }
+    }
+
+    /// Several narrowed types meet a fragment that reaches any one of them.
+    #[test]
+    fn any_of_several_path_types_is_enough() {
+        let schema = schema();
+        let at_either = vec![name!("Book"), name!("Film")];
+        assert!(type_condition_admits(
+            &schema,
+            Some(&at_either),
+            Some(&name!("Media"))
+        ));
+        assert!(type_condition_admits(
+            &schema,
+            Some(&at_either),
+            Some(&name!("Printed"))
+        ));
+    }
+
+    /// An unconditioned path element, or an unguarded selection, constrains nothing. This is the
+    /// case every plan takes without `--type-conditioned-fetching`, which is why the swapped
+    /// comparison above stayed invisible for so long.
+    #[test]
+    fn an_absent_condition_admits_everything() {
+        let schema = schema();
+        assert!(type_condition_admits(&schema, None, Some(&name!("Book"))));
+        assert!(type_condition_admits(&schema, Some(&[name!("Film")]), None));
+        assert!(type_condition_admits(&schema, None, None));
+    }
 }

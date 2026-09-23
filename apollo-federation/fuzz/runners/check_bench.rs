@@ -124,6 +124,12 @@ fn main() {
             legacy_times.push(at.elapsed());
             if verdict.is_ok() != legacy.is_ok() {
                 println!("DISAGREE new={} legacy={}", verdict.is_ok(), legacy.is_ok());
+                if let Err(error) = &verdict {
+                    println!("new says:\n{error}");
+                }
+                if let Err(error) = &legacy {
+                    println!("legacy says:\n{error}");
+                }
             }
         }
     }
