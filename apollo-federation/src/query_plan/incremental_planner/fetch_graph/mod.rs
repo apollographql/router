@@ -805,16 +805,26 @@ impl FetchGraph {
     /// different stages).
     #[allow(clippy::type_complexity)]
     pub(crate) fn merge_sibling_entities(&mut self) {
-        // Group by (subgraph, condition-stripped merge_at).
-        // IndexMap for deterministic processing order: when merged groups
-        // have edges to each other, order decides how relocated edge inputs
-        // interleave, which is visible in the serialized plan.
-        let mut groups: IndexMap<(Arc<str>, Vec<FetchDataPathElement>), Vec<NodeIndex>> =
-            IndexMap::new();
+        // Group by (subgraph, defer scope, condition-stripped merge_at).
+        // Nodes from different defer scopes never merge: the survivor keeps
+        // one defer_ref, which would move the other scope's data into the
+        // wrong block. IndexMap for deterministic processing order: when
+        // merged groups have edges to each other, order decides how
+        // relocated edge inputs interleave, which is visible in the
+        // serialized plan.
+        #[allow(clippy::type_complexity)]
+        let mut groups: IndexMap<
+            (Arc<str>, Option<String>, Vec<FetchDataPathElement>),
+            Vec<NodeIndex>,
+        > = IndexMap::new();
         for node_idx in self.graph.node_indices() {
             let node = &self.graph[node_idx];
             if let FetchGroupKind::Entity { merge_at } = &node.kind {
-                let key = (node.subgraph.clone(), strip_merge_at_conditions(merge_at));
+                let key = (
+                    node.subgraph.clone(),
+                    node.defer_ref.clone(),
+                    strip_merge_at_conditions(merge_at),
+                );
                 groups.entry(key).or_default().push(node_idx);
             }
         }
@@ -832,12 +842,32 @@ impl FetchGraph {
                     continue;
                 }
                 for bucket in self.bucket_by_merge_compatibility(set) {
-                    if bucket.len() <= 1 {
-                        continue;
+                    // Earlier merges can connect members that were
+                    // independent when the partition was computed, and
+                    // merging two sets with paths into each other closes a
+                    // cycle. Re-check pairwise reachability on the current
+                    // graph and only merge members that are still mutually
+                    // unreachable; the rest retry among themselves.
+                    let mut remaining = bucket;
+                    while remaining.len() > 1 {
+                        let mut safe = vec![remaining[0]];
+                        let mut rest = Vec::new();
+                        for &member in &remaining[1..] {
+                            if safe.iter().all(|&kept| {
+                                !self.is_reachable(kept, member) && !self.is_reachable(member, kept)
+                            }) {
+                                safe.push(member);
+                            } else {
+                                rest.push(member);
+                            }
+                        }
+                        if safe.len() > 1 {
+                            let survivor = safe[0];
+                            self.union_merge_at_conditions(&safe);
+                            self.merge_nodes_into(survivor, &safe[1..]);
+                        }
+                        remaining = rest;
                     }
-                    let survivor = bucket[0];
-                    self.union_merge_at_conditions(&bucket);
-                    self.merge_nodes_into(survivor, &bucket[1..]);
                 }
             }
         }
@@ -1650,6 +1680,63 @@ mod tests {
         assert!(g.has_edge(e1, e2));
         assert!(g.has_edge(root, e1));
         assert!(!g.has_edge(e1, e1));
+    }
+
+    #[test]
+    fn merge_sibling_entities_does_not_merge_across_defer_scopes() {
+        let mut g = FetchGraph::new();
+        let root_sg: Arc<str> = Arc::from("A");
+        let sg: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&root_sg, dummy_root_type());
+        // Same subgraph and path but different defer scopes: merging would
+        // pull one scope's data into the other's block.
+        let primary = g.add_entity_group_with_defer(&sg, user_path(None), None);
+        let deferred =
+            g.add_entity_group_with_defer(&sg, user_path(None), Some("qp__0".to_string()));
+        g.add_dependency(root, primary, vec![]);
+        g.add_dependency(root, deferred, vec![]);
+
+        g.merge_sibling_entities();
+
+        assert_eq!(g.node_count(), 3, "defer scopes must not merge");
+        assert_eq!(g.node(primary).defer_ref, None);
+        assert_eq!(g.node(deferred).defer_ref, Some("qp__0".to_string()));
+    }
+
+    #[test]
+    fn merge_sibling_entities_does_not_create_cross_set_cycles() {
+        let mut g = FetchGraph::new();
+        let root_sg: Arc<str> = Arc::from("A");
+        let sg_b: Arc<str> = Arc::from("B");
+        let sg_c: Arc<str> = Arc::from("C");
+        let root = g.get_or_create_root_group(&root_sg, dummy_root_type());
+        // Four same-key siblings in B created in the order a1 < b2 < a2 < b1
+        // with chains a1 -> x1 -> b1 and a2 -> x2 -> b2 through C. First-fit
+        // partitioning forms {a1, b2} and {a2, b1}; merging both sets closes
+        // a cycle between the survivors.
+        let a1 = g.add_entity_group(&sg_b, user_path(None));
+        let b2 = g.add_entity_group(&sg_b, user_path(None));
+        let a2 = g.add_entity_group(&sg_b, user_path(None));
+        let b1 = g.add_entity_group(&sg_b, user_path(None));
+        let x1 = g.add_entity_group(&sg_c, vec![]);
+        let x2 = g.add_entity_group(
+            &sg_c,
+            vec![FetchDataPathElement::Key(
+                apollo_compiler::name!("other"),
+                Default::default(),
+            )],
+        );
+        g.add_dependency(root, a1, vec![]);
+        g.add_dependency(root, a2, vec![]);
+        g.add_dependency(a1, x1, vec![]);
+        g.add_dependency(x1, b1, vec![]);
+        g.add_dependency(a2, x2, vec![]);
+        g.add_dependency(x2, b2, vec![]);
+
+        g.merge_sibling_entities();
+
+        g.pipeline_depths()
+            .expect("sibling merging must never create a dependency cycle");
     }
 
     #[test]
