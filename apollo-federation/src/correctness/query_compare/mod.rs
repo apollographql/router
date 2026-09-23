@@ -271,6 +271,34 @@ fn compare_shared_variable_declarations(
 }
 
 //==================================================================================================
+// Work accounting
+//
+// How much the search did, as a number a test can compare. Two spellings of the same query must
+// cost the same to decide; when one costs orders of magnitude more, the checker is reading them
+// differently even though it answers the same, and no verdict comparison can show that. Wall time
+// cannot either at the scale a generated case runs at -- the whole comparison is microseconds, so
+// the signal is under the noise. A counter is exact at any scale.
+//
+// Per thread, not per process. A caller reads it either side of one comparison and subtracts, and
+// that difference only means anything if nothing else counted in between -- which is not true of a
+// process-wide number as soon as anything checks plans on more than one thread, as the corpus
+// harness does. Keeping it thread-local makes the reading right by construction rather than by a
+// rule callers have to know.
+//
+// This is not a debugging aid left in by accident: `fuzz/runners/metamorphic.rs` asserts on it.
+
+thread_local! {
+    /// Response-name groups this thread's searches have decided.
+    static GROUPS_DECIDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many response-name groups the search has decided on this thread. Monotonic for the life of
+/// the thread; callers read it either side of a comparison and subtract.
+pub fn groups_decided() -> u64 {
+    GROUPS_DECIDED.with(|decided| decided.get())
+}
+
+//==================================================================================================
 // Guarded field groups
 
 /// Every occurrence of one response name in a selection-set boundary, each with the condition
@@ -650,6 +678,7 @@ fn guarded_field_groups_include<T: PathConstraint>(
     right_groups: &[GuardedFieldGroup<'_>],
 ) -> Result<(), ComparisonError> {
     for right in right_groups {
+        GROUPS_DECIDED.with(|decided| decided.set(decided.get() + 1));
         let fallback = empty_group(&right.response_name, right.scope);
         let left = left_groups
             .iter()

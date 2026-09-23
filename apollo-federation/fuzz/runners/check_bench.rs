@@ -72,6 +72,43 @@ fn main() {
         .expect("query plan");
     println!("plan:  {:?}", planned.elapsed());
 
+    // The same invariant `metamorphic` asserts, at a scale where it can discriminate: generating
+    // fragments rewrites the plan's selection sets without changing what they select, so deciding
+    // the plan must cost about the same either way. It did not -- a plan written with generated
+    // fragments once cost 400x the same plan written inline, with no verdict ever disagreeing.
+    if flag("--compare-work").is_some() {
+        let groups_for = |generate: bool| {
+            let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+                generate_query_fragments: generate,
+                ..Default::default()
+            };
+            let planner = QueryPlanner::new(&supergraph, config).expect("planner");
+            let plan = planner
+                .build_query_plan(&document, None, Default::default())
+                .expect("query plan");
+            let before = correctness::query_compare::groups_decided();
+            let verdict = correctness::check_plan(
+                planner.api_schema(),
+                planner.supergraph_schema(),
+                &subgraphs,
+                &document,
+                &plan,
+            );
+            (
+                correctness::query_compare::groups_decided() - before,
+                verdict.is_ok(),
+            )
+        };
+        let (inline, inline_ok) = groups_for(false);
+        let (fragments, fragments_ok) = groups_for(true);
+        let ratio = fragments as f64 / inline.max(1) as f64;
+        println!("groups decided: inline {inline}, generated fragments {fragments} ({ratio:.1}x)");
+        if inline_ok != fragments_ok {
+            println!("VERDICT DIFFERS: inline {inline_ok}, fragments {fragments_ok}");
+        }
+        return;
+    }
+
     if flag("--dump-plan").is_some() {
         println!("{plan}");
         return;

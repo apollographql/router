@@ -19,6 +19,18 @@ use apollo_federation::correctness::query_compare;
 use query_inclusion_fuzz::harness::Harness;
 use query_inclusion_fuzz::model;
 
+/// Below this, a ratio says more about the rewrite than about the checker.
+const COST_FLOOR: u64 = 1;
+/// Where a work change stops being what an edit accounts for.
+///
+/// Calibrated, not guessed: over 40,000 comparisons on this fixture the largest legitimate change
+/// is 8x, from composing `split-complementary`, `duplicate` and `partition-by-runtime-type`, each
+/// of which really does add groups. Note what the same 40,000 comparisons say about the ceiling:
+/// no check here decides more than 6 groups, so this fixture cannot produce the two-orders-of-
+/// magnitude change that a real schema did. The guard is cheap and it is exact, but catching that
+/// class needs the invariant run against a corpus-scale schema -- see `check_bench --compare-work`.
+const COST_RATIO_REPORTED: f64 = 12.0;
+
 struct Options {
     seed: u64,
     cases: usize,
@@ -114,6 +126,10 @@ fn main() {
     let mut monotonicity_checked = 0usize;
     let mut transitivity_checked = 0usize;
     let mut by_rewrite: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut cost_compared = 0usize;
+    let mut cost_outliers = 0usize;
+    let mut worst_cost_ratio = 1.0f64;
+    let mut worst_cost_case: Option<(String, u64, String)> = None;
 
     for (bytes, rewrite_seed) in &inputs {
         let case = model::rewritten_case(bytes, *rewrite_seed, options.steps);
@@ -222,8 +238,36 @@ fn main() {
 
         for reversed in [false, true] {
             checked += 1;
+            // Cost is timed alongside the verdict. A rewrite that preserves meaning should not
+            // change what the check costs by orders of magnitude; when one does, the checker is
+            // reading the two spellings differently even though it answers the same. That is how
+            // a query plan written with generated fragments came to cost 400x what the same plan
+            // written inline costs, with no verdict ever disagreeing to show it.
+            let at = query_compare::groups_decided();
             let before = harness.run(&base, reversed).query_compare;
+            let before_cost = query_compare::groups_decided() - at;
+            let at = query_compare::groups_decided();
             let after = harness.run(&rewritten, reversed).query_compare;
+            let after_cost = query_compare::groups_decided() - at;
+            // A rewrite legitimately adds groups -- duplicating a selection adds one, partitioning
+            // by runtime type adds one per type -- so only a change far past what an edit can
+            // account for is reported.
+            if before_cost >= COST_FLOOR && after_cost >= COST_FLOOR {
+                cost_compared += 1;
+                let ratio = after_cost as f64 / before_cost as f64;
+                let ratio = if ratio >= 1.0 { ratio } else { 1.0 / ratio };
+                if ratio > worst_cost_ratio {
+                    worst_cost_ratio = ratio;
+                    worst_cost_case = Some((hex(bytes), *rewrite_seed, case.applied.join(", ")));
+                }
+                if ratio >= COST_RATIO_REPORTED {
+                    cost_outliers += 1;
+                    println!("---- work changed {ratio:.0}x under a meaning-preserving rewrite");
+                    println!("--input-hex {} --rewrite-seed {rewrite_seed}", hex(bytes));
+                    println!("applied: {}", case.applied.join(", "));
+                    println!("groups decided before {before_cost}, after {after_cost}");
+                }
+            }
             if before != after {
                 violations += 1;
                 println!("--------------------------------------------------------------------");
@@ -247,6 +291,13 @@ fn main() {
     println!("base invalid:          {base_invalid}");
     println!("rewrite invalid:       {rewritten_invalid}");
     println!("verdict comparisons:   {checked}");
+    println!("work comparisons:      {cost_compared} (over {COST_FLOOR} groups)");
+    println!("work outliers:         {cost_outliers} (at or above {COST_RATIO_REPORTED:.0}x)");
+    if let Some((bytes, seed, applied)) = &worst_cost_case {
+        println!(
+            "worst work change:     {worst_cost_ratio:.1}x  --input-hex {bytes} --rewrite-seed {seed}  [{applied}]"
+        );
+    }
     println!("rewrites applied:");
     for (name, count) in &by_rewrite {
         println!("  {name:<30} {count}");
