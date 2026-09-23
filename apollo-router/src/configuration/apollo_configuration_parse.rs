@@ -46,7 +46,9 @@ impl apollo_configuration::Configuration for ExpandedDocument {}
 
 /// Applies within-major migrations, then parses typed settings and the retained document
 /// using the same shared options. Providers must be stable across both parse calls.
-/// `raw_yaml` preserves the exact original text, while diagnostics refer to the migrated copy.
+/// `raw_yaml` preserves the exact original text. When migration changes nothing, the shared
+/// parser reads that text, so diagnostics point at the user's lines and YAML aliases keep the
+/// shared parser's anchor redaction. Otherwise diagnostics refer to the serialized migrated copy.
 ///
 /// Unlike the production loader, this adapter rejects invalid migrated input without falling
 /// back to the original document. Production loading remains a separate cutover.
@@ -72,12 +74,19 @@ pub(crate) fn parse_via_apollo_configuration(
         .parse()
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
     let migrated = upgrade_configuration(&raw, false, UpgradeMode::Minor(major))?;
-    let migrated =
-        serde_yaml::to_string(&migrated).map_err(|error| ConfigurationError::MigrationFailure {
-            error: error.to_string(),
+    let migrated_text;
+    let text_to_parse = if migrated == raw {
+        text
+    } else {
+        migrated_text = serde_yaml::to_string(&migrated).map_err(|error| {
+            ConfigurationError::MigrationFailure {
+                error: error.to_string(),
+            }
         })?;
-    let mut config: Configuration = options.parse(&migrated)?;
-    let document: ExpandedDocument = options.parse(&migrated)?;
+        &migrated_text
+    };
+    let mut config: Configuration = options.parse(text_to_parse)?;
+    let document: ExpandedDocument = options.parse(text_to_parse)?;
     config.validated_yaml = Some(document.0);
     config.raw_yaml = Some(Arc::from(text));
     Ok(config)
@@ -245,6 +254,41 @@ mod tests {
             config.supergraph.listen.to_string(),
             "http://127.0.0.1:4001",
             "the deserialized configuration must agree with validated_yaml"
+        );
+    }
+
+    /// Redis settings whose non-secret `namespace` anchors the value aliased into `password`,
+    /// plus an unknown key so that the diagnostic shows the anchor.
+    const ANCHORED_SECRET: &str = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost:6379]\n        namespace: &pw anchored-secret-value\n        unexpected: true\n        password: *pw\n";
+
+    #[test]
+    fn diagnostics_redact_an_anchor_aliased_into_a_secret_field() {
+        let error =
+            parse_via_apollo_configuration(ANCHORED_SECRET, &apollo_configuration_options())
+                .expect_err("the Redis configuration contains an unknown field");
+        let rendered = error.to_string();
+
+        assert!(
+            rendered.contains("namespace: &pw [REDACTED]"),
+            "the diagnostic should quote the original text with the anchor redacted: {rendered}"
+        );
+        assert!(
+            !rendered.contains("anchored-secret-value"),
+            "the diagnostic must not contain the aliased secret: {rendered}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_refer_to_the_original_text_when_migration_changes_nothing() {
+        let text = "# one\n# two\n\n# three\n# four\n\nsupergraph:\n  # listen comment\n  listen: 127.0.0.1:0\n\nthis_key_does_not_exist_anywhere: true\n";
+
+        let error = parse_via_apollo_configuration(text, &apollo_configuration_options())
+            .expect_err("the document sets a key the schema does not declare");
+        let rendered = error.to_string();
+
+        assert!(
+            rendered.contains("[11:1]"),
+            "the diagnostic should point at the offending line of the original text: {rendered}"
         );
     }
 }
