@@ -945,6 +945,11 @@ impl FieldRoutingSearchSpace {
             return Ok(true);
         }
         let sub_ss = field_sel.selection_set.as_ref().filter(|s| !s.is_empty());
+        // FIXME: a direct edge is taken as routable without checking the
+        // edge's own @requires or @fromContext conditions, which may have no
+        // route of their own. Commit re-checks them, so the cost is a late
+        // drop rather than a wrong plan. The condition resolution rework
+        // should account for edge conditions here.
         if let Some(edge_idx) = self.edge_for_field(node, &field_sel.field) {
             let Some(sub_ss) = sub_ss else {
                 return Ok(true);
@@ -971,6 +976,10 @@ impl FieldRoutingSearchSpace {
         let Some(type_cond) = frag_sel.inline_fragment.type_condition_position.as_ref() else {
             return self.conditions_routable(node, &frag_sel.selection_set);
         };
+        // FIXME: a missing downcast edge does not only mean "hop elsewhere".
+        // It can mean the type condition must be exploded into the runtime
+        // types this node shares with it. This falls through to key hops
+        // and may report unroutable where explosion would succeed.
         if let Some(edge_idx) = self.edge_for_inline_fragment(node, &frag_sel.inline_fragment) {
             let (_, target) = self.query_graph.edge_endpoints(edge_idx)?;
             return self.conditions_routable(target, &frag_sel.selection_set);
@@ -984,6 +993,11 @@ impl FieldRoutingSearchSpace {
 
     /// Whether any of `hops` can deliver `sub_ss`: at least one hop whose
     /// target routes the sub-selections.
+    ///
+    /// FIXME: this requires a single hop target to route the whole
+    /// sub-selection, but a condition set can be served by calling the same
+    /// field in several subgraphs for different parts of it. The subgraph
+    /// jump simplification should relax this.
     fn hops_reach(
         &self,
         hops: &[RoutingChoice],

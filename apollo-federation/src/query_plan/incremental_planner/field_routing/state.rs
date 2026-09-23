@@ -140,6 +140,10 @@ pub(crate) struct PlanState {
     /// search. Capped by `FORCED_BACKTRACK_CAP` so unplannable operations
     /// with no BULB alternatives stop retrying within the budget-free
     /// greedy pass. Not restored by `rollback`.
+    ///
+    /// FIXME: like the condition depth limit, a fixed cap can fail an
+    /// operation the legacy planner handles. Loop detection in the condition
+    /// resolution rework should replace it.
     pub(crate) forced_backtracks: u64,
 }
 
