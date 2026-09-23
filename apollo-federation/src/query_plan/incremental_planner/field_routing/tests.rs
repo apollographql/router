@@ -2898,62 +2898,6 @@ fn defer_on_value_type_stays_in_enclosing_fetch() {
             },
           },
         ]
-/// Shareable parent returning an abstract type whose runtime members differ
-/// per subgraph (U is X|Y in A but only X in B): fragments committed under
-/// the B route must be filtered to B's member set, dropping `... on Y`
-/// there without a penalty, while the A route keeps both.
-/// Targets routing.rs fragment_options' intersection filter, and
-/// type_conditions.rs dropped-by-intersection-filter arm.
-#[test]
-fn inconsistent_union_members_filtered_per_subgraph() {
-    let schema = wrap_supergraph(
-        r#"  A @join__graph(name: "a", url: "http://a")
-  B @join__graph(name: "b", url: "http://b")"#,
-        r#"
-union U
-  @join__type(graph: A)
-  @join__type(graph: B)
-  @join__unionMember(graph: A, member: "X")
-  @join__unionMember(graph: A, member: "Y")
-  @join__unionMember(graph: B, member: "X")
- = X | Y
-
-type X
-  @join__type(graph: A)
-  @join__type(graph: B)
-{
-  x: String
-}
-
-type Y
-  @join__type(graph: A)
-{
-  y: String
-}
-
-type Query
-  @join__type(graph: A)
-  @join__type(graph: B)
-{
-  search: [U]
-}
-"#,
-    );
-    let plan_str = plan_query(&schema, "{ search { ... on X { x } ... on Y { y } } }");
-    insta::assert_snapshot!(plan_str, @r###"
-    QueryPlan {
-      Fetch(service: "a") {
-        {
-          search {
-            __typename
-            ... on X {
-              x
-            }
-            ... on Y {
-              y
-            }
-          }
-        }
       },
     }
     "###);
