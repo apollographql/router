@@ -300,7 +300,9 @@ uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
 ] }
-tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
+# Unprefixed so that, when linked against a shared libjemalloc via JEMALLOC_OVERRIDE, allocations
+# go through the dynamic linker, where ddprof can hook them.
+tikv-jemallocator = { version = "0.7.0", features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
 tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
