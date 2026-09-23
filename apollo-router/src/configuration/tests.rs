@@ -517,7 +517,7 @@ fn redacted_redis_credentials_are_hidden_from_debug_output() {
     let config: QueryPlanRedisCache = serde_json::from_value(json!({
         "urls": ["redis://localhost:6379"],
         "username": "redis-admin",
-        "password": "hunter2-super-secret",
+        "password": "hunter2-super-secret", // gitleaks:allow
     }))
     .expect("valid redis config");
 

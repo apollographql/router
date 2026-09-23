@@ -24,6 +24,8 @@
             "77700b93798ce98eaf75c3b02b70198e7b730ddb",
             # not a key: https://github.com/apollographql/router/pull/8326#issuecomment-3325655427
             "58bca0271d5a2046dfa7705a5418781bc456c787",
+            # Synthetic Redis, response-cache and OTLP credentials in the redaction tests
+            "ba0b7f734eab8c1230fa29d5b70cebf40d632e46",
         ]
 
         paths = [
@@ -132,20 +134,13 @@
             '''^docs/source/routing/performance/caching/response-caching/invalidation.mdx$''',
         ]
 
-        # Synthetic credentials used by the Redis and OTLP redaction tests.
-        # Match only these fixture values, including occurrences in Git history.
-        # CI's scanner may report the whole match (`password": "<value>"`) as the
-        # secret, so the value is delimited rather than anchored to the full secret.
-        regexTarget = "secret"
-        regexes = ['''(?:^|[^\w-])(?:hunter2-super-secret|synthetic-otlp-private-key|synthetic-credential)(?:[^\w-]|$)''']
-
 [[ rules ]]
     id = "aws-access-token"
     [ rules.allowlist ]
-        # Synthetic ID used by redacted_aws_credentials_are_hidden_from_debug_output.
-        # Do not allowlist Redacted wrappers: they can still contain real credentials.
-        regexTarget = "secret"
-        regexes = ['''^AKIASCRATCHACCESSKEY$''']
+        commits = [
+            # Synthetic AWS access key ID in the SigV4 redaction tests
+            "ba0b7f734eab8c1230fa29d5b70cebf40d632e46",
+        ]
 
 [[ rules ]]
     id = "curl-auth-header"

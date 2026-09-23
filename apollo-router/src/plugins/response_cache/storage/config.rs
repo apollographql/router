@@ -165,7 +165,7 @@ mod tests {
         let input = serde_json::json!({
             "urls": ["redis://localhost:6379"],
             "username": "synthetic-user",
-            "password": "synthetic-credential",
+            "password": "synthetic-credential", // gitleaks:allow
         });
         let config: Config = serde_json::from_value(input.clone()).unwrap();
         let identical: Config = serde_json::from_value(input.clone()).unwrap();

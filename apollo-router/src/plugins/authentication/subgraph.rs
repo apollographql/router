@@ -1091,7 +1091,7 @@ mod test {
     #[test]
     fn redacted_aws_credentials_are_hidden_from_debug_output() {
         let config = AWSSigV4HardcodedConfig {
-            access_key_id: Redacted::new("AKIASCRATCHACCESSKEY".to_string()),
+            access_key_id: Redacted::new("AKIASCRATCHACCESSKEY".to_string()), // gitleaks:allow
             secret_access_key: Redacted::new("wJalrXUtSecretAccessKeyScratch123".to_string()),
             region: "us-east-1".to_string(),
             service_name: "s3".to_string(),
@@ -1100,7 +1100,7 @@ mod test {
 
         let debug = format!("{config:?}");
         assert!(
-            !debug.contains("AKIASCRATCHACCESSKEY"),
+            !debug.contains("AKIASCRATCHACCESSKEY"), // gitleaks:allow
             "access key ID must not appear in Debug output: {debug}"
         );
         assert!(
@@ -1108,7 +1108,7 @@ mod test {
             "secret access key must not appear in Debug output: {debug}"
         );
 
-        assert_eq!(config.access_key_id.unredact(), "AKIASCRATCHACCESSKEY");
+        assert_eq!(config.access_key_id.unredact(), "AKIASCRATCHACCESSKEY"); // gitleaks:allow
         assert_eq!(
             config.secret_access_key.unredact(),
             "wJalrXUtSecretAccessKeyScratch123"

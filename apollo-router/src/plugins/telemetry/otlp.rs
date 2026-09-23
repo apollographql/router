@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn redacted_grpc_key_preserves_contents_and_change_detection() {
-        let input = serde_json::json!({"key": "synthetic-otlp-private-key"});
+        let input = serde_json::json!({"key": "synthetic-otlp-private-key"}); // gitleaks:allow
         let config: GrpcExporter = serde_json::from_value(input.clone()).unwrap();
         let debug = format!("{config:?}");
         assert!(debug.contains("key: Some([REDACTED])"), "{debug}");
