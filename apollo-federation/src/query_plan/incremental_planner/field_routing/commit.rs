@@ -280,8 +280,8 @@ impl FieldRoutingSearchSpace {
         // Keys the current fetch cannot resolve directly are routed as
         // pending selections; ordering edges to the new group are wired as
         // they commit. Statically circular keys are the exception: routing
-        // their conditions would recurse without progress, so they are
-        // handled via locally_satisfiable_subset instead.
+        // their conditions would recurse without progress, so the anchor
+        // must resolve the whole key itself or the commit fails.
         if !key_locally_resolvable && let Some(key_conditions) = first_key.cloned() {
             if matches!(choice, RoutingChoice::CircularKeyHop { .. }) {
                 self.commit_circular_key_conditions(
