@@ -8,6 +8,7 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use tracing::trace;
 
 use super::super::defer;
@@ -119,22 +120,37 @@ impl FieldRoutingSearchSpace {
         };
 
         // Mutating half: commit the hop or resolve the direct fetch group.
-        let (fetch_node, key_hop_edge) = match choice {
+        let (fetch_node, key_hop_edge, is_defer_redirect) = match choice {
             RoutingChoice::Provides(_) | RoutingChoice::Local(_) => {
-                (self.direct_fetch_node(state, pending, choice)?, None)
+                let node = self.direct_fetch_node(state, pending, choice)?;
+                // A deferred field whose enclosing group belongs to a
+                // different defer scope needs its own entity fetch, even
+                // when no key hop is involved. This lets the executor
+                // stream the deferred payload in a separate chunk.
+                let enclosing_defer = &state.graph.node(node).defer_ref;
+                if pending.defer_ref != *enclosing_defer {
+                    let (group, edge) = self.commit_defer_redirect(state, pending, choice)?;
+                    (group, Some(edge), true)
+                } else {
+                    (node, None, false)
+                }
             }
             RoutingChoice::RootHop(_) => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
-                (group, Some(hop_edge))
+                (group, Some(hop_edge), false)
             }
             _ => {
                 let (group, hop_edge) = self.commit_key_hop(state, pending, choice)?;
-                (group, Some(hop_edge))
+                (group, Some(hop_edge), false)
             }
         };
 
         // Pure half: assemble op and response paths for children.
-        let mut target = self.target_paths(pending, choice, fetch_node, response_path_elements)?;
+        let mut target = if is_defer_redirect {
+            self.defer_redirect_target(pending, fetch_node, response_path_elements)?
+        } else {
+            self.target_paths(pending, choice, fetch_node, response_path_elements)?
+        };
         let ctx = CommitCtx {
             pending,
             choice,
@@ -808,6 +824,111 @@ impl FieldRoutingSearchSpace {
             op_path,
             response_path,
             entity_root: !choice.is_direct(),
+        })
+    }
+
+    /// Route a deferred field into a separate entity group when it lives
+    /// in the same subgraph as its enclosing fetch but belongs to a
+    /// different defer scope. This creates the same structure as a key hop
+    /// so the executor can stream the deferred payload independently.
+    fn commit_defer_redirect(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        choice: &RoutingChoice,
+    ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
+        let qg = &self.query_graph;
+        let source = self.node_source(pending.query_graph_node)?;
+        let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
+
+        // The self-key edge exists specifically for @defer re-entering a
+        // subgraph; out_edges filters self-edges so use the unfiltered view.
+        let key_conditions = qg
+            .out_edges_with_federation_self_edges(pending.query_graph_node)
+            .into_iter()
+            .find_map(|edge_ref| {
+                let edge = edge_ref.weight();
+                if !matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                    return None;
+                }
+                let target_node = qg.node_weight(edge_ref.target()).ok()?;
+                if target_node.source != subgraph {
+                    return None;
+                }
+                edge.conditions.clone()
+            });
+
+        self.append_entity_inputs(
+            state,
+            pending.fetch_node,
+            &pending.op_path,
+            key_conditions.as_ref(),
+            &source,
+        );
+
+        let merge_at = self.pending_merge_at(state, pending);
+        let new_group = self.entity_group_avoiding_cycles(
+            state,
+            &subgraph,
+            merge_at,
+            pending.fetch_node,
+            pending.ordering_dependent(),
+            pending.defer_ref.clone(),
+        );
+
+        let (field_source, _) =
+            qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
+        let dest_type: CompositeTypeDefinitionPosition =
+            qg.node_weight(field_source)?.type_.clone().try_into()?;
+
+        let key_input = key_conditions.map(|conditions| InputContribution::Key {
+            source_type_name: source.type_pos.type_name().clone(),
+            conditions,
+            rewrite_info: InputRewriteInfo {
+                dest_type,
+                dest_subgraph: subgraph,
+            },
+        });
+
+        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
+        Ok((new_group, edge))
+    }
+
+    /// Build a commit target for a same-subgraph defer redirect. The field
+    /// is routed to a new entity group, so its op_path restarts from the
+    /// entity root (like a key hop) rather than extending the parent path.
+    fn defer_redirect_target(
+        &self,
+        pending: &PendingSelection,
+        fetch_node: NodeIndex,
+        response_path_elements: Vec<FetchDataPathElement>,
+    ) -> Result<CommitTarget, FederationError> {
+        let node_data = self.query_graph.node_weight(pending.query_graph_node)?;
+        let type_name = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone())?
+            .type_name()
+            .clone();
+        let mut op_path = self.entity_root_path(&type_name)?;
+        for element in trailing_condition_fragments(&pending.op_path) {
+            op_path = op_path.pushed(element);
+        }
+        let op_element: Arc<OpPathElement> = match &pending.selection {
+            Selection::Field(field_sel) => Arc::new(OpPathElement::Field(field_sel.field.clone())),
+            Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
+                frag_sel.inline_fragment.clone(),
+            )),
+        };
+        op_path = op_path.pushed(op_element);
+
+        let mut response_path = SharedPath::new();
+        for element in response_path_elements {
+            response_path = response_path.pushed(element);
+        }
+
+        Ok(CommitTarget {
+            fetch_node,
+            op_path,
+            response_path,
+            entity_root: true,
         })
     }
 
