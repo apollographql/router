@@ -43,6 +43,8 @@ mod integration;
 // apollo-router rlib.
 #[path = "set_context.rs"]
 mod set_context;
+#[path = "router_1919_flatten_error_type_condition.rs"]
+mod router_1919_flatten_error_type_condition;
 #[path = "type_conditions.rs"]
 mod type_conditions;
 
