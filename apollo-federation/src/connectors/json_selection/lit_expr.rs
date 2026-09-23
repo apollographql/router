@@ -737,9 +737,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
-    fn test_lit_expr_parse_objects() {
-=======
     fn keywords_respect_identifier_boundary() {
         // Every keyword crossed with every identifier-continue character.
         for (keyword, expected) in LitExpr::keywords() {
@@ -767,7 +764,7 @@ mod tests {
 
                 // The alias position is where the bug was silent.
                 let selection = format!("alias: {key}");
-                let parsed = JSONSelection::parse(&selection)
+                let parsed = JSONSelection::parse_with_spec(&selection, ConnectSpec::V0_4)
                     .unwrap_or_else(|e| panic!("Failed to parse '{selection}': {e:?}"));
                 assert_eq!(
                     parsed.pretty_print_with_indentation(true, 0),
@@ -828,17 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lit_expr_parse_objects_v0_3() {
-        // v0.3 and earlier parse object literals as an unordered
-        // `LitExpr::LegacyObject` map. Pinned to V0_3 so bumping
-        // `ConnectSpec::latest()` can't silently drop this coverage; v0.4+
-        // `Object` parsing is covered by `test_lit_expr_parse_objects_v0_4`.
-        #[track_caller]
-        fn check_parse(input: &str, expected: LitExpr) {
-            check_parse_with_spec(input, ConnectSpec::V0_3, expected);
-        }
-
->>>>>>> 46d4e61 (fix(connectors): stop JSONSelection truncating keyword- and number-prefixed names (#10260))
+    fn test_lit_expr_parse_objects() {
         check_parse(
             "{a: 1}",
             LitExpr::LegacyObject({

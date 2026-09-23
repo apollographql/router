@@ -5057,10 +5057,12 @@ mod tests {
     }
 
     /// Asserts `input` prints back exactly as written, which catches a
-    /// mis-parse that `is_ok()` would miss.
+    /// mis-parse that `is_ok()` would miss. Pinned to V0_4, the first spec
+    /// that allows a bare `LitExpr` after an alias, since `latest()` is V0_3
+    /// on this branch.
     #[track_caller]
     fn check_round_trip(input: &str) {
-        let parsed = JSONSelection::parse(input)
+        let parsed = JSONSelection::parse_with_spec(input, ConnectSpec::V0_4)
             .unwrap_or_else(|e| panic!("Failed to parse '{input}': {e:?}"));
         assert_eq!(parsed.pretty_print_with_indentation(true, 0), input);
     }
@@ -5069,7 +5071,7 @@ mod tests {
     fn adjacent_selections_may_not_split_a_single_token() {
         // Each has a zero-width seam inside a name.
         for input in ["alias: 1b: 2", "x: 1 y: 2z", "{ a: 1b }", "{ a: 1b, c: 2 }"] {
-            let err = JSONSelection::parse(input)
+            let err = JSONSelection::parse_with_spec(input, ConnectSpec::V0_4)
                 .expect_err("a zero-width seam inside a name should be rejected");
             assert!(
                 err.message
@@ -5084,7 +5086,7 @@ mod tests {
         check_round_trip("alias: a? b");
         check_round_trip("... a ... b");
         for input in ["{a{x}b}", "a{x}b", "alias: \"a\"b: 1", "alias: @foo"] {
-            JSONSelection::parse(input)
+            JSONSelection::parse_with_spec(input, ConnectSpec::V0_4)
                 .unwrap_or_else(|e| panic!("'{input}' should still parse: {e:?}"));
         }
 
@@ -5109,7 +5111,7 @@ mod tests {
         // printer normalizes `1.` to `1.0`.
         #[track_caller]
         fn check_prints_as(input: &str, expected: &str) {
-            let parsed = JSONSelection::parse(input)
+            let parsed = JSONSelection::parse_with_spec(input, ConnectSpec::V0_4)
                 .unwrap_or_else(|e| panic!("Failed to parse '{input}': {e:?}"));
             assert_eq!(parsed.pretty_print_with_indentation(true, 0), expected);
         }
@@ -5153,8 +5155,9 @@ mod tests {
         check_round_trip("nullField { x }");
 
         // Verbatim from the original bug report.
-        let parsed = JSONSelection::parse("$(falsePositives ?? 'fallback')")
-            .expect("the reported repro should parse");
+        let parsed =
+            JSONSelection::parse_with_spec("$(falsePositives ?? 'fallback')", ConnectSpec::V0_4)
+                .expect("the reported repro should parse");
         assert_eq!(
             parsed.pretty_print_with_indentation(true, 0),
             "$(falsePositives ?? \"fallback\")",
