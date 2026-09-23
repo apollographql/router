@@ -634,7 +634,16 @@ impl FieldRoutingSearchSpace {
                     edge.transition,
                     QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
                 ) {
-                    self.push_interface_object_typename(state, pending)?;
+                    // Entity groups already carry __typename in their
+                    // incoming representation, so recovery is only needed
+                    // when the fake downcast originates from a root group.
+                    if matches!(
+                        state.graph.node(pending.fetch_node).kind,
+                        super::super::fetch_graph::FetchGroupKind::Root { .. }
+                            | super::super::fetch_graph::FetchGroupKind::RootHop { .. }
+                    ) {
+                        self.push_interface_object_typename(state, pending)?;
+                    }
                 }
                 Ok(pending.fetch_node)
             }
