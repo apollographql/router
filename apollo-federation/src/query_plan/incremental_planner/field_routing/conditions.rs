@@ -1,15 +1,20 @@
-use apollo_compiler::name;
+//! Condition satisfiability: can a set of @requires / @key fields be resolved
+//! at a given query graph node?
+//!
+//! Three flavors of check, each deeper than the last:
+//! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
+//! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
+//! - `conditions_have_requires`: detects @requires on condition edges.
+
 use petgraph::graph::NodeIndex;
 
+use super::FieldRoutingSearchSpace;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
-
-const TYPENAME_FIELD: apollo_compiler::Name = name!("__typename");
-
-use super::FieldRoutingSearchSpace;
 
 impl FieldRoutingSearchSpace {
     /// Can this subgraph resolve every field in `conditions` at `type_pos`?
