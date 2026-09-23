@@ -3784,3 +3784,172 @@ fn inc_requires_overlapping_conditions_fetch_count() {
     "###
     );
 }
+
+/// Multiple non-nested @defer labels: sibling entity merging must not
+/// combine fetches from different defer scopes; primary data must stay in
+/// the primary and each label's data in its own Deferred block.
+#[test]
+fn inc_defer_multiple_labels_keep_scopes_separate() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v0: String
+            v1: String
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            v2: String
+            v3: U
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph3: r#"
+          type U @key(fields: "id") {
+            id: ID!
+            x: Int
+            y: Int
+          }
+        "#,
+    );
+
+    assert_plan!(planner,
+        r#"
+          {
+            t {
+              v0
+              ... @defer(label: "defer_v1") {
+                v1
+              }
+              ... @defer {
+                v2
+              }
+              v3 {
+                x
+                ... @defer(label: "defer_in_v3") {
+                  y
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v0 v3 { x } } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  v0
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2", id: 1) {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v3 {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.v3") {
+              Fetch(service: "Subgraph3") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [1], path: "t/v3", label: "defer_in_v3") {
+            { y }:
+            Flatten(path: "t.v3") {
+              Fetch(service: "Subgraph3") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    y
+                  }
+                }
+              },
+            },
+          },
+          Deferred(depends: [0], path: "t") {
+            { v2 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v2
+                  }
+                }
+              },
+            },
+          },
+          Deferred(depends: [0], path: "t", label: "defer_v1") {
+            { v1 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
