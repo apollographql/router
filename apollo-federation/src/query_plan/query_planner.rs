@@ -945,14 +945,9 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    // The BULB planner has no defer support yet: it would plan every field
-    // eagerly and silently drop the DeferNodes, so deferred operations
-    // (including the defer-conditionals path, which always plans with
-    // has_defers) fall back to the legacy planner.
-    // It also does not implement type_conditioned_fetching, so queries
-    // relying on that flag fall back to the legacy planner as well.
+    // The BULB planner does not implement type_conditioned_fetching, so
+    // queries relying on that flag fall back to the legacy planner.
     let use_incremental = parameters.config.incremental_planner.enabled
-        && (!has_defers || force_incremental_defer())
         && !parameters.config.type_conditioned_fetching;
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
