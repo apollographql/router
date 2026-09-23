@@ -25,9 +25,27 @@ RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_
 
 # Use a multi-stage build to install the debug tools if DEBUG_IMAGE is true
 FROM rust:slim-bookworm AS install-debug-tools-true
+ARG TARGETARCH
+ARG DDPROF_VERSION=0.26.0
 # We use the rust addr2line to avoid this error/perf issue https://github.com/iced-rs/iced/issues/2394
 RUN cargo install addr2line --locked --features="bin"
 RUN cargo install flamegraph --locked
+
+# ddprof is a native continuous profiler.  Unlike perf/heaptrack it ships its samples to an
+# APM backend rather than writing artifacts to disk, so it is the one that works unattended.
+# The checksum file covers both architectures, so pinning it lets one digest verify either
+# binary -- the per-arch digests cannot be pinned via ADD --checksum because TARGETARCH varies.
+ADD --checksum=sha256:65daff7671fc23a26c67a8885679f188ec994c8eba3815906330533617c4d842 \
+  https://github.com/DataDog/ddprof/releases/download/v${DDPROF_VERSION}/sha256sum.txt \
+  /tmp/ddprof-sha256sum.txt
+ADD --chmod=0755 \
+  https://github.com/DataDog/ddprof/releases/download/v${DDPROF_VERSION}/ddprof-${TARGETARCH} \
+  /usr/local/cargo/bin/ddprof
+# Fails closed: an unmatched TARGETARCH yields an empty list and sha256sum -c then errors.
+RUN cd /usr/local/cargo/bin \
+  && awk -v f="ddprof-${TARGETARCH}" '$2 == f { print $1 "  ddprof" }' /tmp/ddprof-sha256sum.txt > ddprof.sha256 \
+  && sha256sum -c ddprof.sha256 \
+  && rm ddprof.sha256
 
 FROM rust:slim-bookworm AS install-debug-tools-false
 # Do nothing
@@ -63,6 +81,7 @@ RUN \
 # Copy the debug tools from the install-debug-tools stage if DEBUG_IMAGE was true.
 COPY --from=install-debug-tools /usr/local/cargo/bin/flamegraph* /usr/bin/
 COPY --from=install-debug-tools /usr/local/cargo/bin/addr2line* /usr/bin/
+COPY --from=install-debug-tools /usr/local/cargo/bin/ddprof* /usr/bin/
 
 # Clean up apt lists
 RUN rm -rf /var/lib/apt/lists/*
@@ -84,7 +103,15 @@ RUN \
   echo '#!/bin/bash \
 \nset -e \
 \n \
-\nif [ -f "/usr/bin/heaptrack" ]; then \
+\n# APOLLO_ROUTER_PROFILER selects a profiler explicitly.  Deliberately not DD_PROFILING_ENABLED: \
+\n# that is ddprof own variable and defaults to true, and Datadog admission controller injects \
+\n# DD_* cluster-wide, which would turn this from opt-in into silently-on. \
+\nif [ "${APOLLO_ROUTER_PROFILER:-}" = "ddprof" ] && [ -x "/usr/bin/ddprof" ]; then \
+\n    # The -- is required: ddprof has its own --config and would otherwise consume the one \
+\n    # intended for the router and try to parse it as TOML. \
+\n    # informational logging is deliberate; at the default level a broken exporter is silent. \
+\n    exec /usr/bin/ddprof --log_level informational -- /dist/router "$@" \
+\nelif [ -f "/usr/bin/heaptrack" ]; then \
 \n    exec heaptrack -o /dist/data/$(hostname)/router_heaptrack  /dist/router "$@" \
 \nelse \
 \n    exec /dist/router "$@" \
