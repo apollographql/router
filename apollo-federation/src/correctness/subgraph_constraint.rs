@@ -148,4 +148,8 @@ impl PathConstraint for SubgraphConstraint<'_> {
                 ))
             })
     }
+    /// The subgraphs still possible are what this narrows by, so two agree only when those do.
+    fn narrows_alike(&self, other: &Self) -> bool {
+        self.possible_subgraphs == other.possible_subgraphs
+    }
 }

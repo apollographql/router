@@ -126,6 +126,13 @@ where
         representative_field: &Field,
         parent_types: &PossibleTypes,
     ) -> Result<(Self, PossibleTypes), ComparisonError>;
+
+    /// Would these two narrow every deeper field the same way?
+    ///
+    /// Only a caller that is about to discard one of them needs to ask. Two constraints can agree
+    /// on a field's response types and still disagree below it, so answering by comparing what
+    /// they just returned is not enough; a stateless constraint answers `true`.
+    fn narrows_alike(&self, other: &Self) -> bool;
 }
 
 /// The constraint that narrows nothing: every field's response may be any type.
@@ -144,6 +151,10 @@ impl PathConstraint for NoConstraint {
     ) -> Result<(Self, PossibleTypes), ComparisonError> {
         Ok((NoConstraint, PossibleTypes::All))
     }
+
+    fn narrows_alike(&self, _other: &Self) -> bool {
+        true
+    }
 }
 
 /// Conjunction of two path constraints: a runtime type is possible only if both constraints
@@ -158,6 +169,9 @@ impl<A: PathConstraint, B: PathConstraint> PathConstraint for (A, B) {
         let (a, a_types) = self.0.for_field(representative_field, parent_types)?;
         let (b, b_types) = self.1.for_field(representative_field, parent_types)?;
         Ok(((a, b), a_types.intersect(&b_types)))
+    }
+    fn narrows_alike(&self, other: &Self) -> bool {
+        self.0.narrows_alike(&other.0) && self.1.narrows_alike(&other.1)
     }
 }
 

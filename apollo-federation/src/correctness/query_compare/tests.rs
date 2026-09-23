@@ -482,3 +482,88 @@ fn error_renders_as_json() {
     }
     "###);
 }
+
+//==================================================================================================
+// The subgraph oracle's state
+
+/// A supergraph where two implementations reach the same child region through different subgraphs.
+///
+/// `P.f` resolves only in subgraph A and `Q.f` only in B, and both return `R`, so the two child
+/// obligations agree on the region `{R}` and disagree on which subgraphs remain possible. `R.g`
+/// returns an interface implemented by `X` in A and by `Y` in B, so that disagreement decides what
+/// the next level admits.
+const CONSTRAINT_STATE_SCHEMA: &str = include_str!("testdata/constraint_state.graphql");
+
+fn constraint_state_fixture() -> (
+    crate::schema::ValidFederationSchema,
+    crate::schema::ValidFederationSchema,
+    apollo_compiler::collections::IndexMap<
+        std::sync::Arc<str>,
+        crate::schema::ValidFederationSchema,
+    >,
+) {
+    let supergraph =
+        crate::Supergraph::new_with_router_specs(CONSTRAINT_STATE_SCHEMA).expect("valid fixture");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    let subgraphs = supergraph
+        .extract_subgraphs()
+        .expect("subgraphs")
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    (supergraph.schema.clone(), api_schema, subgraphs)
+}
+
+/// Deciding `left` includes `right` under the federated oracle, as the plan checker does.
+fn includes_in_supergraph(left: &str, right: &str) -> Result<(), ComparisonError> {
+    let (supergraph_schema, api_schema, subgraphs) = constraint_state_fixture();
+    let parse = |source: &str| {
+        ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            source.to_string(),
+            "op.graphql",
+        )
+        .expect("valid operation")
+    };
+    let constraint = crate::correctness::subgraph_constraint::SubgraphConstraint::new(&subgraphs);
+    includes_with_constraint(&supergraph_schema, &constraint, &parse(left), &parse(right))
+}
+
+/// The right side asks for a field only `Y` has, and the left never selects it, so this is not an
+/// inclusion. `Y` is reachable only through subgraph B, and only the `Q` branch keeps B possible --
+/// so answering correctly depends on the `Q` obligation surviving as far as `g`.
+#[test]
+fn an_obligation_reached_through_a_different_subgraph_is_not_dropped() {
+    let error = includes_in_supergraph(
+        "{ items { f { g { __typename } } } }",
+        "{ items { f { g { ... on Y { y } } } } }",
+    )
+    .expect_err("left does not select `y` on Y");
+    assert!(
+        error.to_string().contains('y'),
+        "expected the missing field to be named, got:\n{error}"
+    );
+}
+
+/// The same shape through the other branch, so a fix cannot pass by keeping only one of the two.
+#[test]
+fn an_obligation_reached_through_the_other_subgraph_is_not_dropped() {
+    includes_in_supergraph(
+        "{ items { f { g { __typename } } } }",
+        "{ items { f { g { ... on X { x } } } } }",
+    )
+    .expect_err("left does not select `x` on X");
+}
+
+/// The control: what the left does select is included, so the tests above are not passing merely
+/// because this fixture rejects everything.
+#[test]
+fn what_the_left_selects_is_included() {
+    includes_in_supergraph(
+        "{ items { f { g { __typename } } } }",
+        "{ items { f { g { __typename } } } }",
+    )
+    .expect("an operation includes itself");
+}

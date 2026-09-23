@@ -65,3 +65,7 @@ path = "runners/benchmark.rs"
 [[example]]
 name = "compose_fixture"
 path = "runners/compose_fixture.rs"
+
+[[example]]
+name = "compose_constraint_fixture"
+path = "runners/compose_constraint_fixture.rs"

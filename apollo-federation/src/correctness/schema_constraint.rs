@@ -87,4 +87,8 @@ impl PathConstraint for SchemaConstraint<'_> {
         };
         Ok((SchemaConstraint::new(self.schema), field_types))
     }
+    /// Stateless: it reads the supergraph schema and nothing it has been told.
+    fn narrows_alike(&self, _other: &Self) -> bool {
+        true
+    }
 }

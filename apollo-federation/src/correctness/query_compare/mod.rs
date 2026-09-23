@@ -625,6 +625,9 @@ fn child_tasks_for_parent_types<'doc, T: PathConstraint>(
         // return region plus pointer identity on the selections is enough to spot duplicates.
         let duplicate = tasks.iter().any(|existing| {
             existing.possible_types == task.possible_types
+                // Equal response types do not make two obligations equal: the oracle carries state
+                // that narrows deeper fields, and two parents can agree here and diverge below.
+                && existing.constraint.narrows_alike(&task.constraint)
                 && same_selection_refs(&existing.left_selections, &task.left_selections)
                 && same_selection_refs(&existing.right_selections, &task.right_selections)
         });
