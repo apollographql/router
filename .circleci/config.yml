@@ -652,6 +652,20 @@ jobs:
       - checkout
       - setup_environment:
           platform: << parameters.platform >>
+      # Link the release binary against a shared jemalloc so ddprof can hook allocations
+      # (apollo-router/Cargo.toml).  The runtime image installs libjemalloc2.
+      - when:
+          condition:
+            or:
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [*arm_linux_build_executor, << parameters.platform >>]
+          steps:
+            - run:
+                name: Install shared jemalloc
+                command: |
+                  microdnf install -y epel-release
+                  microdnf install -y jemalloc-devel
+                  echo 'export JEMALLOC_OVERRIDE=/usr/lib64/libjemalloc.so' >> "$BASH_ENV"
       - when:
           condition:
             or:
