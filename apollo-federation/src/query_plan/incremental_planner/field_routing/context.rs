@@ -212,13 +212,13 @@ pub(super) fn handle_from_context(
     let pending = ctx.pending;
     // The field edge's source gives the subgraph defining the @fromContext
     // field; for key hops this differs from pending.query_graph_node.
-    let (edge_source_node, _) = search_space.qg().edge_endpoints(
-        ctx.choice.edge_index().ok_or_else(|| {
-            FederationError::internal("edge_index called on non-edge routing choice")
-        })?,
-    )?;
-    let edge_source_data = search_space.qg()
-        .node_weight(edge_source_node)?;
+    let (edge_source_node, _) =
+        search_space
+            .qg()
+            .edge_endpoints(ctx.choice.edge_index().ok_or_else(|| {
+                FederationError::internal("edge_index called on non-edge routing choice")
+            })?)?;
+    let edge_source_data = search_space.qg().node_weight(edge_source_node)?;
     let source_subgraph = &edge_source_data.source;
 
     let placement = classify_placement(pending, current_fetch_node, required_contexts);
@@ -235,7 +235,8 @@ pub(super) fn handle_from_context(
     // pairs to splice into the field's arguments.
     let mut context_args: Vec<(Name, Name)> = Vec::new();
     for cond in required_contexts {
-        let context_id = search_space.qg()
+        let context_id = search_space
+            .qg()
             .context_id_by_source_and_argument(source_subgraph, &cond.argument_coordinate)?;
 
         let (ancestor_type, ancestor_idx, levels_in_data_path) =
@@ -274,7 +275,8 @@ pub(super) fn handle_from_context(
         // subgraph may declare them as @external.
         let append_subgraph = state.graph.node(append_fetch_node).subgraph.clone();
         let append_schema = search_space
-            .cached_query_graph.query_graph
+            .cached_query_graph
+            .query_graph
             .schema_by_source(&append_subgraph)?;
         let append_type: CompositeTypeDefinitionPosition = append_schema
             .get_type(ancestor_type.type_name())?
