@@ -74,14 +74,23 @@ flow by bouncing them through a separate tool.
 
 ---
 
-## Prerequisite: install `connect-migrate`
+## Prerequisite: get `connect-migrate`
 
 The CLI lives at <https://github.com/apollographql/connect-migrate>.
+There are two ways to get it, and they give you the same analyzer: the
+same Rust parser, compiled from the same pinned router commit. Start
+with Option A; move to Option B the moment A is blocked.
 
-**While the repo is private, the one-line installer can't be fetched
-anonymously** — `curl …/raw.githubusercontent.com/.../install.sh` 404s
-without auth. The reliable path is an authenticated release download via
-the GitHub CLI (`gh`), which picks up your existing login:
+### Option A: install the prebuilt binary
+
+The one-line script drops the binary in `~/.local/bin` (no `sudo`;
+ensure that directory is on your `PATH`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/apollographql/connect-migrate/main/install.sh | sh
+```
+
+Or download a release asset directly with the GitHub CLI (`gh`):
 
 ```sh
 gh release download -R apollographql/connect-migrate \
@@ -90,16 +99,69 @@ gh release download -R apollographql/connect-migrate \
   && mv /tmp/cm/connect-migrate-* ~/.local/bin/connect-migrate
 ```
 
-(Installs to `~/.local/bin` — no `sudo`, matching `install.sh`. Ensure
-`~/.local/bin` is on your `PATH`.)
+Verify with `connect-migrate --version`. Windows users download the
+`.exe` from the Releases page.
 
-If you have a token, the piped installer also works:
-`curl -fsSL -H "Authorization: token $(gh auth token)" …/install.sh | sh`.
-Once the repo is public, the plain `curl …/install.sh | sh` is fine.
+### Option B: build it from source
 
-Verify with `connect-migrate --version`. **If you cannot install or run
-it, stop and tell the developer** — do not hand-migrate (see Step 1).
-Windows users download the `.exe` from the Releases page.
+Reach for this whenever Option A can't work: no published asset for the
+platform, a download that fails, or (the common case in a managed
+environment) a developer whose machine will not run a binary it didn't
+compile. The released binaries are **not** Apple-notarized or
+Authenticode-signed, so Gatekeeper rejects a browser-downloaded copy and
+app-control systems (Santa, Jamf, CrowdStrike, WDAC, AppLocker) reject
+every copy. Those same systems routinely permit locally compiled output.
+
+**Building is not a fallback to guesswork.** `connect-migrate` is a bin
+target of the upstream `apollo-federation` crate, so a local build runs
+the identical parser from a commit you choose. It is the download that
+is the convenience; the source is the original.
+
+You need `git`, `rustup` (<https://rustup.rs>), and network access to
+`github.com` and `crates.io`, and nothing else. You are **not** building
+the router: `apollo-federation`'s dependency tree is small, so there is no
+`protoc`, no `cmake`, and no C toolchain to install. Router pins its own
+compiler in `rust-toolchain.toml`, which rustup installs and selects for
+you.
+
+```sh
+# 1. Find the router commit a given connect-migrate release was built
+#    from. Omit this to build from the current router tip instead.
+gh api "repos/apollographql/connect-migrate/contents/.github/workflows/release.yml?ref=v0.0.8" \
+  --jq '.content' | base64 -d | grep RELEASE_ROUTER_REF
+
+# 2. Clone router at that commit. --filter=blob:none fetches file
+#    contents on demand, which keeps the clone small.
+git clone --filter=blob:none https://github.com/apollographql/router.git
+cd router
+git checkout <RELEASE_ROUTER_REF>
+
+# 3. Build just the analyzer, behind its cargo feature.
+cd apollo-federation
+CONNECT_MIGRATE_VERSION=0.0.8 cargo build --release \
+  --bin connect-migrate --features connect-migrate
+
+# 4. Put it on PATH and confirm.
+mkdir -p ~/.local/bin
+cp ../target/release/connect-migrate ~/.local/bin/
+connect-migrate --version
+```
+
+`CONNECT_MIGRATE_VERSION` only stamps the `--version` string and the
+manifest's `generator:` line; omit it and the binary reports
+`0.0.0-dev`. Set it to the release you matched in step 1 so the audit
+trail stays meaningful.
+
+**Say what it costs before you start it.** Measured end to end on an
+Apple Silicon laptop: ~4s to clone (~35 MB of git history, ~46 MB
+checked out), ~1s to check out the pinned commit, ~38s to compile.
+**Under a minute in total**, and the same with an *empty* crate cache,
+which adds ~148 MB of downloads but almost no time. Disk: ~360 MB of
+`target/`, ~550 MB all in. A slow network or a spinning disk will
+stretch that, and a first-ever `rustup` install adds a few minutes of
+its own. Tell the developer the number, get their go-ahead, and run it
+in the foreground where they can watch. Never start a build
+unannounced.
 
 ---
 
@@ -119,10 +181,12 @@ or a `subgraphs/` subdirectory.
 
 Confirm the CLI is available (`connect-migrate --version`); if it errors
 with "command not found," install it per the
-[Prerequisite](#prerequisite-install-connect-migrate) section, then
-retry. If `install.sh` fails (e.g. no binary for the developer's
-platform), surface its error verbatim and stop — do not build from
-source unattended.
+[Prerequisite](#prerequisite-get-connect-migrate) section, then retry.
+If Option A fails, whether no asset exists for the platform, the
+download errors, or the machine refuses to execute the binary, surface
+the error verbatim, then offer
+[Option B](#option-b-build-it-from-source) with its cost stated.
+Build on the developer's go-ahead; never start one unannounced.
 
 Then, from the project root, write a **timestamped** manifest so each
 run is its own durable artifact and never clobbers a prior one:
@@ -141,10 +205,15 @@ markdown.
 
 **The tool's manifest is the source of truth — do not hand-migrate.**
 Every edit you make comes from a manifest the tool actually produced.
-If you cannot install or run `connect-migrate` (no published binary for
-your platform, install failed, no repo access), **stop and tell the
-developer** — do **not** reconstruct the migration from memory, the
-docs, or web searches. A hand-built migration silently drops
+If you cannot obtain a working `connect-migrate` by *either* route,
+meaning Option A is blocked and Option B is impossible (no `rustup`, no
+reachable `crates.io`), **stop and tell the developer**. Do **not**
+reconstruct the migration from memory, the docs, or web searches.
+
+Building from source is **not** hand-migrating: it produces the same
+analyzer the release ships, so it satisfies this rule rather than
+bending it. The thing forbidden here is inventing the analysis, not
+compiling it. A hand-built migration silently drops
 fortifications, and (see Step 5) a post-upgrade `analyze` will *not*
 catch the omission — so a from-memory attempt looks clean while quietly
 changing behavior. The tool is cheap; guessing is not.
@@ -163,12 +232,19 @@ for the full prescription:
   Report it; ask whether to look elsewhere. Stop.
 - **`safe-to-upgrade`** — directives present, zero divergence. State the
   verdict. No fortifications are needed; the only change is the `@link`
-  bump (Step 6) — bump it with the developer's go-ahead.
+  bump (Step 6) — bump it with the developer's go-ahead. **Unless
+  `already-at-target: true`**, in which case the schemas are on v0.4 or
+  newer already: report that and stop. Do not "bump" anything.
 - **`safe-after-rewrites`** — divergence exists but every site is
   mechanical: apply the rewrites (Step 3), verify (Step 5), then bump the
   `@link` (Step 6). There are **no questions** — a clean bill of health.
 - **`needs-decisions`** — apply the rewrites (Step 3), interview the
   developer over the questions (Step 4), verify (Step 5), bump (Step 6).
+
+Whatever the verdict, also read **`schemas-skipped:`**. Anything above
+zero means the analyzer declined to read part of the project, so the
+verdict is partial: say so to the developer, name the schemas from the
+heads-up section, and do not migrate those files from this manifest.
 
 Do not edit source until you've read the verdict; whoever performs the
 `@link` bump, it is the **last** step and only after Step 5 verifies
@@ -324,6 +400,15 @@ untouched. This is the **last** edit — it's what actually moves the
 schema onto v0.4, which is exactly why it follows verification rather
 than preceding it.
 
+**`connect/v0.4` is the target. Never propose a newer version.**
+`connect/v0.5` exists upstream only as a preview spec, and it may not be
+usable until a future router major version that has not shipped yet.
+The analyzer recognizes it so that a schema already on v0.5 is left
+alone, not so that you move schemas there. If the developer explicitly
+asks to go to v0.5 or later, do it, but first warn them that current
+router releases may not support that spec and that this skill does
+not check anything v0.5 adds.
+
 ---
 
 ## Step 7: audit trail and summary
@@ -371,6 +456,8 @@ Read these comments before parsing prose:
 | `questions:` | Sites in *Questions for the developer*. The number that matters: zero means a clean bill of health. |
 | `upgrade:` | The source `connect/v0.n` version(s) found across the schemas → the target (`connect/v0.4`). |
 | `parse-notices:` | Selections that couldn't be diffed (see *Heads up* below). |
+| `schemas-skipped:` | Schemas not analyzed at all, because they link a `connect` version this binary doesn't recognize. Non-zero means the verdict does not cover the whole project. |
+| `already-at-target:` | `true` when every connector schema found already links `connect/v0.4` or newer. Nothing to migrate, and **no `@link` bump to perform** — skip Step 6 rather than "bumping" a newer schema down to v0.4. |
 
 ### Title, upgrade, and scope
 
@@ -421,6 +508,25 @@ needs a look:
 
 Surface these to the developer; don't try to auto-fix them.
 
+### Heads up — schemas not analyzed
+
+A `## Heads up — schemas not analyzed (N)` section appears when a schema
+links a `connect` spec version the binary doesn't know, which in practice
+means a version newer than the binary. The analyzer skips the file rather
+than guess which grammar its selections were written against: a wrong
+guess yields confident `$.` fortifications that introduce the very
+behavior change this tool exists to prevent.
+
+`schemas-skipped:` counts them. The manifest's verdict covers only the
+schemas that *were* analyzed, so:
+
+- Tell the developer which schemas were skipped and what version each
+  links.
+- Get a newer `connect-migrate` and re-run. If none exists yet, the
+  schema is on a spec that postdates every release, and there is nothing
+  to migrate it *to* — say so rather than improvising.
+- Never hand-migrate a skipped schema. The manifest could not read it.
+
 ### `site v2` machine block
 
 One block per site (grouped sites carry `occurrences: N`):
@@ -449,11 +555,15 @@ One block per site (grouped sites carry `occurrences: N`):
 - **`nothing-to-migrate`** — files scanned, no `@connect` directives
   parsed cleanly (`directives-analyzed: 0`). Usually means no connectors
   here; but if a `## Heads up` section is present, there *were* `@connect`
-  directives that failed to parse — read those before concluding. Stop.
+  directives the analyzer couldn't read — either selections that failed
+  to parse, or whole schemas skipped for an unrecognized `connect`
+  version (`schemas-skipped: > 0`). Read those before concluding. Stop.
 - **`safe-to-upgrade`** — directives present, zero divergence
   (`divergent-sites: 0`). A trustworthy positive verdict, not the
   absence of one. State it; the only change is the `@link` bump
-  (Step 6), done with the developer's go-ahead.
+  (Step 6), done with the developer's go-ahead — **except** when
+  `already-at-target: true`, where every schema is on v0.4 or newer and
+  there is no bump to make.
 - **`safe-after-rewrites`** — divergence exists, but every site is a
   deterministic fortification or a no-op (`questions: 0`). Apply the
   rewrites; no developer decisions are required.
@@ -464,7 +574,12 @@ One block per site (grouped sites carry `occurrences: N`):
 Each schema is diffed at its **own** linked `connect/v0.n` version
 against the v0.4 target (see the `Upgrade` line), so a mixed-version
 project is handled correctly. A schema already on `connect/v0.4` shows
-zero divergence — it's at the target.
+zero divergence — it's at the target. So does one on a *newer* spec,
+such as `connect/v0.5`, which shares v0.4's selection grammar; those
+report `already-at-target: true` and need no `@link` change. A schema
+linking a version the binary has never heard of is not analyzed at all
+(`schemas-skipped:`), because guessing its baseline is worse than
+admitting the gap.
 
 ---
 
@@ -518,9 +633,26 @@ Why the analyzer sorts sites the way it does:
 
 ## Failure modes
 
-- **`connect-migrate` not installed.** Run the install command, retry.
-  On an unsupported-platform error from `install.sh`, surface it
-  verbatim and stop; do not build from source unattended.
+- **`connect-migrate` not installed.** Run the Option A install, retry.
+  If it reports an unsupported platform or fails to download, surface
+  the error verbatim and offer
+  [Option B](#option-b-build-it-from-source).
+- **The binary installs but won't run.** In a managed environment this
+  is policy, not corruption. What you'll see:
+  - macOS: `"connect-migrate" cannot be opened because Apple cannot
+    check it for malicious software`, or a bare `zsh: killed`, or
+    `spctl -a -t execute <file>` reporting `rejected`.
+  - Linux: `Permission denied` on a file that is already `+x`, which
+    usually means a `noexec` mount on `/tmp` or on home directories.
+  - Windows: SmartScreen's "Windows protected your PC", or
+    `This program is blocked by group policy`.
+
+  If it is only macOS quarantine on a browser-downloaded file, verify
+  the checksum against `SHA256SUMS` first, then
+  `xattr -d com.apple.quarantine <file>`, and only if the developer
+  confirms their policy allows it. If an app-control system is refusing
+  an unsigned binary, don't fight it: go to Option B. **Never ask a
+  developer to disable a security control to run this tool.**
 - **Source changed between analyze and apply.** Before editing, confirm
   each site's `id` still appears in a fresh `analyze` run. If an `id` is
   gone, the source moved under you — regenerate the manifest and restart
@@ -546,4 +678,13 @@ Why the analyzer sorts sites the way it does:
      which is embedded into the binary via `connect-migrate agent-guide`.
      Future work: decide between (a) CI-enforced hash match, (b) fetch
      this file at build time, or (c) drop the embed entirely and rely on
-     the install having put SKILL.md on disk. -->
+     the install having put SKILL.md on disk.
+
+     The two copies must be edited together, and nothing enforces it.
+     The drift is not hypothetical: from 2026-06-05 to 2026-09-22 the
+     embedded copy told agents "While the repo is private, the one-line
+     installer can't be fetched anonymously" — wrong twice over, months
+     after the repo went public and the installer started working
+     without auth. Anyone reading `connect-migrate agent-guide` instead
+     of this file got that. Until one of (a)/(b)/(c) lands, treat an
+     edit here as unfinished until the upstream copy matches. -->
