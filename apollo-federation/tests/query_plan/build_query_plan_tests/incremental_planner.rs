@@ -1237,14 +1237,13 @@ fn inc_diamond_shaped_compound_key_dependency() {
 }
 
 // ---------------------------------------------------------------------------
-// Defer fallback and statistics
+// Defer across subgraphs and statistics
 // ---------------------------------------------------------------------------
 
-/// The incremental planner has no defer support yet; a deferred operation
-/// must fall back to the legacy planner and keep its DeferNode rather than
-/// silently planning every field eagerly.
+/// Cross-subgraph @defer: the deferred field's entity fetch lands in the
+/// Deferred block, and the deferred selection stays out of the primary.
 #[test]
-fn inc_defer_falls_back_to_legacy_planner() {
+fn inc_defer_cross_subgraph_produces_deferred_entity_fetch() {
     let mut config = incremental_config();
     config.incremental_delivery.enable_defer = true;
     let planner = planner!(
@@ -1266,20 +1265,62 @@ fn inc_defer_falls_back_to_legacy_planner() {
           }
         "#,
     );
-    let api_schema = planner.api_schema();
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        api_schema.schema(),
+    assert_plan!(
+        &planner,
         r#"{ t { v1 ... @defer { v2 } } }"#,
-        "test.graphql",
-    )
-    .expect("valid graphql document");
-    let plan = planner
-        .build_query_plan(&document, None, Default::default())
-        .expect("deferred operation plans via the legacy planner");
-    let plan_str = format!("{plan}");
-    assert!(
-        plan_str.contains("Defer"),
-        "deferred operations must keep their DeferNode, got: {plan_str}",
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v1 } }:
+          Sequence {
+            Fetch(service: "a", id: 0) {
+              {
+                t {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { v2 }:
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v2
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
     );
 }
 
@@ -2861,6 +2902,198 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
               }
             }
           },
+        },
+      },
+    }
+    "###
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Same-subgraph @defer: deferred field must get its own entity fetch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inc_defer_same_subgraph_produces_entity_fetch() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v0: String
+            v1: String
+          }
+        "#,
+    );
+
+    // v1 is deferred, so the primary fetch must NOT include v1.
+    // The Deferred block must contain its own entity fetch for v1.
+    assert_plan!(planner,
+        r#"
+          {
+            t {
+              v0
+              ... @defer {
+                v1
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v0 } }:
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              t {
+                __typename
+                v0
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { v1 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+/// Mutation with same-subgraph @defer: BULB plans each top-level mutation
+/// field independently and sequences the resulting Defer nodes. Each
+/// deferred field must get its own entity fetch rather than riding the
+/// primary mutation fetch.
+#[test]
+fn inc_defer_on_mutation_in_same_subgraph() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type Mutation {
+            update1: T
+            update2: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v0: String
+            v1: String
+          }
+        "#,
+    );
+
+    assert_plan!(planner,
+        r#"
+          mutation mut {
+            update1 {
+              v0
+              ... @defer {
+                v1
+              }
+            }
+            update2 {
+              v1
+              ... @defer {
+                v0
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Defer {
+          Primary {
+            { update1 { v0 } }:
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                update1 {
+                  __typename
+                  v0
+                  id
+                }
+              }
+            },
+          }, [
+            Deferred(depends: [0], path: "update1") {
+              { v1 }:
+              Flatten(path: "update1") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v1
+                    }
+                  }
+                },
+              },
+            },
+          ]
+        },
+        Defer {
+          Primary {
+            { update2 { v1 } }:
+            Fetch(service: "Subgraph1", id: 1) {
+              {
+                update2 {
+                  __typename
+                  v1
+                  id
+                }
+              }
+            },
+          }, [
+            Deferred(depends: [1], path: "update2") {
+              { v0 }:
+              Flatten(path: "update2") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v0
+                    }
+                  }
+                },
+              },
+            },
+          ]
         },
       },
     }

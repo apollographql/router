@@ -67,10 +67,12 @@ pub(crate) struct BulbPlan {
 /// Subgraph operation naming state spanning one whole query plan. Mutation
 /// planning runs one BULB search per top-level field; sharing this across
 /// those searches keeps generated operation names (`{name}__{subgraph}__{n}`)
-/// unique per plan instead of restarting the counter per field.
+/// and fetch ids (referenced by deferred blocks' `depends`) unique per plan
+/// instead of restarting the counters per field.
 pub(crate) struct OperationNaming {
     compression: SubgraphOperationCompression,
     counter: u32,
+    fetch_id_counter: u64,
 }
 
 impl OperationNaming {
@@ -82,6 +84,7 @@ impl OperationNaming {
                 SubgraphOperationCompression::Disabled
             },
             counter: 0,
+            fetch_id_counter: 0,
         }
     }
 }
@@ -283,11 +286,13 @@ fn run_bulb_and_finalize(
         operation_name: &parameters.operation.name,
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
+        fetch_id_counter: naming.fetch_id_counter,
     };
     let (plan, cost) = result
         .graph
         .to_query_plan_with_defer(&mut build_ctx, defer_info.as_ref())?;
     naming.counter = build_ctx.operation_counter;
+    naming.fetch_id_counter = build_ctx.fetch_id_counter;
 
     Ok(BulbPlan { plan, cost })
 }

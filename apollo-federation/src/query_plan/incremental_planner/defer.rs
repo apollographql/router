@@ -169,6 +169,14 @@ fn collect_deferred_blocks(
                         let sub_selection = non_deferred_subset(&frag_sel.selection_set)
                             .map(|own| {
                                 let stripped = strip_defer_directive(&frag_sel.inline_fragment);
+                                // A wrapper with no type condition and no
+                                // remaining directives is vacuous; serialize
+                                // the content directly.
+                                if stripped.type_condition_position.is_none()
+                                    && stripped.directives.is_empty()
+                                {
+                                    return serialize_selection_set(&own);
+                                }
                                 let wrapper = SelectionSet::from_selection(
                                     stripped.parent_type_position.clone(),
                                     Selection::InlineFragment(Arc::new(
