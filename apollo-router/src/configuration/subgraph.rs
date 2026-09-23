@@ -78,15 +78,16 @@ use serde::de::Visitor;
 // - deserialize to the plugin configuration
 
 /// Configuration options pertaining to the subgraph server component.
+///
+/// The descriptions in the configuration schema are written in the `JsonSchema` impl below, not
+/// taken from these doc comments.
 #[derive(Default, Serialize)]
 pub(crate) struct SubgraphConfiguration<T>
 where
     T: Default + JsonSchema,
 {
-    /// options applying to all subgraphs
     #[serde(default)]
     pub(crate) all: T,
-    /// per subgraph options
     #[serde(default)]
     pub(crate) subgraphs: HashMap<String, T>,
 }
