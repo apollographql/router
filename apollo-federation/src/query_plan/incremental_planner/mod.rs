@@ -276,10 +276,12 @@ fn run_bulb_and_finalize(
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
         fetch_id_counter: naming.fetch_id_counter,
-        skip_validation: parameters
-            .config
-            .incremental_planner
-            .skip_subgraph_operation_validation,
+        // Generated subgraph operations are valid by construction, so
+        // production always skips the O(n) re-validation. Debug builds
+        // still assert validity in into_document_unchecked /
+        // generate_fragments_unchecked; unit tests flip this flag to
+        // exercise the validating path.
+        skip_validation: true,
     };
     let (plan, cost) = result
         .graph
