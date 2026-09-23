@@ -24,6 +24,11 @@
 //! on the wrong type entirely. Pendings do not currently carry their
 //! ancestor query-graph spine, so the append to the parent fetch at the
 //! ancestor prefix stays direct.
+//!
+//! The one exception is an ancestor inside the pending's own fetch whose
+//! subgraph cannot resolve the context fields (e.g. they are @external
+//! there). Its query-graph node is recovered by type and subgraph, and the
+//! fields route as condition pendings anchored there.
 
 use std::sync::Arc;
 
@@ -42,6 +47,7 @@ use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
 use crate::query_graph::ContextCondition;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -73,6 +79,34 @@ pub(super) fn parse_context_selection(
             Ok(())
         })?;
     Ok(selection_set)
+}
+
+/// Drop top-level fragments whose type condition shares no runtime type with
+/// `ancestor_type`. The append site rebases the selection onto that type,
+/// which rejects such fragments at plan build.
+fn applicable_context_selection(
+    schema: &ValidFederationSchema,
+    selection_set: &SelectionSet,
+    ancestor_type: &CompositeTypeDefinitionPosition,
+) -> Result<SelectionSet, FederationError> {
+    let ancestor_runtime_types = schema.possible_runtime_types(ancestor_type.clone())?;
+    let mut kept = SelectionMap::new();
+    for selection in selection_set.selections.values() {
+        if let Selection::InlineFragment(frag_sel) = selection
+            && let Some(tc) = &frag_sel.inline_fragment.type_condition_position
+            && schema
+                .possible_runtime_types(tc.clone())?
+                .is_disjoint(&ancestor_runtime_types)
+        {
+            continue;
+        }
+        kept.insert(selection.clone());
+    }
+    Ok(SelectionSet {
+        schema: selection_set.schema.clone(),
+        type_position: selection_set.type_position.clone(),
+        selections: Arc::new(kept),
+    })
 }
 
 /// The inner selections of a context selection set relevant to one runtime
@@ -225,37 +259,67 @@ pub(super) fn handle_from_context(
                 )?
             };
 
-        let context_selection = parse_context_selection(
+        let context_selection = applicable_context_selection(
             &search_space.supergraph_schema,
+            &parse_context_selection(
+                &search_space.supergraph_schema,
+                &ancestor_type,
+                &cond.selection,
+            )?,
             &ancestor_type,
-            &cond.selection,
         )?;
 
         // Verify that the subgraph receiving this context selection can
         // actually resolve the fields. Context selections are parsed against
         // the supergraph schema (where every field exists), but the target
         // subgraph may declare them as @external.
-        let append_subgraph = &state.graph.node(append_fetch_node).subgraph;
-        let append_schema = search_space.query_graph.schema_by_source(append_subgraph)?;
+        let append_subgraph = state.graph.node(append_fetch_node).subgraph.clone();
+        let append_schema = search_space
+            .query_graph
+            .schema_by_source(&append_subgraph)?;
         let append_type: CompositeTypeDefinitionPosition = append_schema
             .get_type(ancestor_type.type_name())?
             .try_into()?;
-        if !super::conditions::can_satisfy_conditions(
+        if super::conditions::can_satisfy_conditions(
             &context_selection,
             &append_type,
             append_schema,
         ) {
-            return Err(FederationError::internal(format!(
-                "@fromContext field {} requires context data that subgraph `{}` cannot resolve (fields may be @external)",
-                cond.argument_coordinate, append_subgraph,
-            )));
+            state.graph.append_selection(
+                append_fetch_node,
+                &ancestor_op_path,
+                Some(&Arc::new(context_selection.clone())),
+            );
+        } else {
+            // Route the context fields like any other requirement instead,
+            // so a key hop can fetch them from a subgraph that resolves them.
+            let local_site = placement != ContextPlacement::EntityBoundary
+                && append_fetch_node == parent_fetch_node;
+            let anchor = local_site
+                .then(|| {
+                    ancestor_anchor(
+                        search_space,
+                        pending,
+                        &append_subgraph,
+                        &ancestor_type,
+                        ancestor_idx,
+                        &ancestor_op_path,
+                    )
+                })
+                .flatten()
+                .ok_or_else(|| {
+                    FederationError::internal(format!(
+                        "@fromContext field {} requires context data that subgraph `{}` cannot resolve (fields may be @external)",
+                        cond.argument_coordinate, append_subgraph,
+                    ))
+                })?;
+            search_space.push_condition_pendings(
+                state,
+                &anchor,
+                &Arc::new(context_selection.clone()),
+                context_fetch_node,
+            )?;
         }
-
-        state.graph.append_selection(
-            append_fetch_node,
-            &ancestor_op_path,
-            Some(&Arc::new(context_selection.clone())),
-        );
 
         add_context_renamers(
             search_space,
@@ -409,6 +473,61 @@ fn locate_ancestor_site(
     let levels = count_field_elements(pending.op_path.iter())
         + count_field_elements(anchor.op_path.iter().skip(anchor_prefix as usize));
     Ok((anchor_fetch, prefix, levels))
+}
+
+/// A pending positioned at a @fromContext ancestor within the pending's own
+/// fetch, used to route context fields the fetch's subgraph cannot resolve.
+/// `None` when the ancestor has no plain query graph node in that subgraph.
+fn ancestor_anchor(
+    search_space: &FieldRoutingSearchSpace,
+    pending: &super::PendingSelection,
+    subgraph: &Arc<str>,
+    ancestor_type: &CompositeTypeDefinitionPosition,
+    ancestor_idx: usize,
+    ancestor_op_path: &SharedPath<Arc<OpPathElement>>,
+) -> Option<super::PendingSelection> {
+    let graph = search_space.query_graph.graph();
+    let node = graph.node_indices().find(|&idx| {
+        let data = &graph[idx];
+        data.source == *subgraph
+            && data.provide_id.is_none()
+            && matches!(&data.type_, QueryGraphNodeType::SchemaType(pos) if pos.type_name() == ancestor_type.type_name())
+    })?;
+    let parent_types = pending.parent_types.to_vec();
+    let fields = count_field_elements(ancestor_op_path.iter());
+    let mut anchor = pending
+        .clone()
+        .at(node, pending.fetch_node)
+        .with_op_path(ancestor_op_path.clone())
+        .with_response_path(path_in_fetch_prefix(&pending.path_in_fetch, fields))
+        .with_provides_anchor(None)
+        .with_parent_types(SharedPath::from_vec(
+            parent_types.get(..=ancestor_idx)?.to_vec(),
+        ))
+        .with_context_anchor(Default::default())
+        .with_narrowing(Default::default());
+    anchor.condition = None;
+    Some(anchor)
+}
+
+/// The leading elements of `path` that cover its first `fields` fields: each
+/// field contributes a `Key` plus any list indexes that follow it.
+fn path_in_fetch_prefix(
+    path: &SharedPath<FetchDataPathElement>,
+    fields: usize,
+) -> SharedPath<FetchDataPathElement> {
+    let mut seen = 0;
+    let mut prefix = SharedPath::new();
+    for element in path.iter() {
+        if matches!(element, FetchDataPathElement::Key(..)) {
+            if seen == fields {
+                break;
+            }
+            seen += 1;
+        }
+        prefix = prefix.pushed(element.clone());
+    }
+    prefix
 }
 
 /// Guard for [`locate_ancestor_site`]: the computed prefix must land on the
