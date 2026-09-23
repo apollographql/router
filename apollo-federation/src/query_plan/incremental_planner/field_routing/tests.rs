@@ -3451,7 +3451,7 @@ fn connector_defer_produces_defer_plan_with_connector_fetch() {
           },
         }, [
           Deferred(depends: [0], path: "currentUser", label: "slow") {
-            { ... { name } }:
+            { name }:
             Flatten(path: "currentUser") {
               Fetch(service: "connectors_Query_user_0") {
                 {
