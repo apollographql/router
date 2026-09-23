@@ -122,9 +122,40 @@ impl Field {
             return Ok(updated_field);
         }
 
+        self.rebase_on_inner(parent_type, schema, false)
+    }
+
+    /// Like `rebase_on`, but allows rebasing a concrete type's field onto
+    /// an interface or @interfaceObject target. Used by the incremental
+    /// planner's plan builder where entity fetch paths cross the
+    /// concrete-to-interface boundary in @interfaceObject schemas.
+    pub(crate) fn rebase_on_for_incremental_planner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<Field, FederationError> {
+        let field_parent = self.field_position.parent();
+        if self.schema == *schema && field_parent == *parent_type {
+            return Ok(self.clone());
+        }
+        if self.name() == &TYPENAME_FIELD {
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = parent_type.introspection_typename_field();
+            return Ok(updated_field);
+        }
+        self.rebase_on_inner(parent_type, schema, true)
+    }
+
+    fn rebase_on_inner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        allow_interface_target: bool,
+    ) -> Result<Field, FederationError> {
         let field_from_parent = parent_type.field(self.name().clone())?;
         if field_from_parent.try_get(schema.schema()).is_some()
-            && self.can_rebase_on(parent_type, schema)?
+            && self.can_rebase_on_inner(parent_type, schema, allow_interface_target)?
         {
             let mut updated_field = self.clone();
             updated_field.schema = schema.clone();
@@ -139,42 +170,50 @@ impl Field {
         }
     }
 
-    /// Verifies whether given field can be rebase on following parent type.
+    /// Verifies whether given field can be rebased on the following parent type.
     ///
-    /// There are 3 valid cases we want to allow:
-    /// 1. either `parent_type` and `field_parent_type` are the same underlying type (same name) but from different underlying schema. Typically,
-    ///    happens when we're building subgraph queries but using selections from the original query which is against the supergraph API schema.
-    /// 2. or they are not the same underlying type, but the field parent type is from an interface (or an interface object, which is the same
-    ///    here), in which case we may be rebasing an interface field on one of the implementation type, which is ok. Note that we don't verify
-    ///    that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
-    ///    in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
-    ///    if the field name simply does not exist in `parent_type`.
-    /// 3. or the target parent type is an interface (or interface object), in which case we may be rebasing a concrete type's field onto its
-    ///    interface. This is the reverse of case 2 and happens when building entity fetches for @interfaceObject schemas: the source subgraph
-    ///    declares the type as `@interfaceObject` (a plain type), but the target subgraph declares it as a real interface. The concrete type's
-    ///    fields need to rebase onto that interface. The broad interface check is safe because `rebase_on` will still fail if the field doesn't
-    ///    exist on the interface.
+    /// There are 2 valid cases:
+    /// 1. `parent_type` and `field_parent_type` are the same underlying type
+    ///    (same name) but from different schemas. Typical when building
+    ///    subgraph queries from supergraph-schema selections.
+    /// 2. The field's parent is an interface (or interface object), so we may
+    ///    be rebasing an interface field onto an implementing type. We don't
+    ///    verify the implementation relationship because it may exist only in
+    ///    the supergraph. `rebase_on` will fail if the field doesn't exist.
     fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         target_schema: &ValidFederationSchema,
     ) -> Result<bool, FederationError> {
+        self.can_rebase_on_inner(parent_type, target_schema, false)
+    }
+
+    fn can_rebase_on_inner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        target_schema: &ValidFederationSchema,
+        allow_interface_target: bool,
+    ) -> Result<bool, FederationError> {
         let field_parent_type = self.field_position.parent();
-        // case 1
+        // case 1: same type name across schemas
         if field_parent_type.type_name() == parent_type.type_name() {
             return Ok(true);
         }
-        // case 2
+        // case 2: field parent is an interface or @interfaceObject
         let field_parent_is_iface_obj = self
             .schema
             .is_interface_object_type(field_parent_type.clone().into())?;
         if field_parent_type.is_interface_type() || field_parent_is_iface_obj {
             return Ok(true);
         }
-        // case 3
-        let target_is_iface_obj =
-            target_schema.is_interface_object_type(parent_type.clone().into())?;
-        Ok(parent_type.is_interface_type() || target_is_iface_obj)
+        // case 3: target is an interface or @interfaceObject (incremental
+        // planner only, gated by allow_interface_target)
+        if allow_interface_target {
+            let target_is_iface_obj =
+                target_schema.is_interface_object_type(parent_type.clone().into())?;
+            return Ok(parent_type.is_interface_type() || target_is_iface_obj);
+        }
+        Ok(false)
     }
 
     fn type_if_added_to(
