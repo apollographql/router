@@ -2055,3 +2055,42 @@ type Dog implements Animal { name: String }
         "Cat.name must not rebase onto unrelated interface Animal: {result:?}"
     );
 }
+
+mod generated_document_validation_tests {
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
+
+    use crate::operation::assume_generated_document_valid;
+
+    fn invalid_document() -> (
+        apollo_compiler::validation::Valid<Schema>,
+        ExecutableDocument,
+    ) {
+        let schema =
+            Schema::parse_and_validate("type Query { f(arg: Int): Int }", "schema.graphql")
+                .expect("schema is valid");
+        // `$v` is never declared, which only validation catches.
+        let document = ExecutableDocument::parse(&schema, "{ f(arg: $v) }", "op.graphql")
+            .expect("document parses");
+        (schema, document)
+    }
+
+    #[test]
+    fn release_path_passes_invalid_document_through() {
+        let (schema, document) = invalid_document();
+        let valid = assume_generated_document_valid(document, &schema, false, "test")
+            .expect("release builds do not validate");
+        assert_eq!(valid.to_string().trim(), "{\n  f(arg: $v)\n}");
+    }
+
+    #[test]
+    fn debug_path_rejects_invalid_document() {
+        let (schema, document) = invalid_document();
+        let err = assume_generated_document_valid(document, &schema, true, "test")
+            .expect_err("debug builds validate");
+        assert!(
+            err.to_string().contains("test produced invalid document"),
+            "unexpected error: {err}"
+        );
+    }
+}
