@@ -61,6 +61,8 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
+#[cfg(test)]
+mod compatibility;
 pub(crate) mod connector;
 pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
@@ -73,6 +75,8 @@ pub(crate) mod schema;
 pub(crate) mod server;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
+#[cfg(test)]
+mod test_discovery;
 #[cfg(test)]
 mod tests;
 mod upgrade;
