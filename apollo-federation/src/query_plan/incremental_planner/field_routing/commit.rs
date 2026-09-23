@@ -204,26 +204,15 @@ impl FieldRoutingSearchSpace {
             field_source_node.type_.clone().try_into()?;
         // The hop resolves through the kind of the subgraph root it lands
         // on, not the surrounding operation's kind.
-        let subgraph_schema = qg.schema_by_source(choice.target_subgraph())?;
-        let root_kind = [
-            SchemaRootDefinitionKind::Query,
-            SchemaRootDefinitionKind::Mutation,
-            SchemaRootDefinitionKind::Subscription,
-        ]
-        .into_iter()
-        .find(|kind| {
-            subgraph_schema
-                .schema()
-                .root_operation((*kind).into())
-                .is_some_and(|name| name == root_type.type_name())
-        })
-        .ok_or_else(|| {
-            FederationError::internal(format!(
-                "root hop target type {} is not a root type in subgraph {}",
-                root_type.type_name(),
-                choice.target_subgraph(),
-            ))
-        })?;
+        let root_kind = self
+            .subgraph_root_kind(choice.target_subgraph(), &root_type)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "root hop target type {} is not a root type in subgraph {}",
+                    root_type.type_name(),
+                    choice.target_subgraph(),
+                ))
+            })?;
 
         let new_group = self.root_hop_group_avoiding_cycles(
             state,
@@ -233,6 +222,7 @@ impl FieldRoutingSearchSpace {
             merge_at,
             pending.fetch_node,
             pending.ordering_dependent(),
+            pending.defer_ref.clone(),
         );
 
         let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
@@ -243,6 +233,27 @@ impl FieldRoutingSearchSpace {
         };
 
         Ok((new_group, edge))
+    }
+
+    /// The root kind `type_pos` serves as in `subgraph`, if it is a root type.
+    fn subgraph_root_kind(
+        &self,
+        subgraph: &Arc<str>,
+        type_pos: &CompositeTypeDefinitionPosition,
+    ) -> Result<Option<SchemaRootDefinitionKind>, FederationError> {
+        let subgraph_schema = self.query_graph.schema_by_source(subgraph)?;
+        Ok([
+            SchemaRootDefinitionKind::Query,
+            SchemaRootDefinitionKind::Mutation,
+            SchemaRootDefinitionKind::Subscription,
+        ]
+        .into_iter()
+        .find(|kind| {
+            subgraph_schema
+                .schema()
+                .root_operation((*kind).into())
+                .is_some_and(|name| name == type_pos.type_name())
+        }))
     }
 
     /// Commit a key-resolution hop: creates an entity group in the target
@@ -540,19 +551,21 @@ impl FieldRoutingSearchSpace {
         merge_at: Vec<FetchDataPathElement>,
         anchor_fetch: NodeIndex,
         ordering_dependent: Option<NodeIndex>,
+        defer_ref: Option<String>,
     ) -> NodeIndex {
         let group = state.graph.get_or_create_root_hop_group(
             subgraph,
             root_type.clone(),
             root_kind,
             merge_at.clone(),
+            defer_ref.clone(),
         );
         if Self::group_reusable(state, group, anchor_fetch, ordering_dependent) {
             return group;
         }
         state
             .graph
-            .add_root_hop_group(subgraph, root_type, root_kind, merge_at)
+            .add_root_hop_group(subgraph, root_type, root_kind, merge_at, defer_ref)
     }
 
     /// Whether an existing group can take a dependency edge from
@@ -840,6 +853,11 @@ impl FieldRoutingSearchSpace {
         let qg = &self.query_graph;
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
+        if let Some(root_kind) = self.subgraph_root_kind(&subgraph, &source.type_pos)? {
+            return Ok(
+                self.commit_root_defer_redirect(state, pending, &subgraph, &source, root_kind)
+            );
+        }
 
         // The self-key edge exists specifically for @defer re-entering a
         // subgraph; out_edges filters self-edges so use the unfiltered view.
@@ -894,6 +912,37 @@ impl FieldRoutingSearchSpace {
         Ok((new_group, edge))
     }
 
+    /// Root types have no key to re-enter through, so a deferred field on a
+    /// subgraph root re-enters it with a root hop in the pending's scope.
+    fn commit_root_defer_redirect(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        subgraph: &Arc<str>,
+        source: &NodeSource,
+        root_kind: SchemaRootDefinitionKind,
+    ) -> (NodeIndex, EdgeIndex) {
+        self.append_typename(state, pending.fetch_node, &pending.op_path, source);
+        let merge_at = self.pending_merge_at(state, pending);
+        let new_group = self.root_hop_group_avoiding_cycles(
+            state,
+            subgraph,
+            source.type_pos.clone(),
+            root_kind,
+            merge_at,
+            pending.fetch_node,
+            pending.ordering_dependent(),
+            pending.defer_ref.clone(),
+        );
+        let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
+            Some(existing) => existing,
+            None => state
+                .graph
+                .add_dependency(pending.fetch_node, new_group, Vec::new()),
+        };
+        (new_group, edge)
+    }
+
     /// Build a commit target for a same-subgraph defer redirect. The field
     /// is routed to a new entity group, so its op_path restarts from the
     /// entity root (like a key hop) rather than extending the parent path.
@@ -904,13 +953,20 @@ impl FieldRoutingSearchSpace {
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
         let node_data = self.query_graph.node_weight(pending.query_graph_node)?;
-        let type_name = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone())?
-            .type_name()
-            .clone();
-        let mut op_path = self.entity_root_path(&type_name)?;
-        for element in trailing_condition_fragments(&pending.op_path) {
-            op_path = op_path.pushed(element);
-        }
+        let type_pos = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone())?;
+        let mut op_path = if self
+            .subgraph_root_kind(&node_data.source, &type_pos)?
+            .is_some()
+        {
+            // Root redirects start at the hop's root, like a root hop.
+            SharedPath::new()
+        } else {
+            let mut path = self.entity_root_path(type_pos.type_name())?;
+            for element in trailing_condition_fragments(&pending.op_path) {
+                path = path.pushed(element);
+            }
+            path
+        };
         let op_element: Arc<OpPathElement> = match &pending.selection {
             Selection::Field(field_sel) => Arc::new(OpPathElement::Field(field_sel.field.clone())),
             Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(

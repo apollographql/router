@@ -404,32 +404,40 @@ impl FetchGraph {
         root_type: CompositeTypeDefinitionPosition,
         root_kind: SchemaRootDefinitionKind,
         merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
     ) -> NodeIndex {
-        self.insert_node(FetchNode::new(
+        let mut node = FetchNode::new(
             subgraph.clone(),
             FetchGroupKind::RootHop {
                 root_type,
                 root_kind,
                 merge_at,
             },
-        ))
+        );
+        node.defer_ref = defer_ref;
+        self.insert_node(node)
     }
 
-    /// Get or create the root hop group for (subgraph, root_kind, merge_at).
+    /// Get or create the root hop group for
+    /// (subgraph, root_kind, merge_at, defer_ref).
     pub(crate) fn get_or_create_root_hop_group(
         &mut self,
         subgraph: &Arc<str>,
         root_type: CompositeTypeDefinitionPosition,
         root_kind: SchemaRootDefinitionKind,
         merge_at: Vec<FetchDataPathElement>,
+        defer_ref: Option<String>,
     ) -> NodeIndex {
-        // Hop nodes are created without a defer scope, so the key's defer
-        // half is always None here.
-        let key = GroupKey::RootHop(subgraph.clone(), root_kind, merge_at.clone(), None);
+        let key = GroupKey::RootHop(
+            subgraph.clone(),
+            root_kind,
+            merge_at.clone(),
+            defer_ref.clone(),
+        );
         if let Some(id) = self.registered_group(&key) {
             return id;
         }
-        self.add_root_hop_group(subgraph, root_type, root_kind, merge_at)
+        self.add_root_hop_group(subgraph, root_type, root_kind, merge_at, defer_ref)
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at, defer_ref).
@@ -722,6 +730,7 @@ mod tests {
             dummy_root_type(),
             SchemaRootDefinitionKind::Query,
             user_path(None),
+            None,
         );
         let FetchGroupKind::RootHop {
             root_kind,
@@ -963,9 +972,9 @@ mod tests {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
         let kind = SchemaRootDefinitionKind::Query;
-        let a = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, user_path(None));
-        let b = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, user_path(None));
-        let c = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, vec![]);
+        let a = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, user_path(None), None);
+        let b = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, user_path(None), None);
+        let c = g.get_or_create_root_hop_group(&sg, dummy_root_type(), kind, vec![], None);
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_eq!(g.node_count(), 2);
