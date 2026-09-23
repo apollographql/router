@@ -449,7 +449,7 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -462,7 +462,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_custom_listener() {
         let router_addr = "127.0.0.1:4012";
         base_test_health_check(
@@ -475,7 +475,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_timeout_unready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -488,7 +488,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_unavailable_unready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -501,7 +501,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_timeout_ready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -514,7 +514,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_unavailable_ready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -527,7 +527,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_disabled() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -573,7 +573,7 @@ mod test {
     // Uses unready=5s so the DOWN check at 2s always falls well within the recovery window,
     // regardless of when the sampling tick fires after switching to tokio::time::interval
     // (which fires the first tick immediately on first poll, during setup).
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_recovery_after_unready() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
@@ -634,7 +634,7 @@ mod test {
     // Uses unready=5s so that the DOWN checks always fall well within the recovery window,
     // avoiding a race condition on slow CI environments (ARM, Windows) where a 2s wait could
     // land right at the boundary of a 2s recovery and produce a non-deterministic result.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_multiple_unready_cycles() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
@@ -707,7 +707,7 @@ mod test {
 
     // Verifies the boundary condition: exactly `allowed` rejections must NOT trigger unready
     // because the condition is strictly `rejected_count > allowed`.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_at_rejection_threshold_stays_up() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
@@ -743,7 +743,7 @@ mod test {
     //
     // Uses unready=5s so the DOWN check at 2s is safely inside the recovery window regardless
     // of when the sampling tick fires (first tick fires immediately on first poll with interval()).
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_one_above_rejection_threshold_goes_down() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
