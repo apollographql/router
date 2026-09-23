@@ -114,6 +114,14 @@ impl Default for QueryPlannerConfig {
     }
 }
 
+impl QueryPlannerConfig {
+    /// Whether operations are planned by the incremental planner. It does not
+    /// implement type_conditioned_fetching, so that flag falls back to legacy.
+    pub(crate) fn uses_incremental_planner(&self) -> bool {
+        self.incremental_planner.enabled && !self.type_conditioned_fetching
+    }
+}
+
 impl std::hash::Hash for QueryPlannerConfig {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // Destructured so adding a field is a compile error until it is
@@ -481,7 +489,7 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
-            !self.config.incremental_planner.enabled,
+            !self.config.uses_incremental_planner(),
         )?;
 
         let NormalizedDefer {
@@ -932,10 +940,7 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    // The BULB planner does not implement type_conditioned_fetching, so
-    // queries relying on that flag fall back to the legacy planner.
-    let use_incremental = parameters.config.incremental_planner.enabled
-        && !parameters.config.type_conditioned_fetching;
+    let use_incremental = parameters.config.uses_incremental_planner();
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
         && use_incremental
