@@ -23,8 +23,9 @@ impl Merger {
                     .members
                     .contains(member_name)
                 {
-                    // Add the member type to the destination union
-                    dest.insert_member(&mut self.merged, member_name.clone())?;
+                    // Strip extension_id so all members land on the base union definition.
+                    let member_name = Node::new((**member_name).clone());
+                    dest.insert_member(&mut self.merged, member_name)?;
                 }
             }
         }
