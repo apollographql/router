@@ -117,7 +117,7 @@ impl FieldRoutingSearchSpace {
 }
 
 /// Can this `schema` resolve every field in `conditions` at `type_pos`?
-fn can_satisfy_conditions(
+pub(super) fn can_satisfy_conditions(
     conditions: &SelectionSet,
     type_pos: &CompositeTypeDefinitionPosition,
     schema: &ValidFederationSchema,
