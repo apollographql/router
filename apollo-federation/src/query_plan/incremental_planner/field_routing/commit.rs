@@ -1425,12 +1425,9 @@ impl FieldRoutingSearchSpace {
         // children of an entity root may need to add context selections to
         // the parent fetch that feeds the entity representation.
         let child_context_anchor = if target.entity_root {
-            let entity_type =
-                CompositeTypeDefinitionPosition::try_from(target_node_data.type_.clone()).ok();
             ContextAnchor {
                 fetch: Some(pending.fetch_node),
                 op_path: pending.op_path.clone(),
-                entity_type,
             }
         } else {
             pending.context_anchor.clone()

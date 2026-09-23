@@ -37,7 +37,6 @@ pub(crate) struct ConditionScope {
 pub(crate) struct ContextAnchor {
     pub(crate) fetch: Option<NodeIndex>,
     pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
-    pub(crate) entity_type: Option<CompositeTypeDefinitionPosition>,
 }
 
 #[derive(Clone, Debug)]
