@@ -1735,8 +1735,7 @@ impl SubSelection {
             }
             match NamedSelection::parse(rest.clone()) {
                 Ok((r, sel)) => {
-                    // A zero-width match would spin forever; `many0` guarded
-                    // against this for us before the loop was written out.
+                    // Guard against zero-width matches, as `many0` did.
                     if r.location_offset() == rest.location_offset() {
                         break;
                     }
@@ -2035,8 +2034,6 @@ pub(super) fn is_identifier(input: &str) -> bool {
         .is_ok()
 }
 
-/// The message shown when two selections abut with nothing between them and a
-/// single token on either side of the seam.
 const TOKEN_SPLIT_MESSAGE: &str = concat!(
     "Nothing separates this from the previous item, and the characters on ",
     "either side of the seam would otherwise read as a single name. Add ",
@@ -2044,25 +2041,10 @@ const TOKEN_SPLIT_MESSAGE: &str = concat!(
     "Unexpected continuation of the preceding item",
 );
 
-/// True when `rest` begins in the middle of what a single token would be:
-/// the character just before it and the character it starts with are both
-/// identifier characters, and nothing separates them.
-///
-/// A selection list is the only construct in the grammar whose items may be
-/// separated by whitespace alone, and `spaces_or_comments` matches zero
-/// characters quite happily. So when a sub-parser stops early, the list reads
-/// the leftover as the *next item* rather than objecting. That is the whole
-/// mechanism behind `alias: nullFoo` quietly becoming `alias: null Foo`: the
-/// mis-parse was not caught, it was accommodated.
-///
-/// Rejecting a zero-width seam between two identifier characters is the
-/// longest-match rule applied across items rather than within one token, and
-/// it is the part of this fix that covers
-/// cases nobody has found yet. No legitimate input is affected: for two
-/// selections to abut this way the first would have to end in an identifier
-/// character and the second begin with one, which is simply one longer
-/// identifier. Seams after a self-delimiting token (`}`, `]`, `)`, a quote,
-/// `?`) are untouched, so minified input like `{a{x}b}` still parses.
+/// True when `rest` starts mid-identifier, with an identifier character
+/// directly before it. Since list items may be separated by nothing, a
+/// sub-parser that stops early inside a name (`alias: nullFoo` read as
+/// `alias: null Foo`) would otherwise be silently accepted.
 fn splits_single_token(list_start: &Span, rest: &Span) -> bool {
     let Some(delta) = rest
         .location_offset()
@@ -2089,25 +2071,14 @@ fn parse_identifier(input: Span) -> ParseResult<WithRange<String>> {
     preceded(spaces_or_comments, parse_identifier_no_space).parse(input)
 }
 
-/// Characters that may begin an `Identifier`.
 const IDENTIFIER_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
 
-/// Characters that may continue an `Identifier` after its first character.
-///
-/// Shared with `LitExpr::parse_keyword`, which uses it as a negative
-/// lookahead so `true`/`false`/`null` are recognized as literals only at an
-/// identifier boundary. Keeping both rules on one definition is what stops
-/// the keyword guard from drifting out of sync with what an identifier is.
+/// Also used by `LitExpr::parse_keyword` to find the end of a keyword.
 pub(super) const IDENTIFIER_CONTINUE_CHARS: &str =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789";
 
-/// Matches any single character that could begin a `Key`, which is either an
-/// `Identifier` or a `LitString`.
-///
-/// Used as a negative lookahead by `LitExpr::parse_number`, so that the `.` in
-/// `1.foo` is left for the `PathStep` that wants it instead of being eaten as
-/// a zero-digit fractional part. Built from `IDENTIFIER_START_CHARS` rather
-/// than a fresh copy of the alphabet, so it cannot drift from `Identifier`.
+/// Matches a character that could begin a `Key` (an `Identifier` or a
+/// `LitString`).
 pub(super) fn key_start_char(input: Span) -> ParseResult<char> {
     alt((one_of(IDENTIFIER_START_CHARS), one_of("'\""))).parse(input)
 }
@@ -5139,12 +5110,8 @@ mod tests {
         assert!(JSONSelection::parse_with_spec("[1, 2, 3]", ConnectSpec::V0_3).is_err());
     }
 
-    /// Parses `input` and asserts it prints back exactly as written.
-    ///
-    /// A round trip is the assertion that catches a *mis*-parse. `is_ok()`
-    /// does not: every bug in the "terminal is a prefix of a longer token"
-    /// family parses successfully in at least one position, just into the
-    /// wrong tree.
+    /// Asserts `input` prints back exactly as written, which catches a
+    /// mis-parse that `is_ok()` would miss.
     #[track_caller]
     fn check_round_trip(input: &str) {
         let parsed = JSONSelection::parse(input)
@@ -5154,14 +5121,7 @@ mod tests {
 
     #[test]
     fn adjacent_selections_may_not_split_a_single_token() {
-        // The backstop for the whole "terminal is a prefix of a longer token"
-        // family. Fixing the keyword and number cases removes the two
-        // instances we know about; this makes the *next* one loud instead of
-        // silent, by refusing to read a new selection that begins in the
-        // middle of what a single name would be.
-        // Each of these has a *zero-width* seam inside a name. `a 1b` is a
-        // different failure: the space means there is no seam, and the
-        // pre-existing trailing-input check rejects it.
+        // Each has a zero-width seam inside a name.
         for input in ["alias: 1b: 2", "x: 1 y: 2z", "{ a: 1b }", "{ a: 1b, c: 2 }"] {
             let err = JSONSelection::parse(input)
                 .expect_err("a zero-width seam inside a name should be rejected");
@@ -5173,8 +5133,7 @@ mod tests {
             );
         }
 
-        // Seams after a self-delimiting token are legitimate and must keep
-        // working, including in minified input with no whitespace at all.
+        // Seams after a self-delimiting token are fine, even minified.
         check_round_trip("a { x } b");
         check_round_trip("alias: a? b");
         check_round_trip("... a ... b");
@@ -5183,25 +5142,14 @@ mod tests {
                 .unwrap_or_else(|e| panic!("'{input}' should still parse: {e:?}"));
         }
 
-        // And ordinary separated lists are untouched.
         check_round_trip("a b");
         check_round_trip("x: a.b.c d");
     }
 
     #[test]
     fn number_rooted_paths_are_not_truncated_numbers() {
-        // Sibling of `keyword_prefixed_keys_do_not_break_expr_parsing`, same
-        // root cause with a different terminal. `LitNumber` allows a
-        // fractional part with no digits (`1.` is the number one), so `1.`
-        // matched greedily and swallowed the `.` that `PathStep ::= "." Key`
-        // needed. `1.foo` became the number `1.` with a dangling `foo`, even
-        // though `LitPath ::= LitPrimitive NonEmptyPathTail` says a path may
-        // be rooted at a number. That `1.5.foo` always worked is what shows
-        // this was a hole rather than the intended rule.
-        //
-        // As with the keyword bug, the damage depended on position: in an
-        // alias it parsed silently into `alias: 1.0 foo`, two selections
-        // where the author wrote one.
+        // `1.` used to swallow the `.` of `1.foo`, so `alias: 1.foo` parsed
+        // as `alias: 1.0 foo`.
         for path in NUMBER_ROOTED_PATHS {
             check_round_trip(&format!("alias: {path}"));
             check_round_trip(&format!("$({path})"));
@@ -5211,9 +5159,8 @@ mod tests {
             check_round_trip(&format!("alias: {path}->first"));
         }
 
-        // The zero-digit fractional part is still legal wherever the `.`
-        // could not have begun a `Key`. These do not round-trip only because
-        // the printer normalizes `1.` to `1.0`.
+        // A digitless fraction is still legal where no `Key` follows. The
+        // printer normalizes `1.` to `1.0`.
         #[track_caller]
         fn check_prints_as(input: &str, expected: &str) {
             let parsed = JSONSelection::parse(input)
@@ -5225,8 +5172,6 @@ mod tests {
         check_prints_as("$(1.->add(2))", "$(1.0->add(2))");
         check_prints_as("alias: 1.", "alias: 1.0");
 
-        // Unaffected neighbours: a complete fraction, a leading-dot number,
-        // and a path hanging off a complete fraction.
         check_round_trip("alias: 1.5");
         check_round_trip("alias: 1.5.foo");
         check_prints_as("alias: .5", "alias: 0.5");
@@ -5234,36 +5179,14 @@ mod tests {
 
     #[test]
     fn keyword_prefixed_keys_do_not_break_expr_parsing() {
-        // Regression test for a bug where a bare key beginning with `null`,
-        // `true`, or `false` inside `$( ... )` failed to parse, because the
-        // keyword literal matched greedily with no word-boundary check,
-        // leaving the rest of the identifier as an unparseable remainder
-        // (surfacing as a raw `nom::error::ErrorKind::Eof`).
-        //
-        // The `LitExpr`-level regression lives in
-        // `lit_expr::tests::test_lit_expr_parse_keyword_prefixed_keys` and
-        // shares `KEYWORD_PREFIXED_KEYS` with this one. Here we check the
-        // end-to-end `$( ... )` surface the bug was reported against, and
-        // assert the parse *round-trips* rather than merely succeeding.
-        // The bug was a mis-parse, which `is_ok()` would not have caught.
-        //
-        // Note the double quotes: the pretty-printer normalizes string
-        // literals to double quotes, so writing them that way here keeps the
-        // round trip exact. The single-quoted form from the original report
-        // is checked separately below.
-
+        // Strings are double-quoted because the printer normalizes them.
         for key in KEYWORD_PREFIXED_KEYS {
             check_round_trip(&format!("$({key} ?? \"fallback\")"));
             check_round_trip(&format!("$($.{key} ?? \"fallback\")"));
             check_round_trip(&format!("alias: $({key})"));
 
-            // `Alias LitExpr` is the worse half of this bug, and the reason
-            // the regression is not only about parse failures. `alias: {key}`
-            // *succeeded* before the fix, silently, by reading the keyword as
-            // a literal and the rest of the name as a second, anonymous
-            // selection: `alias: nullFoo` became `alias: null Foo`. A
-            // connector mapping written that way returned null for the alias
-            // and quietly selected a different field alongside it.
+            // These used to parse silently wrong: `alias: nullFoo` became
+            // `alias: null Foo`.
             check_round_trip(&format!("alias: {key}"));
             check_round_trip(&format!("alias: {{ k: {key} }}"));
             check_round_trip(&format!("alias: [{key}]"));
@@ -5271,24 +5194,19 @@ mod tests {
             check_round_trip(&format!("alias: x->echo({key})"));
         }
 
-        // Controls: a key with no keyword prefix always worked, and the
-        // `$.`-qualified form was the documented workaround.
         check_round_trip("$(missingField ?? \"fallback\")");
         check_round_trip("$($.falsePositives ?? \"fallback\")");
 
-        // The keywords themselves are still literals in the same position.
         check_round_trip("$(null ?? \"fallback\")");
         check_round_trip("$(true ?? \"fallback\")");
         check_round_trip("$(false ?? \"fallback\")");
 
-        // The keywords are not reserved words. They are still ordinary
-        // keys wherever a key is expected, which is what the README's
-        // `LitPrimitive` section claims.
+        // Keywords are not reserved; they are still keys where a key is expected.
         check_round_trip("$($.null ?? \"fallback\")");
         check_round_trip("null { x }");
         check_round_trip("nullField { x }");
 
-        // Verbatim from the original bug report, single quotes and all.
+        // Verbatim from the original bug report.
         let parsed = JSONSelection::parse("$(falsePositives ?? 'fallback')")
             .expect("the reported repro should parse");
         assert_eq!(

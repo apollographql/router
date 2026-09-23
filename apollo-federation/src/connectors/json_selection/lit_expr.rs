@@ -38,12 +38,8 @@ use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
 use crate::connectors::spec::ConnectSpec;
 
-/// Keys that merely *begin* with the `true`/`false`/`null` keywords, plus
-/// proper prefixes of those keywords. None of them is a keyword literal, and
-/// all of them must parse as ordinary keys.
-///
-/// Shared with `parser::tests` so the `LitExpr`-level and `JSONSelection`-level
-/// regressions cannot drift apart.
+/// Keys that begin with (or are prefixes of) `true`/`false`/`null`, all of
+/// which must parse as ordinary keys. Shared with `parser::tests`.
 #[cfg(test)]
 pub(super) const KEYWORD_PREFIXED_KEYS: &[&str] = &[
     "nullField",
@@ -52,25 +48,18 @@ pub(super) const KEYWORD_PREFIXED_KEYS: &[&str] = &[
     "falseField",
     "falsey",
     "falsePositives",
-    // Digits and underscores are identifier-continue characters too, so they
-    // must also suppress the keyword match.
     "null_",
     "null2",
     "true1",
     "false_positives",
-    // Proper prefixes of a keyword were never ambiguous, but are cheap to pin.
     "nul",
     "tru",
     "fals",
     "truthy",
 ];
 
-/// Paths rooted at a numeric literal whose first step follows the number
-/// immediately. `LitPath ::= LitPrimitive NonEmptyPathTail` permits these, but
-/// `LitNumber`'s zero-digit fractional part used to swallow the `.` first.
-///
-/// Leading zeros are deliberately absent: `007.foo` is valid but normalizes to
-/// `7.foo`, so it cannot be checked with a round trip.
+/// Paths rooted at a number, which `LitNumber`'s digitless fraction (`1.`)
+/// used to truncate. No leading zeros, since those don't round-trip.
 #[cfg(test)]
 pub(super) const NUMBER_ROOTED_PATHS: &[&str] = &[
     "1.foo",
@@ -78,7 +67,6 @@ pub(super) const NUMBER_ROOTED_PATHS: &[&str] = &[
     "0.foo",
     "1.f",
     "1.foo.bar",
-    // `Key ::= Identifier | LitString`, so a quoted key is the same case.
     "1.\"quoted\"",
 ];
 
@@ -321,25 +309,9 @@ impl LitExpr {
         .parse(input)
     }
 
-    /// The grammar's word-shaped terminals, each paired with the literal it
-    /// denotes. This is the only place the keyword set is written down.
-    ///
-    /// Every word-shaped terminal is prefix-ambiguous with `Identifier` by
-    /// construction, because both are runs of identifier characters and the
-    /// parser is scannerless. Routing them all through one table is what
-    /// makes that safe:
-    ///
-    /// - `parse_primitive` builds its alternatives from this table, so a
-    ///   keyword cannot reach the input without `parse_keyword`'s boundary
-    ///   lookahead. There is no second path to forget.
-    /// - `keywords_respect_identifier_boundary` derives its cases from this
-    ///   table too, so a keyword added here is exhaustively tested against
-    ///   every identifier character without anyone remembering to write a
-    ///   test.
-    ///
-    /// Adding a word-shaped terminal by any other route, in particular a bare
-    /// `ranged_span("word")`, reintroduces the bug where `nullField` parsed
-    /// as the literal `null` followed by a dangling `Field`.
+    /// The keyword literals. `parse_primitive` and the boundary test both
+    /// derive from this table, so new keywords should be added here rather
+    /// than as a bare `ranged_span`, which would match inside `nullField`.
     pub(super) fn keywords() -> [(&'static str, Self); 3] {
         [
             ("true", Self::Bool(true)),
@@ -348,16 +320,7 @@ impl LitExpr {
         ]
     }
 
-    /// Parses the keyword `s` as the literal `value`, but only when the
-    /// keyword is not immediately followed by another identifier character.
-    ///
-    /// Without that boundary check, a bare `ranged_span("null")` greedily
-    /// matches the first four characters of `nullField`, leaving `Field` as
-    /// an unparseable remainder, which surfaces as a raw
-    /// `nom::error::ErrorKind::Eof` rather than `nullField` being read as an
-    /// ordinary key. The lookahead uses the same `IDENTIFIER_CONTINUE_CHARS`
-    /// that `parse_identifier_no_space` does, so the two cannot disagree
-    /// about where an identifier ends.
+    /// Parses keyword `s` as `value`, unless an identifier character follows.
     fn parse_keyword<'a, 'b: 'a>(
         s: &'a str,
         value: Self,
@@ -384,15 +347,8 @@ impl LitExpr {
                             spaces_or_comments,
                             alt((
                                 recognize(many1(one_of("0123456789"))),
-                                // A fractional part with no digits at all is
-                                // legal (`1.` is the number one), but only
-                                // where the `.` could not have been the start
-                                // of a `PathStep` instead. Otherwise `1.foo`
-                                // is read as the number `1.` with a dangling
-                                // `foo`, when the grammar says it is the
-                                // `LitPath` `1` followed by `.foo`. Consuming
-                                // nothing here lets `opt` fail the whole
-                                // fractional group and hand the `.` back.
+                                // A digitless fraction (`1.`) is allowed only
+                                // if no `Key` follows, so `1.foo` stays a path.
                                 recognize(not(key_start_char)),
                             )),
                         )),
@@ -787,15 +743,8 @@ mod tests {
 
     #[test]
     fn keywords_respect_identifier_boundary() {
-        // The exhaustive half of the keyword regression, and the part that
-        // does not depend on anyone's diligence. Rather than listing example
-        // keys, this derives its cases from `LitExpr::keywords()` crossed
-        // with every character `Identifier` accepts after its first, so a
-        // keyword added to that table is fully covered the moment it is
-        // added, and a keyword introduced *outside* the table fails the
-        // round-trip check below.
+        // Every keyword crossed with every identifier-continue character.
         for (keyword, expected) in LitExpr::keywords() {
-            // On its own, and at end of input, it is the literal.
             let (_, parsed) = LitExpr::parse_primitive(new_span(keyword))
                 .unwrap_or_else(|e| panic!("Failed to parse '{keyword}': {e:?}"));
             assert_eq!(
@@ -805,7 +754,6 @@ mod tests {
             );
 
             for c in IDENTIFIER_CONTINUE_CHARS.chars() {
-                // One extra identifier character is enough to make it a key.
                 let key = format!("{keyword}{c}");
                 let (remainder, parsed) = LitExpr::parse(new_span(&key))
                     .unwrap_or_else(|e| panic!("Failed to parse '{key}': {e:?}"));
@@ -819,9 +767,7 @@ mod tests {
                     "'{key}' should parse as a key, not as the literal '{keyword}'",
                 );
 
-                // And the same in the alias position, which is where a
-                // partial match is silently reinterpreted rather than
-                // rejected. `alias: nullFoo` once became `alias: null Foo`.
+                // The alias position is where the bug was silent.
                 let selection = format!("alias: {key}");
                 let parsed = JSONSelection::parse(&selection)
                     .unwrap_or_else(|e| panic!("Failed to parse '{selection}': {e:?}"));
@@ -836,15 +782,6 @@ mod tests {
 
     #[test]
     fn test_lit_expr_parse_keyword_prefixed_keys() {
-        // Regression test: `true`/`false`/`null` must not be matched as a
-        // literal when they are merely a prefix of a longer identifier, or
-        // `nullField`, `trueField`, `falseField`, and ordinary REST field
-        // names like `falsePositives` become unparseable (they were read as
-        // the keyword literal, leaving a dangling identifier suffix).
-        //
-        // Asserting the whole parsed value, not just that parsing succeeded:
-        // the bug was a *mis*-parse, so `is_ok()` alone would not have
-        // caught it.
         for key in KEYWORD_PREFIXED_KEYS {
             let (remainder, parsed) = LitExpr::parse(new_span(key))
                 .unwrap_or_else(|e| panic!("Failed to parse '{key}': {e:?}"));
@@ -859,8 +796,6 @@ mod tests {
             );
         }
 
-        // The keywords themselves are of course still literals, including at
-        // end of input, where the boundary lookahead has nothing to inspect.
         #[track_caller]
         fn check_primitive_matches(input: &str, expected: LitExpr) {
             let (_, parsed) = LitExpr::parse_primitive(new_span(input))
@@ -871,20 +806,14 @@ mod tests {
         check_primitive_matches("true", LitExpr::Bool(true));
         check_primitive_matches("false", LitExpr::Bool(false));
 
-        // Keywords immediately followed by a non-identifier character are
-        // still recognized as the literal by the primitive parser itself
-        // (what follows may then extend into a LitPath, e.g. `null.foo`,
-        // which is a separate concern from the boundary check here).
+        // A non-identifier character ends the keyword.
         check_primitive_matches("null.foo", LitExpr::Null);
         check_primitive_matches("true?bar", LitExpr::Bool(true));
         check_primitive_matches("null)", LitExpr::Null);
         check_primitive_matches("false]", LitExpr::Bool(false));
 
-        // A keyword directly before a SubSelection is re-read as a *Key*
-        // rather than a literal (see the README section "Literals followed
-        // by a SubSelection"). The boundary lookahead must not disturb that,
-        // and neither must it disturb the same shape with a keyword-prefixed
-        // key, which reaches it by a different route.
+        // Before a SubSelection, a keyword is read as a Key (see the README's
+        // "Literals followed by a SubSelection").
         #[track_caller]
         fn check_round_trip(input: &str) {
             let (remainder, parsed) = LitExpr::parse(new_span(input))
