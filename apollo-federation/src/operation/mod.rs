@@ -3066,16 +3066,33 @@ impl Operation {
         let mut document = executable::ExecutableDocument::new();
         document.operations.insert(operation);
         coerce_executable_values(self.schema.schema(), &mut document);
-        // Debug builds still validate but surface a planning error instead
-        // of panicking the process on a malformed operation.
-        #[cfg(debug_assertions)]
-        if let Err(err) = document.clone().validate(self.schema.schema()) {
-            return Err(FederationError::internal(format!(
-                "into_document_unchecked produced invalid document: {err}"
-            )));
-        }
-        Ok(Valid::assume_valid(document))
+        assume_generated_document_valid(
+            document,
+            self.schema.schema(),
+            VALIDATE_GENERATED_DOCUMENTS,
+            "into_document_unchecked",
+        )
     }
+}
+
+/// Debug builds validate generated subgraph documents; release builds trust
+/// structural construction and skip the O(n) pass.
+pub(crate) const VALIDATE_GENERATED_DOCUMENTS: bool = cfg!(debug_assertions);
+
+/// Wraps a planner-generated document as valid, checking it first only when
+/// `validate` is set. A failed check is a planning error, not a panic.
+pub(crate) fn assume_generated_document_valid(
+    document: executable::ExecutableDocument,
+    schema: &Valid<apollo_compiler::Schema>,
+    validate: bool,
+    producer: &str,
+) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+    if validate && let Err(err) = document.clone().validate(schema) {
+        return Err(FederationError::internal(format!(
+            "{producer} produced invalid document: {err}"
+        )));
+    }
+    Ok(Valid::assume_valid(document))
 }
 
 // Display implementations for the operation types.

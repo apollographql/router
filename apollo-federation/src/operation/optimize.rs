@@ -167,15 +167,12 @@ impl Operation {
         if validate {
             Ok(document.validate(self.schema.schema())?)
         } else {
-            // Debug builds still validate but surface a planning error
-            // instead of panicking the process on a malformed operation.
-            #[cfg(debug_assertions)]
-            if let Err(err) = document.clone().validate(self.schema.schema()) {
-                return Err(FederationError::internal(format!(
-                    "generate_fragments_unchecked produced invalid document: {err}"
-                )));
-            }
-            Ok(Valid::assume_valid(document))
+            super::assume_generated_document_valid(
+                document,
+                self.schema.schema(),
+                super::VALIDATE_GENERATED_DOCUMENTS,
+                "generate_fragments_unchecked",
+            )
         }
     }
 }
