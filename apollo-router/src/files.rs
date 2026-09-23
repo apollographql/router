@@ -200,6 +200,12 @@ pub(crate) mod tests {
 
     use super::*;
 
+    /// Gap between the intermediate writes in the `clog_*` tests. Two 100ms poll intervals are
+    /// enough for the watcher to see each write while the channel is still full. The last
+    /// write uses `write_and_flush`'s full wait, so the watcher has seen it before the event
+    /// is consumed.
+    const CLOG_WRITE_GAP: Duration = Duration::from_millis(200);
+
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
@@ -220,9 +226,9 @@ pub(crate) mod tests {
         let (path, mut file) = create_temp_file();
         let mut watch = watch_with_duration(&path, Duration::from_millis(100));
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "Some data 1").await;
-        write_and_flush(&mut file, "Some data 2").await;
-        write_and_flush(&mut file, "Some data 3").await;
+        write_and_flush_then_wait(&mut file, "Some data 1", CLOG_WRITE_GAP).await;
+        write_and_flush_then_wait(&mut file, "Some data 2", CLOG_WRITE_GAP).await;
+        write_and_flush_then_wait(&mut file, "Some data 3", CLOG_WRITE_GAP).await;
         write_and_flush(&mut file, "Some data 4").await;
         assert!(
             futures::poll!(watch.next()).is_ready(),
@@ -246,9 +252,9 @@ pub(crate) mod tests {
         let mut file = std::fs::File::create(&rhai_path).unwrap();
         let mut watch = watch_rhai_with_duration(&rhai_path, Duration::from_millis(100));
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "// v1").await;
-        write_and_flush(&mut file, "// v2").await;
-        write_and_flush(&mut file, "// v3").await;
+        write_and_flush_then_wait(&mut file, "// v1", CLOG_WRITE_GAP).await;
+        write_and_flush_then_wait(&mut file, "// v2", CLOG_WRITE_GAP).await;
+        write_and_flush_then_wait(&mut file, "// v3", CLOG_WRITE_GAP).await;
         write_and_flush(&mut file, "// v4").await;
         assert!(
             futures::poll!(watch.next()).is_ready(),
@@ -268,10 +274,15 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn write_and_flush(file: &mut File, contents: &str) {
+        write_and_flush_then_wait(file, contents, Duration::from_millis(500)).await;
+    }
+
+    /// Writes `contents` to `file`, then waits `wait` to give the poll watcher time to see it.
+    async fn write_and_flush_then_wait(file: &mut File, contents: &str, wait: Duration) {
         file.rewind().unwrap();
         file.set_len(0).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(wait).await;
     }
 }
