@@ -379,3 +379,20 @@ pub(crate) static INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE: LazyLock<HintCodeDe
             "Interface key missing implementation type",
         )
     });
+
+pub(crate) static DEPRECATED_REASON_NULL: LazyLock<HintCodeDefinition> = LazyLock::new(|| {
+    HintCodeDefinition::new(
+        "DEPRECATED_REASON_NULL",
+        HintLevel::Warn,
+        "`@deprecated(reason: null)` is invalid in the 2025 GraphQL spec; `reason: null` stripped for Router 3 compatibility",
+    )
+});
+
+pub(crate) static DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE: LazyLock<HintCodeDefinition> =
+    LazyLock::new(|| {
+        HintCodeDefinition::new(
+            "DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE",
+            HintLevel::Warn,
+            "Implementing field is `@deprecated` but interface field is not; invalid in the 2025 GraphQL spec",
+        )
+    });

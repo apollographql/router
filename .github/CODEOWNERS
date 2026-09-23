@@ -1,7 +1,7 @@
-/apollo-federation/ @apollographql/orchestration-language @apollographql/graphos
-/apollo-router/ @apollographql/graphos
-/apollo-router/src/plugins/connectors @apollographql/orchestration-language @apollographql/graphos
-/apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness @apollographql/graphos
-/apollo-router-benchmarks/ @apollographql/graphos @apollographql/orchestration-language
-/examples/ @apollographql/graphos
-/.github/CODEOWNERS @apollographql/graphos
+/apollo-federation/ @apollographql/orchestration-language @apollographql/router-core
+/apollo-router/ @apollographql/router-core
+/apollo-router/src/plugins/connectors @apollographql/orchestration-language @apollographql/router-core
+/apollo-router/src/plugins/fleet_detector.rs @apollographql/runtime-readiness @apollographql/router-core
+/apollo-router-benchmarks/ @apollographql/router-core @apollographql/orchestration-language
+/examples/ @apollographql/router-core
+/.github/CODEOWNERS @apollographql/router-core
