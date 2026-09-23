@@ -2,6 +2,7 @@ use apollo_compiler::Name;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
+use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
@@ -3201,6 +3202,333 @@ fn inc_from_context_multi_hop_ancestor() {
             .starts_with("contextualArgument_"),
         "rename key should be a contextualArgument, got {:?}",
         renamer.rename_key_to
+    );
+}
+
+/// Context rewrites of every fetch in the plan, as (rename_key_to, path).
+fn context_rewrite_paths(plan: &QueryPlan) -> Vec<(String, Vec<FetchDataPathElement>)> {
+    fn walk(node: &PlanNode, out: &mut Vec<(String, Vec<FetchDataPathElement>)>) {
+        match node {
+            PlanNode::Fetch(fetch) => {
+                for rewrite in &fetch.context_rewrites {
+                    if let FetchDataRewrite::KeyRenamer(renamer) = &**rewrite {
+                        out.push((renamer.rename_key_to.to_string(), renamer.path.clone()));
+                    }
+                }
+            }
+            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
+            PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
+            PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
+            other => panic!("unexpected plan node in context test: {other:?}"),
+        }
+    }
+    let mut out = Vec::new();
+    match &plan.node {
+        Some(TopLevelPlanNode::Fetch(fetch)) => walk(&PlanNode::Fetch(fetch.clone()), &mut out),
+        Some(TopLevelPlanNode::Sequence(seq)) => seq.nodes.iter().for_each(|n| walk(n, &mut out)),
+        Some(TopLevelPlanNode::Parallel(par)) => par.nodes.iter().for_each(|n| walk(n, &mut out)),
+        other => panic!("unexpected top-level plan node: {other:?}"),
+    }
+    out
+}
+
+fn rewrite_path(elements: &[&str]) -> Vec<FetchDataPathElement> {
+    elements
+        .iter()
+        .copied()
+        .map(parse_fetch_data_path_element)
+        .collect()
+}
+
+/// A context field that is @external in the @context subgraph must be
+/// fetched from the subgraph that resolves it, not selected where it is
+/// external. The search has to back out of the direct append and take the
+/// Subgraph2 hop instead.
+#[test]
+fn inc_from_context_external_field_fetched_from_resolving_subgraph() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          t: T!
+        }
+        type T @key(fields: "id") @context(name: "context") {
+          id: ID!
+          u: U!
+          prop: String! @external
+        }
+        type U @key(fields: "id") {
+          id: ID!
+          field(a: String @fromContext(field: "$context { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          a: Int!
+        }
+        type T @key(fields: "id") {
+          id: ID!
+          prop: String!
+        }
+        type U @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          t {
+            u {
+              id
+              field
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         u {
+                           __typename
+                           id
+                         }
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "t") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on T {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on T {
+                           prop
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_1_0".to_string(),
+            rewrite_path(&["..", "... on T", "prop"])
+        )]
+    );
+}
+
+/// A type carrying the same @context as its @fromContext field must read the
+/// context from its nearest ancestor, not from itself: `value` on `child`
+/// takes `tree.prop`, so the rewrite needs a Parent step.
+#[test]
+fn inc_from_context_self_context_reads_from_ancestor() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          start: Wrapper!
+        }
+        type Wrapper @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          tree: Tree!
+        }
+        type Tree @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          child: Tree!
+          value(arg: String @fromContext(field: "$ctx { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          dummy: ID!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          start {
+            tree {
+              child {
+                value
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       start {
+                         tree {
+                           child {
+                             __typename
+                             id
+                           }
+                           prop
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "start.tree.child") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Tree {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Tree {
+                           value(arg: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_1_0".to_string(),
+            rewrite_path(&["..", "... on Tree", "prop"])
+        )]
+    );
+}
+
+/// Type-conditioned context selections name types other than the ancestor
+/// actually found, which FieldSet validation rejects. They must still plan,
+/// with the rewrite unwrapped to the matching runtime type.
+#[test]
+fn inc_from_context_type_conditioned_selection_plans() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          a: A!
+        }
+        type A @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type A @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String! @shareable
+          child: C!
+        }
+        type B @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String! @shareable
+          child: C!
+        }
+        type C @key(fields: "id") {
+          id: ID!
+          value(arg: String @fromContext(field: "$ctx ... on A { prop } ... on B { prop }")): Int!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          a {
+            child {
+              value
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       a {
+                         __typename
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "a") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on A {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on A {
+                           child {
+                             __typename
+                             id
+                           }
+                           prop
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "a.child") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on C {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on C {
+                           value(arg: $contextualArgument_2_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_2_0".to_string(),
+            rewrite_path(&["..", "... on A", "prop"])
+        )]
     );
 }
 
