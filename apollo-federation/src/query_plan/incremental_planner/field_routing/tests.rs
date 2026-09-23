@@ -1,6 +1,7 @@
 use crate::Supergraph;
 use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
+use crate::query_plan::query_planner::FORCE_INCREMENTAL_DEFER;
 use crate::query_plan::query_planner::IncrementalPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use crate::query_plan::query_planner::QueryPlanOptions;
@@ -49,6 +50,14 @@ fn plan_query_with_defer(schema: &str, query: &str) -> String {
         ..default_config()
     };
     plan_query_with_options(schema, query, config, Default::default())
+}
+
+/// Plans a deferred operation through BULB instead of the legacy fallback.
+fn plan_query_with_defer_via_bulb(schema: &str, query: &str) -> String {
+    FORCE_INCREMENTAL_DEFER.set(true);
+    let plan = plan_query_with_defer(schema, query);
+    FORCE_INCREMENTAL_DEFER.set(false);
+    plan
 }
 
 /// One supergraph shared by every test here; each test picks the part of
@@ -2081,6 +2090,53 @@ fn defer_produces_defer_node() {
         plan_str.contains("email"),
         "Deferred should fetch 'email': {plan_str}"
     );
+}
+
+/// Through BULB, the deferred key hop carries the fragment's defer scope, so
+/// its fetch lands in the Deferred block and stays out of the primary.
+#[test]
+fn defer_cross_subgraph_key_hop_lands_in_deferred_block() {
+    let plan_str = plan_query_with_defer_via_bulb(
+        CROSS_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { user { name } }:
+          Fetch(service: "a", id: 0) {
+            {
+              user {
+                __typename
+                name
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "user") {
+            { ... { email } }:
+            Flatten(path: "user") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
 }
 
 /// Labels synthesized by defer normalization for unlabeled @defer
