@@ -3634,6 +3634,137 @@ fn inc_from_context_boundary_entity_with_self_context_reads_from_ancestor() {
     );
 }
 
+/// Reaching Z takes a key-hop chain. Every intermediate subgraph starts a
+/// candidate chain, and BULB must pick the shortest one, S1 -> Y1 -> Z as
+/// legacy does, not a detour through S2 that adds a no-op fetch.
+#[test]
+fn inc_interface_object_type_preserving_transitions_skip_noop_hop() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+
+            type Query {
+                test: A
+            }
+        "#,
+        S2: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S3: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S4: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        Y1: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Y2: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Z: r#"
+            type I @interfaceObject @key(fields: "alt_id { id }") {
+                alt_id: AltID!
+                data: String!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            {
+                test {
+                    data
+                }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            test {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Y1") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Z") {
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on I {
+                data
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 #[test]
 fn inc_interface_type_explosion_routes_value_type_field() {
     let planner = planner!(

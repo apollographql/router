@@ -403,9 +403,13 @@ impl FieldRoutingSearchSpace {
         // state does have) must still be offered; ranking already prefers
         // chains over circular hops.
         if options.iter().all(|opt| opt.conditions_unroutable()) {
+            // Each first hop runs its own shortest-chain search. Keep only the
+            // globally shortest chains: stopping at the first first hop with
+            // any chain can commit a detour through an extra subgraph.
+            let mut chains = Vec::new();
             for (key_target, key_edge_idx) in need_chain {
                 let key_edge = self.query_graph.edge_weight(key_edge_idx)?;
-                options.extend(self.chained_key_hop_options(
+                chains.extend(self.chained_key_hop_options(
                     pending_node,
                     key_target,
                     key_edge,
@@ -414,10 +418,13 @@ impl FieldRoutingSearchSpace {
                     &source_schema,
                     edge_finder,
                 )?);
-                if !options.is_empty() {
-                    break;
-                }
             }
+            let shortest = chains.iter().map(|c| c.intermediate_hops().len()).min();
+            options.extend(
+                chains
+                    .into_iter()
+                    .filter(|c| Some(c.intermediate_hops().len()) == shortest),
+            );
         }
         Ok(())
     }
