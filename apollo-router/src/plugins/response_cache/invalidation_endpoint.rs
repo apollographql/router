@@ -446,14 +446,15 @@ fn validate_shared_key(
 /// Compares a caller-provided key with the configured one in constant time, so response timing
 /// does not reveal how many leading bytes of the key matched. Only a length mismatch returns
 /// early.
+///
+/// An empty key never matches. A subgraph that overrides `invalidation` without a `shared_key`
+/// has an empty key, and must not accept an empty `Authorization` header.
 fn shared_key_matches(invalidation: Option<&SubgraphInvalidationConfig>, provided: &str) -> bool {
     invalidation.is_some_and(|invalidation| {
-        invalidation
-            .shared_key
-            .unredact()
-            .as_bytes()
-            .ct_eq(provided.as_bytes())
-            .into()
+        let configured = invalidation.shared_key.unredact();
+        !configured.is_empty()
+            && !provided.is_empty()
+            && bool::from(configured.as_bytes().ct_eq(provided.as_bytes()))
     })
 }
 
@@ -503,6 +504,44 @@ mod shared_key_tests {
         ] {
             assert!(!validate_shared_key(&config, wrong, "reviews"), "{wrong}");
         }
+    }
+
+    #[test]
+    fn an_override_without_a_shared_key_accepts_only_the_all_subgraphs_key() {
+        let config = SubgraphConfiguration {
+            all: Subgraph {
+                invalidation: invalidation("all-subgraphs-key"),
+                ..Default::default()
+            },
+            subgraphs: HashMap::from([(
+                "products".to_string(),
+                Subgraph {
+                    invalidation: invalidation(""),
+                    ..Default::default()
+                },
+            )]),
+        };
+
+        assert!(!validate_shared_key(&config, "", "products"));
+        assert!(validate_shared_key(
+            &config,
+            "all-subgraphs-key",
+            "products"
+        ));
+    }
+
+    #[test]
+    fn an_empty_configured_key_accepts_nothing() {
+        let config = SubgraphConfiguration {
+            all: Subgraph {
+                invalidation: invalidation(""),
+                ..Default::default()
+            },
+            subgraphs: HashMap::new(),
+        };
+
+        assert!(!validate_shared_key(&config, "", "reviews"));
+        assert!(!validate_shared_key(&config, "any-key", "reviews"));
     }
 
     #[test]
