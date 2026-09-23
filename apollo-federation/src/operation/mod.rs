@@ -1813,7 +1813,10 @@ impl SelectionSet {
                             );
                             for selection in selections.iter() {
                                 rebased.add_local_selection(
-                                    &selection.rebase_on(&sub_selection_type_pos, &self.schema)?,
+                                    &selection.rebase_on_for_incremental_planner(
+                                        &sub_selection_type_pos,
+                                        &self.schema,
+                                    )?,
                                 )?;
                             }
                             Ok::<_, FederationError>(rebased)
