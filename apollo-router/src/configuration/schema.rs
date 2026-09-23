@@ -40,6 +40,16 @@ pub(crate) fn generate_config_schema() -> Schema {
     schema
 }
 
+/// [`generate_config_schema`] as JSON, generated once and shared by the shared-parser adapter
+/// and tests.
+pub(crate) fn router_config_schema() -> &'static serde_json::Value {
+    static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::to_value(generate_config_schema())
+            .expect("router's configuration schema serializes")
+    })
+}
+
 #[derive(Eq, PartialEq)]
 pub(crate) enum Mode {
     Upgrade,
@@ -333,7 +343,7 @@ pub(crate) mod advertised_defaults {
     use serde::de::DeserializeOwned;
     use serde_json::Value;
 
-    use crate::configuration::apollo_configuration_parse::router_config_schema;
+    use super::router_config_schema;
 
     /// The `default` the generated schema advertises for `property` of `definition`.
     pub(crate) fn of_property(definition: &str, property: &str) -> Value {

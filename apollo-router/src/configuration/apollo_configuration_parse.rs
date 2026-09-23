@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use apollo_configuration::ConfigError;
 use apollo_configuration::ParseYamlOptions;
@@ -17,7 +16,7 @@ use serde_json::Value;
 
 use super::Configuration;
 use super::ConfigurationError;
-use super::schema::generate_config_schema;
+use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 
@@ -25,15 +24,6 @@ use super::upgrade::upgrade_configuration;
 // shared crate's validation hook has nothing further to check.
 impl apollo_configuration::Validate for Configuration {}
 impl apollo_configuration::Configuration for Configuration {}
-
-/// Router's patched configuration schema, generated once and shared by parsing and tests.
-pub(crate) fn router_config_schema() -> &'static Value {
-    static SCHEMA: OnceLock<Value> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        serde_json::to_value(generate_config_schema())
-            .expect("router's configuration schema serializes")
-    })
-}
 
 /// Uses [`router_config_schema`] so the shared parser also rejects unknown top-level keys.
 #[allow(dead_code)]
