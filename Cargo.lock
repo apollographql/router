@@ -353,9 +353,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-redaction"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de3b6459c152286d1733494ee3706c1d30859643129d725189ae849c74fa65ab"
+checksum = "5d1eaec91eb4f40f9d28d6e458ed5668e3d39b30f712f4bc18247c21735e6446"
 dependencies = [
  "schemars",
  "serde",
@@ -374,6 +374,7 @@ dependencies = [
  "apollo-configuration",
  "apollo-environment-detector",
  "apollo-federation",
+ "apollo-redaction",
  "astral-tokio-tar",
  "async-compression",
  "async-trait",

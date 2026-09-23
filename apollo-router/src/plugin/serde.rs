@@ -3,10 +3,13 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
+use apollo_redaction::Redacted;
 use http::HeaderValue;
 use http::header::HeaderName;
 use regex::Regex;
 use serde::Deserializer;
+use serde::Serialize;
+use serde::Serializer;
 use serde::de;
 use serde::de::Error;
 use serde::de::SeqAccess;
@@ -207,4 +210,19 @@ impl serde::de::Visitor<'_> for JSONPathVisitor {
     {
         serde_json_bytes::path::JsonPathInst::from_str(s).map_err(serde::de::Error::custom)
     }
+}
+
+/// Serialize the unredacted value of an `Option<Redacted<T>>` field.
+///
+/// Use with `#[serde(serialize_with)]` when serialization must preserve the original setting.
+/// The output contains plaintext secrets and must stay out of diagnostics.
+pub(crate) fn serialize_redacted_option<T, R, S>(
+    value: &Option<Redacted<T, R>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    T: Serialize,
+    S: Serializer,
+{
+    value.as_ref().map(Redacted::unredact).serialize(serializer)
 }

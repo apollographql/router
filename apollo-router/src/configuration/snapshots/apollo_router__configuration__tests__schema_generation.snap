@@ -42,7 +42,8 @@ expression: "&schema"
       "properties": {
         "access_key_id": {
           "description": "The ID for this access key.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "assume_role": {
           "anyOf": [
@@ -61,7 +62,8 @@ expression: "&schema"
         },
         "secret_access_key": {
           "description": "The secret key used to sign requests.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "service_name": {
           "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
@@ -557,7 +559,6 @@ expression: "&schema"
           "additionalProperties": {
             "$ref": "#/definitions/AuthConfig"
           },
-          "default": {},
           "description": "Create a configuration that will apply only to a specific source.",
           "type": "object"
         }
@@ -594,14 +595,12 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "default": null,
           "description": "Configuration that will apply to all subgraphs."
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/AuthConfig"
           },
-          "default": {},
           "description": "Create a configuration that will apply only to a specific subgraph.",
           "type": "object"
         }
@@ -2145,7 +2144,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 5,
@@ -2184,7 +2184,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -5922,12 +5923,12 @@ expression: "&schema"
           ]
         },
         "key": {
-          "default": null,
           "description": "The optional private key file for TLS configuration.",
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "metadata": {
           "additionalProperties": true,
@@ -7474,13 +7475,6 @@ expression: "&schema"
               "$ref": "#/definitions/GrpcExporter"
             }
           ],
-          "default": {
-            "ca": null,
-            "cert": null,
-            "domain_name": null,
-            "key": null,
-            "metadata": {}
-          },
           "description": "gRPC configuration settings"
         },
         "http": {
@@ -8067,7 +8061,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8133,7 +8128,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -8364,7 +8360,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8427,7 +8424,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -10041,7 +10039,6 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "default": null,
           "description": "Invalidation configuration"
         },
         "private_id": {
@@ -10061,7 +10058,6 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "default": null,
           "description": "Redis configuration"
         },
         "ttl": {
@@ -10100,16 +10096,12 @@ expression: "&schema"
               "$ref": "#/definitions/CommonBatchingConfig"
             }
           ],
-          "default": {
-            "enabled": false
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/CommonBatchingConfig"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -10253,18 +10245,12 @@ expression: "&schema"
               "$ref": "#/definitions/DeduplicationConfig"
             }
           ],
-          "default": {
-            "enabled": true,
-            "ignore_auth_context": false,
-            "ignored_headers": []
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/DeduplicationConfig"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -10301,16 +10287,12 @@ expression: "&schema"
               "$ref": "#/definitions/HoistOrphanErrors"
             }
           ],
-          "default": {
-            "enabled": false
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/HoistOrphanErrors"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -10339,9 +10321,9 @@ expression: "&schema"
           "description": "Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to\nall three (`subgraph`, `type`, `cache_tag`) enabled, matching the original\n`response_cache` behavior. Operators with workloads that only invalidate by a subset of\nmodes can opt out of the unused indexes to reduce per-insert Redis work.\n\nSetting all three to `false` disables invalidation indexing entirely; the `/invalidation`\nendpoint then returns HTTP 400 for any request against this subgraph. This shape is\nuseful for pure TTL-based caching without an invalidation API."
         },
         "shared_key": {
-          "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         }
       },
       "type": "object"
@@ -11336,16 +11318,12 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphApq"
             }
           ],
-          "default": {
-            "enabled": false
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphApq"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11361,20 +11339,12 @@ expression: "&schema"
               "$ref": "#/definitions/Subgraph"
             }
           ],
-          "default": {
-            "enabled": true,
-            "invalidation": null,
-            "private_id": null,
-            "redis": null,
-            "ttl": null
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11390,16 +11360,12 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphLimits"
             }
           ],
-          "default": {
-            "http_max_response_size": null
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphLimits"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11415,17 +11381,12 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphStrategyConfig"
             }
           ],
-          "default": {
-            "list_size": null,
-            "max": null
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphStrategyConfig"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11441,17 +11402,12 @@ expression: "&schema"
               "$ref": "#/definitions/TlsClient"
             }
           ],
-          "default": {
-            "certificate_authorities": null,
-            "client_authentication": null
-          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/TlsClient"
           },
-          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -12390,7 +12346,8 @@ expression: "&schema"
         "key": {
           "description": "key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -12416,7 +12373,8 @@ expression: "&schema"
         "key": {
           "description": "server key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [

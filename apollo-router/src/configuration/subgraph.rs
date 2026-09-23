@@ -78,7 +78,7 @@ use serde::de::Visitor;
 #[schemars(rename = "Subgraph{T}Configuration")]
 pub(crate) struct SubgraphConfiguration<T>
 where
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     /// options applying to all subgraphs
     #[serde(default)]
@@ -90,7 +90,7 @@ where
 
 impl<T> SubgraphConfiguration<T>
 where
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     #[allow(dead_code)]
     pub(crate) fn get(&self, subgraph_name: &str) -> &T {
@@ -98,7 +98,7 @@ where
     }
 
     // Create a new `SubgraphConfiguration<V>` by extracting a value `V` from `&T`
-    pub(crate) fn extract<V: Default + Serialize + JsonSchema>(
+    pub(crate) fn extract<V: Default + JsonSchema>(
         &self,
         extract_fn: fn(&T) -> V,
     ) -> SubgraphConfiguration<V> {
@@ -115,7 +115,7 @@ where
 
 impl<T> Debug for SubgraphConfiguration<T>
 where
-    T: Debug + Default + Serialize + JsonSchema,
+    T: Debug + Default + JsonSchema,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SubgraphConfiguration")
@@ -127,7 +127,7 @@ where
 
 impl<T> Clone for SubgraphConfiguration<T>
 where
-    T: Clone + Default + Serialize + JsonSchema,
+    T: Clone + Default + JsonSchema,
 {
     fn clone(&self) -> Self {
         Self {
@@ -139,7 +139,7 @@ where
 
 impl<T> PartialEq for SubgraphConfiguration<T>
 where
-    T: Default + Serialize + JsonSchema + PartialEq,
+    T: Default + JsonSchema + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.all == other.all && self.subgraphs == other.subgraphs
@@ -149,7 +149,7 @@ where
 impl<'de, T> Deserialize<'de> for SubgraphConfiguration<T>
 where
     T: DeserializeOwned,
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -166,7 +166,7 @@ struct SubgraphVisitor<T> {
 impl<'de, T> Visitor<'de> for SubgraphVisitor<T>
 where
     T: DeserializeOwned,
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     type Value = SubgraphConfiguration<T>;
 

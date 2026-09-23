@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use apollo_redaction::Redacted;
 use aws_config::provider_config::ProviderConfig;
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::ProvideCredentials;
@@ -26,7 +27,6 @@ use http::Request;
 use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
@@ -39,13 +39,13 @@ use crate::services::router::body::RouterBody;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
-    access_key_id: String,
+    access_key_id: Redacted<String>,
     /// The secret key used to sign requests.
-    secret_access_key: String,
+    secret_access_key: Redacted<String>,
     /// The AWS region this chain applies to.
     region: String,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
@@ -62,8 +62,8 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
         Self: 'a,
     {
         aws_credential_types::provider::future::ProvideCredentials::ready(Ok(Credentials::new(
-            self.access_key_id.clone(),
-            self.secret_access_key.clone(),
+            self.access_key_id.unredact().clone(),
+            self.secret_access_key.unredact().clone(),
             None,
             None,
             "apollo-router",
@@ -72,7 +72,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 }
 
 /// Configuration of the DefaultChainProvider
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
@@ -86,7 +86,7 @@ pub(crate) struct DefaultChainConfig {
 }
 
 /// Specify assumed role configuration.
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
@@ -99,7 +99,7 @@ pub(crate) struct AssumeRoleProvider {
 }
 
 /// Configure AWS sigv4 auth.
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
@@ -198,7 +198,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
     )
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
@@ -523,6 +523,7 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    static_assertions::assert_not_impl_any!(AWSSigV4HardcodedConfig: serde::Serialize);
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
@@ -545,8 +546,8 @@ mod test {
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
         let params: SigningParamsConfig = make_signing_params(
             &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                access_key_id: "id".to_string(),
-                secret_access_key: "secret".to_string(),
+                access_key_id: Redacted::new("id".to_string()),
+                secret_access_key: Redacted::new("secret".to_string()),
                 region: "us-east-1".to_string(),
                 service_name: service_name.to_string(),
                 assume_role: None,
@@ -658,8 +659,8 @@ mod test {
             signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                        access_key_id: "id".to_string(),
-                        secret_access_key: "secret".to_string(),
+                        access_key_id: Redacted::new("id".to_string()),
+                        secret_access_key: Redacted::new("secret".to_string()),
                         region: "us-east-1".to_string(),
                         service_name: "vpc-lattice-svcs".to_string(),
                         assume_role: None,
@@ -726,8 +727,8 @@ mod test {
             signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                        access_key_id: "id".to_string(),
-                        secret_access_key: "secret".to_string(),
+                        access_key_id: Redacted::new("id".to_string()),
+                        secret_access_key: Redacted::new("secret".to_string()),
                         region: "us-east-1".to_string(),
                         service_name: "s3".to_string(),
                         assume_role: None,
@@ -810,8 +811,8 @@ mod test {
             let signing_params = Arc::new(
                 make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                        access_key_id: "id".to_string(),
-                        secret_access_key: "secret".to_string(),
+                        access_key_id: Redacted::new("id".to_string()),
+                        secret_access_key: Redacted::new("secret".to_string()),
                         region: "us-east-1".to_string(),
                         service_name: "execute-api".to_string(),
                         assume_role: None,
@@ -870,8 +871,8 @@ mod test {
                         make_signing_params(
                             &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
                                 AWSSigV4HardcodedConfig {
-                                    access_key_id: "id".to_string(),
-                                    secret_access_key: "secret".to_string(),
+                                    access_key_id: Redacted::new("id".to_string()),
+                                    secret_access_key: Redacted::new("secret".to_string()),
                                     region: "us-east-1".to_string(),
                                     service_name: "execute-api".to_string(),
                                     assume_role: None,
@@ -1066,5 +1067,32 @@ mod test {
         })
         .join()
         .unwrap()
+    }
+
+    #[test]
+    fn redacted_aws_credentials_are_hidden_from_debug_output() {
+        let config = AWSSigV4HardcodedConfig {
+            access_key_id: Redacted::new("AKIASCRATCHACCESSKEY".to_string()),
+            secret_access_key: Redacted::new("wJalrXUtSecretAccessKeyScratch123".to_string()),
+            region: "us-east-1".to_string(),
+            service_name: "s3".to_string(),
+            assume_role: None,
+        };
+
+        let debug = format!("{config:?}");
+        assert!(
+            !debug.contains("AKIASCRATCHACCESSKEY"),
+            "access key ID must not appear in Debug output: {debug}"
+        );
+        assert!(
+            !debug.contains("wJalrXUtSecretAccessKeyScratch123"),
+            "secret access key must not appear in Debug output: {debug}"
+        );
+
+        assert_eq!(config.access_key_id.unredact(), "AKIASCRATCHACCESSKEY");
+        assert_eq!(
+            config.secret_access_key.unredact(),
+            "wJalrXUtSecretAccessKeyScratch123"
+        );
     }
 }

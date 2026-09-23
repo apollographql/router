@@ -1,7 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 980
 expression: schema
-snapshot_kind: text
 ---
 {
   "$schema": "https://json-schema.org/draft/2019-09/schema",
@@ -36,10 +36,6 @@ snapshot_kind: text
               "maximum": 255,
               "default": 0
             }
-          },
-          "default": {
-            "a": true,
-            "b": 0
           }
         },
         "subgraphs": {
@@ -60,8 +56,7 @@ snapshot_kind: text
                 "default": 0
               }
             }
-          },
-          "default": {}
+          }
         }
       }
     }
