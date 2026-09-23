@@ -546,6 +546,19 @@ impl HttpClientService {
     ///
     /// WARN: if no CA certificates are found, this function will panic
     pub(crate) fn native_roots_store() -> RootCertStore {
+        // Reading the OS trust store is slow on some platforms (over 100ms on macOS) and unit
+        // tests build many pipelines per process, so tests share one copy. The router itself
+        // re-reads it on every call so that a reload picks up newly installed certificates.
+        if cfg!(test) {
+            static NATIVE_ROOTS: std::sync::OnceLock<RootCertStore> = std::sync::OnceLock::new();
+            return NATIVE_ROOTS
+                .get_or_init(Self::load_native_roots_store)
+                .clone();
+        }
+        Self::load_native_roots_store()
+    }
+
+    fn load_native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
 
         roots.add_parsable_certificates(
