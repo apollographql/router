@@ -443,19 +443,44 @@ supergraph:
 }
 
 #[test]
-fn redacted_tls_key_errors_hide_the_input() {
-    for key in [
-        "-----BEGIN secret-key-with-invalid-header",
-        "-----BEGIN secret-key-with-missing-footer-----",
-    ] {
+fn redacted_tls_key_errors_name_the_failure_without_the_input() {
+    let client_key = include_str!("../services/http/testdata/client.key");
+    let cases = [
+        (
+            "-----BEGIN secret-key-with-missing-footer-----\nc2VjcmV0\n".to_string(),
+            LoadKeyError::Malformed,
+        ),
+        (
+            "-----BEGIN PRIVATE KEY-----\nsecret-key!!!\n-----END PRIVATE KEY-----\n".to_string(),
+            LoadKeyError::Malformed,
+        ),
+        (
+            include_str!("../services/http/testdata/server.crt").to_string(),
+            LoadKeyError::NotAPrivateKey,
+        ),
+        (
+            "secret-key-without-any-pem-markers".to_string(),
+            LoadKeyError::Missing,
+        ),
+        (
+            format!("{client_key}{client_key}"),
+            LoadKeyError::MultipleItems,
+        ),
+    ];
+
+    for (key, expected) in cases {
+        assert_eq!(load_key(&key).unwrap_err(), expected, "{key}");
+
         let error = serde_json::from_value::<TlsClientAuth>(json!({
             "certificate_chain": "",
             "key": key,
         }))
         .unwrap_err()
         .to_string();
+        assert!(error.contains(&expected.to_string()), "{error}");
         assert!(!error.contains("secret-key"), "{error}");
-        assert!(error.contains("could not parse TLS private key"), "{error}");
+        assert!(!error.contains("c2VjcmV0"), "{error}");
+        assert!(!error.contains("BEGIN"), "{error}");
     }
 }
 
