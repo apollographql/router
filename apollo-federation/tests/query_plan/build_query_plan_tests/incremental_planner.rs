@@ -3532,6 +3532,108 @@ fn inc_from_context_type_conditioned_selection_plans() {
     );
 }
 
+/// A key hop into Subgraph1 lands on `tree`, whose type carries the same
+/// @context as `value`. `value` on `child` must read `tree.prop` from the
+/// hop's own fetch, not treat the boundary type as already providing it.
+#[test]
+fn inc_from_context_boundary_entity_with_self_context_reads_from_ancestor() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Wrapper @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          tree: Tree!
+        }
+        type Tree @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          child: Tree!
+          value(arg: String @fromContext(field: "$ctx { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          start: Wrapper!
+        }
+        type Wrapper @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          start {
+            tree {
+              child {
+                value
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph2") {
+                     {
+                       start {
+                         __typename
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "start") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Wrapper {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Wrapper {
+                           tree {
+                             child {
+                               __typename
+                               id
+                             }
+                             prop
+                           }
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "start.tree.child") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Tree {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Tree {
+                           value(arg: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_1_0".to_string(),
+            rewrite_path(&["..", "... on Tree", "prop"])
+        )]
+    );
+}
+
 #[test]
 fn inc_interface_type_explosion_routes_value_type_field() {
     let planner = planner!(

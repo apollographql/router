@@ -359,20 +359,25 @@ fn classify_placement(
     }
 }
 
-/// Whether every context condition's @context sits at (or above) the
-/// pending's entity boundary type: the context data already rides the
-/// entity representation, so no isolating hop is needed.
+/// Whether every context condition's nearest @context ancestor is the
+/// entity boundary type, the one the entity representation carries, so the
+/// context data rides the representation and no isolating hop is needed.
 fn at_entity_boundary(
     pending: &super::PendingSelection,
     required_contexts: &[ContextCondition],
 ) -> bool {
-    let entity_root_type = pending.context_anchor.entity_type.as_ref();
+    // Same pairing as `locate_ancestor_site`: the boundary type is the one
+    // paired with op_path's first element.
+    let boundary_idx = pending
+        .parent_types
+        .len()
+        .checked_sub(pending.op_path.len());
     pending.context_anchor.fetch.is_some()
-        && entity_root_type.is_some()
-        && required_contexts.iter().all(|cond| {
-            cond.types_with_context_set
-                .iter()
-                .any(|t| Some(t) == entity_root_type)
+        && boundary_idx.is_some_and(|boundary_idx| {
+            required_contexts.iter().all(|cond| {
+                find_context_ancestor(pending, cond)
+                    .is_ok_and(|(_, ancestor_idx, _)| ancestor_idx == boundary_idx)
+            })
         })
 }
 

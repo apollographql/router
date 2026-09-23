@@ -763,10 +763,12 @@ impl FieldRoutingSearchSpace {
             let edge = self.query_graph.edge_weight(edge_idx)?;
             // @fromContext at a position the entity boundary does not already
             // isolate needs a same-subgraph entity re-entry so the context
-            // value rides the representation.
+            // value rides the representation. At the boundary the re-entry
+            // stays as a fallback for when the fetch feeding the
+            // representation cannot resolve the context fields.
             let needs_isolation = !edge.required_contexts.is_empty()
                 && super::context::needs_context_isolation(pending, &edge.required_contexts);
-            if edge.conditions.is_none() && !needs_isolation {
+            if edge.conditions.is_none() && edge.required_contexts.is_empty() {
                 options.push(self.direct_choice(edge_idx, target_node.source.clone())?);
             } else {
                 self.push_requires_strategy_options(
