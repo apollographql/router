@@ -165,12 +165,6 @@ pub struct IncrementalPlannerConfig {
     /// Leave unset (the default) for fully deterministic, fuel-bounded
     /// planning.
     pub timeout: Option<Duration>,
-
-    /// Skip validation of generated subgraph operations. The planner
-    /// constructs operations structurally, so they are valid by
-    /// construction; validation is O(n) redundant work. Enabled by
-    /// default; disable for debugging malformed plans.
-    pub skip_subgraph_operation_validation: bool,
 }
 
 impl Default for IncrementalPlannerConfig {
@@ -180,7 +174,6 @@ impl Default for IncrementalPlannerConfig {
             beam_width: 16,
             fuel: 5_000,
             timeout: None,
-            skip_subgraph_operation_validation: true,
         }
     }
 }
