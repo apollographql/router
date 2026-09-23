@@ -64,11 +64,12 @@ WORKDIR /dist
 
 COPY --from=downloader /dist/router /dist
 
-# Update apt and install ca-certificates
+# Update apt and install ca-certificates, and the shared jemalloc the router is linked against
 RUN \
   apt-get update -y \
   && apt-get install -y \
-    ca-certificates
+    ca-certificates \
+    libjemalloc2
 
 # If debug image, install perf and heaptrack and make a data directory
 RUN \
@@ -110,7 +111,7 @@ RUN \
 \n    # The -- is required: ddprof has its own --config and would otherwise consume the one \
 \n    # intended for the router and try to parse it as TOML. \
 \n    # informational logging is deliberate; at the default level a broken exporter is silent. \
-\n    exec /usr/bin/ddprof --log_level informational -- /dist/router "$@" \
+\n    exec /usr/bin/ddprof --log_level informational --preset cpu_live_heap -- /dist/router "$@" \
 \nelif [ -f "/usr/bin/heaptrack" ]; then \
 \n    exec heaptrack -o /dist/data/$(hostname)/router_heaptrack  /dist/router "$@" \
 \nelse \
