@@ -104,6 +104,35 @@ pub(super) fn inline_fragment_spreads(
     Ok(out)
 }
 
+/// Guards selections by the runtime types a path element narrowed the position to, so that a
+/// requirement is mounted only where the fetch runs.
+/// - A selection written under a fragment already carries its own condition; this is for the
+///   unguarded case, where the narrowing would otherwise be lost.
+/// - Several types are a disjunction, so each takes its own copy.
+/// - An unnarrowed position is returned untouched, which is every position in a plan built
+///   without `--type-conditioned-fetching`.
+fn under_reached_types(
+    reached: Option<&TypeCondition>,
+    selections: Vec<Selection>,
+) -> Vec<Selection> {
+    let Some(type_names) = reached else {
+        return selections;
+    };
+    if selections.is_empty() {
+        return selections;
+    }
+    type_names
+        .iter()
+        .map(|type_name| {
+            Selection::InlineFragment(Node::new(InlineFragment {
+                type_condition: Some(type_name.clone()),
+                directives: Default::default(),
+                selection_set: selection_set(type_name.clone(), selections.clone()),
+            }))
+        })
+        .collect()
+}
+
 /// Wraps a selection set in one selection unless it is empty, so a path that matches nothing
 /// contributes nothing.
 pub(super) fn wrap_non_empty(
@@ -305,7 +334,7 @@ fn selections_under_key(
                     path,
                     mounted,
                 );
-                out.extend(wrap_non_empty(
+                let reproduced = wrap_non_empty(
                     |selections| {
                         let mut copy = (**field).clone();
                         copy.selection_set =
@@ -313,7 +342,9 @@ fn selections_under_key(
                         Selection::Field(Node::new(copy))
                     },
                     inner,
-                ));
+                );
+                // An unguarded field is selected on every type the path narrowed away.
+                out.extend(under_reached_types(pending, reproduced));
             }
             Selection::InlineFragment(fragment) => {
                 if !type_condition_admits(schema, pending, fragment.type_condition.as_ref()) {
