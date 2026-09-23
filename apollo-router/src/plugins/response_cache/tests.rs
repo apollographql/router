@@ -3131,7 +3131,7 @@ async fn invalidate_by_cache_tag() {
         });
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"), drop_rx)
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -4456,7 +4456,7 @@ async fn invalidate_by_type() {
         });
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"), drop_rx)
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
         let map = [
