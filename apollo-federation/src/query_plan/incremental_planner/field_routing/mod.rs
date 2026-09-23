@@ -207,6 +207,18 @@ impl FieldRoutingSearchSpace {
         })
     }
 
+    /// Whether a selection at `node` may be duplicated into a second root
+    /// fetch. Only query roots are side-effect free; a second mutation or
+    /// subscription root fetch would run the operation twice.
+    pub(super) fn root_may_duplicate(&self, node: NodeIndex) -> Result<bool, FederationError> {
+        Ok(match self.qg().node_weight(node)?.type_ {
+            crate::query_graph::QueryGraphNodeType::FederatedRootType(kind) => {
+                kind == crate::schema::position::SchemaRootDefinitionKind::Query
+            }
+            crate::query_graph::QueryGraphNodeType::SchemaType(_) => true,
+        })
+    }
+
     /// Select `__typename` in `fetch_node` at `base_path` so the executor
     /// can identify the concrete type for entity representations.
     pub(super) fn append_typename(
@@ -306,7 +318,12 @@ impl FieldRoutingSearchSpace {
             } else {
                 wrap_in_parent(&anchor.selection, &remainder)?
             };
-            if matches!(anchor.selection, Selection::Field(_)) && anchor.condition.is_none() {
+            if matches!(anchor.selection, Selection::Field(_))
+                && anchor.condition.is_none()
+                && self
+                    .root_may_duplicate(anchor.query_graph_node)
+                    .unwrap_or(false)
+            {
                 let mut candidate = anchor
                     .fork(wrapped.clone())
                     .with_split_avoid(Some(avoid.clone()));

@@ -744,6 +744,153 @@ fn inc_mutation_interleaved_subgraph_fields_stay_in_document_order() {
     );
 }
 
+/// A shareable mutation root must be invoked once, so the fields the chosen
+/// subgraph lacks are reached through an entity hop rather than a second
+/// root fetch.
+#[test]
+fn inc_mutation_on_shareable_field_invokes_mutation_once() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            dummy: Int
+          }
+
+          type Mutation {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id", resolvable: false) {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            f {
+              x
+              y
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                f {
+                  __typename
+                  id
+                  y
+                }
+              }
+            },
+            Flatten(path: "f") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on F {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on F {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn inc_mutation_key_on_shareable_root_is_ignored() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            dummy: Int
+          }
+
+          type Mutation @key(fields: "__typename") {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation @key(fields: "__typename") {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id", resolvable: false) {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            f {
+              x
+              y
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                f {
+                  __typename
+                  id
+                  y
+                }
+              }
+            },
+            Flatten(path: "f") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on F {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on F {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Greedy tiebreak correction by backtracking
 // ---------------------------------------------------------------------------
