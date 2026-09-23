@@ -2768,14 +2768,15 @@ fn inc_partial_overlap_explodes_abstract_type() {
 }
 
 // ---------------------------------------------------------------------------
-// @defer: cross-subgraph deferred fragment falls back to the legacy planner,
-// which produces a Defer plan node with primary and deferred blocks. The
+// @defer: a deferred named fragment spread whose fields live in another
+// subgraph. The primary block stays a single root fetch, the deferred block
+// gets its own entity fetch, and the fragment's __typename rides along. The
 // @defer directive is stripped from subgraph operations since subgraph schemas
 // do not define it.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inc_defer_cross_subgraph_falls_back_to_legacy_plan() {
+fn inc_defer_named_fragment_spread_across_subgraphs() {
     let planner = planner!(
         config = incremental_defer_config(),
         Subgraph1: r#"
