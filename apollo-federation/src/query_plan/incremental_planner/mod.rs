@@ -120,6 +120,7 @@ pub(crate) fn build_bulb_plan(
         inconsistent_abstract_types: parameters
             .abstract_types_with_inconsistent_runtime_types
             .clone(),
+        connector_index: parameters.connector_index.clone(),
         caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };
@@ -215,9 +216,15 @@ fn run_bulb_and_finalize(
     );
 
     // Accumulate: mutation planning runs one search per top-level field and
-    // the statistics span the whole operation.
+    // the statistics span the whole operation. `evaluated_plan_count` counts
+    // terminal candidates; `evaluated_plan_paths` counts decision points
+    // expanded and scored, the beam-search analog of the exhaustive
+    // planner's evaluated-path count (both measure how much of the search
+    // space was explored).
     let evaluated = &parameters.statistics.evaluated_plan_count;
     evaluated.set(evaluated.get() + stats.evaluated_plans);
+    let evaluated_paths = &parameters.statistics.evaluated_plan_paths;
+    evaluated_paths.set(evaluated_paths.get() + stats.expansions);
 
     if matches!(stats.termination, BulbTermination::Cancelled) {
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());

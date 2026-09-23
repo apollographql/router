@@ -14,6 +14,7 @@ use apollo_federation::Supergraph;
 use apollo_federation::compat::coerce_and_validate_schema_values;
 use apollo_federation::connectors::expand::Connectors;
 use apollo_federation::connectors::expand::ExpansionResult;
+use apollo_federation::connectors::expand::build_connectors_without_expansion;
 use apollo_federation::link::metadata::LinksMetadata;
 use apollo_federation::link::spec::Identity;
 use apollo_federation::router_supported_supergraph_specs;
@@ -68,28 +69,42 @@ impl Schema {
         };
 
         let validate_default_values = config.supergraph.validate_default_values;
-        let expansion = apollo_federation::connectors::expand::expand_connectors_with_options(
-            &raw_sdl.sdl,
-            &api_schema_options,
-            validate_default_values,
-        )
-        .map_err(SchemaError::Connector)?;
         let preserved_launch_id = raw_sdl.launch_id.clone();
-        let (raw_sdl, api_schema, connectors) = match expansion {
-            ExpansionResult::Expanded {
-                raw_sdl,
-                api_schema: api,
-                connectors,
-            } => (
-                Arc::new(SchemaState {
-                    sdl: raw_sdl,
-                    launch_id: preserved_launch_id,
-                }),
-                Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
-                Some(apply_config(config, connectors)),
-            ),
-            ExpansionResult::Unchanged => (raw_sdl, None, None),
-        };
+        let (raw_sdl, api_schema, connectors) =
+            if config.supergraph.query_planning.incremental_planner.enabled {
+                // The incremental planner handles connectors natively, emitting
+                // fetches keyed by the same synthetic service names expansion
+                // would have produced, so the expensive virtual-subgraph
+                // expansion is skipped. The Connector models are still parsed so
+                // ConnectorServiceFactory can serve requests.
+                let connectors = build_connectors_without_expansion(&raw_sdl.sdl)
+                    .map_err(SchemaError::Connector)?
+                    .map(|c| apply_config(config, c));
+                (raw_sdl, None, connectors)
+            } else {
+                let expansion =
+                    apollo_federation::connectors::expand::expand_connectors_with_options(
+                        &raw_sdl.sdl,
+                        &api_schema_options,
+                        validate_default_values,
+                    )
+                    .map_err(SchemaError::Connector)?;
+                match expansion {
+                    ExpansionResult::Expanded {
+                        raw_sdl,
+                        api_schema: api,
+                        connectors,
+                    } => (
+                        Arc::new(SchemaState {
+                            sdl: raw_sdl,
+                            launch_id: preserved_launch_id,
+                        }),
+                        Some(ValidFederationSchema::new(*api).map_err(SchemaError::Connector)?),
+                        Some(apply_config(config, connectors)),
+                    ),
+                    ExpansionResult::Unchanged => (raw_sdl, None, None),
+                }
+            };
 
         let mut parser = apollo_compiler::parser::Parser::new();
 
@@ -125,9 +140,19 @@ impl Schema {
                 let url = join_directive.specified_argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
+                // Expanded supergraphs list connector subgraphs under their
+                // synthetic service names; unexpanded (native) supergraphs
+                // keep the real subgraph name, so match on either. Both are
+                // fully connector-backed and need no reachable URL.
                 let is_connector = connectors
                     .as_ref()
-                    .map(|connectors| connectors.by_service_name.contains_key(name))
+                    .map(|connectors| {
+                        connectors.by_service_name.contains_key(name)
+                            || connectors
+                                .by_service_name
+                                .values()
+                                .any(|c| c.id.subgraph_name.as_str() == name)
+                    })
                     .unwrap_or_default();
 
                 let url = if is_connector {

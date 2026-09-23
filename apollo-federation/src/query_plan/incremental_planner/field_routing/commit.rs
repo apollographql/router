@@ -112,6 +112,13 @@ impl FieldRoutingSearchSpace {
             };
         }
 
+        if choice.is_connector() {
+            let entry = choice.connector().ok_or_else(|| {
+                FederationError::internal("connector choice must have a connector")
+            })?;
+            return self.commit_connector_choice(state, pending, entry, choice);
+        }
+
         let qg = &self.qg();
 
         let edge_index = choice
@@ -1556,4 +1563,29 @@ impl FieldRoutingSearchSpace {
             (false, false) => pending.provides_anchor,
         })
     }
+}
+
+/// The response path elements a field contributes: its response key, plus
+/// an index wildcard per level of list nesting.
+pub(super) fn field_response_elements(
+    field: &Field,
+) -> Result<Vec<FetchDataPathElement>, FederationError> {
+    let mut elements = vec![FetchDataPathElement::Key(
+        field.response_name().clone(),
+        Default::default(),
+    )];
+    let mut ty = &field.field_position.get(field.schema.schema())?.ty;
+    loop {
+        match ty {
+            apollo_compiler::ast::Type::Named(_) | apollo_compiler::ast::Type::NonNullNamed(_) => {
+                break;
+            }
+            apollo_compiler::ast::Type::List(inner)
+            | apollo_compiler::ast::Type::NonNullList(inner) => {
+                elements.push(FetchDataPathElement::AnyIndex(Default::default()));
+                ty = inner;
+            }
+        }
+    }
+    Ok(elements)
 }

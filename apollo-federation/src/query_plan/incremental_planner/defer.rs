@@ -68,7 +68,7 @@ pub(super) fn strip_defer_directive(inline_fragment: &InlineFragment) -> InlineF
 /// Detect @defer on an inline fragment selection: returns the label plus a
 /// copy of the fragment with @defer stripped (so subgraph operations don't
 /// include it), or `(None, None)`.
-pub(super) fn defer_context(selection: &Selection) -> (Option<String>, Option<InlineFragment>) {
+pub(crate) fn defer_context(selection: &Selection) -> (Option<String>, Option<InlineFragment>) {
     let Selection::InlineFragment(frag_sel) = selection else {
         return (None, None);
     };

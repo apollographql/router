@@ -46,6 +46,62 @@ pub enum ExpansionResult {
     Unchanged,
 }
 
+/// Build the `Connectors` index by parsing connector directives from the
+/// supergraph, without creating virtual subgraphs or re-merging the schema.
+/// Used when the incremental planner handles connectors natively via
+/// `FetchProtocol::Connector`.
+pub fn build_connectors_without_expansion(
+    supergraph_str: &str,
+) -> Result<Option<Connectors>, FederationError> {
+    let connect_url = ConnectSpec::identity();
+    let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
+    if !supergraph_str.contains(&connect_url) {
+        return Ok(None);
+    }
+
+    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+
+    let connect_subgraphs: Vec<_> = supergraph
+        .extract_subgraphs()?
+        .into_iter()
+        .filter(|(_, sub)| {
+            matches!(
+                ConnectLink::new(sub.schema.schema()),
+                Some(Ok(link)) if contains_connectors(&link, sub)
+            )
+        })
+        .collect();
+
+    if connect_subgraphs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut connectors_by_service_name: IndexMap<Arc<str>, Connector> = IndexMap::new();
+    for (_, sub) in connect_subgraphs {
+        let connectors = Connector::from_schema(sub.schema.schema(), &sub.name)?;
+        for connector in connectors {
+            let synthetic_name: Arc<str> = Arc::from(connector.id.synthetic_name().as_str());
+            connectors_by_service_name.insert(synthetic_name, connector);
+        }
+    }
+
+    let labels_by_service_name = connectors_by_service_name
+        .iter()
+        .map(|(service_name, connector)| (service_name.clone(), connector.label.0.clone()))
+        .collect();
+
+    let source_config_keys = connectors_by_service_name
+        .values()
+        .map(|connector| connector.source_config_key())
+        .collect();
+
+    Ok(Some(Connectors {
+        by_service_name: Arc::new(connectors_by_service_name),
+        labels_by_service_name: Arc::new(labels_by_service_name),
+        source_config_keys: Arc::new(source_config_keys),
+    }))
+}
+
 /// Expand a schema with connector directives into unique subgraphs per directive
 ///
 /// Until we have a source-aware query planner, work with connectors will need to interface
