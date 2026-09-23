@@ -54,6 +54,7 @@ use super::metrics::record_fetch_error;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::configuration::subgraph::SchemaDefault;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
@@ -319,6 +320,13 @@ pub(crate) struct Subgraph {
 
     /// Invalidation configuration
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
+}
+
+// Holds Redis credentials, so it is not serializable and advertises no schema default for `all`.
+impl SchemaDefault for Subgraph {
+    fn schema_default() -> Option<serde_json::Value> {
+        None
+    }
 }
 
 impl Default for Subgraph {

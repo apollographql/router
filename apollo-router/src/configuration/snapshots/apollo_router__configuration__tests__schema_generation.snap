@@ -10096,12 +10096,16 @@ expression: "&schema"
               "$ref": "#/definitions/CommonBatchingConfig"
             }
           ],
+          "default": {
+            "enabled": false
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/CommonBatchingConfig"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -10245,12 +10249,18 @@ expression: "&schema"
               "$ref": "#/definitions/DeduplicationConfig"
             }
           ],
+          "default": {
+            "enabled": true,
+            "ignore_auth_context": false,
+            "ignored_headers": []
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/DeduplicationConfig"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -10287,12 +10297,16 @@ expression: "&schema"
               "$ref": "#/definitions/HoistOrphanErrors"
             }
           ],
+          "default": {
+            "enabled": false
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/HoistOrphanErrors"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11318,12 +11332,16 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphApq"
             }
           ],
+          "default": {
+            "enabled": false
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphApq"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11345,6 +11363,7 @@ expression: "&schema"
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11360,12 +11379,16 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphLimits"
             }
           ],
+          "default": {
+            "http_max_response_size": null
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphLimits"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11381,12 +11404,17 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphStrategyConfig"
             }
           ],
+          "default": {
+            "list_size": null,
+            "max": null
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphStrategyConfig"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }
@@ -11402,12 +11430,17 @@ expression: "&schema"
               "$ref": "#/definitions/TlsClient"
             }
           ],
+          "default": {
+            "certificate_authorities": null,
+            "client_authentication": null
+          },
           "description": "options applying to all subgraphs"
         },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/TlsClient"
           },
+          "default": {},
           "description": "per subgraph options",
           "type": "object"
         }

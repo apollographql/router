@@ -951,13 +951,13 @@ tls:
     cfg.tls.supergraph.unwrap().tls_config().unwrap();
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 struct TestSubgraphOverride {
     value: Option<u8>,
     subgraph: SubgraphConfiguration<PluginConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(default)]
 struct PluginConfig {
     a: bool,
