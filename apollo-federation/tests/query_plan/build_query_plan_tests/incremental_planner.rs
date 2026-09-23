@@ -2395,13 +2395,14 @@ fn inc_conditionless_fragment_skip_preserved() {
 }
 
 // ---------------------------------------------------------------------------
-// @defer: deferred fragment across subgraphs produces a Defer plan node
-// with primary and deferred blocks. The @defer directive is stripped from
-// subgraph operations since subgraph schemas do not define it.
+// @defer: cross-subgraph deferred fragment falls back to the legacy planner,
+// which produces a Defer plan node with primary and deferred blocks. The
+// @defer directive is stripped from subgraph operations since subgraph schemas
+// do not define it.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inc_defer_cross_subgraph_produces_defer_plan() {
+fn inc_defer_cross_subgraph_falls_back_to_legacy_plan() {
     let planner = planner!(
         config = incremental_defer_config(),
         Subgraph1: r#"
