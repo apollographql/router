@@ -3,7 +3,6 @@
 //! applies (in-place vs. entity re-entry) is decided at routing-enumeration
 //! time and named by the routing choice; this module only applies it.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -60,7 +59,7 @@ type AliasedConditions = (Arc<SelectionSet>, Vec<(Name, Name)>);
 /// the user fetch chain instead of staging an aliased duplicate.
 pub(super) fn alias_condition_fields(
     conditions: &Arc<SelectionSet>,
-    alias_ids: &mut BTreeMap<String, usize>,
+    alias_ids: &mut Vec<Selection>,
     keep_raw: &[Name],
 ) -> Result<AliasedConditions, FederationError> {
     let mut alias_rewrites = Vec::new();
@@ -75,12 +74,28 @@ pub(super) fn alias_condition_fields(
                     continue;
                 }
                 let original_name = field_sel.field.response_name().clone();
-                // Intern the alias id by serialized selection: identical
-                // conditions share an alias (sibling fetches staging the same
-                // @requires can merge); conditions differing in arguments or
-                // sub-selection get distinct aliases.
-                let next_id = alias_ids.len();
-                let idx = *alias_ids.entry(sel.to_string()).or_insert(next_id);
+                // Intern the alias id by selection containment: a condition
+                // shares an alias with any interned entry it contains or is
+                // contained by, so overlapping conditions stage their shared
+                // prefix once (the fetch graph dedupes re-routed selections
+                // under the same alias path). Conditions differing in
+                // arguments get distinct aliases (containment requires
+                // argument equality).
+                let idx = match alias_ids
+                    .iter()
+                    .position(|canon| canon.contains(sel) || sel.contains(canon))
+                {
+                    Some(i) => {
+                        if sel.contains(&alias_ids[i]) {
+                            alias_ids[i] = sel.clone();
+                        }
+                        i
+                    }
+                    None => {
+                        alias_ids.push(sel.clone());
+                        alias_ids.len() - 1
+                    }
+                };
                 let alias = Name::new(&format!("__require_{idx}_{original_name}"))
                     .map_err(|_| FederationError::internal("invalid condition alias name"))?;
                 let aliased_field = Field {
