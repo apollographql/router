@@ -2226,6 +2226,118 @@ type T @join__type(graph: S, key: "id") {
     "###);
 }
 
+const ROOT_HOP_DEFER_SCHEMA: &str = include_str!(
+    "../../../../tests/query_plan/supergraphs/defer_test_defer_on_query_root_type.graphql"
+);
+
+/// A deferred field reached through a root hop (`next: Query` into another
+/// subgraph) must be fetched in the Deferred block, not in the primary's
+/// root-hop fetch.
+#[test]
+fn defer_through_root_hop_keeps_field_deferred() {
+    let plan_str = plan_query_with_defer_via_bulb(
+        ROOT_HOP_DEFER_SCHEMA,
+        "{ op2 { next { op3 ... @defer { op4 } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { op2 { next { op3 } } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                op2 {
+                  next {
+                    __typename
+                  }
+                }
+              }
+            },
+            Flatten(path: "op2.next") {
+              Fetch(service: "Subgraph2") {
+                {
+                  op3
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "op2/next") {
+            { ... { op4 } }:
+            Flatten(path: "op2.next") {
+              Fetch(service: "Subgraph2") {
+                {
+                  op4
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+/// A deferred root field in the enclosing subgraph re-enters it through a
+/// root hop, since a root type has no key to redirect through.
+#[test]
+fn defer_on_query_root_type() {
+    let plan_str = plan_query_with_defer_via_bulb(
+        ROOT_HOP_DEFER_SCHEMA,
+        "{ op2 { x y next { op3 ... @defer { op1 op4 } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { op2 { x y next { op3 } } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                op2 {
+                  x
+                  y
+                  next {
+                    __typename
+                  }
+                }
+              }
+            },
+            Flatten(path: "op2.next") {
+              Fetch(service: "Subgraph2") {
+                {
+                  op3
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "op2/next") {
+            { ... { op1 op4 } }:
+            Parallel {
+              Flatten(path: "op2.next") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    op4
+                  }
+                },
+              },
+              Flatten(path: "op2.next") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    op1
+                  }
+                },
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
 const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
 
 /// Multiple @defer siblings at the same level produce distinct deferred
