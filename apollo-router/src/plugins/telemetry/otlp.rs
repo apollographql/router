@@ -262,6 +262,7 @@ pub(crate) struct GrpcExporter {
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
     /// The optional private key file for TLS configuration.
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option")]
     #[schemars(extend("default" = null))]
     pub(crate) key: Option<Redacted<String>>,
 
@@ -377,7 +378,14 @@ mod tests {
             let changed = serde_json::from_value(serde_json::json!({"key": key})).unwrap();
             assert_ne!(config, changed);
         }
-        assert!(serde_json::from_value::<GrpcExporter>(serde_json::json!({"key": 42})).is_err());
+        let error = serde_json::from_value::<GrpcExporter>(serde_json::json!({"key": 424242}))
+            .expect_err("a numeric key is rejected")
+            .to_string();
+        assert!(
+            error.contains("invalid type: integer, expected a string"),
+            "{error}"
+        );
+        assert!(!error.contains("424242"), "{error}");
     }
 
     #[test]

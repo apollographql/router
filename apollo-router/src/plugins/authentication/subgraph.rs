@@ -43,8 +43,10 @@ use crate::services::router::body::RouterBody;
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
     access_key_id: Redacted<String>,
     /// The secret key used to sign requests.
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
     secret_access_key: Redacted<String>,
     /// The AWS region this chain applies to.
     region: String,

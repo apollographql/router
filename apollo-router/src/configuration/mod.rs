@@ -1011,10 +1011,20 @@ pub(crate) struct QueryPlanRedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
     pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
     pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
@@ -1105,10 +1115,20 @@ pub(crate) struct RedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
     pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    #[serde(serialize_with = "crate::plugin::serde::serialize_redacted_option")]
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
     pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
@@ -1273,7 +1293,7 @@ fn deserialize_redacted_key<'de, D>(
 where
     D: Deserializer<'de>,
 {
-    let data = Redacted::<String>::deserialize(deserializer)?;
+    let data = crate::plugin::serde::deserialize_redacted_string(deserializer)?;
     load_key(data.unredact())
         .map(Redacted::new)
         .map_err(|_| serde::de::Error::custom("could not parse TLS private key"))

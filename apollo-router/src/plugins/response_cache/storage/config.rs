@@ -17,8 +17,16 @@ pub(crate) struct Config {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
+    #[serde(
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
     pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
+    #[serde(
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
     pub(crate) password: Option<Redacted<String>>,
 
     #[serde(

@@ -134,6 +134,7 @@ pub(crate) struct SubgraphInvalidationConfig {
     pub(crate) enabled: bool,
     /// Shared key needed to request the invalidation endpoint
     // Not serializable because it is a secret, so its (empty) default is declared by hand.
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
     #[schemars(extend("default" = ""))]
     pub(crate) shared_key: Redacted<String>,
     /// Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to
