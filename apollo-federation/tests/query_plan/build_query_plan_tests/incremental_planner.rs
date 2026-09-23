@@ -1973,11 +1973,7 @@ fn inc_user_field_argument_conflict_with_requires_condition() {
         }
         "#,
     );
-    // validate_correctness = false: the correctness checker's KeyRenamer
-    // doesn't yet handle the case where the rename target (`p`) already
-    // exists with different arguments.
     assert_plan!(
-        validate_correctness = false,
         &planner,
         r#"
         {
