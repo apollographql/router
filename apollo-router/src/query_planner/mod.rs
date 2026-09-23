@@ -45,14 +45,21 @@ pub(crate) const CONDITION_ELSE_SPAN_NAME: &str = "condition_else";
 pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Schema>>>;
 
 /// Returns a map of the subgraph schemas known to the given planner, keyed by subgraph name.
+/// Connector fetches carry their connector's synthetic service name, and their operations
+/// are written against the source subgraph's schema, so each synthetic name aliases that
+/// subgraph's entry.
 pub(crate) fn build_subgraph_schemas(planner: &QueryPlanner) -> Arc<SubgraphSchemas> {
-    Arc::new(
-        planner
-            .subgraph_schemas()
-            .iter()
-            .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
-            .collect(),
-    )
+    let mut schemas: SubgraphSchemas = planner
+        .subgraph_schemas()
+        .iter()
+        .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+        .collect();
+    for (service_name, subgraph_name) in planner.connector_index().service_subgraphs() {
+        if let Some(schema) = schemas.get(subgraph_name).cloned() {
+            schemas.insert(service_name.to_string(), schema);
+        }
+    }
+    Arc::new(schemas)
 }
 
 /// Subgraph schemas with their precomputed schema hash, keyed by subgraph name.
@@ -61,22 +68,29 @@ pub(crate) fn build_subgraph_schemas(planner: &QueryPlanner) -> Arc<SubgraphSche
 /// hashes for fetch nodes. Elsewhere in the router, use [`SubgraphSchemas`] instead.
 type HashedSubgraphSchemas = HashMap<String, HashedSubgraphSchema>;
 
-/// Returns a map of subgraph schemas and hashes for each.
+/// Returns a map of subgraph schemas and hashes for each. Synthetic connector
+/// service names alias their source subgraph's entry, as in
+/// [`build_subgraph_schemas`].
 fn hashed_subgraph_schemas(planner: &QueryPlanner) -> Arc<HashedSubgraphSchemas> {
-    Arc::new(
-        planner
-            .subgraph_schemas()
-            .iter()
-            .map(|(name, schema)| {
-                (
-                    name.to_string(),
-                    HashedSubgraphSchema::new(schema.schema().clone()),
-                )
-            })
-            .collect(),
-    )
+    let mut schemas: HashedSubgraphSchemas = planner
+        .subgraph_schemas()
+        .iter()
+        .map(|(name, schema)| {
+            (
+                name.to_string(),
+                HashedSubgraphSchema::new(schema.schema().clone()),
+            )
+        })
+        .collect();
+    for (service_name, subgraph_name) in planner.connector_index().service_subgraphs() {
+        if let Some(schema) = schemas.get(subgraph_name).cloned() {
+            schemas.insert(service_name.to_string(), schema);
+        }
+    }
+    Arc::new(schemas)
 }
 
+#[derive(Clone)]
 struct HashedSubgraphSchema {
     schema: Arc<Valid<apollo_compiler::Schema>>,
     hash: SchemaHash,
