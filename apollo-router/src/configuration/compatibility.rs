@@ -13,6 +13,7 @@ use serde_json::json;
 
 use super::Configuration;
 use super::apollo_configuration_parse::ExternalValues;
+use super::apollo_configuration_parse::SecretRedactor;
 use super::apollo_configuration_parse::apollo_configuration_options as router_options;
 use super::apollo_configuration_parse::parse_via_apollo_configuration;
 use super::apollo_configuration_parse::router_config_schema;
@@ -250,95 +251,6 @@ fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Opti
         describe(&router_json),
         describe(&shared_json),
     ))
-}
-
-/// Replaces the values that a configuration schema marks with `x-apollo-secret`.
-struct SecretRedactor<'schema> {
-    root: &'schema Value,
-}
-
-impl<'schema> SecretRedactor<'schema> {
-    const REDACTED: &'static str = "[REDACTED]";
-
-    fn new(root: &'schema Value) -> Self {
-        Self { root }
-    }
-
-    /// Redacts `value`, the configuration found at JSON `pointer`.
-    fn redact_at(&self, pointer: &str, value: &Value) -> Value {
-        let mut schemas = self.expand([self.root]);
-        for token in pointer.split('/').skip(1) {
-            let key = token.replace("~1", "/").replace("~0", "~");
-            schemas = self.children(&schemas, &key);
-        }
-        self.redact(&schemas, value)
-    }
-
-    fn redact(&self, schemas: &[&'schema Value], value: &Value) -> Value {
-        let is_secret = schemas
-            .iter()
-            .any(|schema| schema.get("x-apollo-secret") == Some(&Value::Bool(true)));
-        match value {
-            Value::Null => Value::Null,
-            _ if is_secret => Value::String(Self::REDACTED.to_string()),
-            Value::Object(entries) => entries
-                .iter()
-                .map(|(key, entry)| {
-                    (
-                        key.clone(),
-                        self.redact(&self.children(schemas, key), entry),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>()
-                .into(),
-            Value::Array(items) => items
-                .iter()
-                .enumerate()
-                .map(|(index, item)| self.redact(&self.children(schemas, &index.to_string()), item))
-                .collect(),
-            _ => value.clone(),
-        }
-    }
-
-    /// The schemas that can describe the entry `key` of a value described by `schemas`.
-    fn children(&self, schemas: &[&'schema Value], key: &str) -> Vec<&'schema Value> {
-        let children = schemas.iter().filter_map(|schema| {
-            schema
-                .get("properties")
-                .and_then(|properties| properties.get(key))
-                .or_else(|| schema.get("additionalProperties").filter(|p| p.is_object()))
-                .or_else(|| {
-                    key.parse::<usize>()
-                        .ok()
-                        .and(schema.get("items").filter(|i| i.is_object()))
-                })
-        });
-        self.expand(children)
-    }
-
-    /// Follows `$ref`s and `allOf`/`anyOf`/`oneOf` branches, so every schema that applies to a
-    /// value is checked for the secret annotation.
-    fn expand(&self, schemas: impl IntoIterator<Item = &'schema Value>) -> Vec<&'schema Value> {
-        let mut expanded = Vec::new();
-        let mut pending: Vec<&'schema Value> = schemas.into_iter().collect();
-        while let Some(schema) = pending.pop() {
-            if let Some(target) = schema
-                .get("$ref")
-                .and_then(Value::as_str)
-                .and_then(|reference| reference.strip_prefix('#'))
-                .and_then(|pointer| self.root.pointer(pointer))
-            {
-                pending.push(target);
-            }
-            for combinator in ["allOf", "anyOf", "oneOf"] {
-                if let Some(branches) = schema.get(combinator).and_then(Value::as_array) {
-                    pending.extend(branches);
-                }
-            }
-            expanded.push(schema);
-        }
-        expanded
-    }
 }
 
 #[test]

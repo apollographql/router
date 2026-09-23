@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use apollo_configuration::ConfigError;
 use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::LookupError;
 use apollo_configuration::expansion::VariableProvider;
@@ -116,7 +117,8 @@ impl apollo_configuration::Configuration for ExpandedDocument {}
 /// and reused, so both passes see the same value.
 /// `raw_yaml` preserves the exact original text. When migration changes nothing, the shared
 /// parser reads that text, so diagnostics point at the user's lines and YAML aliases keep the
-/// shared parser's anchor redaction. Otherwise diagnostics refer to the serialized migrated copy.
+/// shared parser's anchor redaction. Otherwise diagnostics refer to the serialized migrated copy,
+/// with every secret string that copy holds redacted wherever it appears.
 ///
 /// Unlike the production loader, this adapter rejects invalid migrated input without falling
 /// back to the original document. Production loading remains a separate cutover.
@@ -142,23 +144,173 @@ pub(crate) fn parse_via_apollo_configuration(
         .parse()
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
     let migrated = upgrade_configuration(&raw, false, UpgradeMode::Minor(major))?;
-    let migrated_text;
-    let text_to_parse = if migrated == raw {
-        text
+    let options = external.into_options();
+    let (mut config, document) = if migrated == raw {
+        parse_both_passes(text, &options)?
     } else {
-        migrated_text = serde_yaml::to_string(&migrated).map_err(|error| {
+        let migrated_text = serde_yaml::to_string(&migrated).map_err(|error| {
             ConfigurationError::MigrationFailure {
                 error: error.to_string(),
             }
         })?;
-        &migrated_text
+        parse_both_passes(&migrated_text, &options)
+            .map_err(|error| without_secret_strings(error, &migrated))?
     };
-    let options = external.into_options();
-    let mut config: Configuration = options.parse(text_to_parse)?;
-    let document: ExpandedDocument = options.parse(text_to_parse)?;
     config.validated_yaml = Some(document.0);
     config.raw_yaml = Some(Arc::from(text));
     Ok(config)
+}
+
+fn parse_both_passes(
+    text: &str,
+    options: &ParseYamlOptions,
+) -> Result<(Configuration, ExpandedDocument), ConfigError> {
+    Ok((options.parse(text)?, options.parse(text)?))
+}
+
+/// Serializing the migrated document replaces YAML aliases with copies, so the shared parser can
+/// no longer tell that an anchored value also fills a secret field and prints the anchor in
+/// clear text. Redacts each secret string of the migrated document, in its plain and escaped
+/// forms, wherever it appears in the rendered diagnostic.
+fn without_secret_strings(error: ConfigError, migrated: &Value) -> ConfigurationError {
+    let mut error = ConfigurationError::from(error);
+    if let ConfigurationError::ApolloConfiguration(rendered) = &mut error {
+        for secret in SecretRedactor::new(router_config_schema()).secret_strings(migrated) {
+            let quoted = serde_json::to_string(secret).expect("strings serialize");
+            let escaped = &quoted[1..quoted.len() - 1];
+            for form in [escaped, secret] {
+                *rendered = rendered.replace(form, SecretRedactor::REDACTED);
+            }
+        }
+    }
+    error
+}
+
+/// Finds the values that a configuration schema marks with `x-apollo-secret`.
+pub(crate) struct SecretRedactor<'schema> {
+    root: &'schema Value,
+}
+
+impl<'schema> SecretRedactor<'schema> {
+    const REDACTED: &'static str = "[REDACTED]";
+
+    pub(crate) fn new(root: &'schema Value) -> Self {
+        Self { root }
+    }
+
+    /// The non-empty strings that `document` holds where the schema marks a value secret,
+    /// including every string inside a secret object or array.
+    fn secret_strings<'v>(&self, document: &'v Value) -> Vec<&'v str> {
+        let mut found = Vec::new();
+        self.collect_secret_strings(&self.expand([self.root]), document, false, &mut found);
+        found
+    }
+
+    fn collect_secret_strings<'v>(
+        &self,
+        schemas: &[&'schema Value],
+        value: &'v Value,
+        inside_secret: bool,
+        found: &mut Vec<&'v str>,
+    ) {
+        let secret = inside_secret || Self::is_secret(schemas);
+        match value {
+            Value::String(text) if secret && !text.is_empty() => found.push(text),
+            Value::Object(entries) => {
+                for (key, entry) in entries {
+                    self.collect_secret_strings(&self.children(schemas, key), entry, secret, found);
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    let schemas = self.children(schemas, &index.to_string());
+                    self.collect_secret_strings(&schemas, item, secret, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Redacts `value`, the configuration found at JSON `pointer`.
+    #[cfg(test)]
+    pub(crate) fn redact_at(&self, pointer: &str, value: &Value) -> Value {
+        let mut schemas = self.expand([self.root]);
+        for token in pointer.split('/').skip(1) {
+            let key = token.replace("~1", "/").replace("~0", "~");
+            schemas = self.children(&schemas, &key);
+        }
+        self.redact(&schemas, value)
+    }
+
+    #[cfg(test)]
+    fn redact(&self, schemas: &[&'schema Value], value: &Value) -> Value {
+        match value {
+            Value::Null => Value::Null,
+            _ if Self::is_secret(schemas) => Value::String(Self::REDACTED.to_string()),
+            Value::Object(entries) => entries
+                .iter()
+                .map(|(key, entry)| {
+                    (
+                        key.clone(),
+                        self.redact(&self.children(schemas, key), entry),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>()
+                .into(),
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| self.redact(&self.children(schemas, &index.to_string()), item))
+                .collect(),
+            _ => value.clone(),
+        }
+    }
+
+    fn is_secret(schemas: &[&'schema Value]) -> bool {
+        schemas
+            .iter()
+            .any(|schema| schema.get("x-apollo-secret") == Some(&Value::Bool(true)))
+    }
+
+    /// The schemas that can describe the entry `key` of a value described by `schemas`.
+    fn children(&self, schemas: &[&'schema Value], key: &str) -> Vec<&'schema Value> {
+        let children = schemas.iter().filter_map(|schema| {
+            schema
+                .get("properties")
+                .and_then(|properties| properties.get(key))
+                .or_else(|| schema.get("additionalProperties").filter(|p| p.is_object()))
+                .or_else(|| {
+                    key.parse::<usize>()
+                        .ok()
+                        .and(schema.get("items").filter(|i| i.is_object()))
+                })
+        });
+        self.expand(children)
+    }
+
+    /// Follows `$ref`s and `allOf`/`anyOf`/`oneOf` branches, so every schema that applies to a
+    /// value is checked for the secret annotation.
+    fn expand(&self, schemas: impl IntoIterator<Item = &'schema Value>) -> Vec<&'schema Value> {
+        let mut expanded = Vec::new();
+        let mut pending: Vec<&'schema Value> = schemas.into_iter().collect();
+        while let Some(schema) = pending.pop() {
+            if let Some(target) = schema
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(|reference| reference.strip_prefix('#'))
+                .and_then(|pointer| self.root.pointer(pointer))
+            {
+                pending.push(target);
+            }
+            for combinator in ["allOf", "anyOf", "oneOf"] {
+                if let Some(branches) = schema.get(combinator).and_then(Value::as_array) {
+                    pending.extend(branches);
+                }
+            }
+            expanded.push(schema);
+        }
+        expanded
+    }
 }
 
 #[cfg(test)]
@@ -388,6 +540,24 @@ mod tests {
         assert!(
             rendered.contains("namespace: &pw [REDACTED]"),
             "the diagnostic should quote the original text with the anchor redacted: {rendered}"
+        );
+        assert!(
+            !rendered.contains("anchored-secret-value"),
+            "the diagnostic must not contain the aliased secret: {rendered}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_redact_an_aliased_anchor_in_a_migrated_document() {
+        let text = format!("cors:\n  origins:\n    - https://example.com\n{ANCHORED_SECRET}");
+
+        let error = parse_via_apollo_configuration(&text, ExternalValues::default())
+            .expect_err("the Redis configuration contains an unknown field");
+        let rendered = error.to_string();
+
+        assert!(
+            rendered.contains("namespace: [REDACTED]"),
+            "the migrated copy's anchor value should be redacted: {rendered}"
         );
         assert!(
             !rendered.contains("anchored-secret-value"),
