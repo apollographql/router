@@ -1,7 +1,6 @@
 use crate::Supergraph;
 use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
-use crate::query_plan::query_planner::FORCE_INCREMENTAL_DEFER;
 use crate::query_plan::query_planner::IncrementalPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use crate::query_plan::query_planner::QueryPlanOptions;
@@ -50,14 +49,6 @@ fn plan_query_with_defer(schema: &str, query: &str) -> String {
         ..default_config()
     };
     plan_query_with_options(schema, query, config, Default::default())
-}
-
-/// Plans a deferred operation through BULB instead of the legacy fallback.
-fn plan_query_with_defer_via_bulb(schema: &str, query: &str) -> String {
-    FORCE_INCREMENTAL_DEFER.set(true);
-    let plan = plan_query_with_defer(schema, query);
-    FORCE_INCREMENTAL_DEFER.set(false);
-    plan
 }
 
 fn plan_query_with_router_specs(schema: &str, query: &str) -> String {
@@ -2119,7 +2110,7 @@ fn defer_produces_defer_node() {
 /// its fetch lands in the Deferred block and stays out of the primary.
 #[test]
 fn defer_cross_subgraph_key_hop_lands_in_deferred_block() {
-    let plan_str = plan_query_with_defer_via_bulb(
+    let plan_str = plan_query_with_defer(
         THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email } } }",
     );
@@ -2139,7 +2130,7 @@ fn defer_cross_subgraph_key_hop_lands_in_deferred_block() {
           },
         }, [
           Deferred(depends: [0], path: "user") {
-            { ... { email } }:
+            { email }:
             Flatten(path: "user") {
               Fetch(service: "b") {
                 {
@@ -2209,7 +2200,7 @@ type T @join__type(graph: S, key: "id") {
 }
 "#,
     );
-    let plan_str = plan_query_with_defer_via_bulb(schema, "{ t { v0 ... @defer { v1 } } }");
+    let plan_str = plan_query_with_defer(schema, "{ t { v0 ... @defer { v1 } } }");
     insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Defer {
@@ -2226,7 +2217,7 @@ type T @join__type(graph: S, key: "id") {
           },
         }, [
           Deferred(depends: [0], path: "t") {
-            { ... { v1 } }:
+            { v1 }:
             Flatten(path: "t") {
               Fetch(service: "s") {
                 {
@@ -2258,7 +2249,7 @@ const ROOT_HOP_DEFER_SCHEMA: &str = include_str!(
 /// root-hop fetch.
 #[test]
 fn defer_through_root_hop_keeps_field_deferred() {
-    let plan_str = plan_query_with_defer_via_bulb(
+    let plan_str = plan_query_with_defer(
         ROOT_HOP_DEFER_SCHEMA,
         "{ op2 { next { op3 ... @defer { op4 } } } }",
     );
@@ -2287,7 +2278,7 @@ fn defer_through_root_hop_keeps_field_deferred() {
           },
         }, [
           Deferred(depends: [0], path: "op2/next") {
-            { ... { op4 } }:
+            { op4 }:
             Flatten(path: "op2.next") {
               Fetch(service: "Subgraph2") {
                 {
@@ -2306,7 +2297,7 @@ fn defer_through_root_hop_keeps_field_deferred() {
 /// root hop, since a root type has no key to redirect through.
 #[test]
 fn defer_on_query_root_type() {
-    let plan_str = plan_query_with_defer_via_bulb(
+    let plan_str = plan_query_with_defer(
         ROOT_HOP_DEFER_SCHEMA,
         "{ op2 { x y next { op3 ... @defer { op1 op4 } } } }",
     );
@@ -2337,7 +2328,7 @@ fn defer_on_query_root_type() {
           },
         }, [
           Deferred(depends: [0], path: "op2/next") {
-            { ... { op1 op4 } }:
+            { op1 op4 }:
             Parallel {
               Flatten(path: "op2.next") {
                 Fetch(service: "Subgraph2") {

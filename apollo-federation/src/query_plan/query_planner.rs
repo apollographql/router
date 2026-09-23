@@ -922,20 +922,6 @@ fn compute_root_parallel_best_plan_for_mutation(
     )?
 }
 
-#[cfg(test)]
-thread_local! {
-    /// Lets unit tests exercise BULB's defer handling while the gate in
-    /// compute_plan_internal keeps deferred operations on the legacy planner.
-    pub(crate) static FORCE_INCREMENTAL_DEFER: Cell<bool> = const { Cell::new(false) };
-}
-
-fn force_incremental_defer() -> bool {
-    #[cfg(test)]
-    return FORCE_INCREMENTAL_DEFER.with(Cell::get);
-    #[cfg(not(test))]
-    false
-}
-
 fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
