@@ -7,6 +7,7 @@ use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn incremental_config() -> QueryPlannerConfig {
@@ -5348,4 +5349,65 @@ fn inc_defer_multiple_labels_keep_scopes_separate() {
     }
     "###
     );
+}
+
+/// With type-conditioned fetching the incremental planner falls back to
+/// legacy, which must then plan exactly as if the incremental planner were
+/// off. Legacy relies on the sibling-typename strip for deferred typenames.
+#[test]
+fn inc_type_conditioned_fetching_fallback_matches_legacy_plan() {
+    let supergraph = crate::query_plan::build_query_plan_support::compose(
+        insta::_function_name!(),
+        &[
+            (
+                "Subgraph1",
+                r#"
+                type Query {
+                  t: T
+                }
+
+                type T @key(fields: "id") {
+                  id: ID!
+                  x: Int
+                }
+                "#,
+            ),
+            (
+                "Subgraph2",
+                r#"
+                type T @key(fields: "id") {
+                  id: ID!
+                  y: Int
+                }
+                "#,
+            ),
+        ],
+    );
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    let legacy_config = QueryPlannerConfig {
+        type_conditioned_fetching: true,
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..Default::default()
+    };
+    let fallback_config = QueryPlannerConfig {
+        incremental_planner: incremental_config().incremental_planner,
+        ..legacy_config.clone()
+    };
+    let legacy = QueryPlanner::new(&supergraph, legacy_config).expect("legacy planner builds");
+    let fallback =
+        QueryPlanner::new(&supergraph, fallback_config).expect("fallback planner builds");
+    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
+        legacy.api_schema().schema(),
+        "{ t { x ... @defer { y __typename } } }",
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let plan = |planner: &QueryPlanner| {
+        planner
+            .build_query_plan(&doc, None, Default::default())
+            .expect("plan builds")
+            .to_string()
+    };
+    assert_eq!(plan(&fallback), plan(&legacy));
 }
