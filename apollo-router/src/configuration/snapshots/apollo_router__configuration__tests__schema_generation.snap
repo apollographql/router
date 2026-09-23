@@ -6330,7 +6330,7 @@ expression: "&schema"
         },
         "enabled": {
           "default": false,
-          "description": "Whether the incremental planner is enabled. When enabled, deferred\noperations still fall back to the default planner.",
+          "description": "Whether the incremental planner is enabled. When enabled, it plans\nall operations, including deferred ones.",
           "type": "boolean"
         },
         "fuel": {
@@ -8245,7 +8245,7 @@ expression: "&schema"
             "fuel": 5000,
             "timeout": null
           },
-          "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates. Deferred operations fall\nback to the default planner."
+          "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates."
         },
         "warmed_up_queries": {
           "default": null,
