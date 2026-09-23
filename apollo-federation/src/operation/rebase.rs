@@ -188,6 +188,10 @@ impl Field {
         self.can_rebase_on_inner(parent_type, target_schema, false)
     }
 
+    /// `allow_interface_target` adds a third case: a concrete type's field on
+    /// an interface target, the reverse of case 2. An @interfaceObject source
+    /// declares the type as a plain object while the target subgraph has the
+    /// interface. `rebase_on` still fails if the interface lacks the field.
     fn can_rebase_on_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -547,5 +551,114 @@ impl SelectionSet {
         self.selections
             .values()
             .fallible_all(|selection| selection.can_add_to(parent_type, schema))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Field;
+    use crate::schema::ValidFederationSchema;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
+    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::InterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::subgraph::test_utils::build_and_validate;
+
+    const INTERFACE_SUBGRAPH: &str = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+        type Query { i: I }
+        interface I @key(fields: "id") { id: ID! x: Int }
+        type A implements I @key(fields: "id") { id: ID! x: Int }
+    "#;
+
+    const INTERFACE_OBJECT_SUBGRAPH: &str = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@interfaceObject"])
+        type Query { is1: [I] }
+        type I @interfaceObject @key(fields: "id") { id: ID! x: Int }
+    "#;
+
+    fn schema(sdl: &str) -> ValidFederationSchema {
+        build_and_validate(sdl).validated_schema().clone()
+    }
+
+    /// A concrete `A.x` field, the source side of case 3.
+    fn concrete_field(schema: &ValidFederationSchema) -> Field {
+        let position = ObjectFieldDefinitionPosition {
+            type_name: apollo_compiler::name!("A"),
+            field_name: apollo_compiler::name!("x"),
+        };
+        Field::from_position(schema, FieldDefinitionPosition::Object(position))
+    }
+
+    fn assert_cannot_rebase(result: Result<Field, crate::error::FederationError>) {
+        let error = result.expect_err("legacy rebase should reject a concrete-to-interface hop");
+        assert!(
+            error
+                .to_string()
+                .contains("Cannot add selection of field `A.x`"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn case_3_interface_target_rejected_on_legacy_path() {
+        let schema = schema(INTERFACE_SUBGRAPH);
+        let field = concrete_field(&schema);
+        let target = CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(!field.can_rebase_on(&target, &schema).unwrap());
+        assert_cannot_rebase(field.rebase_on(&target, &schema));
+    }
+
+    #[test]
+    fn case_3_interface_target_accepted_on_incremental_planner_path() {
+        let schema = schema(INTERFACE_SUBGRAPH);
+        let field = concrete_field(&schema);
+        let target = CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(field.can_rebase_on_inner(&target, &schema, true).unwrap());
+        let rebased = field
+            .rebase_on_for_incremental_planner(&target, &schema)
+            .expect("incremental planner rebase onto interface");
+        assert_eq!(rebased.field_position.parent(), target);
+    }
+
+    #[test]
+    fn case_3_interface_object_target_rejected_on_legacy_path() {
+        let source_schema = schema(INTERFACE_SUBGRAPH);
+        let target_schema = schema(INTERFACE_OBJECT_SUBGRAPH);
+        let field = concrete_field(&source_schema);
+        let target = CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(!field.can_rebase_on(&target, &target_schema).unwrap());
+        assert_cannot_rebase(field.rebase_on(&target, &target_schema));
+    }
+
+    #[test]
+    fn case_3_interface_object_target_accepted_on_incremental_planner_path() {
+        let source_schema = schema(INTERFACE_SUBGRAPH);
+        let target_schema = schema(INTERFACE_OBJECT_SUBGRAPH);
+        let field = concrete_field(&source_schema);
+        let target = CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(
+            field
+                .can_rebase_on_inner(&target, &target_schema, true)
+                .unwrap()
+        );
+        let rebased = field
+            .rebase_on_for_incremental_planner(&target, &target_schema)
+            .expect("incremental planner rebase onto @interfaceObject");
+        assert_eq!(rebased.field_position.parent(), target);
+        assert_eq!(rebased.schema, target_schema);
     }
 }

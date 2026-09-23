@@ -23,7 +23,6 @@ use super::state::PlanState;
 use crate::error::FederationError;
 use crate::operation::Field;
 use crate::operation::FieldSelection;
-use crate::operation::HasSelectionKey;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraphEdgeTransition;
