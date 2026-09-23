@@ -3100,3 +3100,132 @@ fn inc_defer_on_mutation_in_same_subgraph() {
     "###
     );
 }
+
+/// Multi-dependency deferred section: the deferred field's key (id1 id2)
+/// is only resolvable via fetches to intermediate subgraphs.
+#[test]
+fn inc_defer_multi_dependency_deferred_section() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id0") {
+            id0: ID!
+            v1: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id0") @key(fields: "id1") {
+            id0: ID!
+            id1: ID!
+            v2: Int
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id0") @key(fields: "id2") {
+            id0: ID!
+            id2: ID!
+            v3: Int
+          }
+        "#,
+        Subgraph4: r#"
+          type T @key(fields: "id1 id2") {
+            id1: ID!
+            id2: ID!
+            v4: Int
+          }
+        "#,
+    );
+
+    assert_plan!(&planner,
+        r#"
+          {
+            t {
+              v1
+              v2
+              v3
+              ... @defer {
+                v4
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v1 v2 v3 } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  v1
+                  id0
+                }
+              }
+            },
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph3", id: 1) {
+                  {
+                    ... on T {
+                      __typename
+                      id0
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v3
+                      id2
+                    }
+                  }
+                },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2", id: 2) {
+                  {
+                    ... on T {
+                      __typename
+                      id0
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v2
+                      id1
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [1, 2, 0], path: "t") {
+            { v4 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph4") {
+                {
+                  ... on T {
+                    __typename
+                    id1
+                    id2
+                  }
+                } =>
+                {
+                  ... on T {
+                    v4
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
