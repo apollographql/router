@@ -1277,9 +1277,15 @@ impl FieldRoutingSearchSpace {
         // Condition data is entity-fetch input: route it unconditionally
         // (see `unconditioned_input_path`).
         let input_path = unconditioned_input_path(&anchor.op_path);
+        // Conditions resolve in the anchor group's defer scope, not the
+        // dependent's: keys for a deferred fetch merge into the fetches the
+        // enclosing scope already makes instead of duplicating them in the
+        // deferred section.
+        let anchor_defer = state.graph.node(anchor.fetch_node).defer_ref.clone();
         for sel in conditions.selections.values().rev().cloned() {
             let mut forked = anchor.fork(sel).into_condition_for(dependent);
             forked.op_path = input_path.clone();
+            forked.defer_ref = anchor_defer.clone();
             state.push_pending(forked);
         }
         Ok(())
