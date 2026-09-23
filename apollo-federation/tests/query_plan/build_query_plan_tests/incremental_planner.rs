@@ -7,7 +7,6 @@ use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
-use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn incremental_config() -> QueryPlannerConfig {
