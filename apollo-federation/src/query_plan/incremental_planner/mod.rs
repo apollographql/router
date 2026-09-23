@@ -318,6 +318,8 @@ fn root_pending_selections(
             defer_ref: None,
             provides_anchor: None,
             narrowing: Default::default(),
+            parent_types: Default::default(),
+            context_anchor: Default::default(),
             best_effort: false,
         })
         .collect()
