@@ -63,12 +63,20 @@ impl fmt::Display for CorrectnessError {
 
 // The deadline is thread-local rather than threaded through the analysis and comparison call
 // graphs, whose recursive functions have no shared context parameter to carry it.
+// `CHECK_DEADLINE_TRIPPED` records that a poll actually aborted the check, so an error that
+// merely finishes after the deadline is still reported as itself.
 thread_local! {
     static CHECK_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+    static CHECK_DEADLINE_TRIPPED: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(crate) fn check_deadline_exceeded() -> bool {
-    CHECK_DEADLINE.with(|d| d.get().is_some_and(|deadline| Instant::now() > deadline))
+    let exceeded =
+        CHECK_DEADLINE.with(|d| d.get().is_some_and(|deadline| Instant::now() > deadline));
+    if exceeded {
+        CHECK_DEADLINE_TRIPPED.with(|t| t.set(true));
+    }
+    exceeded
 }
 
 pub(crate) const DEADLINE_EXCEEDED_MESSAGE: &str = "correctness check deadline exceeded";
@@ -133,10 +141,12 @@ pub fn check_plan_with_timeout(
     impl Drop for ClearDeadline {
         fn drop(&mut self) {
             CHECK_DEADLINE.with(|d| d.set(None));
+            CHECK_DEADLINE_TRIPPED.with(|t| t.set(false));
         }
     }
 
     let _clear = ClearDeadline;
+    CHECK_DEADLINE_TRIPPED.with(|t| t.set(false));
     CHECK_DEADLINE.with(|d| d.set(timeout.map(|t| Instant::now() + t)));
     let result = check_plan(
         api_schema,
@@ -146,7 +156,7 @@ pub fn check_plan_with_timeout(
         plan,
     );
     match (result, timeout) {
-        (Err(_), Some(timeout)) if check_deadline_exceeded() => {
+        (Err(_), Some(timeout)) if CHECK_DEADLINE_TRIPPED.with(Cell::get) => {
             Err(CorrectnessError::Timeout(timeout))
         }
         (result, _) => result,
@@ -194,4 +204,72 @@ pub fn check_plan(
             ))
         })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod check_plan_with_timeout_tests {
+    use std::time::Duration;
+
+    use apollo_compiler::ExecutableDocument;
+
+    use super::CorrectnessError;
+    use super::check_plan_with_timeout;
+    use super::query_plan_analysis_test::SCHEMA_STR;
+    use crate::query_plan::QueryPlan;
+    use crate::query_plan::query_planner::QueryPlanner;
+
+    const OPERATION: &str = "{ test_i { __typename } }";
+
+    fn check(plan: &QueryPlan, planner: &QueryPlanner) -> Result<(), CorrectnessError> {
+        let op = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            OPERATION,
+            "op.graphql",
+        )
+        .expect("operation parses");
+        check_plan_with_timeout(
+            planner.api_schema(),
+            planner.supergraph_schema(),
+            planner.subgraph_schemas(),
+            &op,
+            plan,
+            Some(Duration::ZERO),
+        )
+    }
+
+    fn planner() -> QueryPlanner {
+        let supergraph = crate::Supergraph::new(SCHEMA_STR).expect("supergraph parses");
+        QueryPlanner::new(&supergraph, Default::default()).expect("planner builds")
+    }
+
+    // The empty plan misses `test_i` at the top level, which fails before any deadline poll,
+    // so the error is a real mismatch even though the deadline has already passed.
+    #[test]
+    fn late_comparison_failure_is_not_reported_as_timeout() {
+        let planner = planner();
+        let err = check(&QueryPlan::default(), &planner).expect_err("empty plan is incomplete");
+        assert!(
+            matches!(err, CorrectnessError::ComparisonError(_)),
+            "expected a comparison error, got {err}"
+        );
+    }
+
+    #[test]
+    fn deadline_hit_during_analysis_is_reported_as_timeout() {
+        let planner = planner();
+        let op = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            OPERATION,
+            "op.graphql",
+        )
+        .expect("operation parses");
+        let plan = planner
+            .build_query_plan(&op, None, Default::default())
+            .expect("plan builds");
+        let err = check(&plan, &planner).expect_err("zero timeout trips the deadline");
+        assert!(
+            matches!(err, CorrectnessError::Timeout(_)),
+            "expected a timeout, got {err}"
+        );
+    }
 }
