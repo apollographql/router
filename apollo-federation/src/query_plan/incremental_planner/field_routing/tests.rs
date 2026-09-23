@@ -2167,18 +2167,63 @@ fn synthesized_defer_labels_do_not_leak_into_plan() {
     );
 }
 
-/// Same-subgraph @defer still produces a Defer node so the executor can
-/// send a multipart response even when no cross-subgraph fetch is needed.
+/// Same-subgraph @defer: a deferred field that lives in the same subgraph
+/// as the primary must not be fetched eagerly in the primary fetch. The
+/// deferred field gets its own entity fetch so the executor can stream it
+/// in a later multipart chunk.
 #[test]
-fn defer_same_subgraph_produces_defer_node() {
-    let plan_str = plan_query_with_defer(
-        SINGLE_SUBGRAPH_SCHEMA,
-        "{ user { name ... @defer { email } } }",
+fn defer_same_subgraph_does_not_fetch_deferred_field_eagerly() {
+    let schema = &wrap_supergraph(
+        r#"  S @join__graph(name: "s", url: "http://s")"#,
+        r#"
+type Query @join__type(graph: S) {
+  t: T
+}
+type T @join__type(graph: S, key: "id") {
+  id: ID!
+  v0: String
+  v1: String
+}
+"#,
     );
-    assert!(
-        plan_str.contains("Defer"),
-        "Plan should contain a Defer node even for same-subgraph @defer: {plan_str}"
-    );
+    let plan_str = plan_query_with_defer_via_bulb(schema, "{ t { v0 ... @defer { v1 } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v0 } }:
+          Fetch(service: "s", id: 0) {
+            {
+              t {
+                __typename
+                v0
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { ... { v1 } }:
+            Flatten(path: "t") {
+              Fetch(service: "s") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
 }
 
 const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
