@@ -54,6 +54,7 @@ use super::metrics::record_fetch_error;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::configuration::subgraph::SchemaDefault;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
@@ -302,10 +303,12 @@ const fn default_include_cache_control_header_on_router_response() -> bool {
 }
 
 /// Per subgraph configuration for response caching
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
     /// Redis configuration
+    #[schemars(extend("default" = null))]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
@@ -318,7 +321,20 @@ pub(crate) struct Subgraph {
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
+    #[schemars(extend("default" = null))]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
+}
+
+impl SchemaDefault for Subgraph {
+    fn schema_default() -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "enabled": true,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+        }))
+    }
 }
 
 impl Default for Subgraph {
@@ -388,7 +404,7 @@ impl PluginPrivate for ResponseCache {
             .all
             .invalidation
             .as_ref()
-            .map(|i| i.shared_key.is_empty())
+            .map(|i| i.shared_key.unredact().is_empty())
             .unwrap_or_default()
         {
             return Err(
@@ -855,7 +871,9 @@ impl ResponseCache {
                 all: Subgraph {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                        shared_key: apollo_redaction::Redacted::new(
+                            INVALIDATION_SHARED_KEY.to_string(),
+                        ),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -3324,13 +3342,7 @@ mod tests {
 
         assert!(response_cache.subgraph_enabled("user"));
         assert!(!response_cache.subgraph_enabled("archive"));
-        let subgraph_config = serde_json_bytes::json!({
-            "all": {
-                "enabled": false
-            },
-            "subgraphs": response_cache.subgraphs.subgraphs.clone()
-        });
-        response_cache.subgraphs = Arc::new(serde_json_bytes::from_value(subgraph_config).unwrap());
+        Arc::make_mut(&mut response_cache.subgraphs).all.enabled = Some(false);
         assert!(!response_cache.subgraph_enabled("archive"));
         assert!(response_cache.subgraph_enabled("user"));
         assert!(response_cache.subgraph_enabled("orga"));

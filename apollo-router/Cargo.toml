@@ -61,6 +61,7 @@ addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
+apollo-redaction = { version = "0.3.2", features = ["schemars"] }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "futures-io",
@@ -228,6 +229,7 @@ serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
+subtle = "2.6.1"
 sys-info = "0.9.1"
 sysinfo = { version = "0.39.1", features = [
     "system",
@@ -301,6 +303,7 @@ tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], opti
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
 [dev-dependencies]
+apollo-configuration = "0.6.3"
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 ctor = "1.0.0"
 ecdsa = { version = "0.17.0", features = ["algorithm", "pem", "pkcs8"] }
@@ -317,6 +320,7 @@ insta.workspace = true
 maplit = "1.0.2"
 brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }
+miette = "7"
 mockall = "0.15.0"
 num-traits = "0.2.19"
 once_cell.workspace = true
