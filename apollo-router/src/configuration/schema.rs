@@ -40,6 +40,16 @@ pub(crate) fn generate_config_schema() -> Schema {
     schema
 }
 
+/// Router's patched configuration schema as JSON, generated once and shared by tests.
+#[cfg(test)]
+pub(crate) fn router_schema() -> &'static serde_json::Value {
+    static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::to_value(generate_config_schema())
+            .expect("router's configuration schema serializes")
+    })
+}
+
 #[derive(Eq, PartialEq)]
 pub(crate) enum Mode {
     Upgrade,
@@ -333,13 +343,11 @@ pub(crate) mod advertised_defaults {
     use serde::de::DeserializeOwned;
     use serde_json::Value;
 
-    fn schema() -> Value {
-        serde_json::to_value(super::generate_config_schema()).expect("the schema serializes")
-    }
+    use super::router_schema;
 
     /// The `default` the generated schema advertises for `property` of `definition`.
     pub(crate) fn of_property(definition: &str, property: &str) -> Value {
-        schema()
+        router_schema()
             .pointer(&format!(
                 "/definitions/{definition}/properties/{property}/default"
             ))
@@ -350,8 +358,7 @@ pub(crate) mod advertised_defaults {
     /// An object built from the `default` the generated schema advertises for every property of
     /// `definition`. Fails if any property advertises none.
     pub(crate) fn of_every_property(definition: &str) -> Value {
-        let schema = schema();
-        let properties = schema
+        let properties = router_schema()
             .pointer(&format!("/definitions/{definition}/properties"))
             .and_then(Value::as_object)
             .unwrap_or_else(|| panic!("{definition} declares no properties"));

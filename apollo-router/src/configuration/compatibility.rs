@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
@@ -18,7 +17,7 @@ use super::expansion::Expansion;
 use super::expansion::Override;
 use super::expansion::ValueType;
 use super::schema::Mode;
-use super::schema::generate_config_schema;
+use super::schema::router_schema;
 use super::schema::validate_yaml_configuration;
 use super::test_discovery;
 use super::upgrade::UpgradeMode;
@@ -37,15 +36,6 @@ fn current_major_version() -> i64 {
     env!("CARGO_PKG_VERSION_MAJOR")
         .parse()
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
-}
-
-/// Router's patched configuration schema, generated once and shared across parses.
-fn router_schema() -> &'static Value {
-    static SCHEMA: OnceLock<Value> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        serde_json::to_value(generate_config_schema())
-            .expect("router's configuration schema serializes")
-    })
 }
 
 fn router_options() -> ParseYamlOptions {
@@ -416,7 +406,7 @@ fn effective_settings_agree_for_the_shared_corpus() {
 
 #[test]
 fn schema_derived_boolean_values_agree_between_parsers() {
-    let schema = serde_json::to_value(generate_config_schema()).unwrap();
+    let schema = router_schema();
     let default = schema["properties"]["experimental_type_conditioned_fetching"]["default"]
         .as_bool()
         .expect("the schema declares a boolean default");
@@ -1129,7 +1119,7 @@ fn effective_settings_agree_for_discovered_project_documents() {
 /// generated schema and produce matching effective settings.
 #[test]
 fn schema_declared_top_level_defaults_agree_between_parsers() {
-    let schema = serde_json::to_value(generate_config_schema()).expect("schema serializes");
+    let schema = router_schema();
     let properties = schema["properties"]
         .as_object()
         .expect("the root schema declares properties");
