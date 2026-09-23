@@ -922,6 +922,20 @@ fn compute_root_parallel_best_plan_for_mutation(
     )?
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Lets unit tests exercise BULB's defer handling while the gate in
+    /// compute_plan_internal keeps deferred operations on the legacy planner.
+    pub(crate) static FORCE_INCREMENTAL_DEFER: Cell<bool> = const { Cell::new(false) };
+}
+
+fn force_incremental_defer() -> bool {
+    #[cfg(test)]
+    return FORCE_INCREMENTAL_DEFER.with(Cell::get);
+    #[cfg(not(test))]
+    false
+}
+
 fn compute_plan_internal(
     parameters: &mut QueryPlanningParameters,
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
@@ -938,7 +952,7 @@ fn compute_plan_internal(
     // It also does not implement type_conditioned_fetching, so queries
     // relying on that flag fall back to the legacy planner as well.
     let use_incremental = parameters.config.incremental_planner.enabled
-        && !has_defers
+        && (!has_defers || force_incremental_defer())
         && !parameters.config.type_conditioned_fetching;
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
