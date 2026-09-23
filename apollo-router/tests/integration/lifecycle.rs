@@ -104,9 +104,19 @@ this_key_does_not_exist_anywhere: true
 "#,
         )
         .await;
-    router
-        .wait_for_log_message("Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)")
-        .await;
+    let validation_error =
+        "Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)";
+    router.wait_for_log_message(validation_error).await;
+    // The file watcher logs this only after parsing returns Err and drops the update.
+    // `assert_not_reloaded` instead waits for a pipeline build failure, which is not reached.
+    assert!(router.logs().iter().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|log| {
+            log["target"] == "apollo_router::router::event::configuration"
+                && log["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(validation_error))
+        })
+    }));
     let (_, response) = router.execute_query(Query::introspection()).await;
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await?;
