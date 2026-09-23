@@ -3,6 +3,7 @@
 //! Only tests call this adapter. Routing production loading through it, including normalization
 //! of `plugins: null` to an empty map, remains a separate cutover change.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -10,6 +11,7 @@ use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::LookupError;
 use apollo_configuration::expansion::VariableProvider;
 use apollo_configuration::provenance::Injection;
+use parking_lot::Mutex;
 use serde_json::Value;
 
 use super::Configuration;
@@ -68,21 +70,35 @@ impl ExternalValues {
             // Without providers the shared parser leaves expansion syntax unchanged.
             options
         } else {
-            options.add_variables(Providers(self.variables))
+            options.add_variables(ProviderSnapshot {
+                providers: self.variables,
+                resolved: Default::default(),
+            })
         }
     }
 }
 
-/// Consults each provider in order, as the shared parser does with separately added providers.
-struct Providers(Vec<Box<dyn VariableProvider>>);
+/// Consults each provider in order, as the shared parser does with separately added providers,
+/// and remembers each result. Both shared-parser passes then see the same value, even if a file
+/// or environment variable changes between them.
+struct ProviderSnapshot {
+    providers: Vec<Box<dyn VariableProvider>>,
+    resolved: Mutex<HashMap<String, Result<String, LookupError>>>,
+}
 
-impl VariableProvider for Providers {
+impl VariableProvider for ProviderSnapshot {
     fn get(&self, reference: &str) -> Result<String, LookupError> {
-        self.0
-            .iter()
-            .map(|provider| provider.get(reference))
-            .find(|result| !matches!(result, Err(LookupError::UnrecognizedKind)))
-            .unwrap_or(Err(LookupError::UnrecognizedKind))
+        self.resolved
+            .lock()
+            .entry(reference.to_string())
+            .or_insert_with(|| {
+                self.providers
+                    .iter()
+                    .map(|provider| provider.get(reference))
+                    .find(|result| !matches!(result, Err(LookupError::UnrecognizedKind)))
+                    .unwrap_or(Err(LookupError::UnrecognizedKind))
+            })
+            .clone()
     }
 }
 
@@ -96,8 +112,8 @@ impl apollo_configuration::Validate for ExpandedDocument {}
 impl apollo_configuration::Configuration for ExpandedDocument {}
 
 /// Applies within-major migrations, then parses typed settings and the retained document
-/// with Router's schema and the same external values. Providers must be stable across both
-/// parse calls.
+/// with Router's schema and the same external values. Each expansion reference is resolved once
+/// and reused, so both passes see the same value.
 /// `raw_yaml` preserves the exact original text. When migration changes nothing, the shared
 /// parser reads that text, so diagnostics point at the user's lines and YAML aliases keep the
 /// shared parser's anchor redaction. Otherwise diagnostics refer to the serialized migrated copy.
@@ -147,9 +163,11 @@ pub(crate) fn parse_via_apollo_configuration(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
 
     use apollo_configuration::expansion::MapVariables;
+    use apollo_configuration::expansion::argument_for_kind;
     use serde_json::json;
 
     use super::*;
@@ -322,6 +340,38 @@ mod tests {
             config.validated_yaml.as_ref().unwrap()["supergraph"]["introspection"],
             json!(true),
             "the retained document must hold the coerced boolean, not the string \"true\""
+        );
+    }
+
+    /// Returns a different password on every read, like a secret file rotated between reads.
+    struct RotatingPassword(Arc<AtomicUsize>);
+
+    impl VariableProvider for RotatingPassword {
+        fn get(&self, reference: &str) -> Result<String, LookupError> {
+            argument_for_kind(reference, "env")?;
+            let read = self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(format!("password-read-{read}"))
+        }
+    }
+
+    #[test]
+    fn both_passes_see_one_snapshot_of_each_expanded_value() {
+        let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost:6379]\n        password: ${env.PW}\n";
+        let reads = Arc::new(AtomicUsize::new(0));
+        let external = ExternalValues::default().add_variables(RotatingPassword(reads.clone()));
+
+        let config = parse_via_apollo_configuration(text, external).expect("valid Redis settings");
+
+        assert_eq!(reads.load(Ordering::SeqCst), 1, "the provider is read once");
+        let redis = config.apq.router.cache.redis.as_ref().unwrap();
+        assert_eq!(
+            redis.password.as_ref().unwrap().unredact(),
+            "password-read-0"
+        );
+        assert_eq!(
+            config.validated_yaml.as_ref().unwrap()["apq"]["router"]["cache"]["redis"]["password"],
+            "password-read-0",
+            "the retained document must hold the same value as the typed settings"
         );
     }
 
