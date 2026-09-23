@@ -1055,7 +1055,7 @@ impl ResponseShapeContext {
         // Record this selection's definition.
         let value = response_shape
             .definitions_per_response_key
-            .entry(field.response_key().clone())
+            .entry(field.response_name().clone())
             .or_default();
         value.insert_possible_definition(
             self.type_condition.clone(),

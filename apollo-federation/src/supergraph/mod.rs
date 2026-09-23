@@ -129,29 +129,6 @@ impl Supergraph<Merged> {
     pub fn hints_mut(&mut self) -> &mut Vec<CompositionHint> {
         &mut self.state.hints
     }
-
-    #[allow(unused)]
-    pub(crate) fn subgraph_name_to_graph_enum_value(
-        &self,
-    ) -> Result<IndexMap<String, Name>, FederationError> {
-        let supergraph_schema = self.schema();
-        // PORT_NOTE: The JS version calls the `extractSubgraphsFromSupergraph` function, which
-        //            returns the subgraph name to graph enum value mapping, but the corresponding
-        //            `extract_subgraphs_from_supergraph` function in Rust does not need it and
-        //            does not return it. Therefore, a small part of
-        //            `extract_subgraphs_from_supergraph` function is reused here to compute the
-        //            mapping, instead of modifying the function itself.
-        let (_link_spec_definition, join_spec_definition, _context_spec_definition) =
-            crate::validate_supergraph_for_query_planning(supergraph_schema)?;
-        let (_subgraphs, _federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-            collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
-        Ok(graph_enum_value_name_to_subgraph_name
-            .into_iter()
-            .map(|(enum_value_name, subgraph_name)| {
-                (subgraph_name.to_string(), enum_value_name.clone())
-            })
-            .collect())
-    }
 }
 
 impl Supergraph<Satisfiable> {
@@ -307,11 +284,16 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     validate_extracted_subgraphs: Option<bool>,
 ) -> Result<ValidFederationSubgraphs, FederationError> {
     let validate_extracted_subgraphs = validate_extracted_subgraphs.unwrap_or(true);
+    let validate_default_values = supergraph_schema.schema().validate_default_values;
     let (link_spec_definition, join_spec_definition, context_spec_definition) =
         crate::validate_supergraph_for_query_planning(supergraph_schema)?;
     let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-        collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
+        collect_empty_subgraphs(
+            supergraph_schema,
+            join_spec_definition,
+            validate_default_values,
+        )?;
 
     let filtered_types: Vec<_> = supergraph_schema
         .get_types()
@@ -397,6 +379,7 @@ type CollectEmptySubgraphsOk = (
 fn collect_empty_subgraphs(
     supergraph_schema: &FederationSchema,
     join_spec_definition: &JoinSpecDefinition,
+    validate_default_values: bool,
 ) -> Result<CollectEmptySubgraphsOk, FederationError> {
     let mut subgraphs = FederationSubgraphs::new();
     let graph_directive_definition =
@@ -417,7 +400,7 @@ fn collect_empty_subgraphs(
         let subgraph = FederationSubgraph {
             name: graph_arguments.name.to_owned(),
             url: graph_arguments.url.to_owned(),
-            schema: new_empty_federation_2_subgraph_schema()?,
+            schema: new_empty_federation_2_subgraph_schema(validate_default_values)?,
             graph_enum_value: enum_value_name.clone(),
         };
         let federation_link = &subgraph

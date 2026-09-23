@@ -748,6 +748,10 @@ pub(crate) struct Supergraph {
     /// - `enforce` (default): rejects query
     /// - `measure`: permits query and the logs unknown fields
     pub(crate) strict_variable_validation: Mode,
+
+    /// Whether to validate default values in the supergraph schema.
+    /// Default: true
+    pub(crate) validate_default_values: bool,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -778,6 +782,7 @@ impl Supergraph {
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
+        validate_default_values: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -795,6 +800,7 @@ impl Supergraph {
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
             redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
+            validate_default_values: validate_default_values.unwrap_or(true),
         }
     }
 }
@@ -816,6 +822,7 @@ impl Supergraph {
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
+        validate_default_values: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -833,6 +840,7 @@ impl Supergraph {
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
             redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
+            validate_default_values: validate_default_values.unwrap_or(true),
         }
     }
 }
