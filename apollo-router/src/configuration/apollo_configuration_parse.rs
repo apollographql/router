@@ -133,7 +133,8 @@ pub(crate) fn parse_via_apollo_configuration(
     let major = env!("CARGO_PKG_VERSION_MAJOR")
         .parse()
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
-    let migrated = upgrade_configuration(&raw, false, UpgradeMode::Minor(major))?;
+    // Log what migration changed, as the production loader does.
+    let migrated = upgrade_configuration(&raw, true, UpgradeMode::Minor(major))?;
     let options = external.into_options();
     let (mut config, document) = if migrated == raw {
         parse_both_passes(text, &options)?
@@ -314,6 +315,7 @@ mod tests {
 
     use super::*;
     use crate::configuration::expansion::Expansion;
+    use crate::test_harness::tracing_test;
 
     #[test]
     fn populates_validated_yaml_and_raw_yaml() {
@@ -553,6 +555,29 @@ mod tests {
             !rendered.contains("anchored-secret-value"),
             "the diagnostic must not contain the aliased secret: {rendered}"
         );
+    }
+
+    #[test]
+    fn migration_reports_what_it_changed() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        parse_via_apollo_configuration(
+            include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
+            ExternalValues::default(),
+        )
+        .expect("the adapter migrates legacy CORS settings");
+
+        tracing_test::logs_assert(|lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("needs to be upgraded"))
+                .then_some(())
+                .ok_or_else(|| {
+                    "the adapter must report applied migrations like the production loader"
+                        .to_string()
+                })
+        })
+        .unwrap();
     }
 
     #[test]
