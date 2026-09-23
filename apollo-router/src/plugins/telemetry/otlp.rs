@@ -34,6 +34,14 @@ pub(crate) struct Config {
 
     /// gRPC configuration settings
     #[serde(default)]
+    // `GrpcExporter` holds a private key, so it cannot serialize its default.
+    #[schemars(extend("default" = {
+        "ca": null,
+        "cert": null,
+        "domain_name": null,
+        "key": null,
+        "metadata": {}
+    }))]
     pub(crate) grpc: GrpcExporter,
 
     /// HTTP configuration settings
@@ -254,6 +262,7 @@ pub(crate) struct GrpcExporter {
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
     /// The optional private key file for TLS configuration.
+    #[schemars(extend("default" = null))]
     pub(crate) key: Option<Redacted<String>>,
 
     /// gRPC metadata
@@ -337,6 +346,18 @@ mod tests {
     use super::*;
 
     static_assertions::assert_not_impl_any!(GrpcExporter: serde::Serialize);
+
+    #[test]
+    fn advertised_grpc_defaults_match_the_runtime_default() {
+        use crate::configuration::schema::advertised_defaults;
+
+        advertised_defaults::assert_describes_default::<GrpcExporter>(
+            advertised_defaults::of_property("OTLPConfig", "grpc"),
+        );
+        advertised_defaults::assert_describes_default::<GrpcExporter>(
+            advertised_defaults::of_every_property("GrpcExporter"),
+        );
+    }
 
     #[test]
     fn redacted_grpc_key_preserves_contents_and_change_detection() {

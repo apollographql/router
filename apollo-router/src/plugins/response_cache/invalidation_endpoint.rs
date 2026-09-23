@@ -132,6 +132,8 @@ pub(crate) struct SubgraphInvalidationConfig {
     /// Enable the invalidation
     pub(crate) enabled: bool,
     /// Shared key needed to request the invalidation endpoint
+    // Not serializable because it is a secret, so its (empty) default is declared by hand.
+    #[schemars(extend("default" = ""))]
     pub(crate) shared_key: Redacted<String>,
     /// Which invalidation indexes to maintain for this subgraph's cached entries. Defaults to
     /// all three (`subgraph`, `type`, `cache_tag`) enabled, matching the original
@@ -150,6 +152,28 @@ mod subgraph_invalidation_config_tests {
     use super::*;
 
     static_assertions::assert_not_impl_any!(SubgraphInvalidationConfig: serde::Serialize);
+
+    #[test]
+    fn advertised_defaults_match_the_runtime_defaults() {
+        use crate::configuration::schema::advertised_defaults;
+
+        let invalidation =
+            advertised_defaults::assert_describes_default::<SubgraphInvalidationConfig>(
+                advertised_defaults::of_every_property("SubgraphInvalidationConfig"),
+            );
+        // `Debug` hides the key, so compare it directly.
+        assert_eq!(
+            invalidation.shared_key.unredact(),
+            SubgraphInvalidationConfig::default().shared_key.unredact()
+        );
+
+        advertised_defaults::assert_describes_default::<Subgraph>(
+            advertised_defaults::of_every_property("Subgraph"),
+        );
+        advertised_defaults::assert_describes_default::<Subgraph>(
+            advertised_defaults::of_property("SubgraphSubgraphConfiguration", "all"),
+        );
+    }
 
     #[test]
     fn redacted_shared_key_is_hidden_from_debug_output() {

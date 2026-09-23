@@ -319,3 +319,69 @@ fn context_lines(
         })
         .join("\n")
 }
+
+/// Checks for hand-written schema defaults.
+///
+/// Configuration sections that hold secrets are deliberately not serializable, so the schema
+/// derive cannot produce their `default` annotations; they declare them by hand instead. These
+/// helpers let each section's tests prove that what the schema advertises still deserializes to
+/// the section's runtime `Default`.
+#[cfg(test)]
+pub(crate) mod advertised_defaults {
+    use std::fmt::Debug;
+
+    use serde::de::DeserializeOwned;
+    use serde_json::Value;
+
+    fn schema() -> Value {
+        serde_json::to_value(super::generate_config_schema()).expect("the schema serializes")
+    }
+
+    /// The `default` the generated schema advertises for `property` of `definition`.
+    pub(crate) fn of_property(definition: &str, property: &str) -> Value {
+        schema()
+            .pointer(&format!(
+                "/definitions/{definition}/properties/{property}/default"
+            ))
+            .cloned()
+            .unwrap_or_else(|| panic!("{definition}.{property} advertises no default"))
+    }
+
+    /// An object built from the `default` the generated schema advertises for every property of
+    /// `definition`. Fails if any property advertises none.
+    pub(crate) fn of_every_property(definition: &str) -> Value {
+        let schema = schema();
+        let properties = schema
+            .pointer(&format!("/definitions/{definition}/properties"))
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| panic!("{definition} declares no properties"));
+        properties
+            .iter()
+            .map(|(name, property)| {
+                let default = property
+                    .get("default")
+                    .unwrap_or_else(|| panic!("{definition}.{name} advertises no default"));
+                (name.clone(), default.clone())
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into()
+    }
+
+    /// Asserts that `advertised` deserializes to `T::default()` and returns the parsed value.
+    ///
+    /// Compares `Debug` output because secret-bearing configurations do not implement
+    /// `PartialEq`. `Debug` hides redacted values, so callers must compare those explicitly.
+    pub(crate) fn assert_describes_default<T>(advertised: Value) -> T
+    where
+        T: DeserializeOwned + Default + Debug,
+    {
+        let parsed: T = serde_json::from_value(advertised.clone())
+            .unwrap_or_else(|error| panic!("advertised default {advertised} is invalid: {error}"));
+        assert_eq!(
+            format!("{parsed:?}"),
+            format!("{:?}", T::default()),
+            "advertised default {advertised} differs from the runtime default"
+        );
+        parsed
+    }
+}

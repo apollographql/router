@@ -206,14 +206,17 @@ pub(crate) enum AuthConfig {
 }
 
 /// Configure subgraph authentication
+// Holds AWS credentials, so it cannot serialize its defaults: the schema declares them by hand.
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "AuthenticationSubgraphConfig")]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) all: Option<AuthConfig>,
     #[serde(default)]
+    #[schemars(extend("default" = {}))]
     /// Create a configuration that will apply only to a specific subgraph.
     pub(crate) subgraphs: HashMap<String, AuthConfig>,
 }
@@ -542,6 +545,20 @@ mod test {
     use crate::services::SubgraphResponse;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
+
+    #[test]
+    fn advertised_defaults_match_the_runtime_defaults() {
+        use crate::configuration::schema::advertised_defaults;
+
+        advertised_defaults::assert_describes_default::<Config>(
+            advertised_defaults::of_every_property("AuthenticationSubgraphConfig"),
+        );
+        advertised_defaults::assert_describes_default::<
+            crate::plugins::authentication::connector::Config,
+        >(advertised_defaults::of_every_property(
+            "AuthenticationConnectorConfig",
+        ));
+    }
 
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
         let params: SigningParamsConfig = make_signing_params(

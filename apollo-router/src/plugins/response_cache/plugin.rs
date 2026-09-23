@@ -303,10 +303,12 @@ const fn default_include_cache_control_header_on_router_response() -> bool {
 }
 
 /// Per subgraph configuration for response caching
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Subgraph {
     /// Redis configuration
+    #[schemars(extend("default" = null))]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
@@ -319,13 +321,19 @@ pub(crate) struct Subgraph {
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
+    #[schemars(extend("default" = null))]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
 }
 
-// Holds Redis credentials, so it is not serializable and advertises no schema default for `all`.
 impl SchemaDefault for Subgraph {
     fn schema_default() -> Option<serde_json::Value> {
-        None
+        Some(serde_json::json!({
+            "enabled": true,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+        }))
     }
 }
 
