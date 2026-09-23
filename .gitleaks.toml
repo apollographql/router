@@ -133,9 +133,11 @@
         ]
 
         # Synthetic credentials used by the Redis and OTLP redaction tests.
-        # Match only this fixture value, including occurrences in Git history.
+        # Match only these fixture values, including occurrences in Git history.
+        # CI's scanner may report the whole match (`password": "<value>"`) as the
+        # secret, so the value is delimited rather than anchored to the full secret.
         regexTarget = "secret"
-        regexes = ['''^(hunter2-super-secret|synthetic-otlp-private-key)$''']
+        regexes = ['''(?:^|[^\w-])(?:hunter2-super-secret|synthetic-otlp-private-key|synthetic-credential)(?:[^\w-]|$)''']
 
 [[ rules ]]
     id = "aws-access-token"
