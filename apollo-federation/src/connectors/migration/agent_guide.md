@@ -125,10 +125,11 @@ compiler in `rust-toolchain.toml`, which rustup installs and selects for
 you.
 
 ```sh
-# 1. Find the router commit a given connect-migrate release was built
+# 1. Find the router commit the latest connect-migrate release was built
 #    from. Omit this to build from the current router tip instead.
-gh api "repos/apollographql/connect-migrate/contents/.github/workflows/release.yml?ref=v0.0.8" \
-  --jq '.content' | base64 -d | grep RELEASE_ROUTER_REF
+TAG=$(gh release view -R apollographql/connect-migrate --json tagName --jq .tagName)
+gh api "repos/apollographql/connect-migrate/contents/.github/workflows/release.yml?ref=$TAG" \
+  --jq '.content' | base64 -d | grep 'RELEASE_ROUTER_REF:'
 
 # 2. Clone router at that commit. --filter=blob:none fetches file
 #    contents on demand, which keeps the clone small.
@@ -138,7 +139,7 @@ git checkout <RELEASE_ROUTER_REF>
 
 # 3. Build just the analyzer, behind its cargo feature.
 cd apollo-federation
-CONNECT_MIGRATE_VERSION=0.0.8 cargo build --release \
+CONNECT_MIGRATE_VERSION="${TAG#v}" cargo build --release \
   --bin connect-migrate --features connect-migrate
 
 # 4. Put it on PATH and confirm.
