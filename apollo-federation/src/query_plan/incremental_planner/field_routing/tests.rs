@@ -2644,3 +2644,63 @@ fn context_value_rides_entity_representation_at_boundary() {
     }
     "###);
 }
+
+const VALUE_TYPE_DEFER_SCHEMA: &str = include_str!(
+    "../../../../tests/query_plan/supergraphs/defer_test_defer_on_value_types.graphql"
+);
+
+/// A deferred field on a value type has no key to re-enter its subgraph
+/// through, so it stays in the enclosing fetch like the legacy planner.
+#[test]
+fn defer_on_value_type_stays_in_enclosing_fetch() {
+    let plan_str = plan_query_with_defer(
+        VALUE_TYPE_DEFER_SCHEMA,
+        "{ me { ... @defer { messages { ... @defer { body { lines } } } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              me {
+                __typename
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "me") {
+            Defer {
+              Primary {
+                Flatten(path: "me") {
+                  Fetch(service: "Subgraph2") {
+                    {
+                      ... on User {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        messages {
+                          body {
+                            lines
+                          }
+                        }
+                      }
+                    }
+                  },
+                },
+              }, [
+                Deferred(depends: [], path: "me/messages") {
+                  { body { lines } }:
+                },
+              ]
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}

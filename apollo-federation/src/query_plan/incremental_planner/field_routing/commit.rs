@@ -125,18 +125,7 @@ impl FieldRoutingSearchSpace {
         // Mutating half: commit the hop or resolve the direct fetch group.
         let (fetch_node, key_hop_edge, is_defer_redirect) = match choice {
             RoutingChoice::Provides(_) | RoutingChoice::Local(_) => {
-                let node = self.direct_fetch_node(state, pending, choice)?;
-                // A deferred field whose enclosing group belongs to a
-                // different defer scope needs its own entity fetch, even
-                // when no key hop is involved. This lets the executor
-                // stream the deferred payload in a separate chunk.
-                let enclosing_defer = &state.graph.node(node).defer_ref;
-                if pending.defer_ref != *enclosing_defer {
-                    let (group, edge) = self.commit_defer_redirect(state, pending, choice)?;
-                    (group, Some(edge), true)
-                } else {
-                    (node, None, false)
-                }
+                self.commit_direct(state, pending, choice)?
             }
             RoutingChoice::RootHop(_) => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
@@ -852,6 +841,43 @@ impl FieldRoutingSearchSpace {
         })
     }
 
+    /// Resolve the fetch group for a direct (same-subgraph) choice. Returns
+    /// the group, the key edge of a defer redirect, and whether one was made.
+    fn commit_direct(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        choice: &RoutingChoice,
+    ) -> Result<(NodeIndex, Option<EdgeIndex>, bool), FederationError> {
+        let node = self.direct_fetch_node(state, pending, choice)?;
+        // A deferred field whose enclosing group belongs to a
+        // different defer scope needs its own entity fetch, even
+        // when no key hop is involved. This lets the executor
+        // stream the deferred payload in a separate chunk.
+        // A type the subgraph cannot re-enter by root hop or key stays
+        // in the enclosing fetch, like the legacy planner: the deferred
+        // chunk then has no fetch of its own.
+        if pending.defer_ref == state.graph.node(node).defer_ref {
+            return Ok((node, None, false));
+        }
+        let source = self.node_source(pending.query_graph_node)?;
+        let subgraph = self
+            .query_graph
+            .node_weight(pending.query_graph_node)?
+            .source
+            .clone();
+        if let Some(root_kind) = self.subgraph_root_kind(&subgraph, &source.type_pos)? {
+            let (group, edge) =
+                self.commit_root_defer_redirect(state, pending, &subgraph, &source, root_kind);
+            return Ok((group, Some(edge), true));
+        }
+        let Some(key_conditions) = self.self_key_conditions(pending)? else {
+            return Ok((node, None, false));
+        };
+        let (group, edge) = self.commit_defer_redirect(state, pending, choice, key_conditions)?;
+        Ok((group, Some(edge), true))
+    }
+
     /// Route a deferred field into a separate entity group when it lives
     /// in the same subgraph as its enclosing fetch but belongs to a
     /// different defer scope. This creates the same structure as a key hop
@@ -861,38 +887,17 @@ impl FieldRoutingSearchSpace {
         state: &mut PlanState,
         pending: &PendingSelection,
         choice: &RoutingChoice,
+        key_conditions: Arc<SelectionSet>,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
         let qg = &self.query_graph;
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
-        if let Some(root_kind) = self.subgraph_root_kind(&subgraph, &source.type_pos)? {
-            return Ok(
-                self.commit_root_defer_redirect(state, pending, &subgraph, &source, root_kind)
-            );
-        }
-
-        // The self-key edge exists specifically for @defer re-entering a
-        // subgraph; out_edges filters self-edges so use the unfiltered view.
-        let key_conditions = qg
-            .out_edges_with_federation_self_edges(pending.query_graph_node)
-            .into_iter()
-            .find_map(|edge_ref| {
-                let edge = edge_ref.weight();
-                if !matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
-                    return None;
-                }
-                let target_node = qg.node_weight(edge_ref.target()).ok()?;
-                if target_node.source != subgraph {
-                    return None;
-                }
-                edge.conditions.clone()
-            });
 
         self.append_entity_inputs(
             state,
             pending.fetch_node,
             &pending.op_path,
-            key_conditions.as_ref(),
+            Some(&key_conditions),
             &source,
         );
 
@@ -911,9 +916,9 @@ impl FieldRoutingSearchSpace {
         let dest_type: CompositeTypeDefinitionPosition =
             qg.node_weight(field_source)?.type_.clone().try_into()?;
 
-        let key_input = key_conditions.map(|conditions| InputContribution::Key {
+        let key_input = Some(InputContribution::Key {
             source_type_name: source.type_pos.type_name().clone(),
-            conditions,
+            conditions: key_conditions,
             rewrite_info: InputRewriteInfo {
                 dest_type,
                 dest_subgraph: subgraph,
@@ -953,6 +958,32 @@ impl FieldRoutingSearchSpace {
                 .add_dependency(pending.fetch_node, new_group, Vec::new()),
         };
         (new_group, edge)
+    }
+
+    /// Conditions of the key that lets `pending`'s subgraph re-enter its
+    /// own type, or None when the type has no resolvable key there.
+    fn self_key_conditions(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<Option<Arc<SelectionSet>>, FederationError> {
+        let qg = &self.query_graph;
+        let subgraph = &qg.node_weight(pending.query_graph_node)?.source;
+        // The self-key edge exists specifically for @defer re-entering a
+        // subgraph; out_edges filters self-edges so use the unfiltered view.
+        Ok(qg
+            .out_edges_with_federation_self_edges(pending.query_graph_node)
+            .into_iter()
+            .find_map(|edge_ref| {
+                let edge = edge_ref.weight();
+                if !matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                    return None;
+                }
+                let target_node = qg.node_weight(edge_ref.target()).ok()?;
+                if target_node.source != *subgraph {
+                    return None;
+                }
+                edge.conditions.clone()
+            }))
     }
 
     /// Build a commit target for a same-subgraph defer redirect. The field
