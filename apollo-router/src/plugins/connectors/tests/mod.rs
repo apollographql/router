@@ -2495,6 +2495,47 @@ mod native_connectors {
         plan.assert_matches(&received);
     }
 
+    /// Type-conditioned fetching must not route native connector schemas to
+    /// the legacy planner, which cannot dispatch unexpanded connector fetches.
+    #[tokio::test]
+    async fn root_field_plus_entity_with_type_conditioned_fetching() {
+        let config = json!({
+            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } },
+            "experimental_type_conditioned_fetching": true
+        });
+        let (response, received) = test_root_field_plus_entity_impl(Some(config)).await;
+
+        insta::assert_json_snapshot!(response, @r###"
+        {
+          "data": {
+            "users": [
+              {
+                "__typename": "User",
+                "id": 1,
+                "name": "Leanne Graham",
+                "username": "Bret"
+              },
+              {
+                "__typename": "User",
+                "id": 2,
+                "name": "Ervin Howell",
+                "username": "Antonette"
+              }
+            ]
+          }
+        }
+        "###);
+
+        let plan = Plan::Sequence(vec![
+            Plan::Fetch(Matcher::new().method("GET").path("/users")),
+            Plan::Parallel(vec![
+                Matcher::new().method("GET").path("/users/1"),
+                Matcher::new().method("GET").path("/users/2"),
+            ]),
+        ]);
+        plan.assert_matches(&received);
+    }
+
     /// Native twin of test_root_field_plus_entity_plus_requires: @requires
     /// through a connector plus a GraphQL subgraph hop.
     #[tokio::test]

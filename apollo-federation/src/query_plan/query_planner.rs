@@ -115,10 +115,11 @@ impl Default for QueryPlannerConfig {
 }
 
 impl QueryPlannerConfig {
-    /// Whether operations are planned by the incremental planner. It does not
-    /// implement type_conditioned_fetching, so that flag falls back to legacy.
+    /// Whether operations are planned by the incremental planner. There is no
+    /// legacy fallback: with native connectors the schema is unexpanded and
+    /// only the incremental planner can route it.
     pub(crate) fn uses_incremental_planner(&self) -> bool {
-        self.incremental_planner.enabled && !self.type_conditioned_fetching
+        self.incremental_planner.enabled
     }
 }
 
