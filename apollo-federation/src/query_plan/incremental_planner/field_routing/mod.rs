@@ -376,29 +376,43 @@ struct ForcedTrail {
     frames: Vec<ForcedFrame>,
     /// Sites whose every routing option failed during this call. Consulted
     /// before committing so recurring instances fail fast.
-    doomed: HashSet<(NodeIndex, PendingSiteKey)>,
+    doomed: HashSet<PendingSite>,
 }
 
-/// Identity of a pending's routing position: the query graph node plus the
-/// selection's field or type-condition name. Coarser than the full routing
-/// cache key, but sufficient for fail-fast in forced backtracking.
+/// Identity of a pending for fail-fast: query graph node, selection name,
+/// fetch anchor, and ordering dependent. The anchor and dependent are
+/// included because an ordering cycle fails one pending's commit without
+/// saying anything about a sibling anchored or ordered elsewhere.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum PendingSiteKey {
+struct PendingSite {
+    query_graph_node: NodeIndex,
+    selection: SiteSelection,
+    fetch_node: NodeIndex,
+    ordering_dependent: Option<NodeIndex>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum SiteSelection {
     Field(Name),
     InlineFragment(Option<Name>),
 }
 
-fn pending_site(pending: &PendingSelection) -> (NodeIndex, PendingSiteKey) {
-    let key = match &pending.selection {
-        Selection::Field(f) => PendingSiteKey::Field(f.field.name().clone()),
-        Selection::InlineFragment(f) => PendingSiteKey::InlineFragment(
+fn pending_site(pending: &PendingSelection) -> PendingSite {
+    let selection = match &pending.selection {
+        Selection::Field(f) => SiteSelection::Field(f.field.name().clone()),
+        Selection::InlineFragment(f) => SiteSelection::InlineFragment(
             f.inline_fragment
                 .type_condition_position
                 .as_ref()
                 .map(|pos| pos.type_name().clone()),
         ),
     };
-    (pending.query_graph_node, key)
+    PendingSite {
+        query_graph_node: pending.query_graph_node,
+        selection,
+        fetch_node: pending.fetch_node,
+        ordering_dependent: pending.ordering_dependent(),
+    }
 }
 
 impl BulbSearchSpace for FieldRoutingSearchSpace {

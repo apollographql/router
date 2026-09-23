@@ -699,33 +699,70 @@ fn cyclic_entity_group_reuse_mints_fresh_group() {
     assert!(state.graph.cost().is_finite());
 }
 
-/// A failed commit marks its site doomed in the forced-backtracking
-/// trail, so a sibling at the same site also fails fast. The doomed
-/// set is deliberately coarse (keyed on node + selection name, not
-/// the full routing context) to avoid re-proving dead ends whose
-/// key conditions recurse. Coarseness can cause false positives that
-/// doom a site that would otherwise succeed, which surfaces as a
-/// dropped field and a hard planning error, not a silently wrong plan.
-/// The trail is scoped to one fast_forward call, limiting the blast
-/// radius.
+/// A commit that fails on its own ordering cycle must not doom a sibling
+/// at the same node and fetch group that has no ordering dependent: the
+/// sibling commits and only the cycling pending is dropped.
 #[test]
-fn failed_commit_dooms_site_for_siblings() {
+fn cyclic_commit_failure_does_not_doom_context_free_sibling() {
     let space = search_space();
     let (mut state, a, b) = cyclic_fixture();
 
-    // Bottom of stack: same site, no ordering dependent (would commit
-    // on its own). Top: condition pending whose ordering edge cycles.
-    // The doomed set marks the site after the cyclic failure, so the
-    // sibling is dropped too.
+    // Bottom of stack: no ordering dependent, commits on its own. Top:
+    // condition pending whose ordering edge back to `a` cycles.
     let ok_pending = y_pending(&space, b, None);
     let cyclic_pending = y_pending(&space, b, Some(a));
     state.pending = vec![Arc::new(ok_pending), Arc::new(cyclic_pending)];
+    let groups_before = state.graph.node_count();
 
     space.fast_forward(&mut state).expect("fast forward runs");
 
+    assert_eq!(state.dropped_fields, 1, "only the cycling pending drops");
+    assert!(state.pending.is_empty());
     assert_eq!(
-        state.dropped_fields, 2,
-        "doomed-site collision drops both pendings",
+        state.graph.node_count(),
+        groups_before + 1,
+        "the sibling's key hop adds an S2 group",
+    );
+}
+
+/// A second pending identical to one whose options were all exhausted
+/// fails fast from the doomed set instead of being retried. Each pending
+/// has two options, so a retry would spend another forced backtrack.
+#[test]
+fn exhausted_site_fails_fast_for_identical_sibling() {
+    let space = test_support::search_space(&[
+        (
+            "S1",
+            r#"
+            type Query { t: T }
+            type T @key(fields: "k") { k: ID }
+            "#,
+        ),
+        (
+            "S2",
+            r#"
+            type T @key(fields: "k") { k: ID, y: Int }
+            "#,
+        ),
+        (
+            "S3",
+            r#"
+            type T @key(fields: "k") { k: ID, y: Int }
+            "#,
+        ),
+    ]);
+    let (mut state, a, b) = cyclic_fixture();
+    state.pending = vec![
+        Arc::new(y_pending_for(&space, "S1", b, Some(a))),
+        Arc::new(y_pending_for(&space, "S1", b, Some(a))),
+    ];
+
+    space.fast_forward(&mut state).expect("fast forward runs");
+
+    assert_eq!(state.dropped_fields, 2);
+    assert_eq!(
+        state.forced_backtracks, 1,
+        "the identical sibling must not retry its alternatives",
     );
     assert!(state.pending.is_empty());
 }
