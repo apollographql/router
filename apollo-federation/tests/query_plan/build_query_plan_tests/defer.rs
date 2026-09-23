@@ -1,6 +1,22 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
+// Shadows the shared `planner!` so every defer case is also planned by the
+// incremental planner and checked for correctness.
+macro_rules! planner {
+    (
+        config = $config: expr,
+        $( $subgraph_name: tt: $subgraph_schema: expr),+
+        $(,)?
+    ) => {{
+        $crate::query_plan::build_query_plan_support::test_planner_with_bulb_twin(
+            insta::_function_name!(),
+            $config,
+            &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
+        )
+    }};
+}
+
 fn config_with_defer() -> QueryPlannerConfig {
     let mut config = QueryPlannerConfig::default();
     config.incremental_delivery.enable_defer = true;
