@@ -1,7 +1,6 @@
 //! Mutable BULB search state: the pending-selection stack, the fetch graph
 //! under construction, and O(1) checkpoint/rollback over both.
 
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -232,12 +231,16 @@ pub(crate) struct PlanState {
     /// operation the legacy planner handles. Loop detection in the condition
     /// resolution rework should replace it.
     pub(crate) forced_backtracks: u64,
-    /// Interned ids for @requires condition-field aliases, keyed by the
-    /// serialized condition selection: identical conditions share an alias
-    /// so sibling entity fetches staging the same @requires can merge;
-    /// distinct conditions get distinct aliases. Append-only; NOT restored
-    /// on rollback (aliases only need to be stable, not predictable).
-    pub(crate) condition_alias_ids: BTreeMap<String, usize>,
+    /// Interned @requires condition-field aliases: index is the alias id,
+    /// the entry is the widest (unaliased) selection interned so far under
+    /// that alias. A condition shares an alias with any entry it contains
+    /// or is contained by, so overlapping conditions stage their shared
+    /// prefix once instead of duplicating the fetch chain per alias.
+    /// Sharing stays correct because every consumer routes its own
+    /// conditions under the alias path and the fetch graph dedupes them.
+    /// Append-only; not restored on rollback (aliases only need to be
+    /// stable, not predictable).
+    pub(crate) condition_alias_ids: Vec<Selection>,
 }
 
 #[derive(Clone, Debug)]
@@ -262,7 +265,7 @@ impl PlanState {
             type_explosions: 0,
             effort: 0,
             forced_backtracks: 0,
-            condition_alias_ids: BTreeMap::new(),
+            condition_alias_ids: Vec::new(),
         }
     }
 

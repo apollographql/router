@@ -3229,3 +3229,558 @@ fn inc_defer_multi_dependency_deferred_section() {
     "###
     );
 }
+
+/// Ordering pair for aliased/plain @requires inputs on one entity edge:
+/// b's condition (a { x }) must be staged and aliased, c's (a { y }) is
+/// resolvable in place and stays plain. Whichever arrives second must not
+/// share a representation with the other, since the KeyRenamer's
+/// remove-then-insert would overwrite the plain `a` at runtime.
+#[test]
+fn inc_requires_aliased_then_plain_input_does_not_collide() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            a: A
+          }
+
+          type A @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
+        "#,
+        S2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: A @external
+            b: Int @requires(fields: "a { x }")
+            c: Int @requires(fields: "a { y }")
+          }
+
+          type A @key(fields: "id") {
+            id: ID! @external
+            x: Int @external
+            y: Int @external
+          }
+        "#,
+        S3: r#"
+          type A @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+    );
+
+    assert_plan!(&planner,
+        r#"{ t { b c } }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_a: a {
+                __typename
+                id
+              }
+              __require_1_a: a {
+                y
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t") {
+            Fetch(service: "S2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_1_a: a {
+                    y
+                  }
+                }
+              } =>
+              {
+                ... on T {
+                  c
+                }
+              }
+            },
+          },
+          Flatten(path: "t.__require_0_a") {
+            Fetch(service: "S3") {
+              {
+                ... on A {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on A {
+                  x
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_a: a {
+                  x
+                }
+              }
+            } =>
+            {
+              ... on T {
+                b
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    assert_plan!(&planner,
+        r#"{ t { c b } }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              a {
+                __typename
+                y
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.a") {
+          Fetch(service: "S3") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                x
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                a {
+                  y
+                  x
+                }
+              }
+            } =>
+            {
+              ... on T {
+                c
+                b
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Identical @requires conditions intern to one alias so their consumers
+/// share a single entity fetch; the rewrite-conflict check must compare
+/// aliases, not just originals, or the second consumer splits needlessly.
+#[test]
+fn inc_requires_identical_conditions_share_one_fetch() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        S2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: Int @external
+            b: Int @requires(fields: "a")
+            c: Int @requires(fields: "a")
+          }
+        "#,
+        S3: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+        "#,
+    );
+
+    assert_plan!(&planner,
+        r#"{ t { b c } }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                __require_0_a: a
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_a: a
+              }
+            } =>
+            {
+              ... on T {
+                b
+                c
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Overlapping @requires conditions (foo needs a subset of bar's) share
+/// one alias via containment interning, so the common `v { y { isY } }`
+/// chain is staged once instead of once per consumer. Legacy plans this
+/// with 6 fetches; BULB currently uses 7.
+#[test]
+fn inc_requires_overlapping_conditions_fetch_count() {
+    let planner = planner!(
+        config = incremental_config(),
+        s1: r#"
+            type Query {
+              t: T
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @shareable
+              x: X @shareable
+              v: V @shareable
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+            }
+
+            type V @key(fields: "id") @key(fields: "internalID") {
+              id: ID!
+              internalID: ID!
+            }
+
+            type X @key(fields: "t { id }") {
+              t: T!
+              isX: Boolean!
+            }
+        "#,
+        s2: r#"
+            type V @key(fields: "id") {
+              id: ID!
+              internalID: ID! @shareable
+              y: Y! @shareable
+              zz: [Z!] @external
+            }
+
+            type Z {
+              u: U! @external
+            }
+
+            type Y @key(fields: "id") {
+              id: ID!
+              isY: Boolean! @external
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+              x: X @external
+              v: V @external
+              foo: [String!]! @requires(fields: "x { isX }\nv { y { isY } }")
+              bar: [I!]! @requires(fields: "x { isX }\nv { y { isY } zz { u { id } } }")
+            }
+
+            type X {
+              isX: Boolean! @external
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+            }
+        "#,
+        s3: r#"
+            type V @key(fields: "internalID") {
+              internalID: ID!
+              y: Y! @shareable
+            }
+
+            type Y @key(fields: "id") {
+              id: ID!
+              isY: Boolean!
+            }
+        "#,
+        s4: r#"
+            type V @key(fields: "id") @key(fields: "internalID") {
+              id: ID!
+              internalID: ID!
+              zz: [Z!] @override(from: "s1")
+            }
+
+            type Z {
+              free: Boolean
+              u: U!
+              v: V!
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @shareable
+              x: X @shareable
+              v: V @shareable
+            }
+
+            type X @key(fields: "t { id }", resolvable: false) {
+              t: T! @external
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @override(from: "s1")
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+            t {
+                foo
+                bar {
+                    name
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "s1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_x: x {
+                isX
+              }
+              __require_1_v: v {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t.__require_1_v") {
+            Fetch(service: "s4") {
+              {
+                ... on V {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on V {
+                  zz {
+                    u {
+                      id
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_1_v") {
+              Fetch(service: "s2") {
+                {
+                  ... on V {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on V {
+                    y {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.__require_1_v.y") {
+              Fetch(service: "s3") {
+                {
+                  ... on Y {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Y {
+                    isY
+                  }
+                }
+              },
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_x: x {
+                  isX
+                }
+                __require_1_v: v {
+                  y {
+                    isY
+                  }
+                  zz {
+                    u {
+                      id
+                    }
+                  }
+                }
+              }
+            } =>
+            {
+              ... on T {
+                foo
+                bar {
+                  __typename
+                  ... on U {
+                    __typename
+                    id
+                  }
+                  ... on T {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Flatten(path: "t.bar.@|[T]") {
+            Fetch(service: "s1") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  name
+                }
+              }
+            },
+          },
+          Flatten(path: "t.bar.@|[U]") {
+            Fetch(service: "s4") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  name
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
