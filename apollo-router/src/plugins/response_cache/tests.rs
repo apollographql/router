@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
+use apollo_redaction::Redacted;
 use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
@@ -79,7 +80,7 @@ pub(super) fn create_subgraph_conf(
         all: Subgraph {
             invalidation: Some(SubgraphInvalidationConfig {
                 enabled: true,
-                shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                shared_key: Redacted::new(INVALIDATION_SHARED_KEY.to_string()),
                 ..Default::default()
             }),
             ..Default::default()

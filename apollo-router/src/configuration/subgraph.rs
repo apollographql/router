@@ -1,11 +1,15 @@
 //! Subgraph configuration override behaviour
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use schemars::JsonSchema;
+use schemars::Schema;
+use schemars::SchemaGenerator;
+use schemars::json_schema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de;
@@ -74,23 +78,23 @@ use serde::de::Visitor;
 // - deserialize to the plugin configuration
 
 /// Configuration options pertaining to the subgraph server component.
-#[derive(Default, Serialize, JsonSchema)]
-#[schemars(rename = "Subgraph{T}Configuration")]
+///
+/// The descriptions in the configuration schema are written in the `JsonSchema` impl below, not
+/// taken from these doc comments.
+#[derive(Default, Serialize)]
 pub(crate) struct SubgraphConfiguration<T>
 where
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
-    /// options applying to all subgraphs
     #[serde(default)]
     pub(crate) all: T,
-    /// per subgraph options
     #[serde(default)]
     pub(crate) subgraphs: HashMap<String, T>,
 }
 
 impl<T> SubgraphConfiguration<T>
 where
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     #[allow(dead_code)]
     pub(crate) fn get(&self, subgraph_name: &str) -> &T {
@@ -98,7 +102,7 @@ where
     }
 
     // Create a new `SubgraphConfiguration<V>` by extracting a value `V` from `&T`
-    pub(crate) fn extract<V: Default + Serialize + JsonSchema>(
+    pub(crate) fn extract<V: Default + JsonSchema>(
         &self,
         extract_fn: fn(&T) -> V,
     ) -> SubgraphConfiguration<V> {
@@ -113,9 +117,70 @@ where
     }
 }
 
+/// The value advertised as the configuration schema's `default` for `all`.
+///
+/// Every serializable plugin configuration advertises its `Default` value. A configuration that
+/// holds secrets is deliberately not serializable, so it implements this trait itself instead;
+/// if such a type later gains `Serialize`, the two implementations conflict and fail to compile.
+pub(crate) trait SchemaDefault {
+    fn schema_default() -> Option<serde_json::Value>;
+}
+
+impl<T: Default + Serialize> SchemaDefault for T {
+    fn schema_default() -> Option<serde_json::Value> {
+        serde_json::to_value(T::default()).ok()
+    }
+}
+
+// Implemented by hand rather than derived: the derive only emits `default` values when every
+// `T` is `Serialize`, which would drop them for all instantiations to accommodate the few
+// secret-bearing configurations that cannot be serialized.
+impl<T> JsonSchema for SubgraphConfiguration<T>
+where
+    T: Default + JsonSchema + SchemaDefault,
+{
+    fn schema_name() -> Cow<'static, str> {
+        format!("Subgraph{}Configuration", T::schema_name()).into()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        format!(
+            "{}::SubgraphConfiguration<{}>",
+            module_path!(),
+            T::schema_id()
+        )
+        .into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut all = generator.subschema_for::<T>();
+        all.insert(
+            "description".into(),
+            "options applying to all subgraphs".into(),
+        );
+        if let Some(default) = T::schema_default() {
+            all.insert("default".into(), default);
+        }
+
+        json_schema!({
+            "description": "Configuration options pertaining to the subgraph server component.",
+            "type": "object",
+            "properties": {
+                "all": all,
+                "subgraphs": {
+                    "description": "per subgraph options",
+                    "type": "object",
+                    "additionalProperties": generator.subschema_for::<T>(),
+                    "default": {}
+                }
+            }
+        })
+    }
+}
+
 impl<T> Debug for SubgraphConfiguration<T>
 where
-    T: Debug + Default + Serialize + JsonSchema,
+    T: Debug + Default + JsonSchema,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SubgraphConfiguration")
@@ -127,7 +192,7 @@ where
 
 impl<T> Clone for SubgraphConfiguration<T>
 where
-    T: Clone + Default + Serialize + JsonSchema,
+    T: Clone + Default + JsonSchema,
 {
     fn clone(&self) -> Self {
         Self {
@@ -139,7 +204,7 @@ where
 
 impl<T> PartialEq for SubgraphConfiguration<T>
 where
-    T: Default + Serialize + JsonSchema + PartialEq,
+    T: Default + JsonSchema + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.all == other.all && self.subgraphs == other.subgraphs
@@ -149,7 +214,7 @@ where
 impl<'de, T> Deserialize<'de> for SubgraphConfiguration<T>
 where
     T: DeserializeOwned,
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -166,7 +231,7 @@ struct SubgraphVisitor<T> {
 impl<'de, T> Visitor<'de> for SubgraphVisitor<T>
 where
     T: DeserializeOwned,
-    T: Default + Serialize + JsonSchema,
+    T: Default + JsonSchema,
 {
     type Value = SubgraphConfiguration<T>;
 
