@@ -1590,6 +1590,9 @@ impl FieldRoutingSearchSpace {
         let Selection::Field(_) = &pending.selection else {
             return Ok(None);
         };
+        if !self.root_may_duplicate(pending.query_graph_node)? {
+            return Ok(None);
+        }
         let options = self.cached_routing_options(pending)?;
         let mut alt_targets: Vec<NodeIndex> = Vec::new();
         for opt in options.iter() {
