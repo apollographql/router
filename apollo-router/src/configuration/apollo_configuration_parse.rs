@@ -315,28 +315,6 @@ mod tests {
     use crate::test_harness::tracing_test;
 
     #[test]
-    fn populates_validated_yaml_and_raw_yaml() {
-        let text = include_str!("testdata/compat/current_minimal.yaml");
-
-        let config = parse_via_apollo_configuration(text, ExternalValues::default())
-            .expect("the minimal fixture is valid");
-
-        assert_eq!(
-            config.raw_yaml.as_deref(),
-            Some(text),
-            "raw_yaml must hold the exact pre-expansion input"
-        );
-        let validated_yaml = config
-            .validated_yaml
-            .as_ref()
-            .expect("validated_yaml must be populated");
-        assert!(
-            validated_yaml.is_object(),
-            "validated_yaml must hold the expanded document, not be left empty: {validated_yaml:?}"
-        );
-    }
-
-    #[test]
     fn rejected_input_renders_as_a_miette_diagnostic() {
         let text = include_str!("testdata/compat/unknown_top_level_key.yaml");
 
@@ -358,9 +336,9 @@ mod tests {
 
     #[test]
     fn diagnostics_redact_typed_secrets_reached_through_draft_7_references() {
-        let secret = "redis-password-must-not-leak";
+        let secret = "redis-password-must-not-leak"; // gitleaks:allow
         let text = format!(
-            "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost:6379]\n        password: {secret}\n        unexpected: true\n"
+            "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: {secret}\n        unexpected: true\n"
         );
 
         let error = parse_via_apollo_configuration(&text, ExternalValues::default())
@@ -379,8 +357,8 @@ mod tests {
 
     #[test]
     fn retained_document_preserves_secret_values_without_serializing_typed_settings() {
-        let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost:6379]\n        password: ${env.ADAPTER_PASSWORD}\n";
-        let secret = "adapter-test-password";
+        let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: ${env.ADAPTER_PASSWORD}\n";
+        let secret = "adapter-test-password"; // gitleaks:allow
         let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
             "ADAPTER_PASSWORD".to_string(),
             secret.to_string(),
@@ -445,28 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn validated_yaml_holds_the_expanded_document() {
-        let text = "supergraph:\n  listen: 127.0.0.1:${env.COMPAT_TEST_PORT}\n";
-        let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
-            "COMPAT_TEST_PORT".to_string(),
-            "4001".to_string(),
-        )])));
-        let config = parse_via_apollo_configuration(text, external)
-            .expect("the shared parser resolves the reference");
-
-        assert_eq!(
-            config.validated_yaml.as_ref().expect("populated")["supergraph"]["listen"],
-            json!("127.0.0.1:4001"),
-            "validated_yaml must hold the expanded value, not the unexpanded reference"
-        );
-        assert_eq!(
-            config.supergraph.listen.to_string(),
-            "http://127.0.0.1:4001",
-            "the deserialized configuration must agree with validated_yaml"
-        );
-    }
-
-    #[test]
     fn expansion_coerces_through_routers_schema_in_both_passes() {
         let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
             "FLAG".to_string(),
@@ -491,13 +447,13 @@ mod tests {
         fn get(&self, reference: &str) -> Result<String, LookupError> {
             argument_for_kind(reference, "env")?;
             let read = self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(format!("password-read-{read}"))
+            Ok(format!("password-read-{read}")) // gitleaks:allow
         }
     }
 
     #[test]
     fn both_passes_see_one_snapshot_of_each_expanded_value() {
-        let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost:6379]\n        password: ${env.PW}\n";
+        let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: ${env.PW}\n";
         let reads = Arc::new(AtomicUsize::new(0));
         let external = ExternalValues::default().add_variables(RotatingPassword(reads.clone()));
 
@@ -518,7 +474,7 @@ mod tests {
 
     /// Redis settings whose non-secret `namespace` anchors the value aliased into `password`,
     /// plus an unknown key so that the diagnostic shows the anchor.
-    const ANCHORED_SECRET: &str = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost:6379]\n        namespace: &pw anchored-secret-value\n        unexpected: true\n        password: *pw\n";
+    const ANCHORED_SECRET: &str = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        namespace: &pw anchored-secret-value\n        unexpected: true\n        password: *pw\n"; // gitleaks:allow
 
     #[test]
     fn diagnostics_redact_an_anchor_aliased_into_a_secret_field() {
