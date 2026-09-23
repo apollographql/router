@@ -1526,6 +1526,15 @@ impl CacheService {
                     cache_control.clone(),
                 );
 
+                // What we store is governed by *this* response's own `Cache-Control`, never by the
+                // merge below. The merge folds in the entries that came back from Redis for the
+                // other entities in this same `_entities` fetch: correct for the client-facing
+                // header, wrong for storage. Those entries are not part of this response, they have
+                // been aging since they were written, and they are not being rewritten here - so
+                // merging would stamp an unrelated entry's remaining lifetime (and its privacy)
+                // onto an entity the subgraph just handed us with a full, fresh lifetime.
+                let mut cache_control_for_store = cache_control.clone();
+
                 if let Some(control_from_cached) = cache_result.1 {
                     cache_control = cache_control.merge(&control_from_cached);
                 }
@@ -1533,6 +1542,7 @@ impl CacheService {
                 // if the request had no_store on it, propagate that to this cache control
                 if let Some(request_cache_control) = request_cache_control {
                     cache_control.merge_no_store(&request_cache_control);
+                    cache_control_for_store.merge_no_store(&request_cache_control);
                 }
 
                 if !is_known_private && cache_control.private() {
@@ -1546,7 +1556,7 @@ impl CacheService {
                     storage,
                     self.subgraph_ttl,
                     &mut response,
-                    cache_control.clone(),
+                    cache_control_for_store,
                     cache_result.0,
                     is_known_private,
                     private_id,

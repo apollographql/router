@@ -23,6 +23,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
@@ -5444,4 +5445,229 @@ async fn include_cache_control_header_on_router_response_true_sends_headers() {
     let cache_control_header = get_cache_control_header(&response).expect("missing header");
     assert!(cache_control_contains_max_age(&cache_control_header));
     assert!(cache_control_contains_public(&cache_control_header));
+}
+
+/// An entity that misses the cache is stored under its own subgraph-advertised TTL. Organization
+/// 3 is fetched fresh with `s-maxage=20` in the same `_entities` request as 1 and 2, which hit
+/// cache with only `AGED_BY` seconds of their own TTL left; 3's stored TTL stays at 20.
+///
+/// See the `merge_inner` tests in `cache_control.rs` for the arithmetic this exercises end to end.
+///
+/// Requires a local Redis on 127.0.0.1:6379.
+#[tokio::test(flavor = "multi_thread")]
+async fn fresh_entity_is_stored_with_its_own_advertised_ttl() {
+    /// The lifetime the `orga` subgraph advertises on every response.
+    const ADVERTISED_TTL: u64 = 20;
+    /// How long we let the first generation age before the second request.
+    const AGED_BY: u64 = 3;
+
+    let query = "query { currentUser { allOrganizations { id name } } }";
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let cache_control_header =
+        HeaderValue::from_str(&format!("public, s-maxage={ADVERTISED_TTL}")).unwrap();
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let subgraphs_conf = create_subgraph_conf(map);
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        subgraphs_conf,
+        valid_schema.clone(),
+        true,
+        drop_tx,
+        true,
+    )
+    .await
+    .unwrap();
+
+    // ---- Generation 0: organizations 1 and 2 are fetched and cached. ----
+    //
+    // The `user` subgraph is `no-store` so the organization *list* is never cached, which forces
+    // the second request to plan a real `_entities` fetch against `orga`.
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "user",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                        serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                            {"__typename": "Organization", "id": "1"},
+                            {"__typename": "Organization", "id": "2"},
+                        ] }}}},
+                    )
+                    .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                    .build(),
+            ),
+            (
+                "orga",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                            "variables": { "representations": [
+                                {"id": "1", "__typename": "Organization"},
+                                {"id": "2", "__typename": "Organization"},
+                            ]}
+                        }},
+                        serde_json::json! {{"data": {"_entities": [
+                            {"name": "Organization 1"},
+                            {"name": "Organization 2"},
+                        ]}}},
+                    )
+                    .with_header(CACHE_CONTROL, cache_control_header.clone())
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
+
+    // Let generation 0 age, so that its remaining lifetime is strictly less than what the
+    // subgraph advertises for generation 1.
+    tokio::time::sleep(Duration::from_secs(AGED_BY)).await;
+
+    // ---- Generation 1: organization 3 is new; 1 and 2 hit the cache. ----
+    //
+    // `orga` only accepts a representation list of `[3]`. If the router asked for 1 and 2 as well
+    // the mock would not match and this test would fail loudly, which is exactly the guard we
+    // want: the assertion below is only meaningful if 1 and 2 really were cache hits.
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "user",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                        serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                            {"__typename": "Organization", "id": "1"},
+                            {"__typename": "Organization", "id": "2"},
+                            {"__typename": "Organization", "id": "3"},
+                        ] }}}},
+                    )
+                    .with_header(CACHE_CONTROL, HeaderValue::from_static("no-store"))
+                    .build(),
+            ),
+            (
+                "orga",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json! {{
+                            "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                            "variables": { "representations": [
+                                {"id": "3", "__typename": "Organization"},
+                            ]}
+                        }},
+                        serde_json::json! {{"data": {"_entities": [
+                            {"name": "Organization 3"},
+                        ]}}},
+                    )
+                    .with_header(CACHE_CONTROL, cache_control_header)
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache.clone())
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+
+    let organization_3 = cache_keys
+        .iter()
+        .find(|context| match &context.kind {
+            CacheEntryKind::Entity {
+                typename,
+                entity_key,
+            } => {
+                typename == "Organization"
+                    && entity_key.get("id").and_then(|id| id.as_str()) == Some("3")
+            }
+            CacheEntryKind::RootFields { .. } => false,
+        })
+        .expect("organization 3 should appear in the cache debug context");
+
+    // Read the entry back out of storage rather than trusting the debug context alone: what we
+    // care about is the lifetime the entity was *persisted* with.
+    wait_for_cache(&storage, vec![organization_3.key.clone()]).await;
+    let entry = storage
+        .fetch_multiple(&[organization_3.key.as_str()], "orga")
+        .await
+        .unwrap()
+        .swap_remove(0)
+        .expect("organization 3 should have been stored");
+
+    assert_eq!(
+        entry.control.ttl(),
+        Some(ADVERTISED_TTL),
+        "organization 3 was fetched fresh with s-maxage={ADVERTISED_TTL}, but it was stored with \
+         the batch minimum instead - it inherited the {AGED_BY}s-old remaining lifetime of \
+         organizations 1 and 2, which hit the cache in the same _entities fetch"
+    );
 }
