@@ -503,6 +503,7 @@ dependencies = [
  "socket2 0.5.10",
  "static_assertions",
  "strum 0.28.0",
+ "subtle",
  "sys-info",
  "sysinfo",
  "tempfile",

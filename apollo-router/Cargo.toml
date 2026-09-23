@@ -229,6 +229,7 @@ serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum = { version = "0.28.0", features = ["derive"] }
+subtle = "2.6.1"
 sys-info = "0.9.1"
 sysinfo = { version = "0.39.1", features = [
     "system",

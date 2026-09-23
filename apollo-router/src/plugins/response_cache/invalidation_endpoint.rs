@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
+use subtle::ConstantTimeEq;
 use tower::BoxError;
 use tower::Service;
 use tracing::Span;
@@ -429,18 +430,86 @@ fn validate_shared_key(
     shared_key: &str,
     subgraph_name: &str,
 ) -> bool {
-    config
-        .all
-        .invalidation
-        .as_ref()
-        .map(|i| i.shared_key.unredact() == shared_key)
-        .unwrap_or_default()
-        || config
+    let matches_all = shared_key_matches(config.all.invalidation.as_ref(), shared_key);
+    let matches_subgraph = shared_key_matches(
+        config
             .subgraphs
             .get(subgraph_name)
-            .and_then(|s| s.invalidation.as_ref())
-            .map(|i| i.shared_key.unredact() == shared_key)
-            .unwrap_or_default()
+            .and_then(|s| s.invalidation.as_ref()),
+        shared_key,
+    );
+    // Check both keys before combining them, so timing does not reveal which one matched.
+    matches_all | matches_subgraph
+}
+
+/// Compares a caller-provided key with the configured one in constant time, so response timing
+/// does not reveal how many leading bytes of the key matched. Only a length mismatch returns
+/// early.
+fn shared_key_matches(invalidation: Option<&SubgraphInvalidationConfig>, provided: &str) -> bool {
+    invalidation.is_some_and(|invalidation| {
+        invalidation
+            .shared_key
+            .unredact()
+            .as_bytes()
+            .ct_eq(provided.as_bytes())
+            .into()
+    })
+}
+
+#[cfg(test)]
+mod shared_key_tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn invalidation(shared_key: &str) -> Option<SubgraphInvalidationConfig> {
+        Some(SubgraphInvalidationConfig {
+            enabled: true,
+            shared_key: Redacted::new(shared_key.to_string()),
+            indexes: InvalidationIndexes::default(),
+        })
+    }
+
+    #[test]
+    fn only_the_exact_configured_key_is_accepted() {
+        let config = SubgraphConfiguration {
+            all: Subgraph {
+                invalidation: invalidation("all-subgraphs-key"),
+                ..Default::default()
+            },
+            subgraphs: HashMap::from([(
+                "products".to_string(),
+                Subgraph {
+                    invalidation: invalidation("products-key"),
+                    ..Default::default()
+                },
+            )]),
+        };
+
+        assert!(validate_shared_key(&config, "all-subgraphs-key", "reviews"));
+        assert!(validate_shared_key(
+            &config,
+            "all-subgraphs-key",
+            "products"
+        ));
+        assert!(validate_shared_key(&config, "products-key", "products"));
+        assert!(!validate_shared_key(&config, "products-key", "reviews"));
+        for wrong in [
+            "",
+            "all-subgraphs",
+            "all-subgraphs-key2",
+            "ALL-SUBGRAPHS-KEY",
+        ] {
+            assert!(!validate_shared_key(&config, wrong, "reviews"), "{wrong}");
+        }
+    }
+
+    #[test]
+    fn no_key_is_accepted_without_invalidation_configuration() {
+        let config = SubgraphConfiguration::<Subgraph>::default();
+        assert!(!validate_shared_key(&config, "", "reviews"));
+        assert!(!validate_shared_key(&config, "any-key", "reviews"));
+    }
 }
 
 /// Map an `InvalidationRequest` kind string to the `IndexMode` that gates whether the
