@@ -39,16 +39,17 @@ fn current_major_version() -> i64 {
         .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
 }
 
-fn router_options() -> ParseYamlOptions {
-    // Cache the patched router schema across parses.
+/// Router's patched configuration schema, generated once and shared across parses.
+fn router_schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
-    let schema = SCHEMA
-        .get_or_init(|| {
-            serde_json::to_value(generate_config_schema())
-                .expect("router's configuration schema serializes")
-        })
-        .clone();
-    ParseYamlOptions::default().schema(schema)
+    SCHEMA.get_or_init(|| {
+        serde_json::to_value(generate_config_schema())
+            .expect("router's configuration schema serializes")
+    })
+}
+
+fn router_options() -> ParseYamlOptions {
+    ParseYamlOptions::default().schema(router_schema().clone())
 }
 
 /// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
@@ -246,18 +247,147 @@ fn difference_paths_resolve_object_keys_and_array_entries() {
 
 /// Serializes both parsers' results and describes the first path where they disagree, or `None`
 /// when they match. Callers prefix the description with whatever identifies the input.
+///
+/// The comparison needs plaintext credentials so that a disagreement about a password is still
+/// detected, but the description replaces every value the schema marks as secret, because it
+/// ends up in test failure output.
 fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Option<String> {
     // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
     let router_json = serde_json::to_value(router).expect("Configuration serializes");
     let shared_json = serde_json::to_value(shared).expect("Configuration serializes");
     let path = first_difference(&router_json, &shared_json)?;
+    let secrets = SecretRedactor::new(router_schema());
+    let describe =
+        |json: &Value| secrets.redact_at(&path, json.pointer(&path).unwrap_or(&Value::Null));
     Some(format!(
         "router's own pipeline and the shared parser disagree at `{path}`\n\
          router:  {}\n\
          shared:  {}",
-        router_json.pointer(&path).unwrap_or(&Value::Null),
-        shared_json.pointer(&path).unwrap_or(&Value::Null),
+        describe(&router_json),
+        describe(&shared_json),
     ))
+}
+
+/// Replaces the values that a configuration schema marks with `x-apollo-secret`.
+struct SecretRedactor<'schema> {
+    root: &'schema Value,
+}
+
+impl<'schema> SecretRedactor<'schema> {
+    const REDACTED: &'static str = "[REDACTED]";
+
+    fn new(root: &'schema Value) -> Self {
+        Self { root }
+    }
+
+    /// Redacts `value`, the configuration found at JSON `pointer`.
+    fn redact_at(&self, pointer: &str, value: &Value) -> Value {
+        let mut schemas = self.expand([self.root]);
+        for token in pointer.split('/').skip(1) {
+            let key = token.replace("~1", "/").replace("~0", "~");
+            schemas = self.children(&schemas, &key);
+        }
+        self.redact(&schemas, value)
+    }
+
+    fn redact(&self, schemas: &[&'schema Value], value: &Value) -> Value {
+        let is_secret = schemas
+            .iter()
+            .any(|schema| schema.get("x-apollo-secret") == Some(&Value::Bool(true)));
+        match value {
+            Value::Null => Value::Null,
+            _ if is_secret => Value::String(Self::REDACTED.to_string()),
+            Value::Object(entries) => entries
+                .iter()
+                .map(|(key, entry)| {
+                    (
+                        key.clone(),
+                        self.redact(&self.children(schemas, key), entry),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>()
+                .into(),
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| self.redact(&self.children(schemas, &index.to_string()), item))
+                .collect(),
+            _ => value.clone(),
+        }
+    }
+
+    /// The schemas that can describe the entry `key` of a value described by `schemas`.
+    fn children(&self, schemas: &[&'schema Value], key: &str) -> Vec<&'schema Value> {
+        let children = schemas.iter().filter_map(|schema| {
+            schema
+                .get("properties")
+                .and_then(|properties| properties.get(key))
+                .or_else(|| schema.get("additionalProperties").filter(|p| p.is_object()))
+                .or_else(|| {
+                    key.parse::<usize>()
+                        .ok()
+                        .and(schema.get("items").filter(|i| i.is_object()))
+                })
+        });
+        self.expand(children)
+    }
+
+    /// Follows `$ref`s and `allOf`/`anyOf`/`oneOf` branches, so every schema that applies to a
+    /// value is checked for the secret annotation.
+    fn expand(&self, schemas: impl IntoIterator<Item = &'schema Value>) -> Vec<&'schema Value> {
+        let mut expanded = Vec::new();
+        let mut pending: Vec<&'schema Value> = schemas.into_iter().collect();
+        while let Some(schema) = pending.pop() {
+            if let Some(target) = schema
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(|reference| reference.strip_prefix('#'))
+                .and_then(|pointer| self.root.pointer(pointer))
+            {
+                pending.push(target);
+            }
+            for combinator in ["allOf", "anyOf", "oneOf"] {
+                if let Some(branches) = schema.get(combinator).and_then(Value::as_array) {
+                    pending.extend(branches);
+                }
+            }
+            expanded.push(schema);
+        }
+        expanded
+    }
+}
+
+#[test]
+fn disagreements_about_secrets_are_detected_without_printing_them() {
+    let parse = |yaml: &str| {
+        validate_yaml_configuration(yaml, Expansion::builder().build(), Mode::NoUpgrade)
+            .expect("the fixture is valid")
+    };
+    let with_password = |password: &str| {
+        parse(&format!(
+            "supergraph:\n  query_planning:\n    cache:\n      redis:\n        urls: [\"redis://localhost:6379\"]\n        password: \"{password}\"\n"
+        ))
+    };
+    let first = with_password("first-synthetic-redis-password"); // gitleaks:allow
+    let second = with_password("second-synthetic-redis-password"); // gitleaks:allow
+    let without_redis = parse("supergraph:\n  query_planning:\n    cache: {}\n");
+
+    let mismatch = settings_disagreement(&first, &second).expect("the passwords differ");
+    assert!(
+        mismatch.contains("/supergraph/query_planning/cache/redis/password"),
+        "{mismatch}"
+    );
+    assert!(mismatch.contains("[REDACTED]"), "{mismatch}");
+    assert!(!mismatch.contains("synthetic-redis-password"), "{mismatch}");
+
+    // A disagreement about a whole section redacts the secrets inside it.
+    let mismatch = settings_disagreement(&first, &without_redis).expect("only one uses Redis");
+    assert!(
+        mismatch.contains("/supergraph/query_planning/cache/redis`"),
+        "{mismatch}"
+    );
+    assert!(mismatch.contains("redis://localhost:6379"), "{mismatch}");
+    assert!(!mismatch.contains("synthetic-redis-password"), "{mismatch}");
 }
 
 /// Current-format inputs, and inputs migrated ahead of time exactly as a real deployment would

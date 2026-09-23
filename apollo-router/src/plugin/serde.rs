@@ -215,7 +215,8 @@ impl serde::de::Visitor<'_> for JSONPathVisitor {
 /// Serialize the unredacted value of an `Option<Redacted<T>>` field.
 ///
 /// Use with `#[serde(serialize_with)]` when serialization must preserve the original setting.
-/// The output contains plaintext secrets and must stay out of diagnostics.
+/// The output contains plaintext secrets and must stay out of diagnostics: the configuration
+/// compatibility tests compare it, then redact schema-marked secrets before reporting.
 pub(crate) fn serialize_redacted_option<T, R, S>(
     value: &Option<Redacted<T, R>>,
     serializer: S,
