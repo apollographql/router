@@ -447,7 +447,6 @@ impl FetchGraph {
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at).
-    #[allow(dead_code)]
     pub(crate) fn get_or_create_entity_group(
         &mut self,
         subgraph: &Arc<str>,
