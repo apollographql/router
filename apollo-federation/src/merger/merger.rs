@@ -1248,7 +1248,9 @@ impl Merger {
             }
         }
         for implemented_itf in implemented {
-            dest.insert_implements_interface(&mut self.merged, implemented_itf.clone())?;
+            // Strip extension_id so all interfaces land on the base type definition.
+            let implemented_itf = Node::new((*implemented_itf).clone());
+            dest.insert_implements_interface(&mut self.merged, implemented_itf)?;
         }
         Ok(())
     }
