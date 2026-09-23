@@ -278,9 +278,7 @@ impl FieldRoutingSearchSpace {
         if !self.inconsistent_abstract_types.contains(type_name) {
             return None;
         }
-        let schema = self.qg()
-            .schema_by_source(subgraph)
-            .ok()?;
+        let schema = self.qg().schema_by_source(subgraph).ok()?;
         let ty = schema.get_type(type_name).ok()?;
         let pos = CompositeTypeDefinitionPosition::try_from(ty).ok()?;
         let types = schema.possible_runtime_types(pos).ok()?;

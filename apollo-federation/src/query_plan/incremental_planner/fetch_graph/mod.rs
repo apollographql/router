@@ -1885,6 +1885,7 @@ mod tests {
             dummy_root_type(),
             SchemaRootDefinitionKind::Query,
             vec![],
+            None,
         );
         assert_eq!(g.node_count(), 1);
         g.rollback(cp);

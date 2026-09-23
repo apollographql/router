@@ -114,8 +114,7 @@ impl FieldRoutingSearchSpace {
         if let Selection::InlineFragment(frag_sel) = &pending.selection
             && let Some(type_cond) = &frag_sel.inline_fragment.type_condition_position
         {
-            let current_node = self.qg()
-                .node_weight(pending.query_graph_node)?;
+            let current_node = self.qg().node_weight(pending.query_graph_node)?;
 
             let is_vacuous =
                 if matches!(current_node.type_, QueryGraphNodeType::FederatedRootType(_)) {
@@ -123,8 +122,7 @@ impl FieldRoutingSearchSpace {
                 } else {
                     let current_type: CompositeTypeDefinitionPosition =
                         current_node.type_.clone().try_into()?;
-                    let current_schema = self.qg()
-                        .schema_by_source(&current_node.source)?;
+                    let current_schema = self.qg().schema_by_source(&current_node.source)?;
                     let current_runtime_types =
                         current_schema.possible_runtime_types(current_type.clone())?;
                     let cond_runtime_types = self
@@ -192,12 +190,10 @@ impl FieldRoutingSearchSpace {
         if let Selection::InlineFragment(frag_sel) = &pending.selection
             && let Some(type_cond) = &frag_sel.inline_fragment.type_condition_position
         {
-            let current_node = self.qg()
-                .node_weight(pending.query_graph_node)?;
+            let current_node = self.qg().node_weight(pending.query_graph_node)?;
             let current_type: CompositeTypeDefinitionPosition =
                 current_node.type_.clone().try_into()?;
-            let current_schema = self.qg()
-                .schema_by_source(&current_node.source)?;
+            let current_schema = self.qg().schema_by_source(&current_node.source)?;
 
             let current_runtime_types =
                 current_schema.possible_runtime_types(current_type.clone())?;
@@ -279,14 +275,12 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
     ) -> Result<bool, FederationError> {
         if let Selection::Field(field_sel) = &pending.selection {
-            let current_node = self.qg()
-                .node_weight(pending.query_graph_node)?;
+            let current_node = self.qg().node_weight(pending.query_graph_node)?;
             if let Ok(current_type) =
                 CompositeTypeDefinitionPosition::try_from(current_node.type_.clone())
                 && current_type.is_abstract_type()
             {
-                let current_schema = self.qg()
-                    .schema_by_source(&current_node.source)?;
+                let current_schema = self.qg().schema_by_source(&current_node.source)?;
                 if let Ok(runtime_types) =
                     current_schema.possible_runtime_types(current_type.clone())
                 {

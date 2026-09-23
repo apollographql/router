@@ -1282,8 +1282,7 @@ impl FieldRoutingSearchSpace {
         target_qg_node: NodeIndex,
     ) -> Result<(bool, IntersectionFilter), FederationError> {
         let shareable = if let Selection::Field(field_sel) = &pending.selection {
-            let source_data = self.qg()
-                .node_weight(pending.query_graph_node)?;
+            let source_data = self.qg().node_weight(pending.query_graph_node)?;
             if matches!(source_data.type_, QueryGraphNodeType::FederatedRootType(_)) {
                 // Root-level shareability is resolved when BULB commits to a
                 // subgraph; only key-hop-based shareability creates
