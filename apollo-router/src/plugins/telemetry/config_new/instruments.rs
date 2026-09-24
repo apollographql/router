@@ -25,6 +25,7 @@ use super::Selector;
 use super::cache::CACHE_METRIC;
 use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
+use super::cache::ConnectorCacheInstruments;
 use super::cache::attributes::CacheAttributes;
 use super::graphql::FIELD_EXECUTION;
 use super::graphql::FIELD_LENGTH;
@@ -1102,6 +1103,21 @@ impl InstrumentsConfig {
                 }
             }),
         }
+    }
+
+    pub(crate) fn new_connector_cache_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+        source_name: String,
+    ) -> ConnectorCacheInstruments {
+        let counter = if self.cache.attributes.response_cache.is_enabled() {
+            static_instruments
+                .get(RESPONSE_CACHE_METRIC)
+                .and_then(|s| s.as_counter_f64().cloned())
+        } else {
+            None
+        };
+        ConnectorCacheInstruments::new(counter, source_name)
     }
 }
 
@@ -2700,7 +2716,6 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -2743,6 +2758,7 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
@@ -3434,11 +3450,11 @@ mod tests {
                                     let response = Response {
                                         context: context.clone(),
                                         subgraph_name: String::new(),
-                                        transport_result: Ok(TransportResponse::Http(
+                                        transport_outcome: TransportOutcome::Response(
                                             HttpResponse {
                                                 inner: http_response.into_parts().0,
                                             },
-                                        )),
+                                        ),
                                         mapped_response: MappedResponse::Data {
                                             data: json!({})
                                                 .try_into()
