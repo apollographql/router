@@ -13,11 +13,10 @@
 //! - `sparse`: edits one user's name through a property chain, which writes `data` back;
 //! - `dense`: edits every user and writes `data` back.
 //!
-//! `callback` rows run one script directly against the Rhai engine and report latency, bytes
-//! allocated, and bytes still held when the script finishes (the edited response). `field` rows
-//! report the size of the native Rhai value one `data` read materializes, which bounds the extra
-//! memory a callback needs while it holds that field. `pipeline` rows report requests per second
-//! through the supergraph plugin service.
+//! `callback` rows run one script directly against the Rhai engine and report, per script, its
+//! latency and the [`HeapUsage`] of running it. `field` rows report the live heap one `data`
+//! read materializes as a native Rhai value. `pipeline` rows report requests per second through
+//! the supergraph plugin service.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -32,7 +31,6 @@ use tower::ServiceExt;
 
 use super::super::new_rhai_test_engine;
 use crate::Context;
-use crate::allocator;
 use crate::graphql;
 use crate::json_ext::Value;
 use crate::plugin::DynPlugin;
@@ -80,18 +78,52 @@ fn response(users: usize) -> graphql::Response {
     graphql::Response::builder().data(data(users)).build()
 }
 
-/// Bytes allocated by `f`, and bytes it allocated that are still live when it returns.
-fn allocations<R>(f: impl FnOnce() -> R) -> (R, usize, usize) {
-    allocator::with_memory_tracking("rhai_json_bridge", || {
-        let stats = allocator::current().expect("inside memory tracking");
-        let result = f();
-        let allocated = stats.bytes_allocated() + stats.bytes_zeroed();
-        (result, allocated, stats.net_allocated())
-    })
+/// Heap activity on the current thread while a closure ran, in jemalloc's usable bytes.
+///
+/// Read from jemalloc's per-thread counters, which see every allocation, reallocation and free:
+/// a reallocation counts as allocating the new block and freeing the old one, and freeing
+/// storage allocated before the closure started counts as freed.
+#[derive(Clone, Copy, Debug, Default)]
+struct HeapUsage {
+    allocated: u64,
+    freed: u64,
+    /// Highest live heap above the starting point. jemalloc samples it after every 64 KiB of
+    /// allocation or deallocation and when it is read, so a shorter excursion can be missed.
+    peak: u64,
 }
 
-fn per_iteration(total: usize, iterations: u32) -> usize {
-    total / iterations as usize
+impl HeapUsage {
+    /// Change in live heap: negative when the closure freed more than it allocated.
+    fn net(&self) -> i64 {
+        self.allocated as i64 - self.freed as i64
+    }
+}
+
+fn heap_usage<R>(f: impl FnOnce() -> R) -> (R, HeapUsage) {
+    use tikv_jemalloc_ctl::thread;
+
+    let allocated = thread::allocatedp::read().unwrap();
+    let freed = thread::deallocatedp::read().unwrap();
+    // SAFETY: `thread.peak.reset` takes and returns nothing.
+    let reset = unsafe {
+        tikv_jemalloc_sys::mallctl(
+            c"thread.peak.reset".as_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    assert_eq!(reset, 0, "thread.peak.reset failed");
+    let (allocated_before, freed_before) = (allocated.get(), freed.get());
+    let result = f();
+    let usage = HeapUsage {
+        allocated: allocated.get() - allocated_before,
+        freed: freed.get() - freed_before,
+        // SAFETY: `thread.peak.read` returns a `u64`.
+        peak: unsafe { tikv_jemalloc_ctl::raw::read(b"thread.peak.read\0") }.unwrap(),
+    };
+    (result, usage)
 }
 
 fn measure_callbacks(bridge: Bridge) {
@@ -100,26 +132,29 @@ fn measure_callbacks(bridge: Bridge) {
         let ast = engine.compile(script).unwrap();
         for (users, iterations) in SIZES {
             let template = response(users);
-            let (mut elapsed, mut allocated, mut retained) = (Duration::ZERO, 0, 0);
+            let (mut elapsed, mut total, mut peak) = (Duration::ZERO, HeapUsage::default(), 0);
             for _ in 0..iterations {
                 let mut scope = Scope::new();
                 scope.push("response", template.clone());
                 let start = Instant::now();
-                let (result, bytes, live) = allocations(|| {
+                let (result, usage) = heap_usage(|| {
                     engine
                         .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
                         .unwrap()
                 });
                 elapsed += start.elapsed();
-                allocated += bytes;
-                retained += live;
+                total.allocated += usage.allocated;
+                total.freed += usage.freed;
+                peak = peak.max(usage.peak);
                 drop(black_box(result));
             }
+            let per_script = |bytes: u64| bytes / u64::from(iterations);
             println!(
-                "callback,{bridge:?},{name},{users},{:.2},{},{}",
-                elapsed.as_secs_f64() * 1e6 / iterations as f64,
-                per_iteration(allocated, iterations),
-                per_iteration(retained, iterations),
+                "callback,{bridge:?},{name},{users},{:.2},{},{},{},{peak}",
+                elapsed.as_secs_f64() * 1e6 / f64::from(iterations),
+                per_script(total.allocated),
+                per_script(total.freed),
+                total.net() / i64::from(iterations),
             );
         }
     }
@@ -131,13 +166,19 @@ fn measure_field(bridge: Bridge) {
     for (users, _) in SIZES {
         let mut scope = Scope::new();
         scope.push("response", response(users));
-        let (field, _, live) = allocations(|| {
+        let (field, usage) = heap_usage(|| {
             engine
                 .eval_ast_with_scope::<Dynamic>(&mut scope, &ast)
                 .unwrap()
         });
         drop(black_box(field));
-        println!("field,{bridge:?},data,{users},,,{live}");
+        println!(
+            "field,{bridge:?},data,{users},,{},{},{},{}",
+            usage.allocated,
+            usage.freed,
+            usage.net(),
+            usage.peak
+        );
     }
 }
 
@@ -185,7 +226,7 @@ async fn measure_pipeline(bridge: Bridge) {
                 name == "no_access",
                 "{name}: {conversions}"
             );
-            println!("pipeline,{bridge:?},{name},{users},{throughput:.0},,");
+            println!("pipeline,{bridge:?},{name},{users},{throughput:.0},,,,");
         }
     }
 }
@@ -193,11 +234,44 @@ async fn measure_pipeline(bridge: Bridge) {
 #[tokio::test]
 #[ignore = "measurement; run in release mode"]
 async fn bridge_performance() {
-    println!("kind,bridge,workload,users,latency_us|requests_per_s,allocated_bytes,retained_bytes");
+    println!(
+        "kind,bridge,workload,users,latency_us|requests_per_s,allocated_bytes,freed_bytes,net_bytes,peak_bytes"
+    );
     for bridge in Bridge::ALL {
         let _selected = bridge.select();
         measure_callbacks(bridge);
         measure_field(bridge);
         measure_pipeline(bridge).await;
     }
+}
+
+#[test]
+fn heap_usage_counts_reallocation() {
+    let (buffer, usage) = heap_usage(|| {
+        let mut buffer = Vec::<u8>::with_capacity(8);
+        buffer.reserve_exact(64);
+        buffer
+    });
+    assert_eq!(buffer.capacity(), 64);
+    // 8 and 64 bytes are jemalloc size classes, so growing moves the buffer to a new block.
+    assert_eq!((usage.allocated, usage.freed, usage.net()), (72, 8, 64));
+    assert_eq!(usage.peak, 64);
+}
+
+#[test]
+fn heap_usage_counts_freeing_earlier_storage() {
+    let earlier = vec![0_u8; 4096];
+    let ((), usage) = heap_usage(|| drop(earlier));
+    assert_eq!(
+        (usage.allocated, usage.freed, usage.net()),
+        (0, 4096, -4096)
+    );
+    assert_eq!(usage.peak, 0);
+}
+
+#[test]
+fn heap_usage_peak_includes_freed_storage() {
+    let ((), usage) = heap_usage(|| drop(black_box(vec![0_u8; 1 << 20])));
+    assert_eq!(usage.net(), 0);
+    assert!(usage.peak >= 1 << 20, "{usage:?}");
 }

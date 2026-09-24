@@ -26,7 +26,7 @@ use crate::graphql;
 use crate::plugins::rhai::engine::json_fields::Bridge;
 
 mod callbacks;
-// Allocation tracking needs Router's own global allocator.
+// Heap accounting reads jemalloc's counters, so it needs jemalloc as the global allocator.
 #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 mod performance;
 
