@@ -237,12 +237,7 @@ async fn execute(
 pub(crate) struct ConnectorServiceFactory {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    /// The plugin-wrapped connector service stack, built once at pipeline creation (mirroring
-    /// `SubgraphServiceFactory` / `ConnectorRequestServiceFactory`). `Plugins` is deliberately
-    /// consumed at construction rather than stored: retaining `Arc<Plugins>` in a factory extends
-    /// every plugin's lifetime (and anything their closures capture) to that of the factory graph.
-    /// The schema, subgraph schemas, subscription config, and request-service factory are likewise
-    /// consumed here (folded into `service`) rather than kept as fields.
+    /// The plugin-wrapped connector service stack. The factory hands out clones of this.
     service: crate::layers::unconstrained_buffer::UnconstrainedBuffer<
         ConnectRequest,
         BoxFuture<'static, Result<ConnectResponse, BoxError>>,
