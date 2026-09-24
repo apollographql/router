@@ -282,7 +282,7 @@ mod tests {
     /// re-serialize `type_name` so assertions read as plain SDL.
     ///
     /// Inherited tags are appended after the element's own tags, in the order
-    /// the parent declares them -- see the `IndexSet` in [`get_tags`].
+    /// the parent declares them -- see the `IndexSet` in [`tag_values`](crate::contract::helpers::tag_values).
     fn inherit(sdl: &str, type_name: &str) -> String {
         let schema = Schema::builder()
             .adopt_orphan_extensions()

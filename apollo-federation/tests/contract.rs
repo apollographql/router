@@ -179,7 +179,7 @@ fn api_schema(supergraph: &Supergraph<Satisfiable>) -> String {
         .to_string()
 }
 
-/// Step 1 has to link both specs and add their definitions, then steps 2 and 3 have to
+/// Step 1 has to link both specs and add their definitions, then later steps have to
 /// find them through metadata that only exists because step 1 re-collected it.
 #[test]
 fn links_tag_and_inaccessible_specs_when_absent() {
@@ -294,7 +294,7 @@ fn rejects_an_unparseable_supergraph() {
 }
 
 /// A malformed `@tag` definition is rejected by the core spec machinery in step 1. This
-/// used to pass silently: `get_tags` matches on an argument literally named `name`, so a
+/// used to pass silently: `tag_values` matches on an argument literally named `name`, so a
 /// renamed argument made every element look untagged and an include filter masked the whole
 /// schema, root type included.
 #[test]
