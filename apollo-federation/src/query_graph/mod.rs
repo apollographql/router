@@ -158,12 +158,7 @@ pub struct ContextCondition {
     pub(crate) argument_type: Node<Type>,
 }
 
-#[allow(dead_code)]
 impl ContextCondition {
-    pub(crate) fn selection(&self) -> &str {
-        &self.selection
-    }
-
     pub(crate) fn types_with_context_set(&self) -> &IndexSet<CompositeTypeDefinitionPosition> {
         &self.types_with_context_set
     }
