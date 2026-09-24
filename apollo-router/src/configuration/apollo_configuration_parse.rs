@@ -185,8 +185,8 @@ impl apollo_configuration::Configuration for ExpandedDocument {}
 /// serialized and parsed instead. If the shared parser rejects the migrated document, whether in
 /// expansion, overrides, schema validation, deserialization or cross-field validation, the
 /// unmigrated document is parsed in its place, as earlier releases did after a schema failure.
-/// Unless replacements changed it, that is the operator's file, where YAML aliases keep the
-/// shared parser's anchor redaction.
+/// If replacements changed the document, errors are reported from the operator's file instead of
+/// the serialized copy, so YAML aliases keep the shared parser's anchor redaction.
 ///
 /// Known limitation: an expansion reference anchored on a non-secret field and aliased into a
 /// secret field is redacted only in the secret field. A diagnostic about the anchoring field can
@@ -244,6 +244,23 @@ pub(crate) fn parse_configuration(
             );
             parse(&original)?
         }
+        parsed => parsed,
+    };
+    // A document changed by replacements, such as the `--dev` defaults, was parsed as a
+    // serialized copy, which drops the file's comments and anchors. Diagnostics quote the
+    // operator's file instead.
+    let parsed = match parsed {
+        Err(_) if original != file => match parse_document(text, &options) {
+            Err(error) => Err(error),
+            Ok(_) => {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "configuration is invalid once the --dev settings are applied",
+                    error:
+                        "the file is valid on its own; check it against the settings --dev enables"
+                            .to_string(),
+                });
+            }
+        },
         parsed => parsed,
     };
     let mut config = parsed.inspect_err(|error| {

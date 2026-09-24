@@ -582,4 +582,28 @@ plain: "no dollars here"
             serde_json::json!(true)
         );
     }
+
+    /// `--dev` changes the document, but diagnostics still quote the operator's file, so a
+    /// literal anchored into a secret field stays redacted and locations match the file.
+    #[test]
+    fn dev_mode_diagnostics_quote_the_file_with_anchors_redacted() {
+        let expansion = Expansion::builder()
+            .replacements(dev_mode_defaults())
+            .build();
+        let text = "# operator comment\napq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        namespace: &pw anchored-secret-value\n        unexpected: true\n        password: *pw\n"; // gitleaks:allow
+
+        let error = crate::configuration::parse_configuration(
+            text,
+            expansion,
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect_err("the Redis configuration contains an unknown field")
+        .to_string();
+
+        assert!(!error.contains("anchored-secret-value"), "{error}");
+        // Only the file has the anchor; a serialized copy would expand it.
+        assert!(error.contains("namespace: &pw [REDACTED]"), "{error}");
+        // The leading comment makes this line 6 of the file; a serialized copy has no comment.
+        assert!(error.contains("[6:9]"), "{error}");
+    }
 }
