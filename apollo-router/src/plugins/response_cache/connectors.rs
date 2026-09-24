@@ -1628,11 +1628,24 @@ impl ConnectorRequestCacheService {
                 }
 
                 let subgraph_name = request.connector.id.subgraph_name.to_string();
+
+                // Reconstruct a transport response for the cached entry rather than exposing
+                // that the cache was hit. Response caching stays self-contained: everything
+                // downstream — telemetry selectors, the coprocessor `ConnectorResponse` stage,
+                // public connector plugins — reads a hit exactly as it reads a fetch, so none
+                // of them need a cache concept. This mirrors the subgraph path, which builds a
+                // `subgraph::Response` on a hit and lets its status default to 200.
+                //
+                // The status is the one the origin actually sent (replayed from the entry)
+                // rather than a blanket 200, because `@connect(errors: { is_success: ... })`
+                // lets a connector declare a non-2xx status successful, and such a response is
+                // cached. Entries written before the status was persisted fall back to 200.
+                let http_response = transport_response_for_cache_hit(entry.status, &entry.control)?;
+
                 let cached_response = connector::request_service::Response {
                     context: request.context,
                     subgraph_name,
-                    // No transport happened — served from the response cache.
-                    transport_outcome: TransportOutcome::ServedFromCache,
+                    transport_outcome: TransportOutcome::Response(http_response),
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,
@@ -1670,6 +1683,17 @@ impl ConnectorRequestCacheService {
                 let lru_size_instrument = self.lru_size_instrument.clone();
                 let indexes = self.indexes;
                 let response = self.handle_with_cache_control_extraction(request).await?;
+
+                // Recorded now so a later cache hit can replay the status this call actually
+                // produced. A connector may declare a non-2xx status successful via
+                // `@connect(errors: { is_success: ... })`, so defaulting a hit to `200` would
+                // report a status the origin never sent.
+                let upstream_status = match &response.transport_outcome {
+                    TransportOutcome::Response(http_response) => {
+                        Some(http_response.inner.status.as_u16())
+                    }
+                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+                };
 
                 // Store in cache if appropriate
                 if let apollo_federation::connectors::runtime::responses::MappedResponse::Data {
@@ -1783,6 +1807,7 @@ impl ConnectorRequestCacheService {
                             // Persist the mapping problems with the data so hits replay them
                             // rather than reporting a clean connector for the whole TTL.
                             mapping_problems: problems.clone(),
+                            status: upstream_status,
                         };
 
                         let source = source_name;
@@ -2000,6 +2025,39 @@ fn get_connector_root_cache_tags(
         }
     }
     Ok(keys)
+}
+
+/// Rebuild a transport response for an entry served from the cache.
+///
+/// A cache hit is presented as an ordinary transport response rather than as a distinct state, so
+/// that nothing outside this plugin needs a cache concept: telemetry selectors, the coprocessor
+/// `ConnectorResponse` stage and public connector plugins all read a hit exactly as they read a
+/// fetch. This mirrors the subgraph path, which builds a `subgraph::Response` on a hit and lets
+/// its status default to 200.
+///
+/// The status is the one the origin actually sent, replayed from the entry, rather than a blanket
+/// 200: `@connect(errors: { is_success: ... })` lets a connector declare a non-2xx status
+/// successful, and such a response is cached, so defaulting would report a status no origin sent.
+/// Entries written before the status was persisted fall back to 200.
+///
+/// The only headers reproduced are the cache-control ones rebuilt from the stored value, again as
+/// the subgraph path does. Upstream response headers are deliberately not persisted.
+fn transport_response_for_cache_hit(
+    status: Option<u16>,
+    control: &CacheControl,
+) -> Result<apollo_federation::connectors::runtime::http_json_transport::HttpResponse, BoxError> {
+    let mut parts = http::Response::builder()
+        .status(
+            status
+                .and_then(|status| http::StatusCode::from_u16(status).ok())
+                .unwrap_or(http::StatusCode::OK),
+        )
+        .body(())
+        .expect("response with an empty body is valid; qed")
+        .into_parts()
+        .0;
+    control.update_response_headers(&mut parts.headers)?;
+    Ok(apollo_federation::connectors::runtime::http_json_transport::HttpResponse { inner: parts })
 }
 
 struct CacheMetadata {
@@ -2348,5 +2406,39 @@ mod tests {
     fn unknown_source_uses_all_defaults() {
         let config = config_with(None, vec![("known", Some(false))]);
         assert!(config.is_source_enabled(true, "unknown"));
+    }
+
+    #[test]
+    fn cache_hit_replays_the_status_the_origin_sent() {
+        // A connector may declare a non-2xx status successful via
+        // `@connect(errors: { is_success: ... })`, in which case that response is cached. The
+        // hit must report the same status the miss did, not a synthesized 200.
+        let control = CacheControl::from_config_ttl(Some(Duration::from_secs(60)));
+        let response = transport_response_for_cache_hit(Some(400), &control)
+            .expect("building a transport response for a cache hit must not fail");
+        assert_eq!(response.inner.status, http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn cache_hit_without_a_recorded_status_falls_back_to_ok() {
+        // Entries written before the status was persisted have none; 200 matches the subgraph
+        // path, which lets a hit's status default.
+        let control = CacheControl::from_config_ttl(Some(Duration::from_secs(60)));
+        let response = transport_response_for_cache_hit(None, &control)
+            .expect("building a transport response for a cache hit must not fail");
+        assert_eq!(response.inner.status, http::StatusCode::OK);
+    }
+
+    #[test]
+    fn cache_hit_carries_the_stored_cache_control() {
+        // The reconstructed response reproduces the stored cache-control, as the subgraph path
+        // does — it is the only header a hit reproduces.
+        let control = CacheControl::from_config_ttl(Some(Duration::from_secs(60)));
+        let response = transport_response_for_cache_hit(Some(200), &control)
+            .expect("building a transport response for a cache hit must not fail");
+        assert!(
+            response.inner.headers.get(CACHE_CONTROL).is_some(),
+            "a cache hit must carry the cache-control rebuilt from the stored entry"
+        );
     }
 }

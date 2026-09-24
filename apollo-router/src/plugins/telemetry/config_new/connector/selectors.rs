@@ -153,24 +153,6 @@ pub(crate) enum ConnectorSelector {
     },
 }
 
-impl ConnectorSelector {
-    /// Whether this selector reads the connector's transport response — the HTTP status,
-    /// headers or wire byte count.
-    ///
-    /// A response served from the router's response cache has none of those, because nothing
-    /// went over the wire. A condition built on such a selector therefore cannot be decided
-    /// for a cached response, as opposed to being decided false: see
-    /// `coprocessor::connector::evaluate_condition_on_cache_hit`.
-    pub(crate) fn reads_transport_response(&self) -> bool {
-        matches!(
-            self,
-            ConnectorSelector::ConnectorResponseHeader { .. }
-                | ConnectorSelector::ConnectorResponseStatus { .. }
-                | ConnectorSelector::ConnectorResponseBodySize { .. }
-        )
-    }
-}
-
 impl Selector for ConnectorSelector {
     type Request = ConnectorRequest;
     type Response = ConnectorResponse;
@@ -297,33 +279,27 @@ impl Selector for ConnectorSelector {
                 connector_http_response_header: connector_response_header,
                 default,
                 redact,
-            } => {
-                // On a cache hit there is no transport response, so no header value is available.
-                // The configured `default` must still apply in that case rather than dropping the
-                // selector entirely — otherwise telemetry defaults go quiet as the hit rate climbs.
-                match response.transport_outcome {
-                    TransportOutcome::ServedFromCache => default.clone().map(Into::into),
-                    TransportOutcome::Response(ref http_response) => {
-                        let raw = http_response
-                            .inner
-                            .headers
-                            .get(connector_response_header)
-                            .and_then(|h| Some(h.to_str().ok()?.to_string()));
+            } => match response.transport_outcome {
+                TransportOutcome::Response(ref http_response) => {
+                    let raw = http_response
+                        .inner
+                        .headers
+                        .get(connector_response_header)
+                        .and_then(|h| Some(h.to_str().ok()?.to_string()));
 
-                        crate::services::header_masking::redact_header_value(
-                            &response.context,
-                            crate::services::header_masking::Direction::Response,
-                            Some(response.subgraph_name.as_str()),
-                            connector_response_header,
-                            raw,
-                            redact.as_ref(),
-                        )
-                        .or_else(|| default.clone())
-                        .map(Into::into)
-                    }
-                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+                    crate::services::header_masking::redact_header_value(
+                        &response.context,
+                        crate::services::header_masking::Direction::Response,
+                        Some(response.subgraph_name.as_str()),
+                        connector_response_header,
+                        raw,
+                        redact.as_ref(),
+                    )
+                    .or_else(|| default.clone())
+                    .map(Into::into)
                 }
-            }
+                TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+            },
             ConnectorSelector::ConnectorResponseStatus {
                 connector_http_response_status: response_status,
             } => {
@@ -337,12 +313,8 @@ impl Selector for ConnectorSelector {
                             }
                         }
                     }
-                    // No HTTP call was made, so there is no status to report. This selector has
-                    // no `default`, and reporting a synthesized `200` would put a status no
-                    // origin sent into telemetry, indistinguishable from a real one.
-                    TransportOutcome::ServedFromCache
-                    | TransportOutcome::MappingOnly
-                    | TransportOutcome::Error(_) => None,
+                    // No HTTP call was made, so there is no status to report.
+                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
                 }
             }
             ConnectorSelector::ConnectorResponseBodySize {
@@ -355,9 +327,7 @@ impl Selector for ConnectorSelector {
                         .get::<WireByteCount>()
                         .map(|c| Value::I64(c.0.load(Ordering::Relaxed) as i64)),
                     // Nothing went over the wire, so there are no wire bytes to count.
-                    TransportOutcome::ServedFromCache
-                    | TransportOutcome::MappingOnly
-                    | TransportOutcome::Error(_) => None,
+                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
                 }
             }
             ConnectorSelector::ResponseMappingProblems {
@@ -631,23 +601,6 @@ mod tests {
         }
     }
 
-    // A cache hit replays the mapped response but has no transport response (nothing went over
-    // the wire), so the outcome is `TransportOutcome::ServedFromCache`.
-    fn connector_response_cache_hit() -> Response {
-        Response {
-            context: Context::new(),
-            subgraph_name: String::new(),
-            transport_outcome: TransportOutcome::ServedFromCache,
-            mapped_response: MappedResponse::Data {
-                data: serde_json::json!({})
-                    .try_into()
-                    .expect("expecting valid JSON"),
-                key: response_key(),
-                problems: vec![],
-            },
-        }
-    }
-
     fn connector_response_with_header() -> Response {
         connector_response_with_header_for_subgraph(String::new())
     }
@@ -792,22 +745,6 @@ mod tests {
         assert_eq!(
             Some("defaulted".into()),
             selector.on_response(&connector_response(StatusCode::OK))
-        );
-    }
-
-    #[test]
-    fn connector_on_response_header_default_applies_on_cache_hit() {
-        // On a cache hit there is no transport response, but a configured `default` must still be
-        // reported rather than dropped — otherwise defaulted telemetry goes quiet as the cache hit
-        // rate climbs.
-        let selector = ConnectorSelector::ConnectorResponseHeader {
-            connector_http_response_header: TEST_HEADER_NAME.to_string(),
-            redact: None,
-            default: Some("defaulted".into()),
-        };
-        assert_eq!(
-            Some("defaulted".into()),
-            selector.on_response(&connector_response_cache_hit())
         );
     }
 

@@ -166,24 +166,6 @@ pub enum TransportOutcome {
 
     /// The connector call was attempted and failed at the transport level.
     Error(Error),
-
-    /// No connector call was made: the response was served from the router's response
-    /// cache. There is no status, no headers and no upstream body, because nothing went
-    /// over the wire.
-    ServedFromCache,
-}
-
-impl TransportOutcome {
-    /// Whether this response was served from the router's response cache rather than
-    /// from a connector call.
-    ///
-    /// Deliberately the only convenience accessor here. An `http_response()` helper
-    /// returning `Option<&HttpResponse>` would hand every reader back the same silent
-    /// `else` that this enum exists to remove, so reading a status or a header means
-    /// matching and saying what each of the other three states does instead.
-    pub fn served_from_cache(&self) -> bool {
-        matches!(self, Self::ServedFromCache)
-    }
 }
 
 /// Response type for a connector

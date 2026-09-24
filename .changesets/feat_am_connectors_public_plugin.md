@@ -25,7 +25,7 @@ On the request:
 On the response:
 
 - `Response.context` is readable and writable.
-- `Response.transport_outcome` exposes the raw transport outcome, naming each state it can be in: `Response` (the call was made over HTTP and the upstream responded — the only state carrying a status and headers), `MappingOnly` (a mapping-only connector, which has no transport at all), `Error` (the call was attempted and failed at the transport level), or `ServedFromCache` (no call was made — the response came from the router's response cache).
+- `Response.transport_outcome` exposes the raw transport outcome, naming each state it can be in: `Response` (the call was made over HTTP and the upstream responded — the only state carrying a status and headers), `MappingOnly` (a mapping-only connector, which has no transport at all), or `Error` (the call was attempted and failed at the transport level).
 - `Response::data()` / `set_data()` and `Response::error()` / `set_error_message()` / `set_error_code()` read and change what is returned to the client.
 
 Two things are worth knowing when moving a customization between a coprocessor and a plugin:

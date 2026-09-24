@@ -53,6 +53,12 @@ pub(super) struct Document {
     /// TTL, leaving `ConnectorSelector::ResponseMappingProblems` and the cache debugger showing
     /// a clean connector for a response that has problems. Always empty on the subgraph path.
     pub(super) mapping_problems: Vec<Problem>,
+    /// The HTTP status the connector's upstream actually returned, persisted so a cache hit can
+    /// report the same status a miss did. A connector may declare a non-2xx status successful
+    /// via `@connect(errors: { is_success: ... })`, in which case that response is cached and
+    /// defaulting a hit to `200` would contradict the operator's own schema. `None` on the
+    /// subgraph path, which has no upstream status to replay.
+    pub(super) status: Option<u16>,
 }
 
 /// A `CacheEntry` is a unit of data returned from the cache. It contains the cache key, value, and
@@ -72,6 +78,10 @@ pub(super) struct CacheEntry {
     /// [`Document::mapping_problems`]; empty for subgraph entries and for entries stored before
     /// mapping problems were persisted.
     pub(super) mapping_problems: Vec<Problem>,
+    /// The upstream HTTP status recorded when this entry was stored. See [`Document::status`];
+    /// `None` for subgraph entries and for connector entries stored before the status was
+    /// persisted, in which case the cache-hit path falls back to `200`.
+    pub(super) status: Option<u16>,
 }
 
 /// The `CacheStorage` trait defines an API that the backing storage layer must implement for

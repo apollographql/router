@@ -60,6 +60,11 @@ struct CacheValue {
     // written before this field existed still deserialize.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     mapping_problems: Vec<Problem>,
+    // The upstream HTTP status for this entry, replayed on a cache hit so a hit and a miss
+    // report the same status. Defaulted rather than required, so entries written before this
+    // field existed still deserialize; those fall back to `200` at the read site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
 }
 
 impl ValueType for CacheValue {}
@@ -78,6 +83,7 @@ impl From<(&str, CacheValue)> for CacheEntry {
                 ..Default::default()
             }),
             mapping_problems: cache_value.mapping_problems,
+            status: cache_value.status,
         }
     }
 }
@@ -418,6 +424,7 @@ impl CacheStorage for Storage {
                 cache_control: document.control,
                 cache_tags: Some(cdn_invalidation_tags.into_iter().collect()),
                 mapping_problems: document.mapping_problems,
+                status: document.status,
             };
             let _: () = pipeline
                 .set::<(), _, _>(
@@ -709,6 +716,7 @@ mod tests {
             expire: Duration::from_secs(60),
             scope: CacheScope::Subgraph,
             mapping_problems: Vec::new(),
+            status: None,
         }
     }
 

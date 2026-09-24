@@ -2545,6 +2545,8 @@ async fn cache_store_root_from_response(
                 scope: CacheScope::Subgraph,
                 // Subgraph responses have no connector response mapping.
                 mapping_problems: Vec::new(),
+                // ... nor an upstream connector status to replay.
+                status: None,
             };
 
             let subgraph_name = response.subgraph_name.clone();
@@ -3430,6 +3432,9 @@ pub(super) fn build_entity_store_document(
         // exists on a hit for `ConnectorSelector::ResponseMappingProblems` to read them from.
         // Root-field entries do carry them (see `ConnectorRequestCacheService`).
         mapping_problems: Vec::new(),
+        // Entity entries are replayed above `make_requests`, where no transport response is
+        // reconstructed, so there is no status to record.
+        status: None,
     }
 }
 

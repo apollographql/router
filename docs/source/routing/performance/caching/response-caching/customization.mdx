@@ -26,9 +26,10 @@ For basic response caching setup, see the [Quickstart](/router/performance/cachi
   - **Subgraph responses** are cached at the subgraph service level, right after coprocessor and Rhai plugins, so the
     coprocessor and Rhai subgraph stages still run on a cache hit (both at request and response level).
   - **Connector root fields** are cached at the connector HTTP request level, so the coprocessor's
-    `connector_request`/`connector_response` stages still run on a cache hit. Because no HTTP call happened, the
-    `connector_response` payload carries `cacheHit: true` and no `statusCode` or `headers`, and a status or headers
-    returned by the coprocessor for a cache hit are ignored.
+    `connector_request`/`connector_response` stages still run on a cache hit. A cached response is replayed as an
+    ordinary connector response, carrying the status the API returned when the entry was stored and its cache-control
+    headers, so your coprocessor does not need to distinguish a cache hit from a live call. Response headers other than
+    cache-control are not stored, so they are absent on a hit.
   - **Connector entity fetches** are cached above `make_requests`, where one GraphQL fetch fans out into several HTTP
     requests. A fully cached entity fetch therefore performs no connector requests at all, and runs none of the layers
     attached to them: no coprocessor stages, and no connector-level telemetry, header propagation, traffic shaping or
