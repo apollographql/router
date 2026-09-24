@@ -66,6 +66,8 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::layers::persisted_queries::RequestPersistedQueryId;
 
@@ -238,7 +240,20 @@ impl PluginPrivate for Telemetry {
             }
         }
 
+        // Set up feature usage list
+        let full_config = init
+            .full_config
+            .as_ref()
+            .expect("Required full router configuration not found in telemetry plugin");
+
         let mut config = init.config;
+        // Apollo reporting identifies the schema it reports against.
+        let apollo_configured = full_config
+            .pointer("/telemetry/apollo")
+            .is_some_and(serde_json::Value::is_object);
+        if apollo_configured || (apollo_key().is_some() && apollo_graph_reference().is_some()) {
+            config.apollo.schema_id = init.supergraph_schema_id.to_string();
+        }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
         if let Err(err) = config.instrumentation.validate() {
@@ -254,11 +269,6 @@ impl PluginPrivate for Telemetry {
         let (activation, custom_endpoints, apollo_metrics_sender) =
             reload::prepare(&init.previous_config, &config)?;
 
-        // Set up feature usage list
-        let full_config = init
-            .full_config
-            .as_ref()
-            .expect("Required full router configuration not found in telemetry plugin");
         let enabled_features = Self::extract_enabled_features(full_config);
         ::tracing::debug!("Enabled scale features: {:?}", enabled_features);
 

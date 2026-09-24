@@ -11,7 +11,6 @@ use tower::BoxError;
 use tracing::Instrument;
 
 use super::plugins::create_plugins;
-use super::plugins::inject_schema_id;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::storage::connect_redis;
 use crate::configuration::Configuration;
@@ -121,14 +120,12 @@ pub(super) async fn maybe_bootstrap_telemetry(
             .iter()
             .find(|factory| factory.name == "apollo.telemetry")
     {
-        let mut telemetry_config = configuration
+        let telemetry_config = configuration
             .apollo_plugins
             .plugins
             .get("telemetry")
             .cloned();
-        if let Some(plugin_config) = &mut telemetry_config {
-            inject_schema_id(schema.schema_id.as_str(), plugin_config);
-
+        if let Some(plugin_config) = &telemetry_config {
             // No previous config: this branch only runs on first boot (`previous_config`
             // is `None` per the guard above).
             let telemetry_init = PluginInit::builder()

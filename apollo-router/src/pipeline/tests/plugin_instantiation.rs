@@ -13,7 +13,6 @@ use tower_http::BoxError;
 
 use crate::AllowedFeature;
 use crate::configuration::Configuration;
-use crate::pipeline::plugins::inject_schema_id;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::PipelineFactory;
@@ -154,18 +153,29 @@ async fn test_yaml_plugins_combo_start_and_fail() {
     assert!(service.is_err())
 }
 
-#[test]
-fn test_inject_schema_id() {
-    let mut config = json!({ "apollo": {} });
-    inject_schema_id(
-        "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8",
-        &mut config,
-    );
-    let config = serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
-    assert_eq!(
-        &config.apollo.schema_id,
-        "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
-    );
+/// The telemetry plugin reports against the supergraph schema's ID when Apollo reporting is
+/// configured.
+#[tokio::test(flavor = "multi_thread")]
+async fn telemetry_reports_the_supergraph_schema_id() {
+    let schema_id = "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8";
+    let factory = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.telemetry")
+        .expect("telemetry is registered");
+    let plugin = factory
+        .create_instance(
+            PluginInit::fake_builder()
+                .config(json!({ "apollo": {} }))
+                .supergraph_schema_id(Arc::new(schema_id.to_string()))
+                .full_config(json!({ "telemetry": { "apollo": {} } }))
+                .build(),
+        )
+        .await
+        .expect("telemetry builds");
+    let telemetry = plugin
+        .as_any()
+        .downcast_ref::<crate::plugins::telemetry::Telemetry>()
+        .expect("the telemetry plugin");
+    assert_eq!(telemetry.config.apollo.schema_id, schema_id);
 }
 
 fn get_plugin_config(plugin: &str) -> &str {

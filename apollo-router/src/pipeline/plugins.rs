@@ -22,8 +22,6 @@ use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
-use crate::services::apollo_graph_reference;
-use crate::services::apollo_key;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -237,17 +235,12 @@ impl PluginRegistrar<'_> {
         let span = Self::plugin_span(&full_name);
         async {
             let factory = self.take_factory(&full_name);
-            let mut plugin_config = self
+            let plugin_config = self
                 .apollo_plugins_config
                 .remove(name)
                 .unwrap_or(Value::Object(Map::new()));
             let mut full_config = None;
             if full_name == "apollo.telemetry" {
-                // The apollo.telemetry plugin isn't happy with empty config, so we
-                // give it some. If any of the other mandatory plugins need special
-                // treatment, then we'll have to perform it here
-                inject_schema_id(&self.supergraph_schema_id, &mut plugin_config);
-
                 // Only the telemetry plugin should have access to the full configuration
                 full_config = self.validated_yaml.clone();
             }
@@ -408,30 +401,5 @@ impl PluginRegistrar<'_> {
         } else {
             Ok(self.plugin_instances)
         }
-    }
-}
-
-pub(crate) fn inject_schema_id(
-    // Ideally we'd use &SchemaHash, but we'll need to update a bunch of tests to do so
-    schema_id: &str,
-    configuration: &mut Value,
-) {
-    if configuration.get("apollo").is_none() {
-        // Warning: this must be done here, otherwise studio reporting will not work
-        if apollo_key().is_some() && apollo_graph_reference().is_some() {
-            if let Some(telemetry) = configuration.as_object_mut() {
-                telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
-            }
-        } else {
-            return;
-        }
-    }
-    if let Some(apollo) = configuration.get_mut("apollo")
-        && let Some(apollo) = apollo.as_object_mut()
-    {
-        apollo.insert(
-            "schema_id".to_string(),
-            Value::String(schema_id.to_string()),
-        );
     }
 }
