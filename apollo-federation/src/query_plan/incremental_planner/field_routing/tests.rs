@@ -2648,7 +2648,7 @@ fn split_avoid_filters_enumerated_options() {
     let fetch_node = NodeIndex::new(0);
 
     let unfiltered = {
-        let pending = Arc::new(y_pending(&space, fetch_node, None));
+        let pending = Arc::new(t_pending(&space, "y", fetch_node, None));
         space
             .cached_routing_options(&pending)
             .expect("options enumerate")
@@ -2656,7 +2656,7 @@ fn split_avoid_filters_enumerated_options() {
     assert!(!unfiltered.is_empty(), "y must have routing options");
     let avoided = unfiltered[0].target_subgraph().clone();
 
-    let mut avoiding = y_pending(&space, fetch_node, None);
+    let mut avoiding = t_pending(&space, "y", fetch_node, None);
     avoiding.split_avoid = Some(avoided.clone());
     let filtered = space
         .cached_routing_options(&Arc::new(avoiding))
