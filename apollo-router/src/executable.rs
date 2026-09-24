@@ -28,6 +28,7 @@ use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::parse_configuration;
+use crate::configuration::uses_migrated_settings;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
@@ -483,9 +484,20 @@ impl Executable {
                 command: ConfigSubcommand::Validate { config_path },
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
-                parse_configuration(&config_string, Expansion::default()?, Migration::None)?;
+                // Validate what startup would load, including automatic migration.
+                parse_configuration(
+                    &config_string,
+                    Expansion::default()?,
+                    Migration::WithinMajor,
+                )?;
 
                 println!("Configuration at path {config_path:?} is valid!");
+                if uses_migrated_settings(&config_string) {
+                    println!(
+                        "Some of its settings are upgraded automatically at startup. Run `router config upgrade {}` to update the file.",
+                        config_path.display()
+                    );
+                }
 
                 Ok(())
             }

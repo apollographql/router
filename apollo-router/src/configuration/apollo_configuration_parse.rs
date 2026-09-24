@@ -44,11 +44,12 @@ fn report_at(mut errors: ErrorCollector<'_>, path: &[String], message: String) {
 
 impl apollo_configuration::Configuration for Configuration {}
 
-/// Whether parsing first applies the current major version's migrations, as startup and reload
-/// do. `router config validate` checks the file as written.
+/// Whether parsing first applies the current major version's migrations. Startup, reload and
+/// `router config validate` do; tests can check a document as written.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Migration {
     WithinMajor,
+    #[cfg(test)]
     None,
 }
 
@@ -213,6 +214,7 @@ pub(crate) fn parse_configuration(
         Migration::WithinMajor => {
             upgrade_configuration(&original, true, UpgradeMode::current_minor())?
         }
+        #[cfg(test)]
         Migration::None => original.clone(),
     };
     let options =

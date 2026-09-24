@@ -48,6 +48,7 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
+pub(crate) use self::upgrade::uses_migrated_settings;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
