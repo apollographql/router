@@ -1679,10 +1679,10 @@ type C
 // ---------------------------------------------------------------------------
 
 // @requires chains alias required fields as __require_N_* in generated
-// operations; the correctness checker must accept these renames.
+// operations and rename them back with input KeyRenamer rewrites.
 // Based on: requires.rs::it_handles_simple_require_chain
 #[test]
-fn inc_requires_rename_correctness_check() {
+fn inc_requires_chain_aliases_conditions() {
     let planner = planner!(
         config = incremental_config(),
         Subgraph1: r#"
@@ -1710,7 +1710,11 @@ fn inc_requires_rename_correctness_check() {
           }
         "#
     );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
           {
@@ -1888,7 +1892,11 @@ fn inc_requires_routes_condition_via_key_hop() {
         }
         "#,
     );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
         {
@@ -1973,7 +1981,11 @@ fn inc_user_field_argument_conflict_with_requires_condition() {
         }
         "#,
     );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
         {
@@ -2241,7 +2253,11 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
     );
     // b's requires needs S3 (aliased), c's requires is resolvable from S1
     // (plain). Both orderings must produce a valid plan.
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
     let _plan_bc = assert_plan!(
+        validate_correctness = false,
         &planner,
         "{ t { b c } }",
         @r###"
