@@ -1,7 +1,7 @@
 //! Parses router configuration through the shared `apollo-configuration` crate.
 //!
-//! Only tests call this adapter. Routing production loading through it remains a separate
-//! cutover change.
+//! Startup, hot reload, `Configuration::from_str` and `router config validate` all load
+//! configuration here.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,7 +29,6 @@ impl apollo_configuration::Configuration for Configuration {}
 /// Whether parsing first applies the current major version's migrations, as startup and reload
 /// do. `router config validate` checks the file as written.
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum Migration {
     WithinMajor,
     None,
@@ -39,13 +38,11 @@ pub(crate) enum Migration {
 /// overrides. The adapter always adds Router's schema itself, because the retained document's
 /// own schema accepts anything and would otherwise skip validation and type-directed coercion.
 #[derive(Default)]
-#[allow(dead_code)]
 pub(crate) struct ExternalValues {
     variables: Vec<Box<dyn VariableProvider>>,
     injections: Vec<Injection>,
 }
 
-#[allow(dead_code)]
 impl ExternalValues {
     /// Appends an expansion provider, as [`ParseYamlOptions::add_variables`] does.
     pub(crate) fn add_variables(mut self, provider: impl VariableProvider + 'static) -> Self {
@@ -136,14 +133,13 @@ impl apollo_configuration::Configuration for ExpandedDocument {}
 /// # Errors
 /// Returns errors from YAML parsing, migration, expansion, overrides, schema validation,
 /// deserialization, or plugin settings.
-#[allow(dead_code)]
 pub(crate) fn parse_configuration(
     text: &str,
     external: impl Into<ExternalValues>,
     migration: Migration,
 ) -> Result<Configuration, ConfigurationError> {
     // Migration serialization must not hide duplicate keys in the original document.
-    super::yaml::parse(text)?;
+    super::yaml::check_duplicate_keys(text)?;
     let original: Value = if text.trim().is_empty() {
         Value::Object(Default::default())
     } else {

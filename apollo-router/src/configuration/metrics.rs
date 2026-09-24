@@ -683,6 +683,8 @@ impl From<InstrumentData> for Metrics {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use rust_embed::RustEmbed;
     use serde_json::json;
 
@@ -717,6 +719,36 @@ mod test {
             }
             .with_metrics()
             .await;
+        }
+    }
+
+    /// Production reads usage gauges from the document that parsing retains. For every fixture,
+    /// that document must drive the same gauges as the document startup migrates the file to.
+    #[test]
+    fn parsed_configuration_keeps_usage_telemetry_meaning() {
+        let major = env!("CARGO_PKG_VERSION_MAJOR").parse().expect("an integer");
+        for file_name in Asset::iter() {
+            let source = Asset::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data).expect("expected utf8");
+            let migrated = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(input).expect("config must be valid yaml"),
+                false,
+                crate::configuration::upgrade::UpgradeMode::Minor(major),
+            )
+            .expect("the fixture migrates");
+            let parsed = crate::Configuration::from_str(input)
+                .unwrap_or_else(|error| panic!("{file_name}: {error}"));
+
+            let mut from_document = InstrumentData::default();
+            from_document.populate_config_instruments(&migrated);
+            let mut from_parsed = InstrumentData::default();
+            from_parsed.populate_config_instruments(
+                parsed
+                    .validated_yaml
+                    .as_ref()
+                    .expect("parsing retains the document"),
+            );
+            assert_eq!(from_parsed.data, from_document.data, "{file_name}");
         }
     }
 

@@ -142,7 +142,6 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.15.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
-jsonschema = { version = "0.56.0", default-features = false }
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"] }
 libc = "0.2.155"
 linkme = "0.3.30"
@@ -318,6 +317,7 @@ fred = { version = "10.1.0", features = [
 ] }
 futures-test = "0.3.30"
 insta.workspace = true
+jsonschema = { version = "0.56.0", default-features = false }
 maplit = "1.0.2"
 brotli = "8.0.0"
 memchr = { version = "2.7.4", default-features = false }

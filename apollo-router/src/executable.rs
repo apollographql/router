@@ -23,11 +23,11 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
+use crate::configuration::Migration;
 use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::schema::Mode;
-use crate::configuration::validate_yaml_configuration;
+use crate::configuration::parse_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
@@ -483,12 +483,7 @@ impl Executable {
                 command: ConfigSubcommand::Validate { config_path },
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
-                validate_yaml_configuration(
-                    &config_string,
-                    Expansion::default()?,
-                    Mode::NoUpgrade,
-                )?
-                .validate()?;
+                parse_configuration(&config_string, Expansion::default()?, Migration::None)?;
 
                 println!("Configuration at path {config_path:?} is valid!");
 

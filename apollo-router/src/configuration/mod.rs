@@ -40,11 +40,12 @@ use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
+pub(crate) use self::apollo_configuration_parse::Migration;
+pub(crate) use self::apollo_configuration_parse::parse_configuration;
 use self::cors::Cors;
 use self::expansion::Expansion;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
-pub(crate) use self::schema::validate_yaml_configuration;
 use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
@@ -667,8 +668,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, schema::Mode::Upgrade)?
-            .validate()
+        parse_configuration(s, Expansion::default()?, Migration::WithinMajor)
     }
 }
 

@@ -13,8 +13,8 @@ use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
-use super::schema::Mode;
-use super::schema::validate_yaml_configuration;
+use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::parse_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::configuration::cors::Policy;
@@ -164,7 +164,7 @@ fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
 
 #[test]
 fn unknown_fields() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   path: /
@@ -172,68 +172,50 @@ subgraphs:
   account: true
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
-    .expect_err("should have resulted in an error");
-    assert_eq!(
-        error.to_string(),
-        String::from(
-            r#"configuration had errors: 
-1. at line 4
-
-  
-  supergraph:
-    path: /
-┌ subgraphs:
-|   account: true
-└-----> Additional properties are not allowed ('subgraphs' was unexpected)
-
-"#
-        )
+    .expect_err("should have resulted in an error")
+    .to_string();
+    assert!(
+        error.contains("Additional properties are not allowed ('subgraphs' was unexpected)"),
+        "{error}"
     );
+    assert!(error.contains("[4:1]"), "{error}");
 }
 
 #[test]
 fn unknown_fields_at_root() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 unknown:
   foo: true
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
-    .expect_err("should have resulted in an error");
-    assert_eq!(
-        error.to_string(),
-        String::from(
-            r#"configuration had errors: 
-1. at line 2
-
-  
-┌ unknown:
-|   foo: true
-└-----> Additional properties are not allowed ('unknown' was unexpected)
-
-"#
-        )
+    .expect_err("should have resulted in an error")
+    .to_string();
+    assert!(
+        error.contains("Additional properties are not allowed ('unknown' was unexpected)"),
+        "{error}"
     );
+    assert!(error.contains("[2:1]"), "{error}");
 }
 
 #[test]
 fn empty_config() {
-    validate_yaml_configuration(
+    parse_configuration(
         r#"
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("should have been ok with an empty config");
 }
 
 #[test]
 fn line_precise_config_errors() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 plugins:
   non_existant:
@@ -243,7 +225,7 @@ telemetry:
   another_non_existant: 3
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -251,7 +233,7 @@ telemetry:
 
 #[test]
 fn line_precise_config_errors_with_errors_after_first_field() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   # The socket address and port to listen on
@@ -261,7 +243,7 @@ supergraph:
   another_one: true
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -269,7 +251,7 @@ supergraph:
 
 #[test]
 fn line_precise_config_errors_bad_type() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   # The socket address and port to listen on
@@ -277,7 +259,7 @@ supergraph:
   listen: true
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -285,7 +267,7 @@ supergraph:
 
 #[test]
 fn line_precise_config_errors_with_inline_sequence() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   # The socket address and port to listen on
@@ -295,7 +277,7 @@ cors:
   allow_headers: [ Content-Type, 5 ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -303,7 +285,7 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_sequence() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   # The socket address and port to listen on
@@ -315,7 +297,7 @@ cors:
     - 5
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -323,14 +305,14 @@ cors:
 
 #[test]
 fn it_does_not_allow_invalid_cors_headers() {
-    let cfg = validate_yaml_configuration(
+    let cfg = parse_configuration(
         r#"
 cors:
   allow_credentials: true
   allow_headers: [ "*" ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -345,14 +327,14 @@ cors:
 
 #[test]
 fn it_does_not_allow_invalid_cors_methods() {
-    let cfg = validate_yaml_configuration(
+    let cfg = parse_configuration(
         r#"
 cors:
   allow_credentials: true
   methods: [ GET, "*" ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -367,14 +349,14 @@ cors:
 
 #[test]
 fn cors_does_not_allow_invalid_cors_origins() {
-    let cfg = validate_yaml_configuration(
+    let cfg = parse_configuration(
         r#"
 cors:
   allow_credentials: true
   allow_any_origin: true
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -389,14 +371,14 @@ cors:
 
 #[test]
 fn cors_doesnt_allow_origins_wildcard() {
-    let cfg = validate_yaml_configuration(
+    let cfg = parse_configuration(
         r#"
 cors:
   policies:
     - origins: ["*"]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -419,7 +401,7 @@ fn validate_project_config_files() {
             .unwrap();
 
         // Documents may still use shapes that startup migrates within the major version.
-        if let Err(e) = validate_yaml_configuration(&doc.yaml, expansion, Mode::Upgrade) {
+        if let Err(e) = parse_configuration(&doc.yaml, expansion, Migration::WithinMajor) {
             panic!("{} configuration error: \n{}", doc.path.display(), e)
         }
     }
@@ -431,16 +413,117 @@ fn it_does_not_leak_env_variable_values() {
         .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
         .build()
         .unwrap();
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
         expansion,
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("Must have an error because we expect a boolean");
     insta::assert_snapshot!(error.to_string());
+}
+
+/// A mistyped secret fails schema validation. The error must point at the setting in the file
+/// without printing the value, whether it is a scalar or a list. The previous loader printed
+/// both the YAML line and the rejected value.
+#[test]
+fn schema_validation_errors_do_not_print_secret_values() {
+    for (password, secrets) in [
+        ("987654321", &["987654321"][..]),
+        (
+            "[first-secret-part, second-secret-part]",
+            &["first-secret-part", "second-secret-part"][..],
+        ),
+    ] {
+        let text = format!(
+            "# Redis for the query plan cache\nsupergraph:\n  query_planning:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        password: {password}\n"
+        );
+
+        let error = Configuration::from_str(&text)
+            .expect_err("a Redis password must be a string")
+            .to_string();
+
+        for secret in secrets {
+            assert!(
+                !error.contains(secret),
+                "the error must not print the secret: {error}"
+            );
+        }
+        assert!(
+            error.contains("password: [REDACTED]"),
+            "the snippet should quote the setting with its value redacted: {error}"
+        );
+        // The comment makes the Redis settings start on line 6 of the file.
+        assert!(
+            error.contains("[6:9]"),
+            "the error should refer to the setting's line in the file: {error}"
+        );
+    }
+}
+
+/// A secret supplied through expansion is not printed when its expanded value is invalid.
+#[test]
+fn schema_validation_errors_do_not_print_expanded_secret_values() {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", "expanded-secret-value") // gitleaks:allow
+        .build();
+    let error = parse_configuration(
+        "supergraph:\n  query_planning:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        password: ${env.TEST_CONFIG_REDIS_PASSWORD}\n        unexpected: true\n",
+        expansion,
+        Migration::None,
+    )
+    .expect_err("the Redis settings contain an unknown field")
+    .to_string();
+
+    assert!(!error.contains("expanded-secret-value"), "{error}");
+    assert!(error.contains("unexpected"), "{error}");
+}
+
+/// An expansion reference anchored in a non-secret field and aliased into `password`.
+const ANCHORED_EXPANSION: &str = "apq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${env.TEST_CONFIG_REDIS_PASSWORD}\n        password: *pw\n";
+
+fn parse_anchored_expansion(text: &str) -> String {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", "aliased-secret-value") // gitleaks:allow
+        .build();
+    parse_configuration(text, expansion, Migration::WithinMajor)
+        .expect_err("the Redis timeout is invalid")
+        .to_string()
+}
+
+/// Pins a known limitation: the shared parser redacts `password`, but the error about the
+/// anchoring `timeout` quotes the value its expansion reference resolved to. When the shared
+/// parser redacts values reached through an anchor, this should assert that the value is hidden.
+#[test]
+fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_field() {
+    let error = parse_anchored_expansion(ANCHORED_EXPANSION);
+
+    assert!(error.contains("expected a duration"), "{error}");
+    assert!(
+        error.contains("password: [REDACTED]"),
+        "the secret field itself must stay redacted: {error}"
+    );
+    assert!(
+        error.contains("aliased-secret-value"),
+        "expected the known limitation; update this test if anchored values are redacted: {error}"
+    );
+}
+
+/// With legacy CORS settings, startup migrates the document first. The migrated copy fails on
+/// the timeout, so the file as written is reported instead: its unmigrated `origins` key fails
+/// schema validation before the timeout is read, and the secret is not printed.
+#[test]
+fn migrated_anchored_expansions_fall_back_without_printing_the_secret() {
+    let error = parse_anchored_expansion(&format!(
+        "cors:\n  origins:\n    - https://example.com\n{ANCHORED_EXPANSION}"
+    ));
+
+    assert!(error.contains("'origins' was unexpected"), "{error}");
+    assert!(!error.contains("aliased-secret-value"), "{error}");
 }
 
 #[test]
@@ -539,57 +622,41 @@ fn redacted_redis_credentials_are_hidden_from_debug_output() {
     assert_eq!(username.unredact(), "redis-admin");
 }
 
+/// Expansion is coerced to the type the schema declares, so an expanded value in a list of
+/// strings is a string even when it looks like a number or a boolean. The previous loader
+/// rejected these values.
 #[test]
-fn line_precise_config_errors_with_inline_sequence_env_expansion() {
-    let expansion = Expansion::default_builder()
-        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
-        .build()
-        .unwrap();
-    let error = validate_yaml_configuration(
-        r#"
-supergraph:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-cors:
-  allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
-        "#,
-        expansion,
-        Mode::NoUpgrade,
-    )
-    .expect_err("should have resulted in an error");
-    insta::assert_snapshot!(error.to_string());
-}
+fn expanded_values_in_a_string_sequence_are_strings() {
+    for allow_headers in [
+        r#"[ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]"#,
+        "\n    - Content-Type\n    - \"${env.TEST_CONFIG_UNSET_ENV_UNIQUE:-true}\"",
+    ] {
+        let expansion = Expansion::default_builder()
+            .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+            .build()
+            .unwrap();
+        let text = format!("cors:\n  allow_headers: {allow_headers}\n");
 
-#[test]
-fn line_precise_config_errors_with_sequence_env_expansion() {
-    let expansion = Expansion::default_builder()
-        .mocked_env_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
-        .build()
-        .unwrap();
+        let config = parse_configuration(&text, expansion, Migration::None)
+            .unwrap_or_else(|error| panic!("{text}: {error}"));
 
-    let error = validate_yaml_configuration(
-        r#"
-supergraph:
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-cors:
-  allow_headers:
-    - Content-Type
-    - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
-        "#,
-        expansion,
-        Mode::NoUpgrade,
-    )
-    .expect_err("should have resulted in an error");
-    insta::assert_snapshot!(error.to_string());
+        let expected = if allow_headers.contains("NUMERIC") {
+            "5"
+        } else {
+            "true"
+        };
+        assert_eq!(
+            config.cors.allow_headers,
+            Arc::from(["Content-Type".into(), expected.into()]),
+            "{text}"
+        );
+    }
 }
 
 #[test]
 fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
     #[allow(clippy::literal_string_with_formatting_args)]
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   # The socket address and port to listen on
@@ -599,7 +666,7 @@ supergraph:
   another_one: foo
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -607,13 +674,13 @@ supergraph:
 
 #[test]
 fn expansion_failure_missing_variable() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("must have an error because the env variable is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -621,7 +688,7 @@ supergraph:
 
 #[test]
 fn expansion_failure_unknown_mode() {
-    let error = validate_yaml_configuration(
+    let error = parse_configuration(
         r#"
 supergraph:
   introspection: ${unknown.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
@@ -630,7 +697,7 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect_err("must have an error because the mode is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -638,7 +705,7 @@ supergraph:
 
 #[test]
 fn expansion_prefixing() {
-    validate_yaml_configuration(
+    parse_configuration(
         r#"
 supergraph:
   introspection: ${env.NEEDS_PREFIX}
@@ -648,7 +715,7 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("must have expanded successfully");
 }
@@ -660,7 +727,7 @@ fn expansion_from_file() {
     path.push("configuration");
     path.push("testdata");
     path.push("true.txt");
-    let config = validate_yaml_configuration(
+    let config = parse_configuration(
         &format!(
             r#"
 supergraph:
@@ -669,7 +736,7 @@ supergraph:
             path.to_string_lossy()
         ),
         Expansion::builder().supported_mode("file").build(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("must have expanded successfully");
 
@@ -697,11 +764,8 @@ fn upgrade_old_configuration() {
             let new_config =
                 serde_yaml::to_string(&new_config).expect("must be able to serialize config");
 
-            let result = validate_yaml_configuration(
-                &new_config,
-                Expansion::builder().build(),
-                Mode::NoUpgrade,
-            );
+            let result =
+                parse_configuration(&new_config, Expansion::builder().build(), Migration::None);
 
             match result {
                 Ok(_) => {
@@ -719,7 +783,7 @@ fn upgrade_old_configuration() {
     }
 }
 
-// Regression: old flat-list headers config must be accepted at startup (Mode::Upgrade)
+// Regression: old flat-list headers config must be accepted at startup (Migration::WithinMajor)
 // without requiring the operator to manually add the `operations:` wrapper key.
 #[test]
 fn headers_operations_migration_applied_at_startup() {
@@ -732,8 +796,12 @@ headers:
       - propagate:
           named: authorization
 "#;
-    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::Upgrade)
-        .expect("old headers config should be accepted at startup via automatic migration");
+    parse_configuration(
+        old_config,
+        Expansion::builder().build(),
+        Migration::WithinMajor,
+    )
+    .expect("old headers config should be accepted at startup via automatic migration");
 }
 
 #[test]
@@ -747,7 +815,7 @@ headers:
       - propagate:
           named: authorization
 "#;
-    validate_yaml_configuration(old_config, Expansion::builder().build(), Mode::NoUpgrade)
+    parse_configuration(old_config, Expansion::builder().build(), Migration::None)
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
@@ -773,11 +841,8 @@ fn upgrade_old_minor_configuration() {
             let new_config =
                 serde_yaml::to_string(&new_config).expect("must be able to serialize config");
 
-            let result = validate_yaml_configuration(
-                &new_config,
-                Expansion::builder().build(),
-                Mode::NoUpgrade,
-            );
+            let result =
+                parse_configuration(&new_config, Expansion::builder().build(), Migration::None);
 
             if let Err(err) = result {
                 panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
@@ -820,7 +885,7 @@ fn default_config_has_defaults() {
 #[case("")]
 #[case("plugins:")]
 fn unusual_configs_validate(#[case] input: &str) {
-    validate_yaml_configuration(input, Expansion::builder().build(), Mode::NoUpgrade)
+    parse_configuration(input, Expansion::builder().build(), Migration::None)
         .expect("should be valid configuration");
 }
 
@@ -960,7 +1025,7 @@ fn load_tls() {
     key_path.push("server.key");
     let key_path = key_path.to_string_lossy();
 
-    let cfg = validate_yaml_configuration(
+    let cfg = parse_configuration(
         &format!(
             r#"
 tls:
@@ -971,7 +1036,7 @@ tls:
 "#,
         ),
         Expansion::builder().supported_mode("file").build(),
-        Mode::NoUpgrade,
+        Migration::None,
     )
     .expect("should not have resulted in an error");
     cfg.tls.supergraph.unwrap().tls_config().unwrap();

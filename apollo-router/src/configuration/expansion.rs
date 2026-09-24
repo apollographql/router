@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::env;
 use std::env::VarError;
-use std::fs;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 
@@ -12,8 +11,6 @@ use apollo_configuration::expansion::LookupError;
 use apollo_configuration::expansion::VariableProvider;
 use apollo_configuration::expansion::argument_for_kind;
 use apollo_configuration::provenance::Injection;
-use proteus::Parser;
-use proteus::TransformBuilder;
 use serde_json::Value;
 
 use super::ConfigurationError;
@@ -40,7 +37,6 @@ pub(crate) struct Override {
     /// Override value
     value: Option<Value>,
     /// The command-line flag that supplies `value`, named in diagnostics.
-    #[allow(dead_code)]
     flag: Option<String>,
     /// The type of the value, used to coerce env variables.
     value_type: ValueType,
@@ -57,6 +53,7 @@ pub(crate) enum ValueType {
 }
 
 impl Override {
+    #[cfg(test)]
     fn value(&self) -> Option<Value> {
         self.env_value().or_else(|| self.value.clone())
     }
@@ -81,7 +78,6 @@ impl Override {
     }
 
     /// The override as a shared-parser injection naming its source, when it supplies a value.
-    #[allow(dead_code)]
     fn injection(&self) -> Option<Injection> {
         let path: Vec<&str> = self.config_path.split('.').collect();
         if let (Some(value), Some(name)) = (self.env_value(), &self.env_name) {
@@ -204,38 +200,6 @@ fn dev_mode_defaults() -> Vec<Override> {
 }
 
 impl Expansion {
-    fn context_fn(&self) -> impl Fn(&str) -> Result<Option<String>, ConfigurationError> + '_ {
-        move |key: &str| {
-            if !self
-                .supported_modes
-                .iter()
-                .any(|prefix| key.starts_with(prefix.as_str()))
-            {
-                return Err(ConfigurationError::UnknownExpansionMode {
-                    key: key.to_string(),
-                    supported_modes: self.supported_modes.join("|"),
-                });
-            }
-
-            if let Some(key) = key.strip_prefix("env.") {
-                return self.expand_env(key);
-            }
-            if let Some(key) = key.strip_prefix("file.") {
-                if !std::path::Path::new(key).exists() {
-                    return Ok(None);
-                }
-
-                return fs::read_to_string(key).map(Some).map_err(|cause| {
-                    ConfigurationError::CannotExpandVariable {
-                        key: key.to_string(),
-                        cause: format!("{cause}"),
-                    }
-                });
-            }
-            Err(ConfigurationError::InvalidExpansionModeConfig)
-        }
-    }
-
     pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
         self.get_env(&self.env_name(key))
             .map(Some)
@@ -258,68 +222,6 @@ impl Expansion {
             return Ok(value.clone());
         }
         env::var(name)
-    }
-
-    pub(crate) fn expand(
-        &self,
-        configuration: &serde_json::Value,
-    ) -> Result<serde_json::Value, ConfigurationError> {
-        let mut configuration = configuration.clone();
-        self.defaults(&mut configuration)?;
-        self.visit(&mut configuration)?;
-        Ok(configuration)
-    }
-
-    fn defaults(&self, config: &mut Value) -> Result<(), ConfigurationError> {
-        // Anything that needs expanding via env variable should be placed here. Don't pollute the codebase with calls to std::env.
-        // For testing we have the one fixed expansion. We don't actually want to expand env variables during tests
-        let mut transformer_builder = TransformBuilder::default();
-        transformer_builder = transformer_builder.add_action(Parser::parse("", "")?);
-        for override_config in &self.override_configs {
-            if let Some(value) = override_config.value() {
-                transformer_builder = transformer_builder.add_action(Parser::parse(
-                    &format!("const({value})"),
-                    &override_config.config_path,
-                )?);
-            }
-        }
-        *config = transformer_builder
-            .build()?
-            .apply(config)
-            .map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "could not set configuration defaults as the source configuration had an invalid structure",
-                error: e.to_string(),
-            })?;
-        Ok(())
-    }
-
-    fn visit(&self, value: &mut Value) -> Result<(), ConfigurationError> {
-        let mut expanded: Option<String> = None;
-        match value {
-            Value::String(value) => {
-                let new_value =
-                    shellexpand::env_with_context(value, self.context_fn()).map_err(|e| e.cause)?;
-                if &new_value != value {
-                    expanded = Some(new_value.to_string());
-                }
-            }
-            Value::Array(a) => {
-                for v in a {
-                    self.visit(v)?
-                }
-            }
-            Value::Object(o) => {
-                for v in o.values_mut() {
-                    self.visit(v)?
-                }
-            }
-            _ => {}
-        }
-        // The expansion may have resulted in a primitive, reparse and replace
-        if let Some(expanded) = expanded {
-            *value = coerce(&expanded)
-        }
-        Ok(())
     }
 }
 
@@ -349,7 +251,6 @@ impl From<Expansion> for ExternalValues {
 }
 
 /// Resolves `${env.NAME}`, reading `<prefix>_NAME` when the router has an environment prefix.
-#[allow(dead_code)]
 struct EnvVariables(Expansion);
 
 impl VariableProvider for EnvVariables {
@@ -365,7 +266,6 @@ impl VariableProvider for EnvVariables {
 }
 
 /// Rejects references whose kind is not a supported mode.
-#[allow(dead_code)]
 struct UnsupportedMode {
     supported_modes: String,
 }
@@ -376,15 +276,6 @@ impl VariableProvider for UnsupportedMode {
             "variables must be prefixed with one of '{}' followed by '.' e.g. 'env.'",
             self.supported_modes
         )))
-    }
-}
-
-pub(crate) fn coerce(expanded: &str) -> Value {
-    match serde_yaml::from_str(expanded) {
-        Ok(Value::Bool(b)) => Value::Bool(b),
-        Ok(Value::Number(n)) => Value::Number(n),
-        Ok(Value::Null) => Value::Null,
-        _ => Value::String(expanded.to_string()),
     }
 }
 
