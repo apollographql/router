@@ -209,10 +209,16 @@ async fn it_does_not_allow_both_allow_and_deny_list_in_global_config() {
             "deny_extensions_keys": []
         }
     });
-    let result = build_harness(&config_json).await;
-    assert_eq!(
-        result.expect_err("expected error").to_string(),
-        "Global config cannot have both allow_extensions_keys and deny_extensions_keys"
+    // Settings that fail the plugin's own validation are rejected while parsing.
+    let error = build_harness(&config_json)
+        .await
+        .expect_err("expected error")
+        .to_string();
+    assert!(
+        error.contains(
+            "Global config cannot have both allow_extensions_keys and deny_extensions_keys"
+        ),
+        "{error}"
     );
 }
 
@@ -231,10 +237,16 @@ async fn it_does_not_allow_both_allow_and_deny_list_in_a_subgraph_config() {
             }
         }
     });
-    let result = build_harness(&config_json).await;
-    assert_eq!(
-        result.expect_err("expected error").to_string(),
-        "A subgraph config cannot have both allow_extensions_keys and deny_extensions_keys"
+    // Settings that fail the plugin's own validation are rejected while parsing.
+    let error = build_harness(&config_json)
+        .await
+        .expect_err("expected error")
+        .to_string();
+    assert!(
+        error.contains(
+            "A subgraph config cannot have both allow_extensions_keys and deny_extensions_keys"
+        ),
+        "{error}"
     );
 }
 

@@ -100,8 +100,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");
 
-        let config = Configuration::from_str(config.unwrap_or_default())
-            .expect("valid config required for test");
+        let config = Configuration::from_str(config.unwrap_or_default())?;
 
         let name = &factory.name.replace("apollo.", "");
         let config_for_plugin = config

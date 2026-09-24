@@ -1,5 +1,6 @@
 //! Logic for loading configuration in to an object model
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
@@ -51,13 +52,13 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::graphql;
+use crate::plugin::PluginConfig;
 use crate::plugin::plugins;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
 use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
@@ -222,6 +223,11 @@ pub struct Configuration {
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
 
+    /// Each configured plugin's settings, prepared for construction while parsing and keyed by
+    /// full plugin name.
+    #[serde(skip)]
+    pub(crate) plugin_configs: Arc<HashMap<String, PluginConfig>>,
+
     /// Uplink configuration.
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
@@ -283,9 +289,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
-        let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-
         // Allow the limits plugin to use the configuration from the configuration struct.
         // This means that the limits plugin will get the regular configuration via plugin init.
         ad_hoc.apollo_plugins.plugins.insert(
@@ -296,6 +299,11 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             "health_check".to_string(),
             serde_json::to_value(&ad_hoc.health_check).unwrap(),
         );
+
+        let plugin_configs = parse_plugin_configs(&ad_hoc.apollo_plugins, &ad_hoc.plugins)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        let notify = Configuration::notify(&plugin_configs)
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
 
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
@@ -314,6 +322,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
+            plugin_configs: Arc::new(plugin_configs),
             batching: ad_hoc.batching,
 
             // serde(skip)
@@ -328,6 +337,38 @@ impl<'de> serde::Deserialize<'de> for Configuration {
 }
 
 pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+
+/// Prepares each configured built-in and user plugin's settings for construction. A section
+/// naming no registered plugin is skipped here and reported by validation or construction.
+fn parse_plugin_configs(
+    apollo_plugins: &ApolloPlugins,
+    user_plugins: &UserPlugins,
+) -> Result<HashMap<String, PluginConfig>, ConfigurationError> {
+    let apollo_sections = apollo_plugins
+        .plugins
+        .iter()
+        .map(|(name, settings)| (format!("{APOLLO_PLUGIN_PREFIX}{name}"), settings));
+    let user_sections = user_plugins
+        .plugins
+        .iter()
+        .flatten()
+        .map(|(name, settings)| (name.clone(), settings));
+
+    let mut configs = HashMap::new();
+    for (name, settings) in apollo_sections.chain(user_sections) {
+        let Some(factory) = plugins().find(|factory| factory.name == name) else {
+            continue;
+        };
+        let config = factory.parse_config(settings.clone()).map_err(|error| {
+            ConfigurationError::PluginConfiguration {
+                plugin: name.clone(),
+                error: error.to_string(),
+            }
+        })?;
+        configs.insert(name, config);
+    }
+    Ok(configs)
+}
 
 fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -355,7 +396,14 @@ impl Configuration {
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
-        let notify = Self::notify(&apollo_plugins)?;
+        let plugins = UserPlugins {
+            plugins: Some(plugins),
+        };
+        let apollo_plugins = ApolloPlugins {
+            plugins: apollo_plugins,
+        };
+        let plugin_configs = parse_plugin_configs(&apollo_plugins, &plugins)?;
+        let notify = Self::notify(&plugin_configs)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
@@ -370,12 +418,9 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
+            plugins,
+            apollo_plugins,
+            plugin_configs: Arc::new(plugin_configs),
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
@@ -402,19 +447,26 @@ impl Configuration {
         hash
     }
 
+    /// The configuration retained for the plugin named `full_name`, such as `apollo.telemetry`,
+    /// when the configuration has a section for it.
+    pub(crate) fn plugin_config(&self, full_name: &str) -> Option<&PluginConfig> {
+        self.plugin_configs.get(full_name)
+    }
+
     fn notify(
-        apollo_plugins: &Map<String, Value>,
+        plugin_configs: &HashMap<String, PluginConfig>,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
         if cfg!(test) {
             return Ok(Notify::for_tests());
         }
-        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
+        let notify_queue_cap = match plugin_configs.get(APOLLO_SUBSCRIPTION_PLUGIN) {
             Some(plugin_conf) => {
-                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
-                    .map_err(|err| ConfigurationError::PluginConfiguration {
+                let conf = plugin_conf.typed::<SubscriptionConfig>().map_err(|err| {
+                    ConfigurationError::PluginConfiguration {
                         plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
-                        error: format!("{err:?}"),
-                    })?;
+                        error: err.to_string(),
+                    }
+                })?;
                 conf.queue_capacity
             }
             None => None,
@@ -493,6 +545,13 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let plugins = UserPlugins {
+            plugins: Some(plugins),
+        };
+        let apollo_plugins = ApolloPlugins {
+            plugins: apollo_plugins,
+        };
+        let plugin_configs = parse_plugin_configs(&apollo_plugins, &plugins)?;
         let configuration = Self {
             validated_yaml: Default::default(),
             reload: Default::default(),
@@ -503,12 +562,9 @@ impl Configuration {
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
+            plugins,
+            apollo_plugins,
+            plugin_configs: Arc::new(plugin_configs),
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),

@@ -102,6 +102,23 @@ async fn create_service(config: Configuration) -> Result<(), BoxError> {
     service.map(|_| ())
 }
 
+/// Plugins registered through the public API have their settings typed while the configuration
+/// is parsed, like built-in plugins, so each construction reuses the validated value.
+#[test]
+fn user_plugin_settings_are_typed_while_parsing() {
+    let config: Configuration =
+        "plugins:\n  test.always_starts_and_stops:\n    name: parsed once\n"
+            .parse()
+            .expect("the plugin settings are valid");
+
+    let settings: Conf = config
+        .plugin_config("test.always_starts_and_stops")
+        .expect("the plugin's settings are retained")
+        .typed()
+        .expect("the settings were deserialized during parsing");
+    assert_eq!(settings.name, "parsed once");
+}
+
 #[tokio::test]
 async fn test_yaml_no_extras() {
     let config = Configuration::builder().build().unwrap();

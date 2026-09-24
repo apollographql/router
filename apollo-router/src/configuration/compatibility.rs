@@ -760,27 +760,18 @@ async fn typed_plugin_configs_and_initialization_agree() {
 }
 
 /// The flat deduplication shape passes schema validation but fails typed deserialization.
-/// Migration must nest its settings under `deduplication.all` before plugin initialization.
+/// Startup migrates it under `deduplication.all`; without migration, parsing rejects it before
+/// any plugin is constructed.
 #[test]
-fn unmigrated_flat_subscription_dedup_fails_at_plugin_init_not_at_parse() {
+fn unmigrated_flat_subscription_dedup_is_rejected_while_parsing() {
     let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
 
-    let shared = router_options()
-        .parse::<Configuration>(text)
-        .expect("Configuration-level parsing accepts the unmigrated flat shape");
-    let raw_subscription = shared
-        .apollo_plugins
-        .plugins
-        .get("subscription")
-        .cloned()
-        .expect("subscription config is present");
-    let plugin_init_result: Result<SubscriptionConfig, _> =
-        serde_json::from_value(raw_subscription);
-    assert!(
-        plugin_init_result.is_err(),
-        "the unmigrated flat shape must fail SubscriptionConfig's typed deserialize at plugin \
-         construction, the way it does through router's own pipeline today"
-    );
+    validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
+        .expect("startup migrates the flat shape");
+    let error = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
+        .expect_err("typed deserialization rejects the unmigrated flat shape")
+        .to_string();
+    assert!(error.contains("apollo.subscription"), "{error}");
 }
 
 /// Both parsers report the cross-field conflict between enabled sandbox and homepage settings.
@@ -1028,8 +1019,8 @@ fn effective_settings_agree_for_discovered_project_documents() {
             .supported_mode("file")
             .mocked_env_vars(mocked_env_vars.clone())
             .build();
-        let router = match validate_yaml_configuration(&doc.yaml, router_expansion, Mode::NoUpgrade)
-        {
+        // Documents may still use shapes that startup migrates within the major version.
+        let router = match validate_yaml_configuration(&doc.yaml, router_expansion, Mode::Upgrade) {
             Ok(config) => config,
             Err(error) => {
                 unexpected.push(format!(
@@ -1041,10 +1032,10 @@ fn effective_settings_agree_for_discovered_project_documents() {
             }
         };
 
-        let shared_options = router_options()
+        let external = ExternalValues::default()
             .add_variables(MapVariables(mocked_env_vars.clone()))
             .add_variables(FileVariables);
-        match shared_options.parse::<Configuration>(&doc.yaml) {
+        match parse_via_apollo_configuration(&doc.yaml, external) {
             Ok(shared) => {
                 compared += 1;
                 if let Some(mismatch) = settings_disagreement(&router, &shared) {
@@ -1052,9 +1043,8 @@ fn effective_settings_agree_for_discovered_project_documents() {
                 }
             }
             Err(error) => unexpected.push(format!(
-                "{}: the shared parser rejected a discovered document expected to succeed: {:?}",
+                "{}: the shared parser rejected a discovered document expected to succeed: {error}",
                 doc.path.display(),
-                miette::Report::new(error)
             )),
         }
     }

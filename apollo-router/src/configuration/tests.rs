@@ -418,7 +418,8 @@ fn validate_project_config_files() {
             .build()
             .unwrap();
 
-        if let Err(e) = validate_yaml_configuration(&doc.yaml, expansion, Mode::NoUpgrade) {
+        // Documents may still use shapes that startup migrates within the major version.
+        if let Err(e) = validate_yaml_configuration(&doc.yaml, expansion, Mode::Upgrade) {
             panic!("{} configuration error: \n{}", doc.path.display(), e)
         }
     }
