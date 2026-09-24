@@ -415,8 +415,9 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 /// only when the migrated one failed the schema check. The shared parser validates in one call,
 /// so a migrated document rejected by deserialization or cross-field validation falls back too.
 /// Here startup migration 2045 fixes the flat deduplication settings, the migrated copy then
-/// fails cross-field validation, and the file as written is reported instead: its flat settings
-/// fail typed deserialization.
+/// fails cross-field validation, and the file as written is reported instead. Its cross-field
+/// conflict is reported first, because invalid plugin settings are reported after the rest of
+/// the configuration deserializes.
 #[test]
 fn migrated_document_failing_cross_field_validation_falls_back_to_the_file() {
     let _guard = tracing_test::dispatcher_guard();
@@ -424,16 +425,18 @@ fn migrated_document_failing_cross_field_validation_falls_back_to_the_file() {
     let error = parse(include_str!(
         "testdata/compat/fallback_after_cross_field_validation.yaml"
     ))
-    .expect_err("the flat deduplication settings are invalid as written")
+    .expect_err("sandbox and homepage are both enabled")
     .to_string();
 
-    assert!(error.contains("unknown field `enabled`"), "{error}");
+    assert!(
+        error.contains("sandbox and homepage cannot be enabled"),
+        "{error}"
+    );
     // Only the operator's file has this comment; the serialized migrated copy has none.
     assert!(
         error.contains("# Startup migration 2045"),
         "the diagnostic should quote the operator's file: {error}"
     );
-    assert!(!error.contains("sandbox and homepage"), "{error}");
     tracing_test::logs_assert(|lines| {
         lines
             .iter()

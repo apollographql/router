@@ -1,6 +1,5 @@
 //! Logic for loading configuration in to an object model
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
@@ -44,6 +43,7 @@ pub(crate) use self::apollo_configuration_parse::Migration;
 pub(crate) use self::apollo_configuration_parse::parse_configuration;
 use self::cors::Cors;
 use self::expansion::Expansion;
+use self::plugin_configs::PluginConfigs;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::server::Server;
@@ -54,7 +54,6 @@ use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::graphql;
 use crate::plugin::PluginConfig;
-use crate::plugin::plugins;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
@@ -75,6 +74,7 @@ pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
 mod persisted_queries;
+pub(crate) mod plugin_configs;
 pub(crate) mod schema;
 pub(crate) mod server;
 pub(crate) mod shared;
@@ -224,10 +224,9 @@ pub struct Configuration {
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
 
-    /// Each configured plugin's settings, prepared for construction while parsing and keyed by
-    /// full plugin name.
+    /// Each configured plugin's settings, prepared for construction while parsing.
     #[serde(skip)]
-    pub(crate) plugin_configs: Arc<HashMap<String, PluginConfig>>,
+    pub(crate) plugin_configs: Arc<PluginConfigs>,
 
     /// Uplink configuration.
     #[serde(skip)]
@@ -301,8 +300,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             serde_json::to_value(&ad_hoc.health_check).unwrap(),
         );
 
-        let plugin_configs = parse_plugin_configs(&ad_hoc.apollo_plugins, &ad_hoc.plugins)
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+        let plugin_configs = PluginConfigs::parse(
+            &ad_hoc.apollo_plugins.plugins,
+            ad_hoc.plugins.plugins.as_ref().unwrap_or(&Map::new()),
+        );
         let notify = Configuration::notify(&plugin_configs)
             .map_err(|e| serde::de::Error::custom(e.to_string()))?;
 
@@ -339,38 +340,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
 
 pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
-/// Prepares each configured built-in and user plugin's settings for construction. A section
-/// naming no registered plugin is skipped here and reported by validation or construction.
-fn parse_plugin_configs(
-    apollo_plugins: &ApolloPlugins,
-    user_plugins: &UserPlugins,
-) -> Result<HashMap<String, PluginConfig>, ConfigurationError> {
-    let apollo_sections = apollo_plugins
-        .plugins
-        .iter()
-        .map(|(name, settings)| (format!("{APOLLO_PLUGIN_PREFIX}{name}"), settings));
-    let user_sections = user_plugins
-        .plugins
-        .iter()
-        .flatten()
-        .map(|(name, settings)| (name.clone(), settings));
-
-    let mut configs = HashMap::new();
-    for (name, settings) in apollo_sections.chain(user_sections) {
-        let Some(factory) = plugins().find(|factory| factory.name == name) else {
-            continue;
-        };
-        let config = factory.parse_config(settings.clone()).map_err(|error| {
-            ConfigurationError::PluginConfiguration {
-                plugin: name.clone(),
-                error: error.to_string(),
-            }
-        })?;
-        configs.insert(name, config);
-    }
-    Ok(configs)
-}
-
 fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
@@ -397,13 +366,13 @@ impl Configuration {
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let plugin_configs = PluginConfigs::parse(&apollo_plugins, &plugins).check()?;
         let plugins = UserPlugins {
             plugins: Some(plugins),
         };
         let apollo_plugins = ApolloPlugins {
             plugins: apollo_plugins,
         };
-        let plugin_configs = parse_plugin_configs(&apollo_plugins, &plugins)?;
         let notify = Self::notify(&plugin_configs)?;
 
         let conf = Self {
@@ -455,7 +424,7 @@ impl Configuration {
     }
 
     fn notify(
-        plugin_configs: &HashMap<String, PluginConfig>,
+        plugin_configs: &PluginConfigs,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
         if cfg!(test) {
             return Ok(Notify::for_tests());
@@ -546,13 +515,13 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let plugin_configs = PluginConfigs::parse(&apollo_plugins, &plugins).check()?;
         let plugins = UserPlugins {
             plugins: Some(plugins),
         };
         let apollo_plugins = ApolloPlugins {
             plugins: apollo_plugins,
         };
-        let plugin_configs = parse_plugin_configs(&apollo_plugins, &plugins)?;
         let configuration = Self {
             validated_yaml: Default::default(),
             reload: Default::default(),

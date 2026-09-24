@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_configuration::ConfigError;
+use apollo_configuration::ErrorCollector;
 use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::LookupError;
 use apollo_configuration::expansion::VariableProvider;
@@ -21,9 +22,26 @@ use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 
-// `Configuration::deserialize` already runs the struct's own cross-field validation, so the
-// shared crate's validation hook has nothing further to check.
-impl apollo_configuration::Validate for Configuration {}
+/// Reports every plugin whose settings could not be deserialized, at its section of the document.
+impl apollo_configuration::Validate for Configuration {
+    fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
+        for error in self.plugin_configs.errors() {
+            report_at(
+                errors.inner(),
+                &error.section,
+                error.to_configuration_error().to_string(),
+            );
+        }
+    }
+}
+
+fn report_at(mut errors: ErrorCollector<'_>, path: &[String], message: String) {
+    match path.split_first() {
+        Some((segment, rest)) => report_at(errors.nest(segment.as_str()), rest, message),
+        None => errors.report_simple(message),
+    }
+}
+
 impl apollo_configuration::Configuration for Configuration {}
 
 /// Whether parsing first applies the current major version's migrations, as startup and reload
@@ -471,6 +489,21 @@ mod tests {
             rendered.contains("[11:1]"),
             "the diagnostic should point at the offending line of the original text: {rendered}"
         );
+    }
+
+    /// Every plugin with invalid settings is reported, each against its own section.
+    #[test]
+    fn every_invalid_plugin_is_reported_at_its_section() {
+        let text = "# operator comment\ntraffic_shaping:\n  router:\n    timeout: not-a-duration\nsubscription:\n  deduplication:\n    enabled: true\n";
+
+        let error = parse_configuration(text, ExternalValues::default(), Migration::None)
+            .expect_err("both plugins' settings are invalid")
+            .to_string();
+
+        assert!(error.contains("apollo.traffic_shaping"), "{error}");
+        assert!(error.contains("apollo.subscription"), "{error}");
+        assert!(error.contains("[3:3]"), "{error}");
+        assert!(error.contains("[6:3]"), "{error}");
     }
 
     /// A migrated document that still fails schema validation falls back to validating the

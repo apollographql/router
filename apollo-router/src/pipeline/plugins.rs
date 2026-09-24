@@ -40,6 +40,18 @@ pub(crate) async fn create_plugins(
     license: Arc<LicenseState>,
     previous_config: Option<Arc<Configuration>>,
 ) -> Result<Plugins, BoxError> {
+    // The shared parser reports invalid plugin settings. A configuration deserialized directly
+    // still carries them, and no plugin is built from it.
+    let invalid_settings: Vec<ConfigurationError> = configuration
+        .plugin_configs
+        .errors()
+        .iter()
+        .map(|error| error.to_configuration_error())
+        .collect();
+    if !invalid_settings.is_empty() {
+        return Err(configuration_errors(&invalid_settings));
+    }
+
     let user_plugin_names = configuration
         .plugins
         .plugins
@@ -356,20 +368,23 @@ impl PluginRegistrar<'_> {
                 tracing::error!("{:#}", error);
             }
 
-            let errors_list = self
-                .errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<String>>()
-                .join("\n");
-
-            Err(BoxError::from(format!(
-                "there were {} configuration errors\n{}",
-                self.errors.len(),
-                errors_list
-            )))
+            Err(configuration_errors(&self.errors))
         } else {
             Ok(self.plugin_instances)
         }
     }
+}
+
+/// Combines configuration errors into one error that lists each of them.
+fn configuration_errors(errors: &[ConfigurationError]) -> BoxError {
+    let errors_list = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<String>>()
+        .join("\n");
+    BoxError::from(format!(
+        "there were {} configuration errors\n{}",
+        errors.len(),
+        errors_list
+    ))
 }
