@@ -52,6 +52,7 @@ pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::ne
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
 pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_LICENSE_SOURCE: Mutex<Option<String>> = Mutex::new(None);
 pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
@@ -781,6 +782,8 @@ impl Executable {
         } else {
             opt.license_source(&current_directory)?
         };
+        tracing::info!("using {} as license source", license);
+        *APOLLO_ROUTER_LICENSE_SOURCE.lock() = Some(license.to_string());
 
         // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
         let user_plugins_present = plugins().filter(|p| !p.is_apollo()).count() > 0;

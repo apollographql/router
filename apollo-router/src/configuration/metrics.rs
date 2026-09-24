@@ -586,6 +586,13 @@ impl InstrumentData {
                 atomic.load(Ordering::Relaxed).into()
             }
         }
+        fn mutex_string(mutex: &Mutex<Option<String>>) -> opentelemetry::Value {
+            if cfg!(test) {
+                "test".into()
+            } else {
+                mutex.lock().clone().unwrap_or_default().into()
+            }
+        }
         let mut attributes = HashMap::new();
         attributes.insert(
             "opt.apollo.key".to_string(),
@@ -606,6 +613,10 @@ impl InstrumentData {
         attributes.insert(
             "opt.apollo.graph_artifact_reference".to_string(),
             mutex_is_some(&crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE),
+        );
+        attributes.insert(
+            "opt.apollo.license.source".to_string(),
+            mutex_string(&crate::executable::APOLLO_ROUTER_LICENSE_SOURCE),
         );
         attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),
