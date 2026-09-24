@@ -181,6 +181,16 @@ impl InstrumentData {
             "$.supergraph[?(@.defer_support == true)]"
         );
         populate_config_instrument!(
+            apollo.router.config.incremental_planner,
+            "$.supergraph.query_planning.incremental_planner[?(@.enabled == true)]",
+            opt.beam_width,
+            "$[?(@.beam_width)]",
+            opt.fuel,
+            "$[?(@.fuel)]",
+            opt.timeout,
+            "$[?(@.timeout)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.authentication.jwt,
             "$.authentication[?(@..jwt)]",
             opt.on_error,
@@ -540,6 +550,11 @@ impl InstrumentData {
         populate_config_instrument!(
             apollo.router.config.expose_query_plan,
             "$[?(@.expose_query_plan==true)]"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.supergraph.validate_default_values,
+            "$.supergraph[?(@.validate_default_values == false)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.
