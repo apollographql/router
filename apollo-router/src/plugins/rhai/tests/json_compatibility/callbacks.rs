@@ -409,11 +409,13 @@ async fn cancelling_a_request_skips_response_callbacks() {
     let plugin = plugin("stages.rhai").await;
     let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
     take_conversions();
-    let call = plugin
-        .supergraph_service(mock.boxed())
-        .oneshot(supergraph_request());
-    tokio::pin!(call);
-    let (received, _responder) = tokio::select! {
+    // Own the pinned future so dropping it cancels the call.
+    let mut call = Box::pin(
+        plugin
+            .supergraph_service(mock.boxed())
+            .oneshot(supergraph_request()),
+    );
+    let (received, responder) = tokio::select! {
         received = handle.next_request() => received.unwrap(),
         _ = &mut call => panic!("the call completed before reaching the inner service"),
     };
@@ -422,5 +424,14 @@ async fn cancelling_a_request_skips_response_callbacks() {
         EDITED_REQUEST
     );
     drop(call);
+    // A response arriving after cancellation has no caller left to run response callbacks.
+    responder.send_response(
+        SupergraphResponse::fake_stream_builder()
+            .responses(primary_and_deferred())
+            .context(Context::new())
+            .build()
+            .unwrap(),
+    );
+    tokio::task::yield_now().await;
     assert_eq!(take_conversions(), edits(0));
 }
