@@ -726,14 +726,13 @@ mod test {
     /// that document must drive the same gauges as the document startup migrates the file to.
     #[test]
     fn parsed_configuration_keeps_usage_telemetry_meaning() {
-        let major = env!("CARGO_PKG_VERSION_MAJOR").parse().expect("an integer");
         for file_name in Asset::iter() {
             let source = Asset::get(&file_name).expect("test file must exist");
             let input = std::str::from_utf8(&source.data).expect("expected utf8");
             let migrated = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(input).expect("config must be valid yaml"),
                 false,
-                crate::configuration::upgrade::UpgradeMode::Minor(major),
+                crate::configuration::upgrade::UpgradeMode::current_minor(),
             )
             .expect("the fixture migrates");
             let parsed = crate::Configuration::from_str(input)
