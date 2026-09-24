@@ -2069,13 +2069,17 @@ fn constant_skip_and_root_type_condition_fragments() {
     );
 }
 
+/// Shared by the @defer tests: name, email, and address each live in their
+/// own subgraph.
+const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
+
 /// Cross-subgraph @defer: the deferred fragment's fields live in a different
 /// subgraph from the primary, producing a Defer node with a key-hop fetch
 /// in the deferred block.
 #[test]
 fn defer_produces_defer_node() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email } } }",
     );
     assert!(
@@ -2097,7 +2101,7 @@ fn defer_produces_defer_node() {
 #[test]
 fn defer_cross_subgraph_key_hop_lands_in_deferred_block() {
     let plan_str = plan_query_with_defer_via_bulb(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email } } }",
     );
     insta::assert_snapshot!(plan_str, @r###"
@@ -2145,7 +2149,7 @@ fn defer_cross_subgraph_key_hop_lands_in_deferred_block() {
 #[test]
 fn synthesized_defer_labels_do_not_leak_into_plan() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email } } }",
     );
     assert!(
@@ -2158,7 +2162,7 @@ fn synthesized_defer_labels_do_not_leak_into_plan() {
     );
 
     let labeled_plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer(label: \"mine\") { email } } }",
     );
     assert!(
@@ -2338,8 +2342,6 @@ fn defer_on_query_root_type() {
     "###);
 }
 
-const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
-
 /// Multiple @defer siblings at the same level produce distinct deferred
 /// blocks inside a single Defer node.
 #[test]
@@ -2373,7 +2375,7 @@ fn defer_sibling_blocks_produces_multiple_deferred() {
 #[test]
 fn nested_defer_produces_nested_defer_nodes() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer(label: \"outer\") { email ... @defer(label: \"inner\") { address } } } }",
     );
     assert!(
@@ -2400,7 +2402,7 @@ fn nested_defer_produces_nested_defer_nodes() {
 #[test]
 fn fully_deferred_field_has_no_primary_payload() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { ... @defer(label: \"all\") { name email } } }",
     );
     assert!(
@@ -2423,7 +2425,7 @@ fn fully_deferred_field_has_no_primary_payload() {
 #[test]
 fn bare_inline_fragment_passes_through_in_defer() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { ... @defer { email } ... { name } } }",
     );
     assert!(
@@ -2446,7 +2448,7 @@ fn bare_inline_fragment_passes_through_in_defer() {
 #[test]
 fn labeled_defer_with_primary_and_deferred_content() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         r#"{ user { name ... @defer(label: "emails") { email } ... @defer(label: "addrs") { address } } }"#,
     );
     assert!(
@@ -2469,7 +2471,7 @@ fn labeled_defer_with_primary_and_deferred_content() {
 #[test]
 fn defer_spanning_two_non_primary_subgraphs() {
     let plan_str = plan_query_with_defer(
-        CROSS_SUBGRAPH_SCHEMA,
+        THREE_SUBGRAPH_SCHEMA,
         "{ user { name ... @defer { email address } } }",
     );
     assert!(
