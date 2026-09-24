@@ -119,6 +119,26 @@ fn user_plugin_settings_are_typed_while_parsing() {
     assert_eq!(settings.name, "parsed once");
 }
 
+/// Construction takes user plugins from the settings retained while parsing, in configuration
+/// order, so later edits to the raw sections change nothing. A section naming no registered
+/// plugin is recorded for construction to report.
+#[test]
+fn user_plugins_come_from_the_settings_retained_while_parsing() {
+    let mut config: Configuration = serde_yaml::from_str(
+        "plugins:\n  test.always_fails_to_start:\n    name: first\n  acme.unregistered: {}\n  test.always_starts_and_stops:\n    name: second\n",
+    )
+    .expect("the user plugin sections deserialize");
+    config.plugins.plugins = None;
+
+    let configs = &config.plugin_configs;
+    let names: Vec<&str> = configs.user_plugins().map(|(name, _)| name).collect();
+    assert_eq!(
+        names,
+        ["test.always_fails_to_start", "test.always_starts_and_stops"]
+    );
+    assert_eq!(configs.unknown_plugins(), ["acme.unregistered"]);
+}
+
 #[tokio::test]
 async fn test_yaml_no_extras() {
     let config = Configuration::builder().build().unwrap();

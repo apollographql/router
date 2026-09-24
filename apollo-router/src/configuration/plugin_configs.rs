@@ -18,8 +18,10 @@ use crate::plugin::plugins;
 pub(crate) struct PluginConfigs {
     /// Built-in plugins, keyed by full name such as `apollo.telemetry`.
     apollo: HashMap<String, PluginConfig>,
-    /// User plugins, keyed by name.
-    user: HashMap<String, PluginConfig>,
+    /// User plugins, in the order the configuration lists them.
+    user: Vec<(String, PluginConfig)>,
+    /// User plugin sections that name no registered plugin.
+    unknown: Vec<String>,
     errors: Vec<PluginConfigError>,
 }
 
@@ -44,7 +46,7 @@ impl PluginConfigError {
 
 impl PluginConfigs {
     /// Deserializes the built-in sections (keyed by short name) and the user plugin sections.
-    /// A section naming no registered plugin is reported by validation or construction.
+    /// A built-in section naming no registered plugin is left to schema validation.
     pub(crate) fn parse(
         apollo_sections: &Map<String, Value>,
         user_sections: &Map<String, Value>,
@@ -58,8 +60,10 @@ impl PluginConfigs {
         }
         for (name, settings) in user_sections {
             let section = vec!["plugins".to_string(), name.clone()];
-            if let Some(config) = configs.parse_section(name, section, settings) {
-                configs.user.insert(name.clone(), config);
+            if !plugins().any(|factory| factory.name == *name) {
+                configs.unknown.push(name.clone());
+            } else if let Some(config) = configs.parse_section(name, section, settings) {
+                configs.user.push((name.clone(), config));
             }
         }
         configs
@@ -87,9 +91,24 @@ impl PluginConfigs {
 
     /// The settings for the plugin named `full_name`, when it has a valid section.
     pub(crate) fn get(&self, full_name: &str) -> Option<&PluginConfig> {
-        self.apollo
-            .get(full_name)
-            .or_else(|| self.user.get(full_name))
+        self.apollo.get(full_name).or_else(|| {
+            self.user
+                .iter()
+                .find(|(name, _)| name == full_name)
+                .map(|(_, config)| config)
+        })
+    }
+
+    /// User plugins with valid settings, in configuration order.
+    pub(crate) fn user_plugins(&self) -> impl Iterator<Item = (&str, &PluginConfig)> {
+        self.user
+            .iter()
+            .map(|(name, config)| (name.as_str(), config))
+    }
+
+    /// User plugin sections that name no registered plugin.
+    pub(crate) fn unknown_plugins(&self) -> &[String] {
+        &self.unknown
     }
 
     pub(crate) fn errors(&self) -> &[PluginConfigError] {

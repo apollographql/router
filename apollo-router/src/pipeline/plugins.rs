@@ -52,12 +52,6 @@ pub(crate) async fn create_plugins(
         return Err(configuration_errors(&invalid_settings));
     }
 
-    let user_plugin_names = configuration
-        .plugins
-        .plugins
-        .iter()
-        .flat_map(|plugins| plugins.keys().cloned())
-        .collect();
     let extra = extra_plugins.unwrap_or_default();
     let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
 
@@ -160,7 +154,7 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
     registrar.add_optional("expose_query_plan").await;
-    registrar.add_user_plugins(user_plugin_names, extra).await;
+    registrar.add_user_plugins(extra).await;
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
@@ -278,24 +272,21 @@ impl PluginRegistrar<'_> {
 
     /// Instantiates every configured user plugin in configuration order, then appends
     /// the pre-built `extra` instances (supplied by tests) verbatim.
-    async fn add_user_plugins(
-        &mut self,
-        user_plugin_names: Vec<String>,
-        extra: Vec<(String, Box<dyn DynPlugin>)>,
-    ) {
-        for name in user_plugin_names {
-            let user_span = tracing::info_span!("user_plugin", "name" = &name);
+    async fn add_user_plugins(&mut self, extra: Vec<(String, Box<dyn DynPlugin>)>) {
+        let configs = &self.configuration.plugin_configs;
+        for name in configs.unknown_plugins() {
+            self.errors
+                .push(ConfigurationError::PluginUnknown(name.clone()));
+        }
+        for (name, plugin_config) in configs.user_plugins() {
+            let user_span = tracing::info_span!("user_plugin", "name" = name);
             async {
                 let factory = crate::plugin::PLUGINS
                     .iter()
-                    .find(|factory| factory.name == name);
-                let plugin_config = self.configuration.plugin_config(&name).cloned();
-                match (factory, plugin_config) {
-                    (Some(factory), Some(plugin_config)) => {
-                        self.add_plugin(name, factory, plugin_config, None).await
-                    }
-                    _ => self.errors.push(ConfigurationError::PluginUnknown(name)),
-                }
+                    .find(|factory| factory.name == name)
+                    .expect("parsed plugin settings belong to a registered plugin");
+                self.add_plugin(name.to_string(), factory, plugin_config.clone(), None)
+                    .await
             }
             .instrument(user_span)
             .await;
