@@ -469,6 +469,8 @@ fn circular_requires_errors_instead_of_recursing() {
     );
 }
 
+/// Shared by the @requires, @override, and routing tests below; each test
+/// picks its slice of the schema by operation.
 const REQUIRES_SCHEMA: &str = include_str!("../fixtures/requires.graphql");
 
 #[test]
@@ -480,9 +482,6 @@ fn requires_fields_added_to_fetch() {
     );
 }
 
-const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
-    include_str!("../fixtures/requires_local_unsatisfiable.graphql");
-
 /// @requires on a field whose subgraph declares the required fields as
 /// @external: the query enters through B (which owns `shippingCost`
 /// requiring `weight`), but `weight` is only resolvable in A. The field
@@ -491,22 +490,19 @@ const REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA: &str =
 /// @external `weight` itself.
 #[test_log::test]
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
-    let plan_str = plan_query(
-        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
-        "{ product { shippingCost } }",
-    );
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ productInB { shippingCost } }");
     insta::assert_snapshot!(plan_str, @r###"
         QueryPlan {
           Sequence {
             Fetch(service: "b") {
               {
-                product {
+                productInB {
                   __typename
                   id
                 }
               }
             },
-            Flatten(path: "product") {
+            Flatten(path: "productInB") {
               Fetch(service: "a") {
                 {
                   ... on Product {
@@ -521,7 +517,7 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
                 }
               },
             },
-            Flatten(path: "product") {
+            Flatten(path: "productInB") {
               Fetch(service: "b") {
                 {
                   ... on Product {
@@ -542,9 +538,6 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
         "###);
 }
 
-const REQUIRES_THROUGH_LOCAL_FIELD_SCHEMA: &str =
-    include_str!("../fixtures/requires_through_local_field.graphql");
-
 /// @requires whose field set walks through a *locally resolvable* field
 /// (`a`) into nested selections owned by other subgraphs (`s.status` in
 /// s1, `j.m` in s2). The planner must resolve the local prefix in place
@@ -553,7 +546,7 @@ const REQUIRES_THROUGH_LOCAL_FIELD_SCHEMA: &str =
 /// A's path.
 #[test_log::test]
 fn requires_through_local_field_resolves_nested_parts() {
-    let plan_str = plan_query(REQUIRES_THROUGH_LOCAL_FIELD_SCHEMA, "{ a { c { elig } } }");
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ a { c { elig } } }");
     // All three requires leaves must be fetched somewhere.
     for needle in ["status", "j {", "elig"] {
         assert!(
@@ -569,11 +562,9 @@ fn requires_through_local_field_resolves_nested_parts() {
     );
 }
 
-const OVERRIDE_SCHEMA: &str = include_str!("../fixtures/override.graphql");
-
 #[test]
 fn static_override_routes_field_to_overriding_subgraph() {
-    let plan_str = plan_query(OVERRIDE_SCHEMA, "{ user { name nickname } }");
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ user { name nickname } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name': {plan_str}"
@@ -587,9 +578,6 @@ fn static_override_routes_field_to_overriding_subgraph() {
         "Static override should not require entity fetch: {plan_str}"
     );
 }
-
-const ROUTING_CHOICE_ITERATIVE_SCHEMA: &str =
-    include_str!("../fixtures/routing_choice_iterative.graphql");
 
 /// Demonstrates BULB backtracking actually correcting a greedy mistake,
 /// not just picking correctly the first time. `profile` is a key hop
@@ -618,7 +606,7 @@ fn greedy_tiebreak_mistake_is_corrected_by_backtracking() {
         ..default_config()
     };
     let greedy_plan_str = plan_query_with_options(
-        ROUTING_CHOICE_ITERATIVE_SCHEMA,
+        REQUIRES_SCHEMA,
         document_str,
         greedy_config,
         Default::default(),
@@ -671,7 +659,7 @@ fn greedy_tiebreak_mistake_is_corrected_by_backtracking() {
         }
         "###);
 
-    let backtracking_plan_str = plan_query(ROUTING_CHOICE_ITERATIVE_SCHEMA, document_str);
+    let backtracking_plan_str = plan_query(REQUIRES_SCHEMA, document_str);
     insta::assert_snapshot!(backtracking_plan_str, @r###"
         QueryPlan {
           Sequence {
@@ -705,13 +693,11 @@ fn greedy_tiebreak_mistake_is_corrected_by_backtracking() {
         "###);
 }
 
-const PROGRESSIVE_OVERRIDE_SCHEMA: &str = include_str!("../fixtures/progressive_override.graphql");
-
 #[test]
 fn progressive_override_routes_to_overrider_when_label_active() {
     let plan_str = plan_query_with_options(
-        PROGRESSIVE_OVERRIDE_SCHEMA,
-        "{ user { name nickname } }",
+        REQUIRES_SCHEMA,
+        "{ user { name handle } }",
         default_config(),
         QueryPlanOptions {
             override_conditions: vec!["test".to_string()],
@@ -719,8 +705,8 @@ fn progressive_override_routes_to_overrider_when_label_active() {
         },
     );
     assert!(
-        plan_str.contains("nickname"),
-        "Plan should fetch 'nickname': {plan_str}"
+        plan_str.contains("handle"),
+        "Plan should fetch 'handle': {plan_str}"
     );
     assert!(
         !plan_str.contains("Flatten"),
@@ -730,10 +716,10 @@ fn progressive_override_routes_to_overrider_when_label_active() {
 
 #[test]
 fn progressive_override_routes_to_original_when_label_inactive() {
-    let plan_str = plan_query(PROGRESSIVE_OVERRIDE_SCHEMA, "{ user { name nickname } }");
+    let plan_str = plan_query(REQUIRES_SCHEMA, "{ user { name handle } }");
     assert!(
-        plan_str.contains("nickname"),
-        "Plan should fetch 'nickname': {plan_str}"
+        plan_str.contains("handle"),
+        "Plan should fetch 'handle': {plan_str}"
     );
     assert!(
         plan_str.contains("Flatten"),
@@ -750,7 +736,7 @@ fn progressive_override_routes_to_original_when_label_inactive() {
 // wrong subgraph and appends to whatever entity group `last_node` reached.
 #[test_log::test]
 fn requires_with_multiple_external_parts_and_nested_requires() {
-    let schema = include_str!("../fixtures/requires_external_misroute.graphql");
+    let schema = REQUIRES_SCHEMA;
     let query = "{ itemById(id: \"1\") { preview } }";
 
     // The bug is non-deterministic (HashMap iteration order determines
@@ -770,7 +756,7 @@ fn requires_with_multiple_external_parts_and_nested_requires() {
 /// across fresh planner instances (fresh caches, fresh allocations).
 #[test]
 fn planning_without_timeout_is_deterministic() {
-    let schema = include_str!("../fixtures/requires_external_misroute.graphql");
+    let schema = REQUIRES_SCHEMA;
     let query = "{ itemById(id: \"1\") { preview } }";
 
     let reference = plan_query(schema, query);
@@ -781,6 +767,53 @@ fn planning_without_timeout_is_deterministic() {
             "Plan differed from reference on run {i}",
         );
     }
+}
+
+/// Minimal join-spec v0.5 supergraph boilerplate around inline type
+/// definitions, so tests can declare small schemas without fixture files.
+fn wrap_supergraph(graph_enum: &str, types: &str) -> String {
+    format!(
+        r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+{{
+  query: Query
+}}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+input join__ContextArgument {{
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}}
+
+scalar join__DirectiveArguments
+scalar join__FieldSet
+scalar join__FieldValue
+scalar link__Import
+
+enum link__Purpose {{
+  SECURITY
+  EXECUTION
+}}
+
+enum join__Graph {{
+{graph_enum}
+}}
+
+{types}
+"#
+    )
 }
 
 const REQUIRES_KEY_HOP_SCHEMA_TYPES: &str = r#"
