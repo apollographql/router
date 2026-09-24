@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_compiler::Schema;
+use apollo_redaction::Redacted;
 use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
@@ -79,7 +80,7 @@ pub(super) fn create_subgraph_conf(
         all: Subgraph {
             invalidation: Some(SubgraphInvalidationConfig {
                 enabled: true,
-                shared_key: INVALIDATION_SHARED_KEY.to_string(),
+                shared_key: Redacted::new(INVALIDATION_SHARED_KEY.to_string()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -302,7 +303,7 @@ async fn insert() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -352,7 +353,7 @@ async fn insert() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -489,7 +490,7 @@ async fn insert_with_custom_key() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -539,7 +540,7 @@ async fn insert_with_custom_key() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -662,7 +663,7 @@ async fn already_expired_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -708,7 +709,7 @@ async fn already_expired_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -823,7 +824,7 @@ async fn insert_without_debug_header() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -863,7 +864,7 @@ async fn insert_without_debug_header() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1299,7 +1300,7 @@ async fn no_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1340,7 +1341,7 @@ async fn no_cache_control() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1436,7 +1437,7 @@ async fn no_store_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1502,7 +1503,7 @@ async fn no_store_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1611,7 +1612,7 @@ async fn no_cache_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1657,7 +1658,7 @@ async fn no_cache_from_request() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         }
@@ -1781,7 +1782,7 @@ async fn private_only() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -1827,7 +1828,7 @@ async fn private_only() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -1863,7 +1864,7 @@ async fn private_only() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -1988,7 +1989,7 @@ async fn private_and_public() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         },
@@ -2037,7 +2038,7 @@ async fn private_and_public() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         },
@@ -2076,7 +2077,7 @@ async fn private_and_public() {
             "id": "1",
             "creatorUser": {
               "__typename": "User",
-              "id": 2
+              "id": "2"
             }
           }
         },
@@ -2202,7 +2203,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             },
@@ -2284,7 +2285,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 3
+                  "id": "3"
                 }
               }
             },
@@ -2333,7 +2334,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             },
@@ -2381,7 +2382,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 3
+                  "id": "3"
                 }
               }
             },
@@ -2422,7 +2423,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             },
@@ -2470,7 +2471,7 @@ async fn polymorphic_private_and_public() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 3
+                  "id": "3"
                 }
               }
             },
@@ -2588,7 +2589,7 @@ async fn private_without_private_id() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -2633,7 +2634,7 @@ async fn private_without_private_id() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3201,7 +3202,7 @@ async fn invalidate_by_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3248,7 +3249,7 @@ async fn invalidate_by_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3303,7 +3304,7 @@ async fn invalidate_by_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -3415,7 +3416,7 @@ async fn complex_cache_tag() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4526,7 +4527,7 @@ async fn invalidate_by_type() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4572,7 +4573,7 @@ async fn invalidate_by_type() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4625,7 +4626,7 @@ async fn invalidate_by_type() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4729,7 +4730,7 @@ async fn failure_mode() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4783,7 +4784,7 @@ async fn failure_mode() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4908,7 +4909,7 @@ async fn failure_mode_reconnect() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -4973,7 +4974,7 @@ async fn failure_mode_reconnect() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }
@@ -5034,7 +5035,7 @@ async fn failure_mode_reconnect() {
                 "id": "1",
                 "creatorUser": {
                   "__typename": "User",
-                  "id": 2
+                  "id": "2"
                 }
               }
             }

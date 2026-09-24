@@ -963,9 +963,12 @@ fn new_federation_subgraph_schema(
 }
 
 // PORT_NOTE: This corresponds to the `newEmptyFederation2Schema` function in JS.
-pub(crate) fn new_empty_federation_2_subgraph_schema() -> Result<FederationSchema, FederationError>
-{
-    let mut schema = new_federation_subgraph_schema(Schema::new())?;
+pub(crate) fn new_empty_federation_2_subgraph_schema(
+    validate_default_values: bool,
+) -> Result<FederationSchema, FederationError> {
+    let mut inner_schema = Schema::new();
+    inner_schema.validate_default_values = validate_default_values;
+    let mut schema = new_federation_subgraph_schema(inner_schema)?;
     schema_as_fed2_subgraph(&mut schema, true)?;
     Ok(schema)
 }
@@ -1346,6 +1349,7 @@ mod tests {
                 name!("external"),
                 name!("include"),
                 name!("key"),
+                name!("oneOf"),
                 name!("provides"),
                 name!("requires"),
                 name!("skip"),
@@ -1395,6 +1399,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1442,6 +1447,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -1498,6 +1504,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy")
             ]
@@ -1555,6 +1562,7 @@ mod tests {
                 name!("federation__tag"),
                 name!("include"),
                 name!("link"),
+                name!("oneOf"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]

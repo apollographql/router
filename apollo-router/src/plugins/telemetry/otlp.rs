@@ -1,6 +1,7 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use apollo_redaction::Redacted;
 use http::Uri;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
@@ -33,6 +34,14 @@ pub(crate) struct Config {
 
     /// gRPC configuration settings
     #[serde(default)]
+    // `GrpcExporter` holds a private key, so it cannot serialize its default.
+    #[schemars(extend("default" = {
+        "ca": null,
+        "cert": null,
+        "domain_name": null,
+        "key": null,
+        "metadata": {}
+    }))]
     pub(crate) grpc: GrpcExporter,
 
     /// HTTP configuration settings
@@ -242,7 +251,7 @@ pub(crate) struct HttpExporter {
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Default, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
@@ -253,7 +262,9 @@ pub(crate) struct GrpcExporter {
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
     /// The optional private key file for TLS configuration.
-    pub(crate) key: Option<String>,
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option")]
+    #[schemars(extend("default" = null))]
+    pub(crate) key: Option<Redacted<String>>,
 
     /// gRPC metadata
     #[serde(with = "http_serde::header_map")]
@@ -280,7 +291,7 @@ impl GrpcExporter {
                 .with_native_roots()
                 .domain_name(domain_name)
                 .ca_certificate(Certificate::from_pem(ca.clone()))
-                .identity(Identity::from_pem(cert.clone(), key.clone())))
+                .identity(Identity::from_pem(cert.clone(), key.unredact().clone())))
         } else {
             // This was a breaking change in tonic where we now have to specify native roots.
             Ok(ClientTlsConfig::new().with_native_roots())
@@ -334,6 +345,48 @@ impl From<Temporality> for SdkTemporality {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static_assertions::assert_not_impl_any!(GrpcExporter: serde::Serialize);
+
+    #[test]
+    fn advertised_grpc_defaults_match_the_runtime_default() {
+        use crate::configuration::schema::advertised_defaults;
+
+        advertised_defaults::assert_describes_default::<GrpcExporter>(
+            advertised_defaults::of_property("OTLPConfig", "grpc"),
+        );
+        advertised_defaults::assert_describes_default::<GrpcExporter>(
+            advertised_defaults::of_every_property("GrpcExporter"),
+        );
+    }
+
+    #[test]
+    fn redacted_grpc_key_preserves_contents_and_change_detection() {
+        let input = serde_json::json!({"key": "synthetic-otlp-private-key"}); // gitleaks:allow
+        let config: GrpcExporter = serde_json::from_value(input.clone()).unwrap();
+        let debug = format!("{config:?}");
+        assert!(debug.contains("key: Some([REDACTED])"), "{debug}");
+        assert!(!debug.contains("synthetic-otlp-private-key"), "{debug}");
+        assert_eq!(
+            config.key.as_ref().unwrap().unredact(),
+            "synthetic-otlp-private-key"
+        );
+        let identical: GrpcExporter = serde_json::from_value(input).unwrap();
+        assert_eq!(config, identical);
+
+        for key in [serde_json::Value::Null, serde_json::json!("rotated-key")] {
+            let changed = serde_json::from_value(serde_json::json!({"key": key})).unwrap();
+            assert_ne!(config, changed);
+        }
+        let error = serde_json::from_value::<GrpcExporter>(serde_json::json!({"key": 424242}))
+            .expect_err("a numeric key is rejected")
+            .to_string();
+        assert!(
+            error.contains("invalid type: integer, expected a string"),
+            "{error}"
+        );
+        assert!(!error.contains("424242"), "{error}");
+    }
 
     #[test]
     fn endpoint_grpc_defaulting_no_scheme() {

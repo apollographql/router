@@ -40,6 +40,16 @@ pub(crate) fn generate_config_schema() -> Schema {
     schema
 }
 
+/// [`generate_config_schema`] as JSON, generated once and shared by the shared-parser adapter
+/// and tests.
+pub(crate) fn router_config_schema() -> &'static serde_json::Value {
+    static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::to_value(generate_config_schema())
+            .expect("router's configuration schema serializes")
+    })
+}
+
 #[derive(Eq, PartialEq)]
 pub(crate) enum Mode {
     Upgrade,
@@ -108,12 +118,7 @@ pub(crate) fn validate_yaml_configuration(
     });
 
     if migration == Mode::Upgrade {
-        let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
-            .parse()
-            .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
-
-        let upgraded =
-            upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::current_minor())?;
         let expanded_yaml = expansion.expand(&upgraded)?;
         if validator.is_valid(&expanded_yaml) {
             yaml = upgraded;
@@ -318,4 +323,67 @@ fn context_lines(
             }
         })
         .join("\n")
+}
+
+/// Checks for hand-written schema defaults.
+///
+/// Configuration sections that hold secrets are deliberately not serializable, so the schema
+/// derive cannot produce their `default` annotations; they declare them by hand instead. These
+/// helpers let each section's tests prove that what the schema advertises still deserializes to
+/// the section's runtime `Default`.
+#[cfg(test)]
+pub(crate) mod advertised_defaults {
+    use std::fmt::Debug;
+
+    use serde::de::DeserializeOwned;
+    use serde_json::Value;
+
+    use super::router_config_schema;
+
+    /// The `default` the generated schema advertises for `property` of `definition`.
+    pub(crate) fn of_property(definition: &str, property: &str) -> Value {
+        router_config_schema()
+            .pointer(&format!(
+                "/definitions/{definition}/properties/{property}/default"
+            ))
+            .cloned()
+            .unwrap_or_else(|| panic!("{definition}.{property} advertises no default"))
+    }
+
+    /// An object built from the `default` the generated schema advertises for every property of
+    /// `definition`. Fails if any property advertises none.
+    pub(crate) fn of_every_property(definition: &str) -> Value {
+        let properties = router_config_schema()
+            .pointer(&format!("/definitions/{definition}/properties"))
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| panic!("{definition} declares no properties"));
+        properties
+            .iter()
+            .map(|(name, property)| {
+                let default = property
+                    .get("default")
+                    .unwrap_or_else(|| panic!("{definition}.{name} advertises no default"));
+                (name.clone(), default.clone())
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into()
+    }
+
+    /// Asserts that `advertised` deserializes to `T::default()` and returns the parsed value.
+    ///
+    /// Compares `Debug` output because secret-bearing configurations do not implement
+    /// `PartialEq`. `Debug` hides redacted values, so callers must compare those explicitly.
+    pub(crate) fn assert_describes_default<T>(advertised: Value) -> T
+    where
+        T: DeserializeOwned + Default + Debug,
+    {
+        let parsed: T = serde_json::from_value(advertised.clone())
+            .unwrap_or_else(|error| panic!("advertised default {advertised} is invalid: {error}"));
+        assert_eq!(
+            format!("{parsed:?}"),
+            format!("{:?}", T::default()),
+            "advertised default {advertised} differs from the runtime default"
+        );
+        parsed
+    }
 }

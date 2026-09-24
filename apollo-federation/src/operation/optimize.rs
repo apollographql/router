@@ -142,6 +142,7 @@ impl Operation {
             variables: self.variables.deref().clone(),
             directives: self.directives.iter().cloned().collect(),
             selection_set: minified_selection,
+            description: self.description.clone(),
         };
         let mut document = executable::ExecutableDocument::new();
         document.operations.insert(operation);
@@ -412,6 +413,7 @@ impl<'a> FragmentGenerator<'a> {
             name: self.next_name(),
             selection_set: minified_selection_set,
             directives: Default::default(),
+            description: None,
         };
 
         self.minimized_fragments

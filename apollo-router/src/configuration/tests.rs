@@ -411,87 +411,15 @@ cors:
 
 #[test]
 fn validate_project_config_files() {
-    #[cfg(not(unix))]
-    let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
-    #[cfg(unix)]
-    let filename_matcher = Regex::from_str("((.+[.])?router(_unix)?\\.yaml)|(.+\\.mdx)").unwrap();
-    // Blocks with extra attributes after the title (e.g. `novalidate`) are intentionally
-    // excluded: they contain intentionally-invalid or version-specific config examples.
-    #[cfg(not(unix))]
-    let embedded_yaml_matcher =
-        Regex::from_str(r#"(?ms)```yaml title="router.yaml"\n(.+?)```"#).unwrap();
-    #[cfg(unix)]
-    let embedded_yaml_matcher =
-        Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"\n(.+?)```"#).unwrap();
+    let mocked_env_vars = super::test_discovery::discovery_env_vars();
+    for doc in super::test_discovery::discover_project_configs() {
+        let expansion = Expansion::default_builder()
+            .mocked_env_vars(mocked_env_vars.clone())
+            .build()
+            .unwrap();
 
-    fn it(path: &str) -> impl Iterator<Item = DirEntry> + use<> {
-        WalkDir::new(path).into_iter().filter_map(|e| e.ok())
-    }
-
-    for entry in it(".")
-        .chain(it("../examples"))
-        .chain(it("../docs"))
-        .chain(it("../dockerfiles"))
-    {
-        if entry
-            .path()
-            .with_file_name(".skipconfigvalidation")
-            .exists()
-        {
-            continue;
-        }
-        #[cfg(not(feature = "telemetry_next"))]
-        if entry.path().to_string_lossy().contains("telemetry_next") {
-            continue;
-        }
-
-        let name = entry.file_name().to_string_lossy();
-        if filename_matcher.is_match(&name) {
-            let config = fs::read_to_string(entry.path()).expect("failed to read file");
-            let yamls = if name.ends_with(".mdx") {
-                #[cfg(unix)]
-                let index = 2usize;
-                #[cfg(not(unix))]
-                let index = 1usize;
-                // Extract yaml from docs
-                embedded_yaml_matcher
-                    .captures_iter(&config)
-                    .map(|i| i.get(index).unwrap().as_str().into())
-                    .collect()
-            } else {
-                vec![config]
-            };
-
-            for yaml in yamls {
-                let expansion = Expansion::default_builder()
-                    .mocked_env_var("DATADOG_AGENT_HOST", "http://example.com")
-                    .mocked_env_var("JAEGER_HOST", "http://example.com")
-                    .mocked_env_var("JAEGER_USERNAME", "username")
-                    .mocked_env_var("JAEGER_PASSWORD", "pass")
-                    .mocked_env_var("REDIS_USERNAME", "username")
-                    .mocked_env_var("REDIS_PASSWORD", "pass")
-                    .mocked_env_var("ZIPKIN_HOST", "http://example.com")
-                    .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
-                    .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
-                    .mocked_env_var("PARSER_MAX_RECURSION", "500")
-                    .mocked_env_var("AWS_ROLE_ARN", "arn:aws:iam::12345678:role/SomeRole")
-                    .mocked_env_var("INVALIDATION_SHARED_KEY", "invalidation")
-                    .mocked_env_var(
-                        "INVALIDATION_SHARED_KEY_PRODUCTS",
-                        "invalidation-for-products",
-                    )
-                    .mocked_env_var("DISTRIBUTED_TRACING_ENDPOINT", "http://example.com")
-                    .build()
-                    .unwrap();
-
-                if let Err(e) = validate_yaml_configuration(&yaml, expansion, Mode::NoUpgrade) {
-                    panic!(
-                        "{} configuration error: \n{}",
-                        entry.path().to_string_lossy(),
-                        e
-                    )
-                }
-            }
+        if let Err(e) = validate_yaml_configuration(&doc.yaml, expansion, Mode::NoUpgrade) {
+            panic!("{} configuration error: \n{}", doc.path.display(), e)
         }
     }
 }
@@ -512,6 +440,102 @@ supergraph:
     )
     .expect_err("Must have an error because we expect a boolean");
     insta::assert_snapshot!(error.to_string());
+}
+
+#[test]
+fn redacted_tls_key_errors_name_the_failure_without_the_input() {
+    let client_key = include_str!("../services/http/testdata/client.key");
+    let cases = [
+        (
+            "-----BEGIN secret-key-with-missing-footer-----\nc2VjcmV0\n".to_string(),
+            LoadKeyError::Malformed,
+        ),
+        (
+            "-----BEGIN PRIVATE KEY-----\nsecret-key!!!\n-----END PRIVATE KEY-----\n".to_string(),
+            LoadKeyError::Malformed,
+        ),
+        (
+            include_str!("../services/http/testdata/server.crt").to_string(),
+            LoadKeyError::NotAPrivateKey,
+        ),
+        (
+            "secret-key-without-any-pem-markers".to_string(),
+            LoadKeyError::Missing,
+        ),
+        (
+            format!("{client_key}{client_key}"),
+            LoadKeyError::MultipleItems,
+        ),
+    ];
+
+    for (key, expected) in cases {
+        assert_eq!(load_key(&key).unwrap_err(), expected, "{key}");
+
+        let error = serde_json::from_value::<TlsClientAuth>(json!({
+            "certificate_chain": "",
+            "key": key,
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(&expected.to_string()), "{error}");
+        assert!(!error.contains("secret-key"), "{error}");
+        assert!(!error.contains("c2VjcmV0"), "{error}");
+        assert!(!error.contains("BEGIN"), "{error}");
+    }
+}
+
+#[test]
+fn redacted_tls_key_preserves_pem_contents() {
+    let pem = include_str!("../services/http/testdata/client.key");
+    let config: TlsClientAuth = serde_json::from_value(json!({
+        "certificate_chain": "",
+        "key": pem,
+    }))
+    .unwrap();
+    assert_eq!(config.key.unredact(), &load_key(pem).unwrap());
+    let identical: TlsClientAuth = serde_json::from_value(json!({
+        "certificate_chain": "",
+        "key": pem,
+    }))
+    .unwrap();
+    assert_eq!(config, identical);
+    let rotated = TlsClientAuth {
+        certificate_chain: vec![],
+        key: load_key(include_str!("../services/http/testdata/server.key"))
+            .unwrap()
+            .into(),
+    };
+    assert_ne!(config, rotated);
+    assert_eq!(
+        format!("{config:?}"),
+        "TlsClientAuth { certificate_chain: [], key: [REDACTED] }"
+    );
+}
+
+#[test]
+fn redacted_redis_credentials_are_hidden_from_debug_output() {
+    let config: QueryPlanRedisCache = serde_json::from_value(json!({
+        "urls": ["redis://localhost:6379"],
+        "username": "redis-admin",
+        "password": "hunter2-super-secret", // gitleaks:allow
+    }))
+    .expect("valid redis config");
+
+    let debug = format!("{config:?}");
+    assert!(
+        !debug.contains("hunter2-super-secret"),
+        "password must not appear in Debug output: {debug}"
+    );
+    assert!(
+        !debug.contains("redis-admin"),
+        "username must not appear in Debug output: {debug}"
+    );
+
+    // Confirm the credentials survived parsing.
+    let password = config.password.as_ref().expect("password was set");
+    let username = config.username.as_ref().expect("username was set");
+    assert_eq!(password.unredact(), "hunter2-super-secret");
+    assert_eq!(username.unredact(), "redis-admin");
 }
 
 #[test]
@@ -997,6 +1021,7 @@ fn test_subgraph_override_json() {
     });
 
     let data: TestSubgraphOverride = serde_json::from_value(first).unwrap();
+    assert_eq!(data.value, None);
     assert!(!data.subgraph.all.a);
     assert!(data.subgraph.subgraphs.get("products").unwrap().a);
 
