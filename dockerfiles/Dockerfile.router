@@ -104,15 +104,15 @@ RUN \
   echo '#!/bin/bash \
 \nset -e \
 \n \
-\n# APOLLO_ROUTER_PROFILER selects a profiler explicitly.  Deliberately not DD_PROFILING_ENABLED: \
-\n# that is ddprof own variable and defaults to true, and Datadog admission controller injects \
-\n# DD_* cluster-wide, which would turn this from opt-in into silently-on. \
+\n# APOLLO_ROUTER_PROFILER selects the profiler: ddprof, heaptrack (the default when present) or none. \
+\n# Deliberately not DD_PROFILING_ENABLED: ddprof reads that variable itself and defaults it to true, \
+\n# and the Datadog Admission Controller can inject DD_* variables into every pod. \
 \nif [ "${APOLLO_ROUTER_PROFILER:-}" = "ddprof" ] && [ -x "/usr/bin/ddprof" ]; then \
 \n    # The -- is required: ddprof has its own --config and would otherwise consume the one \
 \n    # intended for the router and try to parse it as TOML. \
 \n    # informational logging is deliberate; at the default level a broken exporter is silent. \
 \n    exec /usr/bin/ddprof --log_level informational --preset cpu_live_heap -- /dist/router "$@" \
-\nelif [ -f "/usr/bin/heaptrack" ]; then \
+\nelif [ "${APOLLO_ROUTER_PROFILER:-heaptrack}" = "heaptrack" ] && [ -f "/usr/bin/heaptrack" ]; then \
 \n    exec heaptrack -o /dist/data/$(hostname)/router_heaptrack  /dist/router "$@" \
 \nelse \
 \n    exec /dist/router "$@" \
