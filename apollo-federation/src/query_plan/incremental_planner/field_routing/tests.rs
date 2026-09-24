@@ -1955,21 +1955,21 @@ fn entity_shareable_field_filters_inconsistent_union_members() {
 #[test]
 fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
     let plan_str = plan_query(
-        REQUIRES_LOCAL_UNSATISFIABLE_SCHEMA,
-        "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingCost } } }",
+        REQUIRES_SCHEMA,
+        "query($v: Boolean!) { productInB { ... on Product @include(if: $v) { shippingCost } } }",
     );
     insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
         Fetch(service: "b") {
           {
-            product {
+            productInB {
               __typename
               id
             }
           }
         },
-        Flatten(path: "product") {
+        Flatten(path: "productInB") {
           Fetch(service: "a") {
             {
               ... on Product {
@@ -1985,7 +1985,7 @@ fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
           },
         },
         Include(if: $v) {
-          Flatten(path: "product") {
+          Flatten(path: "productInB") {
             Fetch(service: "b") {
               {
                 ... on Product {
@@ -2034,17 +2034,14 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
 /// arm and try_vacuous_type_condition's federated-root arm.
 #[test]
 fn constant_skip_and_root_type_condition_fragments() {
-    let skipped = plan_query(
-        CROSS_SUBGRAPH_SCHEMA,
-        "{ user { name ... @skip(if: true) { email } } }",
-    );
+    let skipped = plan_query(SCHEMA, "{ user { name ... @skip(if: true) { email } } }");
     assert!(
         !skipped.contains("email"),
         "Statically skipped fragment must not be fetched: {skipped}"
     );
 
     let rooted = plan_query(
-        CROSS_SUBGRAPH_SCHEMA,
+        SCHEMA,
         "query($v: Boolean!) { ... on Query @skip(if: $v) { user { name } } }",
     );
     assert!(
