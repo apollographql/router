@@ -1428,9 +1428,9 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt
-                .license_source(&current_directory)
-                .expect("self-hosted graph artifact reference must not conflict with an explicit license");
+            let source = opt.license_source(&current_directory).expect(
+                "self-hosted graph artifact reference must not conflict with an explicit license",
+            );
             assert!(
                 matches!(source, LicenseSource::File { .. }),
                 "expected the explicit license file to take precedence, got {source:?}"
@@ -1449,9 +1449,9 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt
-                .license_source(&current_directory)
-                .expect("self-hosted graph artifact reference must not conflict with an explicit license");
+            let source = opt.license_source(&current_directory).expect(
+                "self-hosted graph artifact reference must not conflict with an explicit license",
+            );
             assert!(
                 matches!(source, LicenseSource::Env),
                 "expected the explicit license env value to take precedence, got {source:?}"
