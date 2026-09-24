@@ -87,10 +87,8 @@ pub(crate) enum RoutingChoice {
         intermediate_hops: Vec<IntermediateKeyHop>,
     },
     /// Strip a fragment which provides no routing information.
-    #[allow(dead_code)]
     StripFragment,
     /// Per-concrete-type explosion at an abstract position.
-    #[allow(dead_code)]
     TypeExplosion,
 }
 

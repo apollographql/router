@@ -2,7 +2,6 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with checkpoint / undo-log rollback.
 
-#[allow(dead_code)]
 pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 
@@ -456,18 +455,6 @@ impl FetchGraph {
             matches!(i, InputContribution::Key { source_type_name, .. }
                 if source_type_name == source_type)
         })
-    }
-
-    /// Iterator over all inputs arriving at `node` from parent fetch
-    /// groups.
-    #[allow(dead_code)] // Used in later PRs in the stack.
-    pub(crate) fn incoming_inputs(
-        &self,
-        node: NodeIndex,
-    ) -> impl Iterator<Item = &InputContribution> {
-        self.graph
-            .edges_directed(node, Direction::Incoming)
-            .flat_map(|edge| edge.weight().inputs.iter())
     }
 
     /// Get a reference to an edge's weight.
