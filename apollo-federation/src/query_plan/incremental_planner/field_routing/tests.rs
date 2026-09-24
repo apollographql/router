@@ -41,26 +41,27 @@ fn plan_query_with_options(
     format!("{plan}")
 }
 
-const SINGLE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/single_subgraph.graphql");
+/// One supergraph shared by every test here; each test picks the part of
+/// it that exercises the path under test.
+const SCHEMA: &str = include_str!("../fixtures/supergraph.graphql");
 
 #[test]
 fn single_subgraph_query_produces_valid_plan() {
-    let plan_str = plan_query(SINGLE_SUBGRAPH_SCHEMA, "{ user { name email } }");
+    let plan_str = plan_query(SCHEMA, "{ user { id name } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name': {plan_str}"
     );
-    assert!(
-        plan_str.contains("email"),
-        "Plan should fetch 'email': {plan_str}"
+    assert_eq!(
+        plan_str.matches("Fetch(").count(),
+        1,
+        "Fields owned by one subgraph need one fetch: {plan_str}"
     );
 }
 
-const CROSS_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/cross_subgraph.graphql");
-
 #[test]
 fn cross_subgraph_key_hop_produces_two_fetches() {
-    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name email } }");
+    let plan_str = plan_query(SCHEMA, "{ user { name email } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name': {plan_str}"
@@ -77,7 +78,7 @@ fn cross_subgraph_key_hop_produces_two_fetches() {
 /// appear in the fetch.
 #[test]
 fn explicit_sibling_typename_is_preserved() {
-    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { __typename name } }");
+    let plan_str = plan_query(SCHEMA, "{ user { __typename name } }");
     assert!(
         plan_str.contains("__typename"),
         "Plan should fetch explicit '__typename': {plan_str}"
@@ -92,25 +93,23 @@ fn explicit_sibling_typename_is_preserved() {
 /// the router execution answers it).
 #[test]
 fn root_typename_is_left_to_router_execution() {
-    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ __typename user { name } }");
+    let plan_str = plan_query(SCHEMA, "{ __typename user { name } }");
     assert_eq!(
         plan_str.matches("Fetch(").count(),
         1,
         "Root __typename must not add a fetch: {plan_str}"
     );
 
-    let alone = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ __typename }");
+    let alone = plan_query(SCHEMA, "{ __typename }");
     assert_eq!(
         alone, "QueryPlan {}",
         "Router execution answers root __typename"
     );
 }
 
-const SUBSCRIPTION_SCHEMA: &str = include_str!("../fixtures/subscription.graphql");
-
 #[test]
 fn subscription_produces_subscription_plan_node() {
-    let supergraph = Supergraph::new(SUBSCRIPTION_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -140,12 +139,10 @@ fn subscription_produces_subscription_plan_node() {
     );
 }
 
-const MUTATION_SCHEMA: &str = include_str!("../fixtures/mutation.graphql");
-
 #[test]
 fn mutation_produces_sequential_plan() {
     let plan_str = plan_query(
-        MUTATION_SCHEMA,
+        SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name email } }"#,
     );
     assert!(
@@ -161,7 +158,7 @@ fn mutation_produces_sequential_plan() {
 #[test]
 fn mutation_multiple_fields_are_not_merged() {
     let plan_str = plan_query(
-        MUTATION_SCHEMA,
+        SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name } updateUser(id: "1", name: "Bob") { id name } }"#,
     );
     assert!(
@@ -178,8 +175,6 @@ fn mutation_multiple_fields_are_not_merged() {
     );
 }
 
-const SHAREABLE_DEAD_END_SCHEMA: &str = include_str!("../fixtures/shareable_dead_end.graphql");
-
 /// Repro for the "local edge suppresses a required key hop" gap: `profile`
 /// is shareable in A and B, but A's copy of `Profile` lacks `detail` and
 /// `Profile` has no key, so once `profile` is routed to A, `detail` is
@@ -188,7 +183,7 @@ const SHAREABLE_DEAD_END_SCHEMA: &str = include_str!("../fixtures/shareable_dead
 /// by BULB backtracking picking the hop.
 #[test_log::test]
 fn shareable_local_dead_end_reroutes_through_key_hop() {
-    let plan_str = plan_query(SHAREABLE_DEAD_END_SCHEMA, "{ user { profile { detail } } }");
+    let plan_str = plan_query(SCHEMA, "{ user { profile { detail } } }");
     assert!(
         plan_str.contains("detail"),
         "Plan should fetch 'detail' via B: {plan_str}"
@@ -198,9 +193,6 @@ fn shareable_local_dead_end_reroutes_through_key_hop() {
         "Plan should hop to subgraph b for profile.detail: {plan_str}"
     );
 }
-
-const CIRCULAR_KEY_BACKTRACK_SCHEMA: &str =
-    include_str!("../fixtures/circular_key_backtrack.graphql");
 
 /// A forced condition commit whose greedy choice strands a descendant on a
 /// circular key must backtrack to the ancestor's alternative. `target` lives
@@ -212,7 +204,7 @@ const CIRCULAR_KEY_BACKTRACK_SCHEMA: &str =
 /// key resolves.
 #[test_log::test]
 fn circular_key_drop_backtracks_to_ancestor_condition_alternative() {
-    let plan_str = plan_query(CIRCULAR_KEY_BACKTRACK_SCHEMA, "{ entry { target } }");
+    let plan_str = plan_query(SCHEMA, "{ entry { target } }");
     assert!(
         plan_str.contains("target"),
         "Plan should fetch 'target' from T: {plan_str}"
@@ -241,7 +233,7 @@ fn incomplete_plan_is_an_error_not_a_partial_plan() {
         },
         ..default_config()
     };
-    let supergraph = Supergraph::new(SHAREABLE_DEAD_END_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -267,63 +259,15 @@ fn incomplete_plan_is_an_error_not_a_partial_plan() {
 
 // ---------------------------------------------------------------------------
 // Coverage-focused plan-level tests. Each test names the code region it
-// forces; schemas are inlined via `wrap_supergraph` so the shape that
-// triggers the path is visible next to the assertion.
+// forces.
 // ---------------------------------------------------------------------------
-
-/// Minimal join-spec v0.5 supergraph boilerplate around inline type
-/// definitions, so tests can declare small schemas without fixture files.
-fn wrap_supergraph(graph_enum: &str, types: &str) -> String {
-    format!(
-        r#"
-schema
-  @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-{{
-  query: Query
-}}
-
-directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-input join__ContextArgument {{
-  name: String!
-  type: String!
-  context: String!
-  selection: join__FieldValue!
-}}
-
-scalar join__DirectiveArguments
-scalar join__FieldSet
-scalar join__FieldValue
-scalar link__Import
-
-enum link__Purpose {{
-  SECURITY
-  EXECUTION
-}}
-
-enum join__Graph {{
-{graph_enum}
-}}
-
-{types}
-"#
-    )
-}
 
 /// A cancellation callback that immediately breaks must abort planning with
 /// a PlanningCancelled error rather than returning a plan.
 /// Targets incremental_planner/mod.rs's cancelled branch.
 #[test]
 fn cooperative_cancellation_stops_planning() {
-    let supergraph = Supergraph::new(CROSS_SUBGRAPH_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -347,39 +291,6 @@ fn cooperative_cancellation_stops_planning() {
     );
 }
 
-fn nested_entity_hop_schema() -> String {
-    wrap_supergraph(
-        r#"  A @join__graph(name: "a", url: "http://a")
-  B @join__graph(name: "b", url: "http://b")
-  C @join__graph(name: "c", url: "http://c")"#,
-        r#"
-type P
-  @join__type(graph: A, key: "id")
-  @join__type(graph: B, key: "id")
-{
-  id: ID!
-  details: D @join__field(graph: B)
-}
-
-type D
-  @join__type(graph: B, key: "did")
-  @join__type(graph: C, key: "did")
-{
-  did: ID!
-  extra: String @join__field(graph: C)
-}
-
-type Query
-  @join__type(graph: A)
-  @join__type(graph: B)
-  @join__type(graph: C)
-{
-  p: P @join__field(graph: A)
-}
-"#,
-    )
-}
-
 /// A key hop launched from INSIDE an entity fetch (`extra` hops B->C while
 /// its pending lives in B's entity fetch for P): the shallowest-anchor
 /// dominance check (`parent_key_anchor`) runs against the fetch feeding the
@@ -389,7 +300,7 @@ type Query
 /// arms.
 #[test]
 fn nested_entity_hop_from_inside_entity_fetch() {
-    let plan_str = plan_query(&nested_entity_hop_schema(), "{ p { details { extra } } }");
+    let plan_str = plan_query(SCHEMA, "{ p { details { extra } } }");
     insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
       Sequence {
@@ -449,7 +360,7 @@ fn generate_query_fragments_config_is_honored() {
         ..default_config()
     };
     let plan_str = plan_query_with_options(
-        CROSS_SUBGRAPH_SCHEMA,
+        SCHEMA,
         "{ user { name email } }",
         config,
         Default::default(),
@@ -467,7 +378,7 @@ fn generate_query_fragments_config_is_honored() {
 /// bulb_search's cancelled bookkeeping.
 #[test]
 fn cancellation_at_any_check_point_aborts_planning() {
-    let supergraph = Supergraph::new(CROSS_SUBGRAPH_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -524,7 +435,7 @@ fn cancellation_at_any_check_point_aborts_planning() {
 
 #[test]
 fn all_subgraphs_disabled_root_typename_fails_planning() {
-    let supergraph = Supergraph::new(SINGLE_SUBGRAPH_SCHEMA).expect("supergraph parse");
+    let supergraph = Supergraph::new(SCHEMA).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
@@ -536,7 +447,7 @@ fn all_subgraphs_disabled_root_typename_fails_planning() {
         &document,
         None,
         QueryPlanOptions {
-            disabled_subgraph_names: ["a".to_string()].into_iter().collect(),
+            disabled_subgraph_names: ["a", "b", "c"].map(String::from).into_iter().collect(),
             ..Default::default()
         },
     );
@@ -558,93 +469,43 @@ use super::test_support;
 use super::*;
 
 fn search_space() -> FieldRoutingSearchSpace {
-    test_support::search_space(&[
-        (
-            "S1",
-            r#"
-            type Query { t: T }
-            type T @key(fields: "k") { k: ID, x: Int }
-            "#,
-        ),
-        (
-            "S2",
-            r#"
-            type T @key(fields: "k") { k: ID, y: Int }
-            "#,
-        ),
-    ])
+    test_support::search_space_from_supergraph(SCHEMA)
 }
 
 fn t_node(space: &FieldRoutingSearchSpace, subgraph: &str) -> NodeIndex {
     test_support::node_for(space, subgraph, "T")
 }
 
-/// A pending for `T.y` (resolvable only in S2) anchored at fetch group
-/// `fetch_node`, marked as condition data feeding `dependent`.
-fn y_pending(
+/// A pending for `T.<field>` at a's T node, anchored at fetch group
+/// `fetch_node`, marked as condition data feeding `dependent`. `y` is
+/// resolvable only in b; `z` in both b and c.
+fn t_pending(
     space: &FieldRoutingSearchSpace,
+    field: &str,
     fetch_node: NodeIndex,
     dependent: Option<NodeIndex>,
 ) -> PendingSelection {
     let op = crate::operation::Operation::parse(
         space.supergraph_schema.clone(),
-        r#"{ t { y } }"#,
+        &format!("{{ t {{ {field} }} }}"),
         "op.graphql",
     )
     .expect("valid operation");
     let Some(Selection::Field(t_sel)) = op.selection_set.selections.values().next() else {
         panic!("expected t field");
     };
-    let y_sel = t_sel
+    let field_sel = t_sel
         .selection_set
         .as_ref()
         .expect("t has sub-selections")
         .selections
         .values()
         .next()
-        .expect("y selection")
+        .expect("field selection")
         .clone();
     PendingSelection {
-        selection: y_sel,
-        query_graph_node: t_node(space, "S1"),
-        fetch_node,
-        op_path: SharedPath::new(),
-        path_in_fetch: SharedPath::new(),
-        condition: dependent.map(|dependent| ConditionScope {
-            dependent,
-            depth: 1,
-        }),
-    }
-}
-
-/// Like `y_pending` but for an arbitrary subgraph's T node and schema.
-fn y_pending_for(
-    space: &FieldRoutingSearchSpace,
-    subgraph: &str,
-    fetch_node: NodeIndex,
-    dependent: Option<NodeIndex>,
-) -> PendingSelection {
-    let op = crate::operation::Operation::parse(
-        space.supergraph_schema.clone(),
-        r#"{ t { y } }"#,
-        "op.graphql",
-    )
-    .expect("valid operation");
-    let Some(Selection::Field(t_sel)) = op.selection_set.selections.values().next() else {
-        panic!("expected t field");
-    };
-    let y_sel = t_sel
-        .selection_set
-        .as_ref()
-        .expect("t has sub-selections")
-        .selections
-        .values()
-        .next()
-        .expect("y selection")
-        .clone();
-    PendingSelection {
-        selection: y_sel,
-        query_graph_node: test_support::node_for(space, subgraph, "T"),
+        selection: field_sel,
+        query_graph_node: t_node(space, "a"),
         fetch_node,
         op_path: SharedPath::new(),
         path_in_fetch: SharedPath::new(),
@@ -659,7 +520,7 @@ fn y_pending_for(
 /// dependent of A cycles when a new group hangs beneath B.
 fn cyclic_fixture() -> (PlanState, NodeIndex, NodeIndex) {
     let mut state = PlanState::new(vec![]);
-    let s1: Arc<str> = Arc::from("S1");
+    let s1: Arc<str> = Arc::from("a");
     let root_pos: CompositeTypeDefinitionPosition = CompositeTypeDefinitionPosition::Object(
         crate::schema::position::ObjectTypeDefinitionPosition {
             type_name: name!("Query"),
@@ -678,13 +539,13 @@ fn cyclic_fixture() -> (PlanState, NodeIndex, NodeIndex) {
 fn cyclic_entity_group_reuse_mints_fresh_group() {
     let space = search_space();
     let (mut state, _a, b) = cyclic_fixture();
-    let s2: Arc<str> = Arc::from("S2");
-    // An existing (S2, []) entity group that already feeds b: reusing
+    let s2: Arc<str> = Arc::from("b");
+    // An existing (b, []) entity group that already feeds b: reusing
     // it for a hop anchored at b would close a cycle.
     let existing = state.graph.get_or_create_entity_group(&s2, vec![]);
     state.graph.add_dependency(existing, b, vec![]);
 
-    let pending = Arc::new(y_pending(&space, b, None));
+    let pending = Arc::new(t_pending(&space, "y", b, None));
     let options = Arc::new(space.routing_options(&pending).expect("options enumerate"));
     assert!(!options.is_empty(), "y must have a key-hop option");
 
@@ -709,8 +570,8 @@ fn cyclic_commit_failure_does_not_doom_context_free_sibling() {
 
     // Bottom of stack: no ordering dependent, commits on its own. Top:
     // condition pending whose ordering edge back to `a` cycles.
-    let ok_pending = y_pending(&space, b, None);
-    let cyclic_pending = y_pending(&space, b, Some(a));
+    let ok_pending = t_pending(&space, "y", b, None);
+    let cyclic_pending = t_pending(&space, "y", b, Some(a));
     state.pending = vec![Arc::new(ok_pending), Arc::new(cyclic_pending)];
     let groups_before = state.graph.node_count();
 
@@ -721,7 +582,7 @@ fn cyclic_commit_failure_does_not_doom_context_free_sibling() {
     assert_eq!(
         state.graph.node_count(),
         groups_before + 1,
-        "the sibling's key hop adds an S2 group",
+        "the sibling's key hop adds a b group",
     );
 }
 
@@ -730,31 +591,11 @@ fn cyclic_commit_failure_does_not_doom_context_free_sibling() {
 /// has two options, so a retry would spend another forced backtrack.
 #[test]
 fn exhausted_site_fails_fast_for_identical_sibling() {
-    let space = test_support::search_space(&[
-        (
-            "S1",
-            r#"
-            type Query { t: T }
-            type T @key(fields: "k") { k: ID }
-            "#,
-        ),
-        (
-            "S2",
-            r#"
-            type T @key(fields: "k") { k: ID, y: Int }
-            "#,
-        ),
-        (
-            "S3",
-            r#"
-            type T @key(fields: "k") { k: ID, y: Int }
-            "#,
-        ),
-    ]);
+    let space = search_space();
     let (mut state, a, b) = cyclic_fixture();
     state.pending = vec![
-        Arc::new(y_pending_for(&space, "S1", b, Some(a))),
-        Arc::new(y_pending_for(&space, "S1", b, Some(a))),
+        Arc::new(t_pending(&space, "z", b, Some(a))),
+        Arc::new(t_pending(&space, "z", b, Some(a))),
     ];
 
     space.fast_forward(&mut state).expect("fast forward runs");
@@ -774,43 +615,23 @@ fn exhausted_site_fails_fast_for_identical_sibling() {
 /// double-count, so `backtrack_forced` returns true. Net: exactly 1 drop.
 #[test]
 fn exhausted_alternatives_redrive_counts_one_drop() {
-    // Three subgraphs: S2 and S3 both provide y, giving the condition
-    // pending two key-hop options. Both cycle with the A → B dependency.
-    let space = test_support::search_space(&[
-        (
-            "S1",
-            r#"
-            type Query { t: T }
-            type T @key(fields: "k") { k: ID }
-            "#,
-        ),
-        (
-            "S2",
-            r#"
-            type T @key(fields: "k") { k: ID, y: Int }
-            "#,
-        ),
-        (
-            "S3",
-            r#"
-            type T @key(fields: "k") { k: ID, y: Int }
-            "#,
-        ),
-    ]);
+    // b and c both provide z, giving the condition pending two key-hop
+    // options. Both cycle with the A → B dependency.
+    let space = search_space();
 
     let (mut state, a, b) = cyclic_fixture();
 
     // Condition pending anchored at B with ordering dependent A.
-    // Routing options: key hop to S2 or S3. Both create a new group
+    // Routing options: key hop to b or c. Both create a new group
     // reachable from A (via A → B → new_group), so the ordering edge
     // back to A cycles in both cases.
-    let pending = y_pending_for(&space, "S1", b, Some(a));
+    let pending = t_pending(&space, "z", b, Some(a));
     let options = space
         .routing_options(&Arc::new(pending.clone()))
         .expect("has options");
     assert!(
         options.len() >= 2,
-        "expected multiple routing options for y, got {}",
+        "expected multiple routing options for z, got {}",
         options.len(),
     );
 
