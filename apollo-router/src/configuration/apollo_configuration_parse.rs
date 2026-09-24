@@ -1,7 +1,7 @@
 //! Parses router configuration through the shared `apollo-configuration` crate.
 //!
-//! Only tests call this adapter. Routing production loading through it, including normalization
-//! of `plugins: null` to an empty map, remains a separate cutover change.
+//! Only tests call this adapter. Routing production loading through it remains a separate
+//! cutover change.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,6 +13,7 @@ use apollo_configuration::expansion::VariableProvider;
 use apollo_configuration::provenance::Injection;
 use parking_lot::Mutex;
 use serde_json::Value;
+use serde_json::json;
 
 use super::Configuration;
 use super::ConfigurationError;
@@ -25,10 +26,13 @@ use super::upgrade::upgrade_configuration;
 impl apollo_configuration::Validate for Configuration {}
 impl apollo_configuration::Configuration for Configuration {}
 
-/// Uses [`router_config_schema`] so the shared parser also rejects unknown top-level keys.
+/// Whether parsing first applies the current major version's migrations, as startup and reload
+/// do. `router config validate` checks the file as written.
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
-pub(crate) fn apollo_configuration_options() -> ParseYamlOptions {
-    ParseYamlOptions::default().schema(router_config_schema().clone())
+pub(crate) enum Migration {
+    WithinMajor,
+    None,
 }
 
 /// Values the adapter reads from outside the document: expansion providers and injected
@@ -111,31 +115,36 @@ struct ExpandedDocument(Value);
 impl apollo_configuration::Validate for ExpandedDocument {}
 impl apollo_configuration::Configuration for ExpandedDocument {}
 
-/// Applies within-major migrations, then parses typed settings and the retained document
-/// with Router's schema and the same external values. Each expansion reference is resolved once
-/// and reused, so both passes see the same value.
-/// `raw_yaml` preserves the exact original text. When migration changes nothing, the shared
-/// parser reads that text, so diagnostics point at the user's lines and YAML aliases keep the
-/// shared parser's anchor redaction. Otherwise diagnostics refer to the serialized migrated copy.
+/// Parses `text` into a configuration whose `validated_yaml` holds the expanded document that
+/// configuration-usage telemetry and licence checks read, and whose `raw_yaml` is `text`.
+/// Typed settings and the retained document come from two shared-parser passes with Router's
+/// schema and the same external values. Each expansion reference is resolved once and reused,
+/// so both passes see the same value.
 ///
-/// Known limitation: migration works on a parsed value, so serializing it replaces YAML aliases
-/// with copies. In a migrated document, an anchor on a non-secret field that is aliased into a
-/// secret field is printed in clear text if a diagnostic quotes the anchor's line. Secret fields
-/// themselves stay redacted. Fixing this needs a migration engine that preserves anchors.
+/// A document that needs no changes is parsed as written, so diagnostics point at the user's
+/// lines and YAML aliases keep the shared parser's anchor redaction. A changed document is
+/// serialized and parsed instead. If the shared parser rejects the migrated document, whether in
+/// expansion, overrides, schema validation, deserialization or cross-field validation, the
+/// supplied text is parsed in its place, as earlier releases did after a schema failure. Every
+/// reported diagnostic therefore refers to the operator's file, where YAML aliases keep the
+/// shared parser's anchor redaction.
 ///
-/// Unlike the production loader, this adapter rejects invalid migrated input without falling
-/// back to the original document. Production loading remains a separate cutover.
+/// Known limitation: an expansion reference anchored on a non-secret field and aliased into a
+/// secret field is redacted only in the secret field. A diagnostic about the anchoring field can
+/// quote the value the reference resolved to.
 ///
 /// # Errors
-/// Returns errors from YAML parsing, migration, or either shared-parser pass.
+/// Returns errors from YAML parsing, migration, expansion, overrides, schema validation,
+/// deserialization, or plugin settings.
 #[allow(dead_code)]
-pub(crate) fn parse_via_apollo_configuration(
+pub(crate) fn parse_configuration(
     text: &str,
-    external: ExternalValues,
+    external: impl Into<ExternalValues>,
+    migration: Migration,
 ) -> Result<Configuration, ConfigurationError> {
     // Migration serialization must not hide duplicate keys in the original document.
     super::yaml::parse(text)?;
-    let raw: Value = if text.trim().is_empty() {
+    let original: Value = if text.trim().is_empty() {
         Value::Object(Default::default())
     } else {
         serde_yaml::from_str(text).map_err(|error| ConfigurationError::InvalidConfiguration {
@@ -143,29 +152,57 @@ pub(crate) fn parse_via_apollo_configuration(
             error: error.to_string(),
         })?
     };
-    // Log what migration changed, as the production loader does.
-    let migrated = upgrade_configuration(&raw, true, UpgradeMode::current_minor())?;
-    let options = external.add_to(apollo_configuration_options());
-    let (mut config, document) = if migrated == raw {
-        parse_both_passes(text, &options)?
-    } else {
-        let migrated_text = serde_yaml::to_string(&migrated).map_err(|error| {
+    let migrated = match migration {
+        Migration::WithinMajor => {
+            upgrade_configuration(&original, true, UpgradeMode::current_minor())?
+        }
+        Migration::None => original.clone(),
+    };
+    let options = external
+        .into()
+        .add_to(ParseYamlOptions::default().schema(router_config_schema().clone()));
+    let parse = |document: &Value| -> Result<_, ConfigurationError> {
+        if *document == original {
+            return Ok(parse_document(text, &options));
+        }
+        let serialized = serde_yaml::to_string(document).map_err(|error| {
             ConfigurationError::MigrationFailure {
                 error: error.to_string(),
             }
         })?;
-        parse_both_passes(&migrated_text, &options)?
+        Ok(parse_document(&serialized, &options))
     };
-    config.validated_yaml = Some(document.0);
+
+    // Diagnostics for the serialized copy would point at lines the operator never wrote, so any
+    // error in it falls back to the supplied text. The fallback still validates that text in
+    // full, so it never accepts an invalid document.
+    let parsed = match parse(&migrated)? {
+        Err(_) if migrated != original => {
+            tracing::warn!(
+                "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
+            );
+            parse(&original)?
+        }
+        parsed => parsed,
+    };
+    let mut config = parsed?;
     config.raw_yaml = Some(Arc::from(text));
     Ok(config)
 }
 
-fn parse_both_passes(
-    text: &str,
-    options: &ParseYamlOptions,
-) -> Result<(Configuration, ExpandedDocument), ConfigError> {
-    Ok((options.parse(text)?, options.parse(text)?))
+/// Parses typed settings, then the expanded document, with the same options. The retained
+/// document shows `plugins: null` as `{}`, which means the same.
+fn parse_document(text: &str, options: &ParseYamlOptions) -> Result<Configuration, ConfigError> {
+    let mut config: Configuration = options.parse(text)?;
+    let ExpandedDocument(mut document) = options.parse(text)?;
+    if let Some(plugins) = document
+        .get_mut("plugins")
+        .filter(|plugins| plugins.is_null())
+    {
+        *plugins = json!({});
+    }
+    config.validated_yaml = Some(document);
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -178,15 +215,24 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::configuration::expansion::Expansion;
     use crate::test_harness::tracing_test;
+
+    fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
+        parse_configuration(text, ExternalValues::default(), Migration::WithinMajor)
+    }
+
+    fn env(name: &str, value: &str) -> ExternalValues {
+        ExternalValues::default().add_variables(MapVariables(HashMap::from([(
+            name.to_string(),
+            value.to_string(),
+        )])))
+    }
 
     #[test]
     fn rejected_input_renders_as_a_miette_diagnostic() {
         let text = include_str!("testdata/compat/unknown_top_level_key.yaml");
 
-        let error = parse_via_apollo_configuration(text, ExternalValues::default())
-            .expect_err("the fixture sets a key the schema does not declare");
+        let error = parse(text).expect_err("the fixture sets a key the schema does not declare");
 
         let ConfigurationError::ApolloConfiguration(rendered) = &error else {
             panic!("expected ApolloConfiguration, got: {error:?}");
@@ -208,8 +254,7 @@ mod tests {
             "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: {secret}\n        unexpected: true\n"
         );
 
-        let error = parse_via_apollo_configuration(&text, ExternalValues::default())
-            .expect_err("the Redis configuration contains an unknown field");
+        let error = parse(&text).expect_err("the Redis configuration contains an unknown field");
         let rendered = error.to_string();
 
         assert!(
@@ -226,11 +271,8 @@ mod tests {
     fn retained_document_preserves_secret_values_without_serializing_typed_settings() {
         let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: ${env.ADAPTER_PASSWORD}\n";
         let secret = "adapter-test-password"; // gitleaks:allow
-        let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
-            "ADAPTER_PASSWORD".to_string(),
-            secret.to_string(),
-        )])));
-        let config = parse_via_apollo_configuration(text, external).expect("valid Redis settings");
+        let config = parse_configuration(text, env("ADAPTER_PASSWORD", secret), Migration::None)
+            .expect("valid Redis settings");
 
         let redis = config.apq.router.cache.redis.as_ref().unwrap();
         assert_eq!(redis.password.as_ref().unwrap().unredact(), secret);
@@ -244,8 +286,7 @@ mod tests {
 
     #[test]
     fn malformed_yaml_returns_a_parse_error() {
-        let error = parse_via_apollo_configuration("supergraph: [", ExternalValues::default())
-            .expect_err("the sequence is unterminated");
+        let error = parse("supergraph: [").expect_err("the sequence is unterminated");
 
         assert!(matches!(
             error,
@@ -264,9 +305,10 @@ mod tests {
 
     #[test]
     fn unsupported_expansion_returns_the_reference() {
-        let error = parse_via_apollo_configuration(
+        let error = parse_configuration(
             "supergraph:\n  listen: ${unsupported.ADDRESS}\n",
             ExternalValues::default().add_variables(MapVariables(HashMap::new())),
+            Migration::None,
         )
         .expect_err("the expansion kind is unsupported");
 
@@ -275,29 +317,49 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_document_expands_to_the_same_validated_yaml_as_router() {
-        let config = parse_via_apollo_configuration("", ExternalValues::default())
-            .expect("an empty document is valid");
+    fn blank_documents_are_the_default_configuration() {
+        for text in ["", "  \n"] {
+            let config = parse(text).expect("a blank document is valid");
+            assert_eq!(config.validated_yaml, Some(json!({})), "{text:?}");
+            assert_eq!(config.raw_yaml.as_deref(), Some(text));
+            assert_eq!(
+                config.supergraph.listen.to_string(),
+                "http://127.0.0.1:4000"
+            );
+        }
+    }
 
-        let router = crate::configuration::schema::validate_yaml_configuration(
-            "",
-            Expansion::builder().build(),
-            crate::configuration::schema::Mode::NoUpgrade,
-        )
-        .expect("router's own pipeline accepts an empty document");
+    #[test]
+    fn null_plugins_mean_no_user_plugins() {
+        let config = parse("plugins: null\n").expect("null plugin settings are accepted");
 
-        assert_eq!(config.validated_yaml, router.validated_yaml);
+        assert!(config.plugins.plugins.unwrap_or_default().is_empty());
+        assert_eq!(config.validated_yaml, Some(json!({ "plugins": {} })));
+    }
+
+    /// Empty `plugins:` is parsed as written, so an error elsewhere in the file is located in the
+    /// file, whether or not startup migration runs.
+    #[test]
+    fn errors_beside_null_plugins_refer_to_the_file_as_written() {
+        let text = "# every plugin commented out\nplugins:\nsupergraph:\n  listen: 12\n";
+        for migration in [Migration::WithinMajor, Migration::None] {
+            let error = parse_configuration(text, ExternalValues::default(), migration)
+                .expect_err("the listen address is invalid")
+                .to_string();
+
+            // The comment makes `listen` line 4 of the file; a re-serialized copy has no comment.
+            assert!(error.contains("[4:"), "{error}");
+        }
     }
 
     #[test]
     fn expansion_coerces_through_routers_schema_in_both_passes() {
-        let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
-            "FLAG".to_string(),
-            "true".to_string(),
-        )])));
-        let config =
-            parse_via_apollo_configuration("supergraph:\n  introspection: ${env.FLAG}\n", external)
-                .expect("the reference resolves to a boolean");
+        let config = parse_configuration(
+            "supergraph:\n  introspection: ${env.FLAG}\n",
+            env("FLAG", "true"),
+            Migration::None,
+        )
+        .expect("the reference resolves to a boolean");
 
         assert!(config.supergraph.introspection);
         assert_eq!(
@@ -324,7 +386,8 @@ mod tests {
         let reads = Arc::new(AtomicUsize::new(0));
         let external = ExternalValues::default().add_variables(RotatingPassword(reads.clone()));
 
-        let config = parse_via_apollo_configuration(text, external).expect("valid Redis settings");
+        let config = parse_configuration(text, external, Migration::WithinMajor)
+            .expect("valid Redis settings");
 
         assert_eq!(reads.load(Ordering::SeqCst), 1, "the provider is read once");
         let redis = config.apq.router.cache.redis.as_ref().unwrap();
@@ -345,8 +408,8 @@ mod tests {
 
     #[test]
     fn diagnostics_redact_an_anchor_aliased_into_a_secret_field() {
-        let error = parse_via_apollo_configuration(ANCHORED_SECRET, ExternalValues::default())
-            .expect_err("the Redis configuration contains an unknown field");
+        let error =
+            parse(ANCHORED_SECRET).expect_err("the Redis configuration contains an unknown field");
         let rendered = error.to_string();
 
         assert!(
@@ -359,24 +422,23 @@ mod tests {
         );
     }
 
-    /// Pins the documented limitation of [`parse_via_apollo_configuration`]: the migrated copy has
-    /// no aliases, so only the secret field is redacted. When migration preserves anchors, this
-    /// should render the anchor redacted like the unmigrated case above.
+    /// A migrated copy has no YAML aliases, so its diagnostics could not redact an anchor aliased
+    /// into a secret field. This migrated document fails validation, so the file as written is
+    /// reported instead and the shared parser redacts the anchor as in the unmigrated case.
     #[test]
-    fn migrated_documents_redact_secret_fields_but_not_their_anchor_sources() {
+    fn migrated_documents_that_fall_back_redact_anchor_sources() {
         let text = format!("cors:\n  origins:\n    - https://example.com\n{ANCHORED_SECRET}");
 
-        let error = parse_via_apollo_configuration(&text, ExternalValues::default())
-            .expect_err("the Redis configuration contains an unknown field");
+        let error = parse(&text).expect_err("the Redis configuration contains an unknown field");
         let rendered = error.to_string();
 
         assert!(
-            rendered.contains("password: [REDACTED]"),
-            "the secret field itself must stay redacted: {rendered}"
+            rendered.contains("namespace: &pw [REDACTED]"),
+            "the fallback should quote the file with the anchor redacted: {rendered}"
         );
         assert!(
-            rendered.contains("namespace: anchored-secret-value"),
-            "expected the known limitation; update this test if migration now keeps anchors: {rendered}"
+            !rendered.contains("anchored-secret-value"),
+            "the diagnostic must not contain the aliased secret: {rendered}"
         );
     }
 
@@ -384,10 +446,9 @@ mod tests {
     fn migration_reports_what_it_changed() {
         let _guard = tracing_test::dispatcher_guard();
 
-        parse_via_apollo_configuration(
-            include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
-            ExternalValues::default(),
-        )
+        parse(include_str!(
+            "testdata/compat/needs_minor_migration_cors_origins.yaml"
+        ))
         .expect("the adapter migrates legacy CORS settings");
 
         tracing_test::logs_assert(|lines| {
@@ -407,13 +468,61 @@ mod tests {
     fn diagnostics_refer_to_the_original_text_when_migration_changes_nothing() {
         let text = "# one\n# two\n\n# three\n# four\n\nsupergraph:\n  # listen comment\n  listen: 127.0.0.1:0\n\nthis_key_does_not_exist_anywhere: true\n";
 
-        let error = parse_via_apollo_configuration(text, ExternalValues::default())
-            .expect_err("the document sets a key the schema does not declare");
+        let error = parse(text).expect_err("the document sets a key the schema does not declare");
         let rendered = error.to_string();
 
         assert!(
             rendered.contains("[11:1]"),
             "the diagnostic should point at the offending line of the original text: {rendered}"
         );
+    }
+
+    /// A migrated document that still fails schema validation falls back to validating the
+    /// original document, which earlier releases also did, so the diagnostics quote the file.
+    #[test]
+    fn invalid_migrated_documents_are_reported_against_the_original_text() {
+        let text = "# operator comment kept in the snippet\ncors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
+
+        let error = parse(text).expect_err("the unknown key is invalid in either form");
+
+        let error = error.to_string();
+        assert!(
+            error.contains("this_key_does_not_exist_anywhere"),
+            "{error}"
+        );
+        // The comment makes the unknown key line 5 of the original; the migrated copy has no
+        // comment and no `origins`.
+        assert!(
+            error.contains("[5:1]"),
+            "the fallback diagnostics should refer to the original text: {error}"
+        );
+    }
+
+    /// Expansion errors in a migrated copy also fall back, so their location is in the file too.
+    #[test]
+    fn expansion_errors_in_migrated_documents_are_reported_against_the_original_text() {
+        let _guard = tracing_test::dispatcher_guard();
+        // Migration 2045 moves the unresolvable reference under `deduplication.all`, to line 5
+        // of the serialized copy; it is on line 4 of the file.
+        let text =
+            "# operator comment\nsubscription:\n  deduplication:\n    enabled: ${env.MISSING}\n";
+
+        let error = parse_configuration(text, env("PRESENT", "1"), Migration::WithinMajor)
+            .expect_err("the reference cannot be resolved")
+            .to_string();
+
+        assert!(error.contains("expansion value not present"), "{error}");
+        assert!(
+            error.contains("[4:"),
+            "the diagnostic should refer to the original text: {error}"
+        );
+        tracing_test::logs_assert(|lines| {
+            lines
+                .iter()
+                .any(|line| line.contains("could not be upgraded automatically"))
+                .then_some(())
+                .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
+        })
+        .unwrap();
     }
 }

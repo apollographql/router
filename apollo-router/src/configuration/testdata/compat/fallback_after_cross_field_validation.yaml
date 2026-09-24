@@ -1,0 +1,11 @@
+# Startup migration 2045 moves these flat settings under `deduplication.all`.
+subscription:
+  deduplication:
+    enabled: true
+# The schema accepts both, but Router's cross-field validation rejects enabling both.
+sandbox:
+  enabled: true
+homepage:
+  enabled: true
+supergraph:
+  introspection: true

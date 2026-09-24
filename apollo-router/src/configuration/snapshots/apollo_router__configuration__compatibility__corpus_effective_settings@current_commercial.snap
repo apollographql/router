@@ -1,0 +1,95 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: "commercial configuration: every licence-restricted path (authentication, authorization, batching, coprocessor, demand control, persisted queries, subscriptions, the restricted plugin, response and query-plan caching in Redis, and all four operation limits)"
+expression: changed_settings(&config)
+---
+{
+  "/apq/router/cache/redis": {
+    "urls": [
+      "redis://redis.example.internal:6379"
+    ],
+    "username": null,
+    "password": null,
+    "timeout": {
+      "secs": 0,
+      "nanos": 500000000
+    },
+    "ttl": null,
+    "namespace": null,
+    "tls": null,
+    "required_to_start": false,
+    "reset_ttl": true,
+    "pool_size": 1,
+    "metrics_interval": {
+      "secs": 1,
+      "nanos": 0
+    }
+  },
+  "/authentication": {
+    "router": {
+      "jwt": {
+        "jwks": [
+          {
+            "url": "https://issuer.example.internal/.well-known/jwks.json"
+          }
+        ]
+      }
+    }
+  },
+  "/authorization": {
+    "directives": {
+      "enabled": true
+    }
+  },
+  "/batching/enabled": true,
+  "/coprocessor": {
+    "url": "http://coprocessor.example.internal:8081"
+  },
+  "/demand_control": {
+    "enabled": true,
+    "mode": "measure",
+    "strategy": {
+      "static_estimated": {
+        "list_size": 30,
+        "max": 256
+      }
+    }
+  },
+  "/limits/router/max_aliases": 30,
+  "/limits/router/max_depth": 100,
+  "/limits/router/max_height": 100,
+  "/limits/router/max_root_fields": 20,
+  "/persisted_queries/enabled": true,
+  "/plugins": {
+    "experimental.restricted": {
+      "enabled": true
+    }
+  },
+  "/response_cache": {
+    "enabled": true,
+    "subgraph": {}
+  },
+  "/subscription": {
+    "enabled": true
+  },
+  "/supergraph/query_planning/cache/redis": {
+    "urls": [
+      "redis://redis.example.internal:6379"
+    ],
+    "username": null,
+    "password": null,
+    "timeout": {
+      "secs": 0,
+      "nanos": 500000000
+    },
+    "ttl": {
+      "secs": 2592000,
+      "nanos": 0
+    },
+    "namespace": null,
+    "tls": null,
+    "required_to_start": false,
+    "reset_ttl": true,
+    "pool_size": 1
+  }
+}
