@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::FileVariables;
 use apollo_configuration::expansion::MapVariables;
 use apollo_configuration::provenance::Injection;
@@ -13,11 +12,14 @@ use serde_json::Value;
 use serde_json::json;
 
 use super::Configuration;
+use super::apollo_configuration_parse::ExternalValues;
+use super::apollo_configuration_parse::apollo_configuration_options as router_options;
+use super::apollo_configuration_parse::parse_via_apollo_configuration;
 use super::expansion::Expansion;
 use super::expansion::Override;
 use super::expansion::ValueType;
 use super::schema::Mode;
-use super::schema::router_schema;
+use super::schema::router_config_schema;
 use super::schema::validate_yaml_configuration;
 use super::test_discovery;
 use super::upgrade::UpgradeMode;
@@ -27,20 +29,6 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
-
-// Configuration's Deserialize implementation already runs its cross-field validation.
-impl apollo_configuration::Validate for Configuration {}
-impl apollo_configuration::Configuration for Configuration {}
-
-fn current_major_version() -> i64 {
-    env!("CARGO_PKG_VERSION_MAJOR")
-        .parse()
-        .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
-}
-
-fn router_options() -> ParseYamlOptions {
-    ParseYamlOptions::default().schema(router_schema().clone())
-}
 
 /// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
 #[derive(Clone, Copy)]
@@ -124,11 +112,12 @@ const CASES: &[Case] = &[
     },
 ];
 
-/// Applies `mode`'s migrations and serializes the result for a parser that accepts YAML text.
-/// The existing loader instead validates the migrated value without reserializing it.
-fn migrate(text: &str, mode: UpgradeMode) -> Result<String, String> {
+/// Applies the major-version migrations and serializes the result, as `router config upgrade`
+/// does before an operator starts the upgraded router.
+fn upgrade_major(text: &str) -> Result<String, String> {
     let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-    let migrated = upgrade_configuration(&raw, false, mode).map_err(|error| error.to_string())?;
+    let migrated = upgrade_configuration(&raw, false, UpgradeMode::Major)
+        .map_err(|error| error.to_string())?;
     serde_yaml::to_string(&migrated).map_err(|error| error.to_string())
 }
 
@@ -144,7 +133,7 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
                 .map_err(|error| error.to_string())
         }
         Migration::Major => {
-            let upgraded_yaml = migrate(text, UpgradeMode::Major)?;
+            let upgraded_yaml = upgrade_major(text)?;
             validate_yaml_configuration(
                 &upgraded_yaml,
                 Expansion::builder().build(),
@@ -155,17 +144,15 @@ fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
     }
 }
 
-/// Migrates legacy fixtures before passing them to the shared parser.
+/// Parses `case` through the shared-parser adapter, which applies within-major migrations
+/// itself. A case needing a major migration is pre-upgraded first, as for router.
 fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
-    let text = case.text;
     let text = match case.migration {
-        Migration::None => text.to_string(),
-        Migration::Minor => migrate(text, UpgradeMode::Minor(current_major_version()))?,
-        Migration::Major => migrate(text, UpgradeMode::Major)?,
+        Migration::None | Migration::Minor => case.text.to_string(),
+        Migration::Major => upgrade_major(case.text)?,
     };
-    router_options()
-        .parse::<Configuration>(&text)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))
+    parse_via_apollo_configuration(&text, ExternalValues::default())
+        .map_err(|error| error.to_string())
 }
 
 /// Returns a JSON pointer to the first difference, or `None` when the values match.
@@ -246,7 +233,7 @@ fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Opti
     let router_json = serde_json::to_value(router).expect("Configuration serializes");
     let shared_json = serde_json::to_value(shared).expect("Configuration serializes");
     let path = first_difference(&router_json, &shared_json)?;
-    let secrets = SecretRedactor::new(router_schema());
+    let secrets = SecretRedactor::new(router_config_schema());
     let describe =
         |json: &Value| secrets.redact_at(&path, json.pointer(&path).unwrap_or(&Value::Null));
     Some(format!(
@@ -380,8 +367,8 @@ fn disagreements_about_secrets_are_detected_without_printing_them() {
     assert!(!mismatch.contains("synthetic-redis-password"), "{mismatch}");
 }
 
-/// Current-format inputs, and inputs migrated ahead of time exactly as a real deployment would
-/// migrate them, must produce the same effective settings through both parsers. A mismatch
+/// Current-format inputs, and inputs each loader migrates the way a real deployment would, must
+/// produce the same effective settings through both parsers. A mismatch
 /// names the case and the configuration path where the two disagree.
 #[test]
 fn effective_settings_agree_for_the_shared_corpus() {
@@ -406,7 +393,7 @@ fn effective_settings_agree_for_the_shared_corpus() {
 
 #[test]
 fn schema_derived_boolean_values_agree_between_parsers() {
-    let schema = router_schema();
+    let schema = router_config_schema();
     let default = schema["properties"]["experimental_type_conditioned_fetching"]["default"]
         .as_bool()
         .expect("the schema declares a boolean default");
@@ -514,8 +501,8 @@ fn configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml() 
     let router_config =
         validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
             .expect("router's own pipeline accepts this");
-    let adapted_shared =
-        parse_via_apollo_configuration(text, &router_options()).expect("the adapter accepts this");
+    let adapted_shared = parse_via_apollo_configuration(text, ExternalValues::default())
+        .expect("the adapter accepts this");
 
     let selector =
         jsonpath_rust::JsonPathInst::from_str("$.persisted_queries[?(@.enabled == true)]")
@@ -562,8 +549,8 @@ fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
 
     let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
         .expect("router's own pipeline accepts this");
-    let adapted_shared =
-        parse_via_apollo_configuration(text, &router_options()).expect("the adapter accepts this");
+    let adapted_shared = parse_via_apollo_configuration(text, ExternalValues::default())
+        .expect("the adapter accepts this");
 
     assert_eq!(
         router.raw_yaml.as_deref(),
@@ -575,38 +562,6 @@ fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
         adapted_shared.raw_yaml.as_deref(),
         "the adapter must reproduce the same raw_yaml router itself would have set"
     );
-}
-
-/// Retains document values without adding defaults from `Configuration::serialize`.
-/// The parse options supply Router's schema, including its expansion coercion rules.
-#[derive(serde::Deserialize, schemars::JsonSchema)]
-#[serde(transparent)]
-struct ExpandedDocument(Value);
-
-impl apollo_configuration::Validate for ExpandedDocument {}
-impl apollo_configuration::Configuration for ExpandedDocument {}
-
-/// Applies within-major migrations, parses settings, and separately parses the expanded
-/// document for configuration-usage and licence selectors using the same shared options.
-/// Providers must be stable across both calls. `raw_yaml` keeps the original input.
-/// Like the corpus migration pre-pass, this rejects invalid migrated input; it does not
-/// implement the production loader's fallback to validating the original document.
-fn parse_via_apollo_configuration(
-    text: &str,
-    options: &ParseYamlOptions,
-) -> Result<Configuration, String> {
-    // Do not let migration's serialization hide duplicate keys in the supplied document.
-    super::yaml::parse(text).map_err(|error| error.to_string())?;
-    let migrated = migrate(text, UpgradeMode::Minor(current_major_version()))?;
-    let mut config: Configuration = options
-        .parse(&migrated)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))?;
-    let document: ExpandedDocument = options
-        .parse(&migrated)
-        .map_err(|error| format!("{:?}", miette::Report::new(error)))?;
-    config.validated_yaml = Some(document.0);
-    config.raw_yaml = Some(Arc::from(text));
-    Ok(config)
 }
 
 #[test]
@@ -623,7 +578,7 @@ subscription:
         .build();
     let router = validate_yaml_configuration(text, router_expansion, Mode::NoUpgrade)
         .expect("the router accepts the disabled configuration");
-    let options = router_options()
+    let external = ExternalValues::default()
         .add_variables(MapVariables(HashMap::from([(
             "COMPAT_PERSISTED_QUERIES".to_string(),
             "true".to_string(),
@@ -633,7 +588,7 @@ subscription:
             json!(true),
             "COMPAT_SUBSCRIPTION",
         )]);
-    let shared = parse_via_apollo_configuration(text, &options)
+    let shared = parse_via_apollo_configuration(text, external)
         .expect("the shared parser accepts its independently enabled configuration");
     let document = shared.validated_yaml.as_ref().unwrap();
     assert_eq!(document["persisted_queries"]["enabled"], json!(true));
@@ -651,7 +606,7 @@ fn adapter_document_migrates_cors_before_shared_expansion() {
     let text = include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml");
     let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
         .expect("the router migrates legacy CORS settings");
-    let shared = parse_via_apollo_configuration(text, &router_options())
+    let shared = parse_via_apollo_configuration(text, ExternalValues::default())
         .expect("the adapter migrates legacy CORS settings");
     let document = shared.validated_yaml.as_ref().unwrap();
     assert!(document["cors"].get("origins").is_none());
@@ -665,10 +620,10 @@ fn adapter_document_migrates_cors_before_shared_expansion() {
 fn adapter_rejects_duplicate_keys_before_migration() {
     let error = parse_via_apollo_configuration(
         include_str!("testdata/compat/duplicate_keys.yaml"),
-        &router_options(),
+        ExternalValues::default(),
     )
     .expect_err("migration must not erase duplicate keys");
-    assert!(error.contains("duplicated keys"), "{error}");
+    assert!(error.to_string().contains("duplicated keys"), "{error}");
 }
 
 #[test]
@@ -949,11 +904,11 @@ fn env_expansion_agrees_between_the_two_expanders() {
     let router_config = validate_yaml_configuration(text, router_expansion, Mode::NoUpgrade)
         .expect("router's own expansion resolves this");
 
-    let shared_options = router_options().add_variables(MapVariables(HashMap::from([(
+    let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
         "COMPAT_TEST_PORT".to_string(),
         "4001".to_string(),
     )])));
-    let shared_config = parse_via_apollo_configuration(text, &shared_options)
+    let shared_config = parse_via_apollo_configuration(text, external)
         .expect("the shared crate's expansion resolves this too");
 
     assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
@@ -980,12 +935,12 @@ fn an_env_var_override_beats_the_documents_own_value_on_both_sides() {
     let router_config = validate_yaml_configuration(text, router_expansion, Mode::NoUpgrade)
         .expect("router's own override mechanism applies this");
 
-    let shared_options = router_options().inject(vec![Injection::env(
+    let external = ExternalValues::default().inject(vec![Injection::env(
         &["supergraph", "listen"],
         json!("127.0.0.1:9999"),
         "COMPAT_TEST_LISTEN_OVERRIDE",
     )]);
-    let shared_config = parse_via_apollo_configuration(text, &shared_options)
+    let shared_config = parse_via_apollo_configuration(text, external)
         .expect("the shared crate's injection mechanism applies this too");
 
     assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
@@ -1012,8 +967,8 @@ fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
     let router_config = validate_yaml_configuration(&text, router_expansion, Mode::NoUpgrade)
         .expect("router's own file expansion resolves this");
 
-    let shared_options = router_options().add_variables(FileVariables);
-    let shared_config = parse_via_apollo_configuration(&text, &shared_options)
+    let external = ExternalValues::default().add_variables(FileVariables);
+    let shared_config = parse_via_apollo_configuration(&text, external)
         .expect("the shared crate's file expansion resolves this too");
 
     assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
@@ -1035,8 +990,8 @@ fn file_expansion_boolean_coercion_resolves_through_a_nested_allof_ref() {
     let router_config = validate_yaml_configuration(&text, router_expansion, Mode::NoUpgrade)
         .expect("router's own file expansion resolves this");
 
-    let shared_options = router_options().add_variables(FileVariables);
-    let shared_config = parse_via_apollo_configuration(&text, &shared_options)
+    let external = ExternalValues::default().add_variables(FileVariables);
+    let shared_config = parse_via_apollo_configuration(&text, external)
         .expect("the shared crate resolves the nested field's declared type too");
 
     assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
@@ -1119,7 +1074,7 @@ fn effective_settings_agree_for_discovered_project_documents() {
 /// generated schema and produce matching effective settings.
 #[test]
 fn schema_declared_top_level_defaults_agree_between_parsers() {
-    let schema = router_schema();
+    let schema = router_config_schema();
     let properties = schema["properties"]
         .as_object()
         .expect("the root schema declares properties");
@@ -1204,8 +1159,8 @@ fn licence_restricted_configuration_paths_agree_between_parsers_via_validated_ya
 
     let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
         .expect("router's own pipeline accepts this");
-    let adapted_shared =
-        parse_via_apollo_configuration(text, &router_options()).expect("the adapter accepts this");
+    let adapted_shared = parse_via_apollo_configuration(text, ExternalValues::default())
+        .expect("the adapter accepts this");
 
     let router_yaml = router
         .validated_yaml
@@ -1255,7 +1210,7 @@ fn licence_verdict_agrees_between_parsers_for_commercial_configuration() {
     let router_config =
         validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
             .expect("router's own pipeline accepts the commercial fixture");
-    let shared_config = parse_via_apollo_configuration(text, &router_options())
+    let shared_config = parse_via_apollo_configuration(text, ExternalValues::default())
         .expect("the adapter accepts the commercial fixture");
 
     let router_schema = Schema::parse(schema_sdl, &router_config)
