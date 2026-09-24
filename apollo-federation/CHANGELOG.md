@@ -107,6 +107,18 @@ pass or fail validation is unchanged.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
 
+## 🛠 Maintenance
+
+### Connectors are validated as part of subgraph validation ([PR #10035](https://github.com/apollographql/router/pull/10035))
+
+Connectors validation used to run outside this crate, in `federation-rs`, which
+wrapped the individual composition phases and interleaved connectors work between
+them. It now runs inside `Subgraph::validate`, so `compose` owns the whole
+pipeline and connectors validation cannot be skipped. Diagnostic codes are
+unchanged.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
+
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))

@@ -1,4 +1,4 @@
-### Accept `@defer` labels reused via fragment spreads
+### Accept `@defer` labels reused via fragment spreads ([PR #10178](https://github.com/apollographql/router/pull/10178))
 
 The duplicate `@defer(label:)` check from the [GHSA-gr6h-4wpf-xp52](https://github.com/apollographql/router/security/advisories/GHSA-gr6h-4wpf-xp52) fix ran after fragment expansion, rejecting valid operations where a fragment containing a labeled `@defer` is spread more than once. The incremental delivery specification defines label uniqueness over the document as written, where such a label occurs only once; clients like Relay derive defer labels from fragment names and rely on this.
 
@@ -19,4 +19,4 @@ fragment UserFragment on User {
 }
 ```
 
-By [@tninesling](https://github.com/tninesling)
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10178/
