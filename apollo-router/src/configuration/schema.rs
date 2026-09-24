@@ -40,9 +40,9 @@ pub(crate) fn generate_config_schema() -> Schema {
     schema
 }
 
-/// Router's patched configuration schema as JSON, generated once and shared by tests.
-#[cfg(test)]
-pub(crate) fn router_schema() -> &'static serde_json::Value {
+/// [`generate_config_schema`] as JSON, generated once and shared by the shared-parser adapter
+/// and tests.
+pub(crate) fn router_config_schema() -> &'static serde_json::Value {
     static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {
         serde_json::to_value(generate_config_schema())
@@ -118,12 +118,7 @@ pub(crate) fn validate_yaml_configuration(
     });
 
     if migration == Mode::Upgrade {
-        let current_major_version: i64 = env!("CARGO_PKG_VERSION_MAJOR")
-            .parse()
-            .expect("CARGO_PKG_VERSION_MAJOR should be an integer");
-
-        let upgraded =
-            upgrade_configuration(&yaml, true, UpgradeMode::Minor(current_major_version))?;
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::current_minor())?;
         let expanded_yaml = expansion.expand(&upgraded)?;
         if validator.is_valid(&expanded_yaml) {
             yaml = upgraded;
@@ -343,11 +338,11 @@ pub(crate) mod advertised_defaults {
     use serde::de::DeserializeOwned;
     use serde_json::Value;
 
-    use super::router_schema;
+    use super::router_config_schema;
 
     /// The `default` the generated schema advertises for `property` of `definition`.
     pub(crate) fn of_property(definition: &str, property: &str) -> Value {
-        router_schema()
+        router_config_schema()
             .pointer(&format!(
                 "/definitions/{definition}/properties/{property}/default"
             ))
@@ -358,7 +353,7 @@ pub(crate) mod advertised_defaults {
     /// An object built from the `default` the generated schema advertises for every property of
     /// `definition`. Fails if any property advertises none.
     pub(crate) fn of_every_property(definition: &str) -> Value {
-        let properties = router_schema()
+        let properties = router_config_schema()
             .pointer(&format!("/definitions/{definition}/properties"))
             .and_then(Value::as_object)
             .unwrap_or_else(|| panic!("{definition} declares no properties"));
