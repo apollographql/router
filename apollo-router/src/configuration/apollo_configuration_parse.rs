@@ -59,6 +59,7 @@ pub(crate) enum Migration {
 pub(crate) struct ExternalValues {
     variables: Vec<Box<dyn VariableProvider>>,
     injections: Vec<Injection>,
+    replacements: Vec<(Vec<String>, Value)>,
 }
 
 impl ExternalValues {
@@ -74,7 +75,19 @@ impl ExternalValues {
         self
     }
 
-    /// Adds these values to `options`.
+    /// Sets `value` at the dotted `path` before parsing, replacing whatever the document has
+    /// there. Unlike an injection, this also replaces a section that has settings in it.
+    pub(crate) fn replace(mut self, path: &str, value: Value) -> Self {
+        let path = path.split('.').map(str::to_string).collect();
+        self.replacements.push((path, value));
+        self
+    }
+
+    fn apply_replacements(&self, document: &mut Value) {
+        replace_all(&self.replacements, document);
+    }
+
+    /// Adds the providers and injections to `options`.
     fn add_to(self, options: ParseYamlOptions) -> ParseYamlOptions {
         let options = options.inject(self.injections);
         if self.variables.is_empty() {
@@ -91,10 +104,35 @@ impl ExternalValues {
     /// documents that are not router configuration.
     #[cfg(test)]
     pub(crate) fn expand_without_schema(self, text: &str) -> Result<Value, ConfigError> {
-        self.add_to(ParseYamlOptions::default())
-            .parse::<ExpandedDocument>(text)
-            .map(|document| document.0)
+        let replacements = self.replacements.clone();
+        let ExpandedDocument(mut document) = self
+            .add_to(ParseYamlOptions::default())
+            .parse::<ExpandedDocument>(text)?;
+        replace_all(&replacements, &mut document);
+        Ok(document)
     }
+}
+
+fn replace_all(replacements: &[(Vec<String>, Value)], document: &mut Value) {
+    for (path, value) in replacements {
+        replace_at(document, path, value.clone());
+    }
+}
+
+fn replace_at(document: &mut Value, path: &[String], value: Value) {
+    let Some((key, rest)) = path.split_first() else {
+        *document = value;
+        return;
+    };
+    if !document.is_object() {
+        *document = Value::Object(Default::default());
+    }
+    let child = document
+        .as_object_mut()
+        .expect("replaced with an object above")
+        .entry(key.clone())
+        .or_insert(Value::Null);
+    replace_at(child, rest, value);
 }
 
 /// Consults each provider in order, as the shared parser does with separately added providers,
@@ -136,12 +174,14 @@ impl apollo_configuration::Configuration for ExpandedDocument {}
 /// schema and the same external values. Each expansion reference is resolved once and reused,
 /// so both passes see the same value.
 ///
+/// Replacements, such as the `--dev` defaults, are applied to the document before migration.
+///
 /// A document that needs no changes is parsed as written, so diagnostics point at the user's
 /// lines and YAML aliases keep the shared parser's anchor redaction. A changed document is
 /// serialized and parsed instead. If the shared parser rejects the migrated document, whether in
 /// expansion, overrides, schema validation, deserialization or cross-field validation, the
-/// supplied text is parsed in its place, as earlier releases did after a schema failure. Every
-/// reported diagnostic therefore refers to the operator's file, where YAML aliases keep the
+/// unmigrated document is parsed in its place, as earlier releases did after a schema failure.
+/// Unless replacements changed it, that is the operator's file, where YAML aliases keep the
 /// shared parser's anchor redaction.
 ///
 /// Known limitation: an expansion reference anchored on a non-secret field and aliased into a
@@ -158,7 +198,7 @@ pub(crate) fn parse_configuration(
 ) -> Result<Configuration, ConfigurationError> {
     // Migration serialization must not hide duplicate keys in the original document.
     super::yaml::check_duplicate_keys(text)?;
-    let original: Value = if text.trim().is_empty() {
+    let file: Value = if text.trim().is_empty() {
         Value::Object(Default::default())
     } else {
         serde_yaml::from_str(text).map_err(|error| ConfigurationError::InvalidConfiguration {
@@ -166,17 +206,19 @@ pub(crate) fn parse_configuration(
             error: error.to_string(),
         })?
     };
+    let external = external.into();
+    let mut original = file.clone();
+    external.apply_replacements(&mut original);
     let migrated = match migration {
         Migration::WithinMajor => {
             upgrade_configuration(&original, true, UpgradeMode::current_minor())?
         }
         Migration::None => original.clone(),
     };
-    let options = external
-        .into()
-        .add_to(ParseYamlOptions::default().schema(router_config_schema().clone()));
+    let options =
+        external.add_to(ParseYamlOptions::default().schema(router_config_schema().clone()));
     let parse = |document: &Value| -> Result<_, ConfigurationError> {
-        if *document == original {
+        if *document == file {
             return Ok(parse_document(text, &options));
         }
         let serialized = serde_yaml::to_string(document).map_err(|error| {

@@ -24,8 +24,17 @@ pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
     override_configs: Vec<Override>,
+    /// Values that replace whatever the document sets, such as the `--dev` defaults.
+    replacements: Vec<Replacement>,
     #[cfg(test)]
     mocked_env_vars: HashMap<String, String>,
+}
+
+/// A value set at a fixed path, replacing the document's own value there.
+#[derive(Clone)]
+pub(crate) struct Replacement {
+    config_path: &'static str,
+    value: Value,
 }
 
 #[derive(buildstructor::Builder, Clone)]
@@ -49,6 +58,7 @@ pub(crate) enum ValueType {
     String,
     #[allow(dead_code)]
     Number,
+    #[allow(dead_code)]
     Bool,
 }
 
@@ -155,7 +165,7 @@ impl Expansion {
                     .build(),
             )
             .override_config(listen_override)
-            .override_configs(dev_mode_defaults)
+            .replacements(dev_mode_defaults)
             .build())
     }
 
@@ -176,7 +186,9 @@ impl Expansion {
     }
 }
 
-fn dev_mode_defaults() -> Vec<Override> {
+/// The `--dev` settings. They replace the document's own values, as earlier releases did, so
+/// `include_subgraph_errors.all: true` also replaces per-field settings under `all`.
+fn dev_mode_defaults() -> Vec<Replacement> {
     [
         "expose_query_plan",
         "include_subgraph_errors.all",
@@ -188,13 +200,9 @@ fn dev_mode_defaults() -> Vec<Override> {
     .into_iter()
     .map(|path| (path, true))
     .chain([("homepage.enabled", false)])
-    .map(|(path, value)| {
-        Override::builder()
-            .config_path(path)
-            .value(value)
-            .flag("--dev")
-            .value_type(ValueType::Bool)
-            .build()
+    .map(|(config_path, value)| Replacement {
+        config_path,
+        value: Value::Bool(value),
     })
     .collect()
 }
@@ -244,6 +252,12 @@ impl From<Expansion> for ExternalValues {
                 _ => external,
             };
         }
+        let external = expansion
+            .replacements
+            .iter()
+            .fold(external, |external, replacement| {
+                external.replace(replacement.config_path, replacement.value.clone())
+            });
         external
             .add_variables(UnsupportedMode { supported_modes })
             .inject(injections)
@@ -499,7 +513,7 @@ mod test {
     #[test]
     fn test_dev_mode() {
         let expansion = Expansion::builder()
-            .override_configs(dev_mode_defaults())
+            .replacements(dev_mode_defaults())
             .build();
         let value = expand(
             &expansion,
@@ -536,5 +550,26 @@ plain: "no dollars here"
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(result);
         })
+    }
+
+    /// `--dev` replaces a section that has its own settings, as earlier releases did, instead of
+    /// refusing to override it.
+    #[test]
+    fn dev_mode_replaces_a_section_with_settings() {
+        let expansion = Expansion::builder()
+            .replacements(dev_mode_defaults())
+            .build();
+
+        let config = crate::configuration::parse_configuration(
+            "include_subgraph_errors:\n  all:\n    redact_message: true\n",
+            expansion,
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect("--dev replaces the section");
+
+        assert_eq!(
+            config.validated_yaml.expect("the retained document")["include_subgraph_errors"]["all"],
+            serde_json::json!(true)
+        );
     }
 }
