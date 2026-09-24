@@ -13,6 +13,7 @@ use tower_http::BoxError;
 
 use crate::AllowedFeature;
 use crate::configuration::Configuration;
+use crate::pipeline::plugins::create_plugins;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::PipelineFactory;
@@ -84,6 +85,31 @@ impl Plugin for AlwaysFailsToStartPlugin {
 
 register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
+// Records the previous settings it is built with
+
+/// The previous settings the last built `test.records_previous_config` received.
+static PREVIOUS_SETTINGS: parking_lot::Mutex<Option<Option<String>>> =
+    parking_lot::Mutex::new(None);
+
+#[derive(Debug)]
+struct RecordsPreviousConfigPlugin {}
+
+#[async_trait::async_trait]
+impl Plugin for RecordsPreviousConfigPlugin {
+    type Config = Conf;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        *PREVIOUS_SETTINGS.lock() = Some(init.previous_config.map(|previous| previous.name));
+        Ok(RecordsPreviousConfigPlugin {})
+    }
+}
+
+register_plugin!(
+    "test",
+    "records_previous_config",
+    RecordsPreviousConfigPlugin
+);
+
 async fn create_service(config: Configuration) -> Result<(), BoxError> {
     let schema = include_str!("../../testdata/supergraph.graphql");
     let schema = Schema::parse(schema, &config)?;
@@ -137,6 +163,34 @@ fn user_plugins_come_from_the_settings_retained_while_parsing() {
         ["test.always_fails_to_start", "test.always_starts_and_stops"]
     );
     assert_eq!(configs.unknown_plugins(), ["acme.unregistered"]);
+}
+
+/// On a hot reload, each plugin is built with the settings it ran with before.
+#[tokio::test]
+async fn plugins_receive_their_previous_settings_on_reload() {
+    let configuration = |name: &str| -> Configuration {
+        format!("plugins:\n  test.records_previous_config:\n    name: {name}\n")
+            .parse()
+            .expect("the plugin settings are valid")
+    };
+    let previous = configuration("before");
+    let current = configuration("after");
+    let schema = Schema::parse(include_str!("../../testdata/supergraph.graphql"), &current)
+        .expect("the supergraph is valid");
+
+    create_plugins(
+        &current,
+        &schema,
+        Default::default(),
+        None,
+        None,
+        Default::default(),
+        Some(Arc::new(previous)),
+    )
+    .await
+    .expect("the plugins build");
+
+    assert_eq!(*PREVIOUS_SETTINGS.lock(), Some(Some("before".to_string())));
 }
 
 #[tokio::test]
