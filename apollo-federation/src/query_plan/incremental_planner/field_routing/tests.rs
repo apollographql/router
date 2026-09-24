@@ -2836,7 +2836,7 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
     use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
     use crate::schema::position::SchemaRootDefinitionKind;
 
-    let (supergraph, query_graph, statistics) = bulb_test_parameters(SINGLE_SUBGRAPH_SCHEMA);
+    let (supergraph, query_graph, statistics) = bulb_test_parameters(SCHEMA);
     let head = *query_graph
         .root_kinds_to_nodes_by_source("a")
         .expect("subgraph root kinds")
@@ -3589,7 +3589,7 @@ fn corpus_timing_debug() {
 #[test]
 fn skip_on_cross_subgraph_field_produces_condition_node() {
     let plan_str = plan_query_with_options(
-        CROSS_SUBGRAPH_SCHEMA,
+        SCHEMA,
         "query($s: Boolean!) { user { name email @skip(if: $s) } }",
         default_config(),
         Default::default(),
@@ -3609,7 +3609,7 @@ fn skip_on_cross_subgraph_field_produces_condition_node() {
 #[test]
 fn include_on_cross_subgraph_field_produces_condition_node() {
     let plan_str = plan_query_with_options(
-        CROSS_SUBGRAPH_SCHEMA,
+        SCHEMA,
         "query($inc: Boolean!) { user { name email @include(if: $inc) } }",
         default_config(),
         Default::default(),
@@ -3628,7 +3628,7 @@ fn include_on_cross_subgraph_field_produces_condition_node() {
 /// A -> B -> C entity resolution with each subgraph owning different fields.
 #[test]
 fn three_way_entity_hop_plans_correctly() {
-    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name email address } }");
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { name email address } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name': {plan_str}"
@@ -3649,7 +3649,7 @@ fn three_way_entity_hop_plans_correctly() {
 #[test]
 fn cross_subgraph_mutation_with_entity_hop() {
     let plan_str = plan_query(
-        CROSS_SUBGRAPH_SCHEMA,
+        SCHEMA,
         r#"mutation { createUser(name: "Alice") { id name email } }"#,
     );
     assert!(
@@ -3667,10 +3667,7 @@ fn cross_subgraph_mutation_with_entity_hop() {
 /// handling in selection_builder.
 #[test]
 fn inline_fragment_on_same_type_passes_through() {
-    let plan_str = plan_query(
-        CROSS_SUBGRAPH_SCHEMA,
-        "{ user { ... on User { name email } } }",
-    );
+    let plan_str = plan_query(SCHEMA, "{ user { ... on User { name email } } }");
     assert!(
         plan_str.contains("name"),
         "Plan should fetch 'name' through inline fragment: {plan_str}"
@@ -3685,7 +3682,7 @@ fn inline_fragment_on_same_type_passes_through() {
 /// through selection builder entries.
 #[test]
 fn aliased_cross_subgraph_field_preserves_alias() {
-    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { name myEmail: email } }");
+    let plan_str = plan_query(SCHEMA, "{ user { name myEmail: email } }");
     assert!(
         plan_str.contains("myEmail") || plan_str.contains("email"),
         "Plan should reference the aliased email field: {plan_str}"
@@ -3700,7 +3697,7 @@ fn aliased_cross_subgraph_field_preserves_alias() {
 /// fetch graph construction for independent subgraph fetches.
 #[test]
 fn parallel_entity_hops_from_same_root() {
-    let plan_str = plan_query(CROSS_SUBGRAPH_SCHEMA, "{ user { email address } }");
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { email address } }");
     assert!(
         plan_str.contains("email"),
         "Plan should fetch 'email': {plan_str}"
