@@ -70,7 +70,6 @@ pub(crate) enum RoutingChoice {
     /// Key hop whose @key conditions are locally available.
     KeyHopWithLocalKey { edge: EdgeInfo, key: KeyHopInfo },
     /// Key hop whose @key conditions are covered by an ancestor @provides.
-    #[allow(dead_code)]
     KeyHopWithProvidedKey { edge: EdgeInfo, key: KeyHopInfo },
     /// Key hop whose @key conditions must be fetched from other subgraphs.
     KeyHopWithExternalKey { edge: EdgeInfo, key: KeyHopInfo },

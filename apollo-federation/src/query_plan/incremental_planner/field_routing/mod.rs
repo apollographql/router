@@ -88,14 +88,12 @@ impl<T> std::hash::Hash for ArcKey<T> {
 pub(super) type ConditionsKey = ArcKey<SelectionSet>;
 
 /// Pointer-identity key for a `Selection`, owning the inner Arc.
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum SelectionArcKey {
     Field(ArcKey<crate::operation::FieldSelection>),
     InlineFragment(ArcKey<crate::operation::InlineFragmentSelection>),
 }
 
-#[allow(dead_code)]
 impl SelectionArcKey {
     pub(super) fn new(selection: &Selection) -> Self {
         match selection {
@@ -132,7 +130,6 @@ type ConditionsRoutableCache =
 /// state or that reference routing types. These live on
 /// FieldRoutingSearchSpace (not PlanState) so checkpoint/rollback never
 /// touches them.
-#[allow(dead_code)]
 pub(super) struct PlannerCaches {
     pub(super) routing_options: RoutingOptionsCache,
     key_hops: KeyHopCache,
