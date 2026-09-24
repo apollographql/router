@@ -14,7 +14,6 @@ pub(super) mod cached_query_graph;
 mod commit;
 mod conditions;
 mod connect;
-#[allow(dead_code)]
 pub(super) mod context;
 mod fork;
 mod requires;
