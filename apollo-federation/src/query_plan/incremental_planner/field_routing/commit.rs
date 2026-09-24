@@ -50,13 +50,17 @@ impl FieldRoutingSearchSpace {
     ) -> Result<(), FederationError> {
         let qg = &self.query_graph;
 
-        // Non-edge choices are not yet implemented.
+        // Non-edge choices are implemented in later branches.
         match choice {
             RoutingChoice::TypeExplosion => {
-                todo!("type explosion dispatch")
+                return Err(FederationError::internal(
+                    "type explosion dispatch is not yet implemented",
+                ));
             }
             RoutingChoice::StripFragment => {
-                todo!("fragment restructuring dispatch")
+                return Err(FederationError::internal(
+                    "fragment restructuring dispatch is not yet implemented",
+                ));
             }
             _ => {}
         }
