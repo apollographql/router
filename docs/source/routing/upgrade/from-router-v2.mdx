@@ -89,9 +89,24 @@ The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` ins
 
 Deployments that only use the `router` binary as-is are unaffected.
 
+### Configuration is validated more strictly when it loads
+
+The router checks its configuration more thoroughly at startup and on reload, so a configuration that loaded with router v2.x can be rejected:
+
+- **Plugin settings are fully checked at load.** Settings the configuration schema accepted, but a plugin rejected only when it was built, now fail when the configuration loads. Each invalid plugin's error is reported against its section of the file.
+- **Error messages have a new format.** They quote the offending lines of your file and name the environment variable or command-line flag that supplied a value.
+- **`router config validate` checks what startup would load.** It applies the same automatic upgrades as startup, and says when your file relies on them.
+- **A missing file in `${file.PATH}` is an error.** Previously the reference was left in the configuration as literal text.
+
+**Upgrade steps**:
+
+- Run `router config validate` against your configuration and fix any errors it reports.
+- If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
+- Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
+
 ### Native plugin configuration must be `Clone`, `Send`, `Sync` and `'static`
 
-The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `Clone + Send + Sync + 'static`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins); router configuration files are unaffected.
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `Clone + Send + Sync + 'static`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins).
 
 **Upgrade step**:
 
