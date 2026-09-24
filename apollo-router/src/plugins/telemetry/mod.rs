@@ -188,6 +188,15 @@ struct BuiltinInstruments {
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
+/// Whether Apollo reporting is on, through a `telemetry.apollo` section or an Apollo key and graph
+/// ref (`has_credentials`).
+fn reports_to_apollo(full_config: &serde_json::Value, has_credentials: bool) -> bool {
+    has_credentials
+        || full_config
+            .pointer("/telemetry/apollo")
+            .is_some_and(serde_json::Value::is_object)
+}
+
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
     BuiltinInstruments {
         graphql_custom_instruments: Arc::new(config.new_builtin_graphql_instruments()),
@@ -248,10 +257,10 @@ impl PluginPrivate for Telemetry {
 
         let mut config = init.config;
         // Apollo reporting identifies the schema it reports against.
-        let apollo_configured = full_config
-            .pointer("/telemetry/apollo")
-            .is_some_and(serde_json::Value::is_object);
-        if apollo_configured || (apollo_key().is_some() && apollo_graph_reference().is_some()) {
+        if reports_to_apollo(
+            full_config,
+            apollo_key().is_some() && apollo_graph_reference().is_some(),
+        ) {
             config.apollo.schema_id = init.supergraph_schema_id.to_string();
         }
         config.instrumentation.spans.update_defaults();
@@ -1647,5 +1656,33 @@ mod licensed_operation_count_tests {
         }
         .with_metrics()
         .await;
+    }
+}
+
+#[cfg(test)]
+mod reports_to_apollo_tests {
+    use serde_json::json;
+
+    use super::reports_to_apollo;
+
+    #[test]
+    fn a_telemetry_apollo_section_turns_reporting_on() {
+        assert!(reports_to_apollo(
+            &json!({ "telemetry": { "apollo": {} } }),
+            false
+        ));
+    }
+
+    #[test]
+    fn an_apollo_key_and_graph_ref_turn_reporting_on() {
+        assert!(reports_to_apollo(&json!({}), true));
+    }
+
+    #[test]
+    fn reporting_is_off_without_a_section_or_credentials() {
+        assert!(!reports_to_apollo(
+            &json!({ "telemetry": { "exporters": {} } }),
+            false
+        ));
     }
 }
