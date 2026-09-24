@@ -55,17 +55,26 @@ impl ExternalValues {
         self
     }
 
-    fn into_options(self) -> ParseYamlOptions {
-        let options = apollo_configuration_options().inject(self.injections);
+    /// Adds these values to `options`.
+    fn add_to(self, options: ParseYamlOptions) -> ParseYamlOptions {
+        let options = options.inject(self.injections);
         if self.variables.is_empty() {
             // Without providers the shared parser leaves expansion syntax unchanged.
-            options
-        } else {
-            options.add_variables(ProviderSnapshot {
-                providers: self.variables,
-                resolved: Default::default(),
-            })
+            return options;
         }
+        options.add_variables(ProviderSnapshot {
+            providers: self.variables,
+            resolved: Default::default(),
+        })
+    }
+
+    /// Expands `text` with these values but without Router's schema, for testing expansion on
+    /// documents that are not router configuration.
+    #[cfg(test)]
+    pub(crate) fn expand_without_schema(self, text: &str) -> Result<Value, ConfigError> {
+        self.add_to(ParseYamlOptions::default())
+            .parse::<ExpandedDocument>(text)
+            .map(|document| document.0)
     }
 }
 
@@ -136,7 +145,7 @@ pub(crate) fn parse_via_apollo_configuration(
     };
     // Log what migration changed, as the production loader does.
     let migrated = upgrade_configuration(&raw, true, UpgradeMode::current_minor())?;
-    let options = external.into_options();
+    let options = external.add_to(apollo_configuration_options());
     let (mut config, document) = if migrated == raw {
         parse_both_passes(text, &options)?
     } else {
