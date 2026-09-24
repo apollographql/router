@@ -3,7 +3,8 @@
 //! Each test drives a plugin service around a mocked inner service. It compares the request
 //! body the inner service received and every response chunk the caller received, serialized in
 //! order, with Router v2.17.0's behavior. Conversion counts show which fields callbacks
-//! converted to Rhai values (`to_rhai`) and wrote back (`from_rhai`).
+//! converted to Rhai values (`to_rhai`) and wrote back (`from_rhai`). Each test runs once per
+//! conversion bridge.
 //!
 //! Router-stage callbacks are not covered because Router does not expose request or response
 //! bodies as JSON at that stage (router issue #3642).
@@ -19,6 +20,7 @@ use tower::util::BoxService;
 use crate::Context;
 use crate::graphql;
 use crate::plugin::DynPlugin;
+use crate::plugins::rhai::engine::json_fields::Bridge;
 use crate::plugins::rhai::engine::json_fields::Conversions;
 use crate::plugins::rhai::engine::json_fields::FieldCounts;
 use crate::plugins::rhai::engine::json_fields::take_conversions;
@@ -43,6 +45,16 @@ impl Exchange {
             received: received.map(str::to_string),
             chunks: chunks.iter().map(|chunk| chunk.to_string()).collect(),
         }
+    }
+}
+
+/// Run `test` once with each conversion bridge.
+async fn for_each_bridge<F: Future<Output = ()>>(test: impl Fn() -> F) {
+    for bridge in Bridge::ALL {
+        // Printed so a failure's captured output names the bridge.
+        println!("bridge: {bridge:?}");
+        let _selected = bridge.select();
+        test().await;
     }
 }
 
@@ -234,193 +246,223 @@ const EDITED_DEFERRED: &str = r#"{"label":"later","data":{"a":2,"label":"later",
 
 #[tokio::test]
 async fn supergraph_callbacks_edit_request_and_every_response_chunk() {
-    take_conversions();
-    let exchange = call_supergraph("stages.rhai", primary_and_deferred()).await;
-    assert_eq!(
-        exchange,
-        Exchange::new(Some(EDITED_REQUEST), &[EDITED_PRIMARY, EDITED_DEFERRED])
-    );
-    assert_eq!(take_conversions(), edits(2));
+    for_each_bridge(|| async {
+        take_conversions();
+        let exchange = call_supergraph("stages.rhai", primary_and_deferred()).await;
+        assert_eq!(
+            exchange,
+            Exchange::new(Some(EDITED_REQUEST), &[EDITED_PRIMARY, EDITED_DEFERRED])
+        );
+        assert_eq!(take_conversions(), edits(2));
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn execution_callbacks_edit_request_and_every_response_chunk() {
-    take_conversions();
-    let exchange = call_execution("stages.rhai", primary_and_deferred()).await;
-    assert_eq!(
-        exchange,
-        Exchange::new(Some(EDITED_REQUEST), &[EDITED_PRIMARY, EDITED_DEFERRED])
-    );
-    assert_eq!(take_conversions(), edits(2));
+    for_each_bridge(|| async {
+        take_conversions();
+        let exchange = call_execution("stages.rhai", primary_and_deferred()).await;
+        assert_eq!(
+            exchange,
+            Exchange::new(Some(EDITED_REQUEST), &[EDITED_PRIMARY, EDITED_DEFERRED])
+        );
+        assert_eq!(take_conversions(), edits(2));
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn subgraph_callbacks_edit_outgoing_request_and_response() {
-    take_conversions();
-    let exchange = call_subgraph("stages.rhai").await;
-    assert_eq!(
-        exchange,
-        Exchange::new(
-            Some(
-                r#"{"query":"{ me }","variables":{"a":{"x":1,"y":2},"added":"variable","b":1},"extensions":{"added":"extension","z":true}}"#
-            ),
-            &[
-                r#"{"data":{"a":1,"label":null,"z":"subgraph"},"errors":[{"message":"original (edited)"},{"message":"added"}],"extensions":{"edited":true,"z":true}}"#
-            ],
-        )
-    );
-    // The discarded edit to the read-only originating request still converts its variables.
-    let mut expected = edits(1);
-    expected.to_rhai.request_variables += 1;
-    expected.from_rhai.request_variables += 1;
-    assert_eq!(take_conversions(), expected);
+    for_each_bridge(|| async {
+        take_conversions();
+        let exchange = call_subgraph("stages.rhai").await;
+        assert_eq!(
+            exchange,
+            Exchange::new(
+                Some(
+                    r#"{"query":"{ me }","variables":{"a":{"x":1,"y":2},"added":"variable","b":1},"extensions":{"added":"extension","z":true}}"#
+                ),
+                &[
+                    r#"{"data":{"a":1,"label":null,"z":"subgraph"},"errors":[{"message":"original (edited)"},{"message":"added"}],"extensions":{"edited":true,"z":true}}"#
+                ],
+            )
+        );
+        // The discarded edit to the read-only originating request still converts its variables.
+        let mut expected = edits(1);
+        expected.to_rhai.request_variables += 1;
+        expected.from_rhai.request_variables += 1;
+        assert_eq!(take_conversions(), expected);
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn callbacks_that_never_touch_json_convert_nothing() {
-    take_conversions();
-    call_supergraph("no_access.rhai", primary_and_deferred()).await;
-    call_execution("no_access.rhai", primary_and_deferred()).await;
-    call_subgraph("no_access.rhai").await;
-    assert_eq!(take_conversions(), Conversions::default());
+    for_each_bridge(|| async {
+        take_conversions();
+        call_supergraph("no_access.rhai", primary_and_deferred()).await;
+        call_execution("no_access.rhai", primary_and_deferred()).await;
+        call_subgraph("no_access.rhai").await;
+        assert_eq!(take_conversions(), Conversions::default());
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn primary_edit_then_throw_replaces_the_response() {
-    take_conversions();
-    let exchange = call_supergraph(
-        "edit_then_throw.rhai",
-        vec![chunk(None, json!({"fail": true}))],
-    )
-    .await;
-    assert_eq!(
-        exchange,
-        Exchange::new(
-            Some(
-                r#"{"query":"{ me }","variables":{"b":1,"a":{"y":2,"x":1}},"extensions":{"z":true}}"#
-            ),
-            &[
-                r#"{"errors":[{"message":"rhai execution error: 'Runtime error: response failure (line 7, position 13)'"}]}"#
-            ],
+    for_each_bridge(|| async {
+        take_conversions();
+        let exchange = call_supergraph(
+            "edit_then_throw.rhai",
+            vec![chunk(None, json!({"fail": true}))],
         )
-    );
-    // Only `data` converts: once for the edit and once for the `fail` check, which reads without
-    // writing back. The untouched `errors` and `extensions` never convert.
-    let data_only = FieldCounts {
-        response_data: 2,
-        ..FieldCounts::default()
-    };
-    assert_eq!(
-        take_conversions(),
-        Conversions {
-            to_rhai: data_only,
-            from_rhai: FieldCounts {
-                response_data: 1,
-                ..FieldCounts::default()
-            },
-        }
-    );
+        .await;
+        assert_eq!(
+            exchange,
+            Exchange::new(
+                Some(
+                    r#"{"query":"{ me }","variables":{"b":1,"a":{"y":2,"x":1}},"extensions":{"z":true}}"#
+                ),
+                &[
+                    r#"{"errors":[{"message":"rhai execution error: 'Runtime error: response failure (line 7, position 13)'"}]}"#
+                ],
+            )
+        );
+        // Only `data` converts: once for the edit and once for the `fail` check, which reads without
+        // writing back. The untouched `errors` and `extensions` never convert.
+        let data_only = FieldCounts {
+            response_data: 2,
+            ..FieldCounts::default()
+        };
+        assert_eq!(
+            take_conversions(),
+            Conversions {
+                to_rhai: data_only,
+                from_rhai: FieldCounts {
+                    response_data: 1,
+                    ..FieldCounts::default()
+                },
+            }
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn deferred_edit_then_throw_keeps_the_edit_and_replaces_errors() {
-    let exchange = call_supergraph(
-        "edit_then_throw.rhai",
-        vec![
-            chunk(None, json!({"fail": false})),
-            chunk(Some("later"), json!({"fail": true})),
-        ],
-    )
+    for_each_bridge(|| async {
+        let exchange = call_supergraph(
+            "edit_then_throw.rhai",
+            vec![
+                chunk(None, json!({"fail": false})),
+                chunk(Some("later"), json!({"fail": true})),
+            ],
+        )
+        .await;
+        assert_eq!(
+            exchange.chunks,
+            [
+                r#"{"data":{"edited":true,"fail":false},"errors":[{"message":"original"}],"extensions":{"z":true}}"#,
+                r#"{"label":"later","data":{"edited":true,"fail":true},"errors":[{"message":"rhai execution error: 'Runtime error: response failure (line 7, position 13)'"}],"extensions":{"z":true}}"#,
+            ]
+        );
+    })
     .await;
-    assert_eq!(
-        exchange.chunks,
-        [
-            r#"{"data":{"edited":true,"fail":false},"errors":[{"message":"original"}],"extensions":{"z":true}}"#,
-            r#"{"label":"later","data":{"edited":true,"fail":true},"errors":[{"message":"rhai execution error: 'Runtime error: response failure (line 7, position 13)'"}],"extensions":{"z":true}}"#,
-        ]
-    );
 }
 
 #[tokio::test]
 async fn request_edit_then_throw_never_reaches_the_inner_service() {
-    let exchange = call_supergraph("request_edit_then_throw.rhai", primary_and_deferred()).await;
-    assert_eq!(
-        exchange,
-        Exchange::new(
-            None,
-            &[
-                r#"{"errors":[{"message":"rhai execution error: 'Runtime error: request failure (line 6, position 9)'"}]}"#
-            ],
-        )
-    );
+    for_each_bridge(|| async {
+        let exchange = call_supergraph("request_edit_then_throw.rhai", primary_and_deferred()).await;
+        assert_eq!(
+            exchange,
+            Exchange::new(
+                None,
+                &[
+                    r#"{"errors":[{"message":"rhai execution error: 'Runtime error: request failure (line 6, position 9)'"}]}"#
+                ],
+            )
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn later_callbacks_observe_earlier_edits() {
-    // Each `map_request` wraps the service registered before it, so the last-registered request
-    // callback runs first, while response callbacks run in registration order. Either way the
-    // callback that runs later observes the earlier callback's write-back.
-    let exchange = call_supergraph("later_callbacks.rhai", primary_and_deferred()).await;
-    assert_eq!(
-        exchange,
-        Exchange::new(
-            Some(
-                r#"{"query":"{ me }","variables":{"a":{"x":1,"y":2},"b":1,"first_ran":true,"first_saw_second":true,"second_ran":true,"second_saw_first":null},"extensions":{"z":true}}"#
-            ),
-            &[
-                r#"{"data":{"a":1,"first_ran":true,"first_saw_second":null,"second_ran":true,"second_saw_first":true,"z":"primary"},"errors":[{"message":"original"}],"extensions":{"z":true}}"#,
-                r#"{"label":"later","data":{"a":2,"first_ran":true,"first_saw_second":null,"second_ran":true,"second_saw_first":true,"z":"deferred"},"errors":[{"message":"original"}],"extensions":{"z":true}}"#,
-            ],
-        )
-    );
+    for_each_bridge(|| async {
+        // Each `map_request` wraps the service registered before it, so the last-registered request
+        // callback runs first, while response callbacks run in registration order. Either way the
+        // callback that runs later observes the earlier callback's write-back.
+        let exchange = call_supergraph("later_callbacks.rhai", primary_and_deferred()).await;
+        assert_eq!(
+            exchange,
+            Exchange::new(
+                Some(
+                    r#"{"query":"{ me }","variables":{"a":{"x":1,"y":2},"b":1,"first_ran":true,"first_saw_second":true,"second_ran":true,"second_saw_first":null},"extensions":{"z":true}}"#
+                ),
+                &[
+                    r#"{"data":{"a":1,"first_ran":true,"first_saw_second":null,"second_ran":true,"second_saw_first":true,"z":"primary"},"errors":[{"message":"original"}],"extensions":{"z":true}}"#,
+                    r#"{"label":"later","data":{"a":2,"first_ran":true,"first_saw_second":null,"second_ran":true,"second_saw_first":true,"z":"deferred"},"errors":[{"message":"original"}],"extensions":{"z":true}}"#,
+                ],
+            )
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn dropping_the_response_stream_skips_remaining_deferred_callbacks() {
-    let plugin = plugin("stages.rhai").await;
-    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
-    let inner = tokio::spawn(async move {
-        let (_, responder) = handle.next_request().await.unwrap();
-        let mut chunks = primary_and_deferred();
-        chunks.push(chunk(Some("never read"), json!({})));
-        responder.send_response(
-            SupergraphResponse::fake_stream_builder()
-                .responses(chunks)
-                .context(Context::new())
-                .build()
-                .unwrap(),
-        );
-    });
-    take_conversions();
-    let response = plugin
-        .supergraph_service(mock.boxed())
-        .oneshot(supergraph_request())
-        .await
-        .unwrap();
-    inner.await.unwrap();
-    let mut stream = response.response.into_body();
-    assert_eq!(serialize(&stream.next().await.unwrap()), EDITED_PRIMARY);
-    drop(stream);
-    assert_eq!(take_conversions(), edits(1));
+    for_each_bridge(|| async {
+        let plugin = plugin("stages.rhai").await;
+        let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let inner = tokio::spawn(async move {
+            let (_, responder) = handle.next_request().await.unwrap();
+            let mut chunks = primary_and_deferred();
+            chunks.push(chunk(Some("never read"), json!({})));
+            responder.send_response(
+                SupergraphResponse::fake_stream_builder()
+                    .responses(chunks)
+                    .context(Context::new())
+                    .build()
+                    .unwrap(),
+            );
+        });
+        take_conversions();
+        let response = plugin
+            .supergraph_service(mock.boxed())
+            .oneshot(supergraph_request())
+            .await
+            .unwrap();
+        inner.await.unwrap();
+        let mut stream = response.response.into_body();
+        assert_eq!(serialize(&stream.next().await.unwrap()), EDITED_PRIMARY);
+        drop(stream);
+        assert_eq!(take_conversions(), edits(1));
+    })
+    .await;
 }
 
 #[tokio::test]
 async fn cancelling_a_request_skips_response_callbacks() {
-    let plugin = plugin("stages.rhai").await;
-    let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
-    take_conversions();
-    let call = plugin
-        .supergraph_service(mock.boxed())
-        .oneshot(supergraph_request());
-    tokio::pin!(call);
-    let (received, _responder) = tokio::select! {
-        received = handle.next_request() => received.unwrap(),
-        _ = &mut call => panic!("the call completed before reaching the inner service"),
-    };
-    assert_eq!(
-        serialize(received.supergraph_request.body()),
-        EDITED_REQUEST
-    );
-    drop(call);
-    assert_eq!(take_conversions(), edits(0));
+    for_each_bridge(|| async {
+        let plugin = plugin("stages.rhai").await;
+        let (mock, mut handle) = tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        take_conversions();
+        let call = plugin
+            .supergraph_service(mock.boxed())
+            .oneshot(supergraph_request());
+        tokio::pin!(call);
+        let (received, _responder) = tokio::select! {
+            received = handle.next_request() => received.unwrap(),
+            _ = &mut call => panic!("the call completed before reaching the inner service"),
+        };
+        assert_eq!(
+            serialize(received.supergraph_request.body()),
+            EDITED_REQUEST
+        );
+        drop(call);
+        assert_eq!(take_conversions(), edits(0));
+    })
+    .await;
 }

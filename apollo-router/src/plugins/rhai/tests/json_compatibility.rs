@@ -15,15 +15,20 @@
 //! [`operation_surface`] and [`value_semantics`] run each case directly against Router's Rhai
 //! engine and property accessors. The pipeline tests in [`callbacks`] run representative
 //! scripts through the real plugin services at every stage that exposes JSON, including
-//! deferred chunks, errors, cancellation and conversion accounting.
+//! deferred chunks, errors, cancellation and conversion accounting. Every test runs with each
+//! conversion [`Bridge`], so the legacy rollback stays compatible too.
 
 use rhai::Dynamic;
 use rhai::Scope;
 
 use super::new_rhai_test_engine;
 use crate::graphql;
+use crate::plugins::rhai::engine::json_fields::Bridge;
 
 mod callbacks;
+// Allocation tracking needs Router's own global allocator.
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+mod performance;
 
 /// Response data used by collection cases. Keys are deliberately not in sorted order: Rhai maps
 /// are sorted, so writing a value back re-orders keys.
@@ -1143,15 +1148,22 @@ fn operation_script(expression: &str) -> String {
     format!("let json = response.data;\nlet result = {expression};\nresponse.data = json;\nresult")
 }
 
-/// Run every case, then fail once, listing each mismatch with its actual outcome.
+/// Run every case with each bridge, then fail once, listing each mismatch with its actual
+/// outcome.
 fn check(cases: impl Iterator<Item = (&'static str, Subject, String, Outcome)>) {
-    let mismatches: Vec<String> = cases
-        .filter_map(|(name, subject, script, expected)| {
-            let actual = run(subject, &script);
-            (actual != expected)
-                .then(|| format!("{name}:\n  expected: {expected:?}\n  actual:   {actual:?}"))
-        })
-        .collect();
+    let cases: Vec<_> = cases.collect();
+    let mut mismatches = Vec::new();
+    for bridge in Bridge::ALL {
+        let _selected = bridge.select();
+        for (name, subject, script, expected) in &cases {
+            let actual = run(*subject, script);
+            if actual != *expected {
+                mismatches.push(format!(
+                    "{name} ({bridge:?} bridge):\n  expected: {expected:?}\n  actual:   {actual:?}"
+                ));
+            }
+        }
+    }
     assert!(
         mismatches.is_empty(),
         "{} Rhai JSON compatibility case(s) differ from Router v2.17.0:\n{}",
