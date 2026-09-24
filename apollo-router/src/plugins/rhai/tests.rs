@@ -49,6 +49,8 @@ use crate::services::execution;
 use crate::services::router;
 use crate::test_harness::tracing_test;
 
+mod json_compatibility;
+
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...
 async fn call_rhai_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult>> {
