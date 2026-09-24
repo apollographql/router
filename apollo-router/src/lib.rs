@@ -80,7 +80,6 @@ pub use crate::context::extensions::Extensions;
 pub use crate::context::extensions::sync::ExtensionsMutex;
 pub use crate::executable::Executable;
 pub use crate::executable::main;
-pub use crate::plugins::subscription::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
 pub use crate::router::LicenseSource;

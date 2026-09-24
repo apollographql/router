@@ -23,7 +23,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Configuration;
-use crate::Notify;
 use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
@@ -141,7 +140,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(subgraph_schemas)
-            .notify(Notify::default())
             .license(Arc::new(license.unwrap_or_default()))
             .full_config(full_config)
             .build();
