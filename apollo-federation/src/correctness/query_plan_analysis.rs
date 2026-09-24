@@ -34,7 +34,6 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
-use crate::query_plan::requires_selection;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 
@@ -245,20 +244,9 @@ fn interpret_plan_node(
 fn rename_at_path(
     schema: &ValidFederationSchema,
     response: &ResponseShape,
-    type_filter: Vec<Name>,
-    path: &[FetchDataPathElement],
-    new_name: Name,
-) -> Result<ResponseShape, String> {
-    rename_at_path_inner(schema, response, type_filter, path, new_name, false)
-}
-
-fn rename_at_path_inner(
-    schema: &ValidFederationSchema,
-    response: &ResponseShape,
     mut type_filter: Vec<Name>,
     path: &[FetchDataPathElement],
     new_name: Name,
-    replace_existing: bool,
 ) -> Result<ResponseShape, String> {
     let Some((first, rest)) = path.split_first() else {
         return Err("rename_at_path: unexpected empty path".to_string());
@@ -327,13 +315,12 @@ fn rename_at_path_inner(
                                     path.iter().join(".")
                                 ));
                             };
-                            let updated_sub_state = rename_at_path_inner(
+                            let updated_sub_state = rename_at_path(
                                 schema,
                                 sub_state,
                                 Default::default(), // new type filter
                                 rest,
                                 new_name.clone(),
-                                replace_existing,
                             )?;
                             Ok(
                                 variant
@@ -360,11 +347,7 @@ fn rename_at_path_inner(
                         for (type_cond, defs_per_type_cond) in target_defs.iter() {
                             let existed =
                                 merged_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
-                            // Runtime's KeyRenamer is remove-then-insert on
-                            // the extracted representation, so input renames
-                            // replace an existing key; output renames keep
-                            // this an error.
-                            if existed && !replace_existing {
+                            if existed {
                                 return Err(format!(
                                     "rename_at_path: new name/type already exists: {new_name} on {type_cond}"
                                 ));
@@ -381,14 +364,7 @@ fn rename_at_path_inner(
         }
         FetchDataPathElement::TypenameEquals(type_name) => {
             type_filter.push(type_name.clone());
-            rename_at_path_inner(
-                schema,
-                response,
-                type_filter,
-                rest,
-                new_name,
-                replace_existing,
-            )
+            rename_at_path(schema, response, type_filter, rest, new_name)
         }
         FetchDataPathElement::Parent => {
             Err("rename_at_path: unexpected parent path element".to_string())
@@ -415,75 +391,11 @@ fn apply_output_rewrite(
     }
 }
 
-/// A top-level field response key extracted by the fetch's `requires`
-/// selection (looking through inline fragments).
-fn requires_extracts_key(requires: &[requires_selection::Selection], key: &Name) -> bool {
-    requires.iter().any(|sel| match sel {
-        requires_selection::Selection::Field(field) => {
-            field.alias.as_ref().unwrap_or(&field.name) == key
-        }
-        requires_selection::Selection::InlineFragment(frag) => {
-            requires_extracts_key(&frag.selections, key)
-        }
-    })
-}
-
-/// Apply KeyRenamer input rewrites to the state before checking requires.
-/// Aliased condition fields (e.g. `__require_0_inner` -> `inner`) need to
-/// be renamed back to their original names before the requires check.
-///
-/// At runtime the rename only touches the representation extracted per the
-/// fetch's `requires` selection, and it is a remove-then-insert. So a state
-/// key that shares the rename target's name but is not extracted by
-/// `requires` is not a conflict (it never enters the representation), while
-/// a rename whose target IS extracted by `requires` would clobber that data
-/// at runtime and is a genuine plan bug.
-fn apply_input_key_renames(
-    schema: &ValidFederationSchema,
-    state: &ResponseShape,
-    input_rewrites: &[Arc<FetchDataRewrite>],
-    requires: &[requires_selection::Selection],
-) -> Result<ResponseShape, String> {
-    let mut result = state.clone();
-    for rewrite in input_rewrites {
-        if let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() {
-            let renamed_key = renamer.path.iter().rev().find_map(|elem| match elem {
-                FetchDataPathElement::Key(name, _) => Some(name),
-                _ => None,
-            });
-            if renamed_key.is_some_and(|k| requires_extracts_key(requires, k))
-                && requires_extracts_key(requires, &renamer.rename_key_to)
-            {
-                return Err(format!(
-                    "apply_input_key_renames: rename target `{}` is also extracted by the \
-                     fetch's requires selection; the rename would overwrite it in the \
-                     representation\nrewrite: {renamer:?}",
-                    renamer.rename_key_to,
-                ));
-            }
-            result = rename_at_path_inner(
-                schema,
-                &result,
-                Default::default(),
-                &renamer.path,
-                renamer.rename_key_to.clone(),
-                true,
-            )
-            .map_err(|e| format!("apply_input_key_renames: {e}\nrewrite: {renamer:?}"))?;
-        }
-    }
-    Ok(result)
-}
-
 fn check_input_rewrite(rewrite: &FetchDataRewrite) -> Result<(), String> {
     match rewrite {
-        FetchDataRewrite::KeyRenamer(_) => {
-            // KeyRenamer input rewrites are created for aliased condition fields
-            // (e.g. `__require_0_inner` -> `inner`). They are applied (and
-            // checked against the requires projection for rename-target
-            // collisions) by `apply_input_key_renames` before `check_requires`.
-            Ok(())
-        }
+        FetchDataRewrite::KeyRenamer(rename) => Err(format!(
+            "check_input_rewrite: unexpected key renamer: {rename:?}"
+        )),
         FetchDataRewrite::ValueSetter(_) => {
             // This case is only created in `compute_input_rewrites_on_key_fetch`. It overwrites
             // the existing `__typename` response value. But, it won't affect the response shape
@@ -525,12 +437,10 @@ fn interpret_fetch_node(
                 "Subgraph schema not found for {subgraph_name}:\n{fetch}"
             ));
         };
-        let state_for_requires =
-            apply_input_key_renames(schema, state, &fetch.input_rewrites, &fetch.requires)?;
         check_requires(
             context,
             subgraph_schema,
-            &state_for_requires,
+            state,
             &boolean_clause,
             &response_shapes,
             &fetch.requires,
@@ -1063,81 +973,4 @@ fn interpret_subscription_node(
         })?;
     }
     Ok(response_shape)
-}
-
-#[cfg(test)]
-mod rename_tests {
-    use apollo_compiler::name;
-
-    use super::*;
-    use crate::query_plan::FetchDataKeyRenamer;
-
-    fn requires_field(alias: Option<Name>, field_name: Name) -> requires_selection::Selection {
-        requires_selection::Selection::Field(requires_selection::Field {
-            alias,
-            name: field_name,
-            selections: Vec::new(),
-        })
-    }
-
-    fn wrap_in_fragment(
-        selections: Vec<requires_selection::Selection>,
-    ) -> Vec<requires_selection::Selection> {
-        vec![requires_selection::Selection::InlineFragment(
-            requires_selection::InlineFragment {
-                type_condition: Some(name!("T")),
-                selections,
-            },
-        )]
-    }
-
-    #[test]
-    fn requires_extracts_key_sees_through_fragments_and_aliases() {
-        let requires = wrap_in_fragment(vec![
-            requires_field(None, name!("id")),
-            requires_field(Some(name!("__require_0_a")), name!("a")),
-        ]);
-        assert!(requires_extracts_key(&requires, &name!("id")));
-        assert!(requires_extracts_key(&requires, &name!("__require_0_a")));
-        // The aliased field's plain name is not a representation key.
-        assert!(!requires_extracts_key(&requires, &name!("a")));
-    }
-
-    /// A rename whose target key is also extracted by the requires selection
-    /// would overwrite that data in the representation at runtime (the
-    /// KeyRenamer is remove-then-insert), so the checker must reject it.
-    #[test]
-    fn input_rename_onto_extracted_key_is_rejected() {
-        let schema = apollo_compiler::schema::Schema::parse_and_validate(
-            "type Query { x: Int }",
-            "schema.graphql",
-        )
-        .expect("valid schema");
-        let schema = ValidFederationSchema::new(schema).expect("valid federation schema");
-        let state = ResponseShape::new(name!("T"));
-        let rewrite = Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
-            path: vec![FetchDataPathElement::Key(
-                name!("__require_0_a"),
-                Default::default(),
-            )],
-            rename_key_to: name!("a"),
-        }));
-
-        let colliding = wrap_in_fragment(vec![
-            requires_field(Some(name!("__require_0_a")), name!("a")),
-            requires_field(None, name!("a")),
-        ]);
-        let err =
-            apply_input_key_renames(&schema, &state, std::slice::from_ref(&rewrite), &colliding)
-                .expect_err("rename target extracted by requires must be rejected");
-        assert!(err.contains("rename target `a`"), "unexpected error: {err}");
-
-        // Without the plain `a` in the requires there is no collision.
-        let disjoint = wrap_in_fragment(vec![requires_field(
-            Some(name!("__require_0_a")),
-            name!("a"),
-        )]);
-        apply_input_key_renames(&schema, &state, &[rewrite], &disjoint)
-            .expect("no collision when the target is not extracted");
-    }
 }
