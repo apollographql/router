@@ -532,7 +532,9 @@ extern "C" fn drop_ad_hoc_profiler() {
 // Enable jemalloc profiling with default settings if using jemalloc as the global allocator, however
 // disable profiling by default to avoid overhead unless explicitly enabled at runtime.
 #[allow(non_upper_case_globals)]
-#[unsafe(export_name = "_rjem_malloc_conf")]
+// jemalloc is unprefixed on Linux (see Cargo.toml), so it reads the unprefixed symbol there.
+#[cfg_attr(target_os = "linux", unsafe(export_name = "malloc_conf"))]
+#[cfg_attr(not(target_os = "linux"), unsafe(export_name = "_rjem_malloc_conf"))]
 static malloc_conf: Option<&'static libc::c_char> = Some(unsafe {
     let data: &'static CStr = c"prof:true,prof_active:false";
     let ptr: *const libc::c_char = data.as_ptr();
