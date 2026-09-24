@@ -29,6 +29,7 @@ mod api_schema;
 pub mod compat;
 pub mod composition;
 pub mod connectors;
+pub mod contract;
 #[cfg(feature = "correctness")]
 pub mod correctness;
 mod display_helpers;

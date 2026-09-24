@@ -7844,6 +7844,54 @@ impl From<ObjectTypeDefinitionPosition> for DirectiveTargetPosition {
     }
 }
 
+impl From<ScalarTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ScalarTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::ScalarType(pos)
+    }
+}
+
+impl From<ObjectFieldArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: ObjectFieldArgumentDefinitionPosition) -> Self {
+        DirectiveTargetPosition::ObjectFieldArgument(pos)
+    }
+}
+
+impl From<InterfaceTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InterfaceTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InterfaceType(pos)
+    }
+}
+
+impl From<InterfaceFieldDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InterfaceFieldDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InterfaceField(pos)
+    }
+}
+
+impl From<InterfaceFieldArgumentDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InterfaceFieldArgumentDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InterfaceFieldArgument(pos)
+    }
+}
+
+impl From<UnionTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: UnionTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::UnionType(pos)
+    }
+}
+
+impl From<EnumTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: EnumTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::EnumType(pos)
+    }
+}
+
+impl From<InputObjectTypeDefinitionPosition> for DirectiveTargetPosition {
+    fn from(pos: InputObjectTypeDefinitionPosition) -> Self {
+        DirectiveTargetPosition::InputObjectType(pos)
+    }
+}
+
 impl From<SchemaDefinitionPosition> for DirectiveTargetPosition {
     fn from(pos: SchemaDefinitionPosition) -> Self {
         DirectiveTargetPosition::Schema(pos)
