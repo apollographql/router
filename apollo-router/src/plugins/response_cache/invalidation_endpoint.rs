@@ -543,13 +543,10 @@ pub(crate) fn effective_invalidation_indexes(
 /// caller can render a precise 400 response, or `None` when every request is permitted.
 ///
 /// Connector-targeted requests resolve their indexes from the connector configuration;
-/// subgraph-targeted ones from the subgraph configuration. `cache_tag` names may belong to
-/// either scope (`sources` is folded into `subgraphs` at parse time), so a name is rejected
-/// only when neither configuration enables the cache-tag index *for that request's scope*: the
-/// connector side vouches for a name when the name has its own connector `invalidation` block,
-/// or when the `all` connector block has one and the request is itself connector-scoped. An
-/// unconfigured connector block, or a connector-wide `all` block under a `subgraphs`-scoped
-/// request, does not un-reject the request.
+/// subgraph-targeted ones from the subgraph configuration. A `cache_tag` request states which
+/// scope it addresses (`subgraphs` or `sources`), and is rejected when that scope's own
+/// configuration does not enable the cache-tag index. The other scope is deliberately not
+/// consulted, so its default-enabled indexes cannot mask a disabled one.
 ///
 /// Names are visited in sorted order so the error message is deterministic across repeated
 /// calls, which matters for `CacheTag` requests whose `subgraphs` field is an unordered

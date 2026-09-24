@@ -343,15 +343,22 @@ impl InstrumentData {
             opt.subgraph.invalidation.enabled,
             "$[?(@.subgraph.all.invalidation.enabled || @.subgraph.subgraphs..invalidation.enabled)]",
             opt.connector.enabled,
-            // Connector caching is "on" for a deployment when storage is configured AND the
-            // feature is not explicitly disabled. `enabled` defaults to on (a missing flag means
-            // enabled, see `ConnectorCacheConfiguration::is_source_enabled`), so we can't key on
-            // `enabled` alone the way subgraph does — a redis-only config with `enabled` omitted
-            // still caches. `enabled != false` matches both the omitted and `true` cases while
-            // excluding an explicit `enabled: false`.
-            "$[?((@.connector.all.redis || @.connector.sources..redis) && @.connector.all.enabled != false)]",
+            // Connector caching is "on" for a deployment when storage is configured AND at least
+            // one source is not disabled. `enabled` defaults to on (a missing flag means enabled,
+            // see `ConnectorCacheConfiguration::is_source_enabled`), so we can't key on `enabled`
+            // alone the way subgraph does — a redis-only config with `enabled` omitted still
+            // caches. `enabled != false` matches both the omitted and `true` cases while excluding
+            // an explicit `enabled: false`; the `sources..enabled == true` arm then re-includes a
+            // source that overrides a disabled `all` block, which `is_source_enabled` honors.
+            "$[?((@.connector.all.redis || @.connector.sources..redis) && (@.connector.all.enabled != false || @.connector.sources..enabled == true))]",
             opt.connector.ttl,
             "$[?(@.connector.all.ttl || @.connector.sources..ttl)]",
+            opt.connector.cache_key_headers,
+            // `cache_key_headers` is required wherever connector caching applies, so presence is
+            // not the interesting signal — non-emptiness is. An empty list is the documented
+            // "no header partitions the cache key" opt-out, so indexing `[0]` records whether a
+            // deployment actually partitions on headers or deliberately opted out.
+            "$[?(@.connector.all.cache_key_headers[0] || @.connector.sources..cache_key_headers[0])]",
             opt.connector.invalidation.enabled,
             "$[?(@.connector.all.invalidation.enabled || @.connector.sources..invalidation.enabled)]"
         );

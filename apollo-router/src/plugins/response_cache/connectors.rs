@@ -2009,26 +2009,6 @@ struct CacheMetadata {
     entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
 }
 
-/// Build a stable, sorted snapshot of the connector's *used* per-request inputs — the `$context`
-/// keys and client request headers that shape the upstream HTTP request or the response mapping —
-/// for inclusion in the cache key via [`hash_connector_additional_data`].
-///
-/// Client headers reach the upstream request through TWO distinct routes, and both must be keyed:
-/// 1. **Interpolation**: `{$request.headers.x}` in URL/body/header-value templates — collected via
-///    `Connector::{request,response}_headers` (variable references).
-/// 2. **Forwarding**: `http: {headers: [{name: ..., from: "x"}]}` — no variable reference exists,
-///    so the `from:` client header names are collected from the transport's header list directly.
-///
-/// Deliberately excluded (deployment-static, identical for every request): static header `value:`
-/// templates without variable references, `$config`, and `$env`. A `value:` template that DOES
-/// reference `$context`/`$request` is covered by route 1.
-///
-/// Only used inputs are included, so unreferenced/unforwarded headers never over-partition the
-/// cache. A connector that uses nothing here yields an empty object.
-///
-/// Without this, two client requests that produce *different* upstream connector requests because
-/// a forwarded header or context value differs would resolve to the SAME cache key — a cross-user
-/// data leak.
 /// Build the request-scoped inputs (referenced `$context` keys + the operator-selected request
 /// headers) that partition a connector cache key.
 ///
