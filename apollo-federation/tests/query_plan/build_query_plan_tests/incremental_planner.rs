@@ -2118,7 +2118,11 @@ fn inc_requires_conflicting_arguments_splits_group() {
           }
         "#
     );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
           {
@@ -4517,7 +4521,12 @@ fn inc_requires_aliased_then_plain_input_does_not_collide() {
         "#,
     );
 
-    assert_plan!(&planner,
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
         r#"{ t { b c } }"#,
         @r###"
     QueryPlan {
@@ -4686,7 +4695,12 @@ fn inc_requires_identical_conditions_share_one_fetch() {
         "#,
     );
 
-    assert_plan!(&planner,
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
         r#"{ t { b c } }"#,
         @r###"
     QueryPlan {
@@ -4863,7 +4877,11 @@ fn inc_requires_overlapping_conditions_fetch_count() {
             }
         "#,
     );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
         {
