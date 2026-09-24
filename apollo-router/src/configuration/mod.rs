@@ -460,6 +460,17 @@ impl Configuration {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
+            incremental_planner:
+                apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
+                    enabled: self.supergraph.query_planning.incremental_planner.enabled,
+                    beam_width: self
+                        .supergraph
+                        .query_planning
+                        .incremental_planner
+                        .beam_width,
+                    fuel: self.supergraph.query_planning.incremental_planner.fuel,
+                    timeout: self.supergraph.query_planning.incremental_planner.timeout,
+                },
         }
     }
 }
@@ -980,6 +991,12 @@ pub(crate) struct QueryPlanning {
     ///
     /// See [`CooperativeCancellation`] for more details.
     pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
+
+    /// Configuration for the incremental (BULB) query planner, which
+    /// builds plans field-by-field with bounded backtracking instead of
+    /// exhaustively enumerating plan candidates. Deferred operations fall
+    /// back to the default planner.
+    pub(crate) incremental_planner: IncrementalPlanner,
 }
 
 #[buildstructor::buildstructor]
@@ -992,6 +1009,7 @@ impl QueryPlanning {
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
+        incremental_planner: Option<IncrementalPlanner>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
@@ -1000,6 +1018,41 @@ impl QueryPlanning {
             experimental_paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
+            incremental_planner: incremental_planner.unwrap_or_default(),
+        }
+    }
+}
+
+/// Configuration for the incremental (BULB) query planner.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct IncrementalPlanner {
+    /// Whether the incremental planner is enabled. When enabled, deferred
+    /// operations still fall back to the default planner.
+    pub(crate) enabled: bool,
+
+    /// Beam width: how many states advance together per depth in the beam.
+    /// Wider beams capture more diversity, reducing expensive backtracking.
+    pub(crate) beam_width: usize,
+
+    /// Cap on optimization effort beyond the first draft of the plan, measured in
+    /// pending-selection visits. `fuel: 0` returns the first complete plan found.
+    pub(crate) fuel: u64,
+
+    /// Optional wall-clock time limit for the search. When set, the search
+    /// returns the best complete plan found so far once the limit is reached.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) timeout: Option<Duration>,
+}
+
+impl Default for IncrementalPlanner {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+            timeout: None,
         }
     }
 }
