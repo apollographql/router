@@ -470,6 +470,17 @@ impl FetchGraph {
         })
     }
 
+    /// Iterator over all inputs arriving at `node` from parent fetch
+    /// groups.
+    pub(crate) fn incoming_inputs(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = &InputContribution> {
+        self.graph
+            .edges_directed(node, Direction::Incoming)
+            .flat_map(|edge| edge.weight().inputs.iter())
+    }
+
     /// Get a reference to an edge's weight.
     pub(crate) fn edge_weight_raw(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
         &self.graph[edge]
@@ -531,7 +542,6 @@ impl FetchGraph {
     }
 
     /// Get a reference to the node weight.
-    #[allow(dead_code)]
     pub(crate) fn node(&self, node: NodeIndex) -> &FetchNode {
         &self.graph[node]
     }
@@ -561,7 +571,6 @@ impl FetchGraph {
         self.graph.node_count()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph.node_indices()
     }
