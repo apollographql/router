@@ -44,6 +44,9 @@ fn report_at(mut errors: ErrorCollector<'_>, path: &[String], message: String) {
 
 impl apollo_configuration::Configuration for Configuration {}
 
+const UPGRADE_GUIDE: &str =
+    "https://www.apollographql.com/docs/graphos/routing/upgrade/from-router-v2";
+
 /// Whether parsing first applies the current major version's migrations. Startup, reload and
 /// `router config validate` do; tests can check a document as written.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -237,13 +240,19 @@ pub(crate) fn parse_configuration(
     let parsed = match parse(&migrated)? {
         Err(_) if migrated != original => {
             tracing::warn!(
-                "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
+                "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
             );
             parse(&original)?
         }
         parsed => parsed,
     };
-    let mut config = parsed?;
+    let mut config = parsed.inspect_err(|error| {
+        if matches!(error, ConfigError::ValidationError(_)) {
+            tracing::warn!(
+                "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
+            );
+        }
+    })?;
     config.raw_yaml = Some(Arc::from(text));
     Ok(config)
 }
@@ -533,6 +542,26 @@ mod tests {
             rendered.contains("[11:1]"),
             "the diagnostic should point at the offending line of the original text: {rendered}"
         );
+    }
+
+    /// A configuration that fails validation may only need `router config upgrade`, so the
+    /// operator is told about it.
+    #[test]
+    fn validation_errors_suggest_router_config_upgrade() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        parse("this_key_does_not_exist_anywhere: true\n").expect_err("the key is unknown");
+
+        tracing_test::logs_assert(|lines| {
+            lines
+                .iter()
+                .any(|line| {
+                    line.contains("router config upgrade") && line.contains("from-router-v2")
+                })
+                .then_some(())
+                .ok_or_else(|| "expected a hint to run `router config upgrade`".to_string())
+        })
+        .unwrap();
     }
 
     /// Every plugin with invalid settings is reported, each against its own section.
