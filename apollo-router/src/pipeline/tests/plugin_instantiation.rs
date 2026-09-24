@@ -46,7 +46,7 @@ const OSS_PLUGINS: &[&str] = &[
 struct AlwaysStartsAndStopsPlugin {}
 
 /// Configuration for the test plugin
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     /// The name of the test
     name: String,

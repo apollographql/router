@@ -433,7 +433,7 @@ mod test_for_harness {
     use crate::services::router::body;
 
     /// Config for the test plugin
-    #[derive(JsonSchema, Deserialize)]
+    #[derive(Clone, JsonSchema, Deserialize)]
     struct MyTestPluginConfig {}
 
     struct MyTestPlugin {}

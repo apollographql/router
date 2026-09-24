@@ -89,6 +89,21 @@ The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` ins
 
 Deployments that only use the `router` binary as-is are unaffected.
 
+### Native plugin configuration must be `Clone`, `Send`, `Sync` and `'static`
+
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `Clone + Send + Sync + 'static`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins); router configuration files are unaffected.
+
+**Upgrade step**:
+
+- Add `Clone` to your plugin configuration type's derives:
+
+```rust
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+struct Conf {
+    name: String,
+}
+```
+
 ### Renamed Prometheus metrics
 
 Several duration and byte-count metrics gained a UCUM unit (`s` for durations, `By` for bytes). The `opentelemetry-prometheus` exporter appends a suffix derived from the unit to the exported name, so these metrics are renamed on the Prometheus scrape endpoint:

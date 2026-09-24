@@ -365,7 +365,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -442,7 +442,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -626,7 +626,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
 

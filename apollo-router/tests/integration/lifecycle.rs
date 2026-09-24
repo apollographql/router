@@ -344,7 +344,7 @@ macro_rules! make_plugin {
 
             use super::*;
 
-            #[derive(Deserialize, JsonSchema)]
+            #[derive(Clone, Deserialize, JsonSchema)]
             pub(super) struct Config {}
 
             /// Dummy plugin (for testing purposes only)

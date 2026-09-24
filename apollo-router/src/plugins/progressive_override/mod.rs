@@ -34,7 +34,7 @@ pub(crate) const JOIN_SPEC_VERSION_RANGE: &str = ">=0.4";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 
 /// Configuration for the progressive override plugin
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 pub(crate) struct Config {}
 
 pub(crate) struct ProgressiveOverridePlugin {
