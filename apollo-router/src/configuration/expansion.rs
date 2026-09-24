@@ -41,16 +41,30 @@ pub(crate) struct Replacement {
 pub(crate) struct Override {
     /// The path to the config value to override.
     config_path: String,
-    /// Env variables take precedence over any override values.
+    /// Env variables take precedence over the flag's value.
     env_name: Option<String>,
-    /// Override value
-    value: Option<Value>,
-    /// The command-line flag that supplies `value`, named in diagnostics.
-    flag: Option<String>,
+    /// A value supplied by a command-line flag, used when the environment variable is unset.
+    flag_value: Option<FlagValue>,
     /// The type of the value, used to coerce env variables.
     value_type: ValueType,
     #[cfg(test)]
     mocked_env_vars: HashMap<String, String>,
+}
+
+/// A command-line flag and the value it supplies. The flag is named in diagnostics.
+#[derive(Clone)]
+pub(crate) struct FlagValue {
+    flag: &'static str,
+    value: Value,
+}
+
+impl FlagValue {
+    pub(crate) fn new(flag: &'static str, value: impl Into<Value>) -> Self {
+        Self {
+            flag,
+            value: value.into(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -63,11 +77,6 @@ pub(crate) enum ValueType {
 }
 
 impl Override {
-    #[cfg(test)]
-    fn value(&self) -> Option<Value> {
-        self.env_value().or_else(|| self.value.clone())
-    }
-
     /// The environment variable's value, coerced to the override's type when it parses as one.
     fn env_value(&self) -> Option<Value> {
         let name = self.env_name.as_ref()?;
@@ -93,12 +102,8 @@ impl Override {
         if let (Some(value), Some(name)) = (self.env_value(), &self.env_name) {
             return Some(Injection::env(&path, value, name));
         }
-        let value = self.value.clone()?;
-        let flag = self
-            .flag
-            .as_deref()
-            .expect("an override with a fixed value names the flag that supplies it");
-        Some(Injection::cli_flag(&path, value, flag))
+        let FlagValue { flag, value } = self.flag_value.as_ref()?;
+        Some(Injection::cli_flag(&path, value.clone(), flag))
     }
 }
 
@@ -137,16 +142,12 @@ impl Expansion {
         let builder = Expansion::builder();
         #[cfg(test)]
         let builder = builder.mocked_env_vars(mocked_env_vars);
+        let listen = *crate::executable::APOLLO_ROUTER_LISTEN_ADDRESS.lock();
         let listen_override = Override::builder()
             .config_path("supergraph.listen")
-            .flag("--listen")
-            .value_type(ValueType::String);
-        let listen = *crate::executable::APOLLO_ROUTER_LISTEN_ADDRESS.lock();
-        let listen_override = if let Some(listen) = listen {
-            listen_override.value(listen.to_string()).build()
-        } else {
-            listen_override.build()
-        };
+            .and_flag_value(listen.map(|listen| FlagValue::new("--listen", listen.to_string())))
+            .value_type(ValueType::String)
+            .build();
         Ok(builder
             .and_prefix(prefix)
             .supported_modes(supported_modes)
@@ -295,11 +296,13 @@ impl VariableProvider for UnsupportedMode {
 
 #[cfg(test)]
 mod test {
+    use apollo_configuration::provenance::Injection;
     use insta::assert_yaml_snapshot;
     use serde_json::Value;
 
     use crate::configuration::Expansion;
     use crate::configuration::apollo_configuration_parse::ExternalValues;
+    use crate::configuration::expansion::FlagValue;
     use crate::configuration::expansion::Override;
     use crate::configuration::expansion::ValueType;
     use crate::configuration::expansion::dev_mode_defaults;
@@ -311,102 +314,115 @@ mod test {
             .expect("expansion must succeed")
     }
 
+    fn injection(override_config: Override) -> String {
+        format!("{:?}", override_config.injection())
+    }
+
+    fn from_env(name: &str, value: Value) -> String {
+        format!("{:?}", Some(Injection::env(&[""], value, name)))
+    }
+
+    fn from_flag(flag: &str, value: Value) -> String {
+        format!("{:?}", Some(Injection::cli_flag(&[""], value, flag)))
+    }
+
     #[test]
     fn test_override_precedence() {
         assert_eq!(
-            None,
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            "None",
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            None,
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .env_name("NON_EXISTENT")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            "None",
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .env_name("NON_EXISTENT")
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            Some(Value::String("override".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .env_name("NON_EXISTENT")
-                .value("override")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_flag("--listen", Value::String("override".to_string())),
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .env_name("NON_EXISTENT")
+                    .flag_value(FlagValue::new("--listen", "override"))
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            Some(Value::String("override".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .value("override")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_flag("--listen", Value::String("override".to_string())),
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .flag_value(FlagValue::new("--listen", "override"))
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            Some(Value::String("env_override".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .env_name("TEST_OVERRIDE")
-                .value("override")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_env("TEST_OVERRIDE", Value::String("env_override".to_string())),
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .env_name("TEST_OVERRIDE")
+                    .flag_value(FlagValue::new("--listen", "override"))
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
     }
 
     #[test]
     fn test_type_coercion() {
+        let coerced = |name: &str, value: &str, value_type: ValueType| {
+            injection(
+                Override::builder()
+                    .mocked_env_var(name, value)
+                    .config_path("")
+                    .env_name(name)
+                    .value_type(value_type)
+                    .build(),
+            )
+        };
         assert_eq!(
-            Some(Value::String("overridden_string".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_STRING_VAR", "overridden_string")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_STRING_VAR")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_env(
+                "TEST_DEFAULTED_STRING_VAR",
+                Value::String("overridden_string".to_string())
+            ),
+            coerced(
+                "TEST_DEFAULTED_STRING_VAR",
+                "overridden_string",
+                ValueType::String
+            )
         );
         assert_eq!(
-            Some(Value::Number(1.into())),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_NUMERIC_VAR", "1")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_NUMERIC_VAR")
-                .value_type(ValueType::Number)
-                .build()
-                .value()
+            from_env("TEST_DEFAULTED_NUMERIC_VAR", Value::Number(1.into())),
+            coerced("TEST_DEFAULTED_NUMERIC_VAR", "1", ValueType::Number)
         );
         assert_eq!(
-            Some(Value::Bool(true)),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_BOOL_VAR", "true")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_BOOL_VAR")
-                .value_type(ValueType::Bool)
-                .build()
-                .value()
+            from_env("TEST_DEFAULTED_BOOL_VAR", Value::Bool(true)),
+            coerced("TEST_DEFAULTED_BOOL_VAR", "true", ValueType::Bool)
         );
         assert_eq!(
-            Some(Value::String("true".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_INCORRECT_TYPE", "true")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_INCORRECT_TYPE")
-                .value_type(ValueType::Number)
-                .build()
-                .value()
+            from_env(
+                "TEST_DEFAULTED_INCORRECT_TYPE",
+                Value::String("true".to_string())
+            ),
+            coerced("TEST_DEFAULTED_INCORRECT_TYPE", "true", ValueType::Number)
         );
     }
 
@@ -422,8 +438,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
-                    .value("defaulted")
-                    .flag("--test-flag")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -433,8 +448,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
-                    .value("defaulted")
-                    .flag("--test-flag")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -444,8 +458,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("overridden")
                     .env_name("TEST_OVERRIDDEN_VAR")
-                    .value("defaulted")
-                    .flag("--test-flag")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -473,8 +486,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
-                    .value("defaulted")
-                    .flag("--test-flag")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -484,8 +496,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
-                    .value("defaulted")
-                    .flag("--test-flag")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -495,8 +506,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("overridden")
                     .env_name("TEST_OVERRIDDEN_VAR")
-                    .value("defaulted")
-                    .flag("--test-flag")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
