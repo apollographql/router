@@ -176,7 +176,6 @@ impl FetchNode {
     }
 
     /// Get the root type if this is a root fetch group.
-    #[allow(dead_code)]
     pub(crate) fn root_type(&self) -> Option<&CompositeTypeDefinitionPosition> {
         match &self.kind {
             FetchGroupKind::Root { root_type } | FetchGroupKind::RootHop { root_type, .. } => {
