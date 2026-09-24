@@ -8,9 +8,13 @@ artifact reference (`--graph-artifact-reference` / `APOLLO_GRAPH_ARTIFACT_REFERE
 silently pick the explicit license and ignore the graph artifact reference.
 
 The router now mirrors the schema-source check: if an explicit license (path or literal) and
-a graph artifact reference are both configured, it fails fast at startup with a clear error
-instead of silently picking one. Studio credentials (`APOLLO_KEY` / `APOLLO_GRAPH_REF`)
-overlapping with a graph artifact reference is unaffected — that combination still resolves
-to the OCI registry, since `APOLLO_KEY` may simply be needed to authenticate the OCI pull.
+an **Apollo-hosted** graph artifact reference are both configured, it fails fast at startup
+with a clear error instead of silently picking one. A self-hosted (non-Apollo) graph artifact
+reference is unaffected by this check — those registries aren't expected to carry an
+entitlement layer, so an explicit license alongside one is complementary config, not
+ambiguity, and the router keeps its existing precedence (explicit license wins). Studio
+credentials (`APOLLO_KEY` / `APOLLO_GRAPH_REF`) overlapping with a graph artifact reference is
+also unaffected — that combination still resolves to the OCI registry, since `APOLLO_KEY` may
+simply be needed to authenticate the OCI pull.
 
 By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/####
