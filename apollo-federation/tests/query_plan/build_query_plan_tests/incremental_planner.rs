@@ -1958,7 +1958,7 @@ fn inc_requires_routes_condition_via_key_hop() {
 // condition copy must carry a __require_N_ alias so it doesn't collide with
 // the user's selection. Without the alias the planner merges both into one
 // fetch and produces invalid GraphQL ("conflicting field arguments").
-// Reproduces the customer issue in TSH-23186.
+// Reproduces a customer-reported planning failure.
 #[test]
 fn inc_user_field_argument_conflict_with_requires_condition() {
     let planner = planner!(
