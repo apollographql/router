@@ -670,3 +670,21 @@ fn supergraph_sdl_is_reparseable_when_subgraphs_use_extend_schema() {
 
     Supergraph::parse(&sdl).expect("supergraph SDL should be re-parseable");
 }
+
+#[test]
+fn preserves_one_of_on_input_types() {
+    let result = compose_as_fed2_subgraphs(&[ServiceDefinition {
+        name: "a",
+        type_defs: r#"
+            type Query { find(by: FindInput!): String }
+            input FindInput @oneOf { id: ID name: String }
+        "#,
+    }])
+    .expect("composes");
+    let api = result.to_api_schema(Default::default()).expect("api schema");
+    let api_sdl = api.schema().to_string();
+    assert!(
+        api_sdl.contains("input FindInput @oneOf"),
+        "@oneOf must reach the API schema so the router enforces it:\n{api_sdl}"
+    );
+}
