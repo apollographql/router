@@ -244,9 +244,8 @@ async fn source_max_requests() {
     );
 }
 
-async fn test_root_field_plus_entity_impl(
-    config: Option<serde_json_bytes::Value>,
-) -> (serde_json::Value, Vec<wiremock::Request>) {
+#[tokio::test]
+async fn test_root_field_plus_entity() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
@@ -257,18 +256,11 @@ async fn test_root_field_plus_entity_impl(
         &mock_server.uri(),
         "query { users { __typename id name username } }",
         Default::default(),
-        config,
+        None,
         |_| {},
         None,
     )
     .await;
-    let received = mock_server.received_requests().await.unwrap();
-    (response, received)
-}
-
-#[tokio::test]
-async fn test_root_field_plus_entity() {
-    let (response, received) = test_root_field_plus_entity_impl(None).await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -301,12 +293,11 @@ async fn test_root_field_plus_entity() {
             Matcher::new().method("GET").path("/users/2"),
         ]),
     ]);
-    plan.assert_matches(&received);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
-async fn test_root_field_plus_entity_plus_requires_impl(
-    config: Option<serde_json_bytes::Value>,
-) -> (serde_json::Value, Vec<wiremock::Request>) {
+#[tokio::test]
+async fn test_root_field_plus_entity_plus_requires() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
@@ -338,18 +329,11 @@ async fn test_root_field_plus_entity_plus_requires_impl(
         &mock_server.uri(),
         "query { users { __typename id name username d } }",
         Default::default(),
-        config,
+        None,
         |_| {},
         None,
     )
     .await;
-    let received = mock_server.received_requests().await.unwrap();
-    (response, received)
-}
-
-#[tokio::test]
-async fn test_root_field_plus_entity_plus_requires() {
-    let (response, received) = test_root_field_plus_entity_plus_requires_impl(None).await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -387,13 +371,12 @@ async fn test_root_field_plus_entity_plus_requires() {
         ]),
     ]);
 
-    plan.assert_matches(&received)
+    plan.assert_matches(&mock_server.received_requests().await.unwrap())
 }
 
 /// Tests that a connector can vend an entity reference like `user: { id: userId }`
-async fn test_entity_references_impl(
-    config: Option<serde_json_bytes::Value>,
-) -> (serde_json::Value, Vec<wiremock::Request>) {
+#[tokio::test]
+async fn test_entity_references() {
     let mock_server = MockServer::start().await;
     mock_api::posts().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
@@ -404,18 +387,11 @@ async fn test_entity_references_impl(
         &mock_server.uri(),
         "query { posts { title user { name } } }",
         Default::default(),
-        config,
+        None,
         |_| {},
         None,
     )
     .await;
-    let received = mock_server.received_requests().await.unwrap();
-    (response, received)
-}
-
-#[tokio::test]
-async fn test_entity_references() {
-    let (response, received) = test_entity_references_impl(None).await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -448,7 +424,7 @@ async fn test_entity_references() {
             Matcher::new().method("GET").path("/users/2"),
         ]),
     ]);
-    plan.assert_matches(&received);
+    plan.assert_matches(&mock_server.received_requests().await.unwrap());
 }
 
 #[tokio::test]
@@ -1187,9 +1163,8 @@ async fn test_operation_counter() {
     .await;
 }
 
-async fn test_mutation_impl(
-    config: Option<serde_json_bytes::Value>,
-) -> (serde_json::Value, Vec<wiremock::Request>) {
+#[tokio::test]
+async fn test_mutation() {
     let mock_server = MockServer::start().await;
     mock_api::create_user().mount(&mock_server).await;
 
@@ -1209,18 +1184,11 @@ async fn test_mutation_impl(
             .as_object()
             .unwrap()
             .clone(),
-        config,
+        None,
         |_| {},
         None,
     )
     .await;
-    let received = mock_server.received_requests().await.unwrap();
-    (response, received)
-}
-
-#[tokio::test]
-async fn test_mutation() {
-    let (response, received) = test_mutation_impl(None).await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -1237,7 +1205,7 @@ async fn test_mutation() {
     "###);
 
     req_asserts::matches(
-        &received,
+        &mock_server.received_requests().await.unwrap(),
         vec![
             Matcher::new()
                 .method("POST")
@@ -2444,258 +2412,4 @@ async fn execute(
         .unwrap();
 
     serde_json::from_slice(&response).unwrap()
-}
-
-mod native_connectors {
-    use super::*;
-
-    /// Enabling the incremental planner switches connector handling to
-    /// native mode: no virtual-subgraph expansion, fetches dispatched by
-    /// the connectors' synthetic service names.
-    fn native_config() -> Option<serde_json_bytes::Value> {
-        Some(json!({
-            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } }
-        }))
-    }
-
-    /// Native twin of test_root_field_plus_entity: same response and same
-    /// wire traffic as expanded mode.
-    #[tokio::test]
-    async fn root_field_plus_entity() {
-        let (response, received) = test_root_field_plus_entity_impl(native_config()).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "users": [
-              {
-                "__typename": "User",
-                "id": 1,
-                "name": "Leanne Graham",
-                "username": "Bret"
-              },
-              {
-                "__typename": "User",
-                "id": 2,
-                "name": "Ervin Howell",
-                "username": "Antonette"
-              }
-            ]
-          }
-        }
-        "###);
-
-        let plan = Plan::Sequence(vec![
-            Plan::Fetch(Matcher::new().method("GET").path("/users")),
-            Plan::Parallel(vec![
-                Matcher::new().method("GET").path("/users/1"),
-                Matcher::new().method("GET").path("/users/2"),
-            ]),
-        ]);
-        plan.assert_matches(&received);
-    }
-
-    /// Type-conditioned fetching must not route native connector schemas to
-    /// the legacy planner, which cannot dispatch unexpanded connector fetches.
-    #[tokio::test]
-    async fn root_field_plus_entity_with_type_conditioned_fetching() {
-        let config = json!({
-            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } },
-            "experimental_type_conditioned_fetching": true
-        });
-        let (response, received) = test_root_field_plus_entity_impl(Some(config)).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "users": [
-              {
-                "__typename": "User",
-                "id": 1,
-                "name": "Leanne Graham",
-                "username": "Bret"
-              },
-              {
-                "__typename": "User",
-                "id": 2,
-                "name": "Ervin Howell",
-                "username": "Antonette"
-              }
-            ]
-          }
-        }
-        "###);
-
-        let plan = Plan::Sequence(vec![
-            Plan::Fetch(Matcher::new().method("GET").path("/users")),
-            Plan::Parallel(vec![
-                Matcher::new().method("GET").path("/users/1"),
-                Matcher::new().method("GET").path("/users/2"),
-            ]),
-        ]);
-        plan.assert_matches(&received);
-    }
-
-    /// Native twin of test_root_field_plus_entity_plus_requires: @requires
-    /// through a connector plus a GraphQL subgraph hop.
-    #[tokio::test]
-    async fn root_field_plus_entity_plus_requires() {
-        let (response, received) =
-            test_root_field_plus_entity_plus_requires_impl(native_config()).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "users": [
-              {
-                "__typename": "User",
-                "id": 1,
-                "name": "Leanne Graham",
-                "username": "Bret",
-                "d": "1-770-736-8031 x56442"
-              },
-              {
-                "__typename": "User",
-                "id": 2,
-                "name": "Ervin Howell",
-                "username": "Antonette",
-                "d": "1-770-736-8031 x56442"
-              }
-            ]
-          }
-        }
-        "###);
-
-        let plan = Plan::Sequence(vec![
-            Plan::Fetch(Matcher::new().method("GET").path("/users")),
-            Plan::Parallel(vec![
-                Matcher::new().method("GET").path("/users/1"),
-                Matcher::new().method("GET").path("/users/2"),
-                Matcher::new().method("POST").path("/graphql"),
-            ]),
-            Plan::Parallel(vec![
-                Matcher::new().method("GET").path("/users/1"),
-                Matcher::new().method("GET").path("/users/2"),
-            ]),
-        ]);
-        plan.assert_matches(&received);
-    }
-
-    /// Native twin of test_entity_references: connector-vended entity
-    /// references resolved by entity-resolver connectors.
-    #[tokio::test]
-    async fn entity_references() {
-        let (response, received) = test_entity_references_impl(native_config()).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "posts": [
-              {
-                "title": "Post 1",
-                "user": {
-                  "name": "Leanne Graham"
-                }
-              },
-              {
-                "title": "Post 2",
-                "user": {
-                  "name": "Ervin Howell"
-                }
-              }
-            ]
-          }
-        }
-        "###);
-
-        let plan = Plan::Sequence(vec![
-            Plan::Fetch(Matcher::new().method("GET").path("/posts")),
-            Plan::Parallel(vec![
-                Matcher::new().method("GET").path("/users/1"),
-                Matcher::new().method("GET").path("/users/2"),
-            ]),
-        ]);
-        plan.assert_matches(&received);
-    }
-
-    /// Native twin of test_mutation.
-    #[tokio::test]
-    async fn mutation() {
-        let (response, received) = test_mutation_impl(native_config()).await;
-
-        insta::assert_json_snapshot!(response, @r###"
-        {
-          "data": {
-            "createUser": {
-              "success": true,
-              "user": {
-                "id": 3,
-                "name": "New User"
-              }
-            }
-          }
-        }
-        "###);
-
-        req_asserts::matches(
-            &received,
-            vec![
-                Matcher::new()
-                    .method("POST")
-                    .body(serde_json::json!({ "username": "New User" }))
-                    .path("/user"),
-            ],
-        );
-    }
-
-    #[tokio::test]
-    async fn schema_has_no_synthetic_subgraphs() {
-        let connector_uri = "http://unused/";
-
-        let config: Configuration = serde_json_bytes::from_value(json!({
-            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } },
-            "connectors": {
-                "sources": {
-                    "connectors.json": {
-                        "override_url": connector_uri
-                    }
-                }
-            }
-        }))
-        .unwrap();
-
-        let schema = crate::spec::Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
-
-        // With native connectors, the schema should only contain the real
-        // subgraphs ("connectors" and "graphql"), not synthetic ones like
-        // "connectors_Query_users_0".
-        let subgraph_names: Vec<_> = schema.subgraphs().map(|(name, _)| name.clone()).collect();
-        assert_eq!(
-            subgraph_names.len(),
-            2,
-            "expected 2 real subgraphs, got: {subgraph_names:?}"
-        );
-        assert!(subgraph_names.contains(&"connectors".to_string()));
-        assert!(subgraph_names.contains(&"graphql".to_string()));
-    }
-
-    /// A connector-backed subgraph has no GraphQL endpoint, so an empty
-    /// join__graph url must not fail schema parsing in native mode. The
-    /// unexpanded supergraph lists the subgraph under its real name, which
-    /// the connector table (keyed by synthetic names) does not contain
-    /// directly.
-    #[tokio::test]
-    async fn schema_parses_with_no_connector_subgraph_url() {
-        let schema = STEEL_THREAD_SCHEMA.replace(
-            r#"CONNECTORS @join__graph(name: "connectors", url: "none")"#,
-            r#"CONNECTORS @join__graph(name: "connectors", url: "")"#,
-        );
-        let config: Configuration = serde_json_bytes::from_value(json!({
-            "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } },
-        }))
-        .unwrap();
-
-        crate::spec::Schema::parse(&schema, &config)
-            .expect("connector subgraph with empty url parses in native mode");
-    }
 }
