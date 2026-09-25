@@ -138,8 +138,10 @@ fn user_plugin_settings_are_typed_while_parsing() {
             .expect("the plugin settings are valid");
 
     let settings: Conf = config
-        .plugin_config("test.always_starts_and_stops")
+        .plugin_configs
+        .user("test.always_starts_and_stops")
         .expect("the plugin's settings are retained")
+        .config
         .typed()
         .expect("the settings were deserialized during parsing");
     assert_eq!(settings.name, "parsed once");

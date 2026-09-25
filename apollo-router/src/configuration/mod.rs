@@ -437,10 +437,12 @@ impl Configuration {
         hash
     }
 
-    /// The configuration retained for the plugin named `full_name`, such as `apollo.telemetry`,
-    /// when the configuration has a section for it.
+    /// The config of the built-in plugin named `full_name`, such as `apollo.telemetry`, when
+    /// the configuration has a section for it.
     pub(crate) fn plugin_config(&self, full_name: &str) -> Option<&PluginConfig> {
-        self.plugin_configs.get(full_name)
+        self.plugin_configs
+            .apollo(full_name)
+            .map(|parsed| &parsed.config)
     }
 
     /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
@@ -535,9 +537,9 @@ impl Configuration {
         if cfg!(test) {
             return Ok(Notify::for_tests());
         }
-        let notify_queue_cap = match plugin_configs.get(APOLLO_SUBSCRIPTION_PLUGIN) {
-            Some(plugin_conf) => {
-                let conf = plugin_conf.typed::<SubscriptionConfig>().map_err(|err| {
+        let notify_queue_cap = match plugin_configs.apollo(APOLLO_SUBSCRIPTION_PLUGIN) {
+            Some(parsed) => {
+                let conf = parsed.config.typed::<SubscriptionConfig>().map_err(|err| {
                     ConfigurationError::PluginConfiguration {
                         plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
                         error: err.to_string(),

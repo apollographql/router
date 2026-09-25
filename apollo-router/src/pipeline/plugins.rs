@@ -196,6 +196,13 @@ impl PluginRegistrar<'_> {
         )
     }
 
+    /// On a hot reload, the config the built-in plugin named `full_name` ran with before.
+    fn previous_apollo_config(&self, full_name: &str) -> Option<PluginConfig> {
+        self.previous_config
+            .and_then(|previous| previous.plugin_config(full_name))
+            .cloned()
+    }
+
     /// Claims the factory for a plugin out of `factories`, panicking if the plugin was
     /// never registered or was claimed twice.
     fn take_factory(&mut self, full_name: &str) -> &'static PluginFactory {
@@ -229,8 +236,15 @@ impl PluginRegistrar<'_> {
             let full_config = (full_name == "apollo.telemetry")
                 .then(|| self.configuration.validated_yaml.clone())
                 .flatten();
-            self.add_plugin(full_name, factory, plugin_config, full_config)
-                .await;
+            let previous_config = self.previous_apollo_config(&full_name);
+            self.add_plugin(
+                full_name,
+                factory,
+                plugin_config,
+                previous_config,
+                full_config,
+            )
+            .await;
         }
         .instrument(span)
         .await;
@@ -258,7 +272,8 @@ impl PluginRegistrar<'_> {
                 None => true,
             };
             if allowed {
-                self.add_plugin(full_name, factory, plugin_config, None)
+                let previous_config = self.previous_apollo_config(&full_name);
+                self.add_plugin(full_name, factory, plugin_config, previous_config, None)
                     .await;
             } else {
                 tracing::warn!(
@@ -278,15 +293,21 @@ impl PluginRegistrar<'_> {
             self.errors
                 .push(ConfigurationError::PluginUnknown(name.clone()));
         }
-        for (name, plugin_config) in configs.user_plugins() {
+        for (name, parsed) in configs.user_plugins() {
             let user_span = tracing::info_span!("user_plugin", "name" = name);
             async {
-                let factory = crate::plugin::PLUGINS
-                    .iter()
-                    .find(|factory| factory.name == name)
-                    .expect("parsed plugin settings belong to a registered plugin");
-                self.add_plugin(name.to_string(), factory, plugin_config.clone(), None)
-                    .await
+                let previous_config = self
+                    .previous_config
+                    .and_then(|previous| previous.plugin_configs.user(name))
+                    .map(|previous| previous.config.clone());
+                self.add_plugin(
+                    name.to_string(),
+                    parsed.factory,
+                    parsed.config.clone(),
+                    previous_config,
+                    None,
+                )
+                .await
             }
             .instrument(user_span)
             .await;
@@ -303,16 +324,10 @@ impl PluginRegistrar<'_> {
         name: String,
         factory: &PluginFactory,
         plugin_config: PluginConfig,
+        previous_config: Option<PluginConfig>,
         full_config: Option<Value>,
     ) {
-        // On a hot reload, the plugin also receives the settings it ran with before.
-        let previous_plugin_config = self
-            .previous_config
-            .and_then(|previous| previous.plugin_config(&name))
-            .cloned();
-        let mut plugin_init = self
-            .context
-            .with_config(plugin_config, previous_plugin_config);
+        let mut plugin_init = self.context.with_config(plugin_config, previous_config);
         plugin_init.full_config = full_config;
 
         match factory.create_from_config(plugin_init).await {
