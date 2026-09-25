@@ -1,7 +1,9 @@
 use crate::Supergraph;
 use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
+use crate::query_plan::query_planner::FORCE_INCREMENTAL_DEFER;
 use crate::query_plan::query_planner::IncrementalPlannerConfig;
+use crate::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use crate::query_plan::query_planner::QueryPlanOptions;
 use crate::query_plan::query_planner::QueryPlanner;
 use crate::query_plan::query_planner::QueryPlannerConfig;
@@ -40,6 +42,22 @@ fn plan_query_with_options(
         .build_query_plan(&document, None, plan_options)
         .expect("query plan");
     format!("{plan}")
+}
+
+fn plan_query_with_defer(schema: &str, query: &str) -> String {
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    plan_query_with_options(schema, query, config, Default::default())
+}
+
+/// Plans a deferred operation through BULB instead of the legacy fallback.
+fn plan_query_with_defer_via_bulb(schema: &str, query: &str) -> String {
+    FORCE_INCREMENTAL_DEFER.set(true);
+    let plan = plan_query_with_defer(schema, query);
+    FORCE_INCREMENTAL_DEFER.set(false);
+    plan
 }
 
 /// One supergraph shared by every test here; each test picks the part of
@@ -1165,6 +1183,7 @@ fn t_pending(
         provides_anchor: None,
         narrowing: Default::default(),
         best_effort: false,
+        defer_ref: None,
     }
 }
 
@@ -2047,5 +2066,428 @@ fn constant_skip_and_root_type_condition_fragments() {
     assert!(
         rooted.contains("name"),
         "Root type condition should pass through: {rooted}"
+    );
+}
+
+/// Shared by the @defer tests: name, email, and address each live in their
+/// own subgraph.
+const THREE_SUBGRAPH_SCHEMA: &str = include_str!("../fixtures/three_subgraph.graphql");
+
+/// Cross-subgraph @defer: the deferred fragment's fields live in a different
+/// subgraph from the primary, producing a Defer node with a key-hop fetch
+/// in the deferred block.
+#[test]
+fn defer_produces_defer_node() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// Through BULB, the deferred key hop carries the fragment's defer scope, so
+/// its fetch lands in the Deferred block and stays out of the primary.
+#[test]
+fn defer_cross_subgraph_key_hop_lands_in_deferred_block() {
+    let plan_str = plan_query_with_defer_via_bulb(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { user { name } }:
+          Fetch(service: "a", id: 0) {
+            {
+              user {
+                __typename
+                name
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "user") {
+            { ... { email } }:
+            Flatten(path: "user") {
+              Fetch(service: "b") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    email
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+/// Labels synthesized by defer normalization for unlabeled @defer
+/// (`qp__N`) are internal bookkeeping and must not leak into the plan;
+/// user-written labels must be preserved.
+#[test]
+fn synthesized_defer_labels_do_not_leak_into_plan() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        !plan_str.contains("qp__"),
+        "Synthesized defer label must not appear in the plan: {plan_str}"
+    );
+
+    let labeled_plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer(label: \"mine\") { email } } }",
+    );
+    assert!(
+        labeled_plan_str.contains("mine"),
+        "User-written defer label must be preserved: {labeled_plan_str}"
+    );
+}
+
+/// Same-subgraph @defer: a deferred field that lives in the same subgraph
+/// as the primary must not be fetched eagerly in the primary fetch. The
+/// deferred field gets its own entity fetch so the executor can stream it
+/// in a later multipart chunk.
+#[test]
+fn defer_same_subgraph_does_not_fetch_deferred_field_eagerly() {
+    let schema = &wrap_supergraph(
+        r#"  S @join__graph(name: "s", url: "http://s")"#,
+        r#"
+type Query @join__type(graph: S) {
+  t: T
+}
+type T @join__type(graph: S, key: "id") {
+  id: ID!
+  v0: String
+  v1: String
+}
+"#,
+    );
+    let plan_str = plan_query_with_defer_via_bulb(schema, "{ t { v0 ... @defer { v1 } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v0 } }:
+          Fetch(service: "s", id: 0) {
+            {
+              t {
+                __typename
+                v0
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { ... { v1 } }:
+            Flatten(path: "t") {
+              Fetch(service: "s") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+const ROOT_HOP_DEFER_SCHEMA: &str = include_str!(
+    "../../../../tests/query_plan/supergraphs/defer_test_defer_on_query_root_type.graphql"
+);
+
+/// A deferred field reached through a root hop (`next: Query` into another
+/// subgraph) must be fetched in the Deferred block, not in the primary's
+/// root-hop fetch.
+#[test]
+fn defer_through_root_hop_keeps_field_deferred() {
+    let plan_str = plan_query_with_defer_via_bulb(
+        ROOT_HOP_DEFER_SCHEMA,
+        "{ op2 { next { op3 ... @defer { op4 } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { op2 { next { op3 } } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                op2 {
+                  next {
+                    __typename
+                  }
+                }
+              }
+            },
+            Flatten(path: "op2.next") {
+              Fetch(service: "Subgraph2") {
+                {
+                  op3
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "op2/next") {
+            { ... { op4 } }:
+            Flatten(path: "op2.next") {
+              Fetch(service: "Subgraph2") {
+                {
+                  op4
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+/// A deferred root field in the enclosing subgraph re-enters it through a
+/// root hop, since a root type has no key to redirect through.
+#[test]
+fn defer_on_query_root_type() {
+    let plan_str = plan_query_with_defer_via_bulb(
+        ROOT_HOP_DEFER_SCHEMA,
+        "{ op2 { x y next { op3 ... @defer { op1 op4 } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { op2 { x y next { op3 } } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                op2 {
+                  x
+                  y
+                  next {
+                    __typename
+                  }
+                }
+              }
+            },
+            Flatten(path: "op2.next") {
+              Fetch(service: "Subgraph2") {
+                {
+                  op3
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "op2/next") {
+            { ... { op1 op4 } }:
+            Parallel {
+              Flatten(path: "op2.next") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    op4
+                  }
+                },
+              },
+              Flatten(path: "op2.next") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    op1
+                  }
+                },
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+/// Multiple @defer siblings at the same level produce distinct deferred
+/// blocks inside a single Defer node.
+#[test]
+fn defer_sibling_blocks_produces_multiple_deferred() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email } ... @defer { address } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "A deferred block should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "A deferred block should fetch 'address': {plan_str}"
+    );
+}
+
+/// Nested @defer: an outer deferred fragment contains an inner @defer,
+/// producing nested Defer nodes. Exercises the parent_label tracking in
+/// defer.rs collect_deferred_blocks and the nested defer partitioning in
+/// plan_builder.rs build_deferred_blocks.
+#[test]
+fn nested_defer_produces_nested_defer_nodes() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer(label: \"outer\") { email ... @defer(label: \"inner\") { address } } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Outer deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Inner deferred should fetch 'address': {plan_str}"
+    );
+}
+
+/// When every field in the selection is deferred, the primary sub_selection
+/// is empty. Exercises the None primary_sub_selection path in defer.rs
+/// build_defer_info.
+#[test]
+fn fully_deferred_field_has_no_primary_payload() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer(label: \"all\") { name email } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Deferred should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// A bare inline fragment (no type condition, no directives) inside a
+/// deferred selection exercises collect_non_deferred_selection's
+/// type_cond == None branch.
+#[test]
+fn bare_inline_fragment_passes_through_in_defer() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { ... @defer { email } ... { name } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain a Defer node: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Bare fragment 'name' should be in primary: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+}
+
+/// Deferred cross-subgraph fetch with labeled @defer and an explicit
+/// user field alongside exercises the primary/deferred split where
+/// primary has content and deferred needs an entity hop.
+#[test]
+fn labeled_defer_with_primary_and_deferred_content() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        r#"{ user { name ... @defer(label: "emails") { email } ... @defer(label: "addrs") { address } } }"#,
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("emails"),
+        "Label 'emails' should appear in plan: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("addrs"),
+        "Label 'addrs' should appear in plan: {plan_str}"
+    );
+}
+
+/// Cross-subgraph @defer where the deferred fields span two different
+/// non-primary subgraphs exercises the multi-fetch deferred block
+/// construction in plan_builder.
+#[test]
+fn defer_spanning_two_non_primary_subgraphs() {
+    let plan_str = plan_query_with_defer(
+        THREE_SUBGRAPH_SCHEMA,
+        "{ user { name ... @defer { email address } } }",
+    );
+    assert!(
+        plan_str.contains("Defer"),
+        "Plan should contain Defer: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Primary should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Deferred should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Deferred should fetch 'address': {plan_str}"
     );
 }

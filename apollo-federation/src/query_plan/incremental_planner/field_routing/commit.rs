@@ -8,8 +8,11 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 use tracing::trace;
 
+use super::super::defer;
+use super::super::defer::strip_defer_directive;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
@@ -117,22 +120,37 @@ impl FieldRoutingSearchSpace {
         };
 
         // Mutating half: commit the hop or resolve the direct fetch group.
-        let (fetch_node, key_hop_edge) = match choice {
+        let (fetch_node, key_hop_edge, is_defer_redirect) = match choice {
             RoutingChoice::Provides(_) | RoutingChoice::Local(_) => {
-                (self.direct_fetch_node(state, pending, choice)?, None)
+                let node = self.direct_fetch_node(state, pending, choice)?;
+                // A deferred field whose enclosing group belongs to a
+                // different defer scope needs its own entity fetch, even
+                // when no key hop is involved. This lets the executor
+                // stream the deferred payload in a separate chunk.
+                let enclosing_defer = &state.graph.node(node).defer_ref;
+                if pending.defer_ref != *enclosing_defer {
+                    let (group, edge) = self.commit_defer_redirect(state, pending, choice)?;
+                    (group, Some(edge), true)
+                } else {
+                    (node, None, false)
+                }
             }
             RoutingChoice::RootHop(_) => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
-                (group, Some(hop_edge))
+                (group, Some(hop_edge), false)
             }
             _ => {
                 let (group, hop_edge) = self.commit_key_hop(state, pending, choice)?;
-                (group, Some(hop_edge))
+                (group, Some(hop_edge), false)
             }
         };
 
         // Pure half: assemble op and response paths for children.
-        let mut target = self.target_paths(pending, choice, fetch_node, response_path_elements)?;
+        let mut target = if is_defer_redirect {
+            self.defer_redirect_target(pending, fetch_node, response_path_elements)?
+        } else {
+            self.target_paths(pending, choice, fetch_node, response_path_elements)?
+        };
         let ctx = CommitCtx {
             pending,
             choice,
@@ -186,26 +204,15 @@ impl FieldRoutingSearchSpace {
             field_source_node.type_.clone().try_into()?;
         // The hop resolves through the kind of the subgraph root it lands
         // on, not the surrounding operation's kind.
-        let subgraph_schema = qg.schema_by_source(choice.target_subgraph())?;
-        let root_kind = [
-            SchemaRootDefinitionKind::Query,
-            SchemaRootDefinitionKind::Mutation,
-            SchemaRootDefinitionKind::Subscription,
-        ]
-        .into_iter()
-        .find(|kind| {
-            subgraph_schema
-                .schema()
-                .root_operation((*kind).into())
-                .is_some_and(|name| name == root_type.type_name())
-        })
-        .ok_or_else(|| {
-            FederationError::internal(format!(
-                "root hop target type {} is not a root type in subgraph {}",
-                root_type.type_name(),
-                choice.target_subgraph(),
-            ))
-        })?;
+        let root_kind = self
+            .subgraph_root_kind(choice.target_subgraph(), &root_type)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "root hop target type {} is not a root type in subgraph {}",
+                    root_type.type_name(),
+                    choice.target_subgraph(),
+                ))
+            })?;
 
         let new_group = self.root_hop_group_avoiding_cycles(
             state,
@@ -215,6 +222,7 @@ impl FieldRoutingSearchSpace {
             merge_at,
             pending.fetch_node,
             pending.ordering_dependent(),
+            pending.defer_ref.clone(),
         );
 
         let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
@@ -225,6 +233,27 @@ impl FieldRoutingSearchSpace {
         };
 
         Ok((new_group, edge))
+    }
+
+    /// The root kind `type_pos` serves as in `subgraph`, if it is a root type.
+    fn subgraph_root_kind(
+        &self,
+        subgraph: &Arc<str>,
+        type_pos: &CompositeTypeDefinitionPosition,
+    ) -> Result<Option<SchemaRootDefinitionKind>, FederationError> {
+        let subgraph_schema = self.query_graph.schema_by_source(subgraph)?;
+        Ok([
+            SchemaRootDefinitionKind::Query,
+            SchemaRootDefinitionKind::Mutation,
+            SchemaRootDefinitionKind::Subscription,
+        ]
+        .into_iter()
+        .find(|kind| {
+            subgraph_schema
+                .schema()
+                .root_operation((*kind).into())
+                .is_some_and(|name| name == type_pos.type_name())
+        }))
     }
 
     /// Commit a key-resolution hop: creates an entity group in the target
@@ -247,7 +276,7 @@ impl FieldRoutingSearchSpace {
         // Every key is an entry key; the parent group outputs whatever
         // enters the first group of the chain (the target's own key when
         // there is no chain).
-        let key_info = choice.key();
+        let key_info = choice.key()?;
         let intermediate_hops = choice.intermediate_hops();
         let first_key: Option<&Arc<SelectionSet>> = intermediate_hops
             .first()
@@ -299,6 +328,7 @@ impl FieldRoutingSearchSpace {
             merge_at.clone(),
             pending.fetch_node,
             pending.ordering_dependent(),
+            pending.defer_ref.clone(),
         );
 
         let key_input = if let Some(key_conditions) = first_key {
@@ -416,7 +446,7 @@ impl FieldRoutingSearchSpace {
                 None => (
                     qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?
                         .0,
-                    Some(&choice.key().key_conditions),
+                    Some(&choice.key()?.key_conditions),
                 ),
             };
             let next_subgraph = &qg.node_weight(next_dest_node)?.source;
@@ -427,6 +457,7 @@ impl FieldRoutingSearchSpace {
                 merge_at.clone(),
                 prev_group,
                 pending.ordering_dependent(),
+                pending.defer_ref.clone(),
             );
 
             if let Some(key_conds) = exit_key {
@@ -492,14 +523,19 @@ impl FieldRoutingSearchSpace {
         merge_at: Vec<FetchDataPathElement>,
         anchor_fetch: NodeIndex,
         ordering_dependent: Option<NodeIndex>,
+        defer_ref: Option<String>,
     ) -> NodeIndex {
-        let group = state
-            .graph
-            .get_or_create_entity_group(subgraph, merge_at.clone());
+        let group = state.graph.get_or_create_entity_group_with_defer(
+            subgraph,
+            merge_at.clone(),
+            defer_ref.clone(),
+        );
         if Self::group_reusable(state, group, anchor_fetch, ordering_dependent) {
             return group;
         }
-        state.graph.add_entity_group(subgraph, merge_at)
+        state
+            .graph
+            .add_entity_group_with_defer(subgraph, merge_at, defer_ref)
     }
 
     /// Get or create the root hop group for (subgraph, root_kind, merge_at),
@@ -515,19 +551,21 @@ impl FieldRoutingSearchSpace {
         merge_at: Vec<FetchDataPathElement>,
         anchor_fetch: NodeIndex,
         ordering_dependent: Option<NodeIndex>,
+        defer_ref: Option<String>,
     ) -> NodeIndex {
         let group = state.graph.get_or_create_root_hop_group(
             subgraph,
             root_type.clone(),
             root_kind,
             merge_at.clone(),
+            defer_ref.clone(),
         );
         if Self::group_reusable(state, group, anchor_fetch, ordering_dependent) {
             return group;
         }
         state
             .graph
-            .add_root_hop_group(subgraph, root_type, root_kind, merge_at)
+            .add_root_hop_group(subgraph, root_type, root_kind, merge_at, defer_ref)
     }
 
     /// Whether an existing group can take a dependency edge from
@@ -653,9 +691,11 @@ impl FieldRoutingSearchSpace {
             let subgraph_node = qg.node_weight(field_source)?;
             let root_type: CompositeTypeDefinitionPosition =
                 subgraph_node.type_.clone().try_into()?;
-            return Ok(state
-                .graph
-                .get_or_create_root_group(&subgraph_node.source, root_type));
+            return Ok(state.graph.get_or_create_root_group_with_defer(
+                &subgraph_node.source,
+                root_type,
+                pending.defer_ref.clone(),
+            ));
         }
 
         Ok(pending.fetch_node)
@@ -724,6 +764,7 @@ impl FieldRoutingSearchSpace {
                     .op_path
                     .pushed(Arc::new(OpPathElement::Field(field_sel.field.clone()))),
                 Selection::InlineFragment(frag_sel) => {
+                    let stripped = strip_defer_directive(&frag_sel.inline_fragment);
                     let edge = qg.edge_weight(choice.edge_index().expect("edge-based choice"))?;
                     if matches!(
                         edge.transition,
@@ -731,11 +772,10 @@ impl FieldRoutingSearchSpace {
                     ) {
                         // @interfaceObject fake downcast: the concrete type
                         // doesn't exist in this subgraph.
-                        if frag_sel.inline_fragment.directives.is_empty() {
+                        if stripped.directives.is_empty() {
                             pending.op_path.clone()
                         } else {
-                            let updated =
-                                frag_sel.inline_fragment.with_updated_type_condition(None);
+                            let updated = stripped.with_updated_type_condition(None);
                             pending
                                 .op_path
                                 .pushed(Arc::new(OpPathElement::InlineFragment(updated)))
@@ -743,9 +783,7 @@ impl FieldRoutingSearchSpace {
                     } else {
                         pending
                             .op_path
-                            .pushed(Arc::new(OpPathElement::InlineFragment(
-                                frag_sel.inline_fragment.clone(),
-                            )))
+                            .pushed(Arc::new(OpPathElement::InlineFragment(stripped)))
                     }
                 }
             }
@@ -771,7 +809,7 @@ impl FieldRoutingSearchSpace {
                     Arc::new(OpPathElement::Field(field_sel.field.clone()))
                 }
                 Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
-                    frag_sel.inline_fragment.clone(),
+                    strip_defer_directive(&frag_sel.inline_fragment),
                 )),
             };
             base.pushed(op_element)
@@ -799,6 +837,154 @@ impl FieldRoutingSearchSpace {
             op_path,
             response_path,
             entity_root: !choice.is_direct(),
+        })
+    }
+
+    /// Route a deferred field into a separate entity group when it lives
+    /// in the same subgraph as its enclosing fetch but belongs to a
+    /// different defer scope. This creates the same structure as a key hop
+    /// so the executor can stream the deferred payload independently.
+    fn commit_defer_redirect(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        choice: &RoutingChoice,
+    ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
+        let qg = &self.query_graph;
+        let source = self.node_source(pending.query_graph_node)?;
+        let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
+        if let Some(root_kind) = self.subgraph_root_kind(&subgraph, &source.type_pos)? {
+            return Ok(
+                self.commit_root_defer_redirect(state, pending, &subgraph, &source, root_kind)
+            );
+        }
+
+        // The self-key edge exists specifically for @defer re-entering a
+        // subgraph; out_edges filters self-edges so use the unfiltered view.
+        let key_conditions = qg
+            .out_edges_with_federation_self_edges(pending.query_graph_node)
+            .into_iter()
+            .find_map(|edge_ref| {
+                let edge = edge_ref.weight();
+                if !matches!(edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+                    return None;
+                }
+                let target_node = qg.node_weight(edge_ref.target()).ok()?;
+                if target_node.source != subgraph {
+                    return None;
+                }
+                edge.conditions.clone()
+            });
+
+        self.append_entity_inputs(
+            state,
+            pending.fetch_node,
+            &pending.op_path,
+            key_conditions.as_ref(),
+            &source,
+        );
+
+        let merge_at = self.pending_merge_at(state, pending);
+        let new_group = self.entity_group_avoiding_cycles(
+            state,
+            &subgraph,
+            merge_at,
+            pending.fetch_node,
+            pending.ordering_dependent(),
+            pending.defer_ref.clone(),
+        );
+
+        let (field_source, _) =
+            qg.edge_endpoints(choice.edge_index().expect("edge-based choice"))?;
+        let dest_type: CompositeTypeDefinitionPosition =
+            qg.node_weight(field_source)?.type_.clone().try_into()?;
+
+        let key_input = key_conditions.map(|conditions| InputContribution::Key {
+            source_type_name: source.type_pos.type_name().clone(),
+            conditions,
+            rewrite_info: InputRewriteInfo {
+                dest_type,
+                dest_subgraph: subgraph,
+            },
+        });
+
+        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, key_input);
+        Ok((new_group, edge))
+    }
+
+    /// Root types have no key to re-enter through, so a deferred field on a
+    /// subgraph root re-enters it with a root hop in the pending's scope.
+    fn commit_root_defer_redirect(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        subgraph: &Arc<str>,
+        source: &NodeSource,
+        root_kind: SchemaRootDefinitionKind,
+    ) -> (NodeIndex, EdgeIndex) {
+        self.append_typename(state, pending.fetch_node, &pending.op_path, source);
+        let merge_at = self.pending_merge_at(state, pending);
+        let new_group = self.root_hop_group_avoiding_cycles(
+            state,
+            subgraph,
+            source.type_pos.clone(),
+            root_kind,
+            merge_at,
+            pending.fetch_node,
+            pending.ordering_dependent(),
+            pending.defer_ref.clone(),
+        );
+        let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
+            Some(existing) => existing,
+            None => state
+                .graph
+                .add_dependency(pending.fetch_node, new_group, Vec::new()),
+        };
+        (new_group, edge)
+    }
+
+    /// Build a commit target for a same-subgraph defer redirect. The field
+    /// is routed to a new entity group, so its op_path restarts from the
+    /// entity root (like a key hop) rather than extending the parent path.
+    fn defer_redirect_target(
+        &self,
+        pending: &PendingSelection,
+        fetch_node: NodeIndex,
+        response_path_elements: Vec<FetchDataPathElement>,
+    ) -> Result<CommitTarget, FederationError> {
+        let node_data = self.query_graph.node_weight(pending.query_graph_node)?;
+        let type_pos = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone())?;
+        let mut op_path = if self
+            .subgraph_root_kind(&node_data.source, &type_pos)?
+            .is_some()
+        {
+            // Root redirects start at the hop's root, like a root hop.
+            SharedPath::new()
+        } else {
+            let mut path = self.entity_root_path(type_pos.type_name())?;
+            for element in trailing_condition_fragments(&pending.op_path) {
+                path = path.pushed(element);
+            }
+            path
+        };
+        let op_element: Arc<OpPathElement> = match &pending.selection {
+            Selection::Field(field_sel) => Arc::new(OpPathElement::Field(field_sel.field.clone())),
+            Selection::InlineFragment(frag_sel) => Arc::new(OpPathElement::InlineFragment(
+                frag_sel.inline_fragment.clone(),
+            )),
+        };
+        op_path = op_path.pushed(op_element);
+
+        let mut response_path = SharedPath::new();
+        for element in response_path_elements {
+            response_path = response_path.pushed(element);
+        }
+
+        Ok(CommitTarget {
+            fetch_node,
+            op_path,
+            response_path,
+            entity_root: true,
         })
     }
 
@@ -1162,6 +1348,12 @@ impl FieldRoutingSearchSpace {
             possible_types: child_possible,
             possible_types_after_last_field: child_after_field,
         };
+        // When the committed selection is an inline fragment carrying
+        // @defer, extract the label and propagate it to children so fetch
+        // nodes created downstream land in the deferred partition.
+        let child_defer_ref = defer::defer_context(&pending.selection)
+            .0
+            .or_else(|| pending.defer_ref.clone());
 
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
@@ -1171,6 +1363,7 @@ impl FieldRoutingSearchSpace {
                     .with_op_path(target.op_path.clone())
                     .with_response_path(target.response_path.clone())
                     .with_provides_anchor(child_provides_anchor)
+                    .with_defer(child_defer_ref.clone())
                     .with_narrowing(child_narrowing.clone()),
             );
         }
