@@ -822,11 +822,13 @@ fn stream_license_from_oci(
                                     Err(err) if err.is_missing_entitlement_layer() => {
                                         tracing::warn!("{err}; the router will run unlicensed");
                                         if let Err(e) = sender.send(Err(err)).await {
-                                            tracing::debug!("failed to send error to oci stream, router is likely shutting down: {e}");
+                                            tracing::debug!(
+                                                "failed to send error to oci stream, router is likely shutting down: {e}"
+                                            );
                                             break;
                                         }
-                                        // Update the digest so that if the entitlement layer gets added later, 
-                                        // this can trigger a new fetch 
+                                        // Update the digest so that if the entitlement layer gets added later,
+                                        // this can trigger a new fetch
                                         last_entitlement_digest = Some(current_digest);
                                     }
                                     Err(err) => {
@@ -901,7 +903,9 @@ async fn fetch_license_from_reference(
             // A manifest with no entitlement layer is malformed, not "not yet
             // present but could be in the future" — surface it as an error
             // rather than silently retrying forever or defaulting.
-            tracing::warn!("no entitlement layer found in oci manifest, unable to fetch an entitlement");
+            tracing::warn!(
+                "no entitlement layer found in oci manifest, unable to fetch an entitlement"
+            );
             return Err(OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()));
         }
     };
@@ -1042,6 +1046,30 @@ mod tests {
             error.is_transient_not_found(),
             expected,
             "unexpected is_transient_not_found() for {error:?}"
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::missing_entitlement_layer(
+        OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()),
+        true
+    )]
+    #[case::missing_schema_layer(
+        OciError::LayerNotFound(APOLLO_SCHEMA_MEDIA_TYPE.to_string()),
+        false
+    )]
+    #[case::server_error_404(OciError::Distribution(server_error(404)), false)]
+    #[case::image_manifest_not_found(
+        OciError::Distribution(OciDistributionError::ImageManifestNotFoundError(
+            "no matching platform".to_string()
+        )),
+        false
+    )]
+    fn is_missing_entitlement_layer_cases(#[case] error: OciError, #[case] expected: bool) {
+        assert_eq!(
+            error.is_missing_entitlement_layer(),
+            expected,
+            "unexpected is_missing_entitlement_layer() for {error:?}"
         );
     }
 
@@ -2225,9 +2253,8 @@ mod tests {
     async fn stream_license_from_oci_entitlement_missing_layer_surfaces_error() {
         // The entitlement artifact resolves, but its manifest carries no
         // entitlement JWT layer (a malformed or incomplete publish). Unlike a
-        // 404, this won't fix itself on the next poll, so — per the new
-        // `is_transient_not_found` semantics — it must surface as a stream
-        // `Err`, not a quiet retry.
+        // 404, this won't fix itself on the next poll, so it must surface as
+        // a stream `Err`, not a quiet retry.
         let mock_server = &MockServer::start().await;
         let entitlement_id = "test-entitlement-id";
         let image_reference =
@@ -2242,9 +2269,160 @@ mod tests {
             .expect("stream should not have closed");
         let err = first_result.expect_err("missing entitlement layer must surface as an error");
         assert!(
-            matches!(err, OciError::LayerNotFound(_)) && !err.is_transient_not_found(),
-            "expected a non-transient LayerNotFound, got {err:?}"
+            err.is_missing_entitlement_layer(),
+            "expected a missing-entitlement-layer error, got {err:?}"
         );
+
+        // The entitlement digest still advances on this error (unlike a
+        // transient failure), so the same still-missing-layer manifest must
+        // not re-emit the error on every subsequent poll.
+        let second = timeout(Duration::from_millis(300), stream.next()).await;
+        assert!(
+            second.is_err(),
+            "no further items while the entitlement digest is unchanged, got {second:?}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_license_from_oci_recovers_after_layer_added() {
+        // First entitlement manifest is missing the JWT layer (surfaces as
+        // Err); a later republish adds it, producing a new digest. Proves
+        // the sticky digest tracking on the missing-layer path doesn't
+        // permanently wedge the router once the artifact is fixed.
+        let mock_server = &MockServer::start().await;
+        let graph_id = "test-graph-id";
+        let reference = "latest";
+        let entitlement_id = "test-entitlement-id";
+
+        let graph_manifest_info = create_graph_manifest_with_entitlement_id(entitlement_id, None);
+        let manifest_url = Url::parse(&format!(
+            "{}/v2/{}/manifests/{}",
+            mock_server.uri(),
+            graph_id,
+            reference
+        ))
+        .expect("url must be valid");
+        let _ = Mock::given(method("GET"))
+            .and(path(manifest_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(
+                        "Docker-Content-Digest",
+                        &graph_manifest_info.manifest_digest,
+                    )
+                    .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap()),
+            )
+            .mount(mock_server)
+            .await;
+
+        // First entitlement manifest: no entitlement layer at all.
+        let missing_layer = unrelated_layer();
+        let missing_layer_manifest = OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: missing_layer.media_type.clone(),
+                digest: missing_layer.sha256_digest(),
+                size: missing_layer.data.len().try_into().unwrap(),
+                ..Default::default()
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        });
+        let missing_layer_digest = calculate_manifest_digest(&missing_layer_manifest);
+
+        // Second entitlement manifest: layer added.
+        let entitlement_manifest_info =
+            create_manifest_from_license_layer(TEST_LICENSE_JWT.as_bytes(), None);
+        assert_ne!(
+            missing_layer_digest,
+            entitlement_manifest_info.manifest_digest
+        );
+
+        let entitlement_manifest_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/manifests/{reference}",
+            mock_server.uri()
+        ))
+        .expect("url must be valid");
+        let _ = Mock::given(method("HEAD"))
+            .and(path(entitlement_manifest_url.path()))
+            .respond_with(SequentialManifestDigests {
+                digests: Mutex::new(VecDeque::from([
+                    missing_layer_digest.clone(),
+                    entitlement_manifest_info.manifest_digest.clone(),
+                ])),
+            })
+            .expect(2..=3)
+            .mount(mock_server)
+            .await;
+        let _ = Mock::given(method("GET"))
+            .and(path(entitlement_manifest_url.path()))
+            .respond_with(SequentialManifests {
+                manifests: Mutex::new(VecDeque::from([
+                    (
+                        missing_layer_digest.clone(),
+                        serde_json::to_vec(&missing_layer_manifest).unwrap(),
+                    ),
+                    (
+                        entitlement_manifest_info.manifest_digest.clone(),
+                        serde_json::to_vec(&entitlement_manifest_info.oci_manifest).unwrap(),
+                    ),
+                ])),
+            })
+            .expect(2..=3)
+            .mount(mock_server)
+            .await;
+
+        // Blob for the second (valid) manifest — never fetched while the
+        // first (layer-less) manifest is current.
+        let entitlement_blob_url = Url::parse(&format!(
+            "{}/v2/entitlements/{entitlement_id}/blobs/{}",
+            mock_server.uri(),
+            entitlement_manifest_info.blob_digest
+        ))
+        .expect("url must be valid");
+        Mock::given(method("GET"))
+            .and(path(entitlement_blob_url.path()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header(http::header::CONTENT_TYPE, "application/octet-stream")
+                    .set_body_bytes(entitlement_manifest_info.license_data.clone()),
+            )
+            .mount(mock_server)
+            .await;
+
+        let image_reference = format!("{}/{graph_id}:{reference}", mock_server.address())
+            .parse::<Reference>()
+            .expect("url must be valid");
+        let oci_config = mock_oci_config_with_reference(image_reference.to_string());
+
+        let mut stream = stream_license_from_oci(oci_config);
+
+        // First poll: layer missing → Err.
+        let first_result = timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("stream should yield an item within timeout")
+            .expect("stream should not have closed");
+        assert!(
+            first_result
+                .expect_err("missing entitlement layer must surface as an error")
+                .is_missing_entitlement_layer(),
+        );
+
+        // Second poll: digest changed, layer now present → Ok(Some(license)).
+        let second_result = timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("stream should yield a second item within timeout")
+            .expect("stream should not have closed");
+        let expected = License::from_str(TEST_LICENSE_JWT).expect("test JWT must parse");
+        match second_result {
+            Ok(Some(license)) => assert_eq!(license.claims, expected.claims),
+            Ok(None) => panic!("expected a license, got the unlicensed marker"),
+            Err(e) => panic!("expected recovery after the layer was added, got error: {e}"),
+        }
     }
 
     #[rstest::rstest]

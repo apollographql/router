@@ -8,7 +8,6 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::registry::OciConfig;
-use crate::registry::OciError;
 use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
@@ -175,12 +174,11 @@ impl LicenseSource {
                                     Some(License::default())
                                 }
                                 Err(e) => {
-                                    // A genuine "no entitlement" (`OciError::is_not_found()`)
-                                    // is already converted to `Ok(License::default())` inside
-                                    // `fetch_license_oci` / `fetch_license_from_reference`
-                                    // (missing annotation, missing entitlement manifest, or
-                                    // missing license layer), so any `Err` reaching here is a
-                                    // transient failure (auth, 5xx, network) that should be
+                                    // Missing annotation is already converted to `Ok(None)`
+                                    // upstream, and a missing entitlement layer is handled by
+                                    // the `is_missing_entitlement_layer` arm above, so any
+                                    // `Err` reaching here is a transient failure (auth, 5xx,
+                                    // network, entitlement not yet backfilled) that should be
                                     // retried on the next poll, not treated as an invalid
                                     // license.
                                     tracing::warn!(
