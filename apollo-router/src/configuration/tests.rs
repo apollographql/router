@@ -485,6 +485,31 @@ fn schema_validation_errors_do_not_print_expanded_secret_values() {
     assert!(error.contains("unexpected"), "{error}");
 }
 
+/// Pins a known difference from router v2.x: apollo-configuration converts an expanded value only
+/// to the type its setting's schema declares, and connector `$config` values declare none, so
+/// `${env.FIVE}` stays the string `"5"` where v2.x produced the number `5`. When
+/// apollo-configuration converts values at untyped positions as YAML does, this should assert the
+/// number.
+#[test]
+fn expanded_connector_config_values_stay_strings() {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("FIVE", "5")
+        .build();
+    let config = parse_configuration(
+        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n",
+        expansion,
+        Migration::None,
+    )
+    .expect("the connector config is valid");
+
+    let document = config.validated_yaml.expect("the retained document");
+    assert_eq!(
+        document["connectors"]["sources"]["products.api"]["$config"]["timeout"],
+        json!("5")
+    );
+}
+
 /// An expansion reference anchored in a non-secret field and aliased into `password`.
 const ANCHORED_EXPANSION: &str = "apq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${env.TEST_CONFIG_REDIS_PASSWORD}\n        password: *pw\n";
 
