@@ -315,11 +315,7 @@ impl<'a> FragmentGenerator<'a> {
         field_selection: &Arc<FieldSelection>,
     ) -> Result<executable::Selection, FederationError> {
         let field = &field_selection.field;
-        let definition = field
-            .field_position
-            .get(field.schema.schema())?
-            .node
-            .to_owned();
+        let definition = field.field_position.get(field.schema.schema())?.clone();
         let mut minified_field = executable::Field::new(field.name().to_owned(), definition)
             .with_opt_alias(field.alias.to_owned())
             .with_arguments(field.arguments.deref().to_owned())

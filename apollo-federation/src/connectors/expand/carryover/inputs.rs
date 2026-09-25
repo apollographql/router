@@ -1,6 +1,5 @@
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
@@ -238,14 +237,12 @@ fn replace_join_enum(
     new_directives
 }
 
-/// Unfortunately, there are two different DirectiveList types, so this
-/// function is duplicated.
 fn replace_join_enum_ast(
-    directives: &ast::DirectiveList,
+    directives: &DirectiveList,
     directive_name: &Name,
     replaced_subgraph_names: &MultiMap<Name, Name>,
-) -> ast::DirectiveList {
-    let mut new_directives = ast::DirectiveList::new();
+) -> DirectiveList {
+    let mut new_directives = DirectiveList::new();
     for d in directives.iter() {
         if &d.name == directive_name {
             let Some(graph_arg) = d

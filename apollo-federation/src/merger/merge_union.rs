@@ -1,6 +1,5 @@
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::UnionType;
 
 use crate::error::FederationError;
@@ -24,14 +23,15 @@ impl Merger {
                     .members
                     .contains(member_name)
                 {
-                    // Add the member type to the destination union
-                    dest.insert_member(&mut self.merged, member_name.clone())?;
+                    // Strip extension_id so all members land on the base union definition.
+                    let member_name = Node::new((**member_name).clone());
+                    dest.insert_member(&mut self.merged, member_name)?;
                 }
             }
         }
 
         // For each member in the destination union, add join directives and check for inconsistencies
-        let member_names: Vec<ComponentName> = dest
+        let member_names: Vec<Node<Name>> = dest
             .get(self.merged.schema())?
             .members
             .iter()
@@ -50,7 +50,7 @@ impl Merger {
         &mut self,
         sources: &Sources<Node<UnionType>>,
         dest: &UnionTypeDefinitionPosition,
-        member_name: &ComponentName,
+        member_name: &Node<Name>,
     ) -> Result<(), FederationError> {
         // Add @join__unionMember directive for each subgraph that has this member
         for (&idx, source) in sources.iter() {
@@ -67,7 +67,7 @@ impl Merger {
                 )?;
 
                 // Apply the directive to the destination union
-                dest.insert_directive(&mut self.merged, Component::new(directive))?;
+                dest.insert_directive(&mut self.merged, Node::new(directive))?;
             }
         }
 
@@ -79,7 +79,7 @@ impl Merger {
         &mut self,
         sources: &Sources<Node<UnionType>>,
         dest: &UnionTypeDefinitionPosition,
-        member_name: &ComponentName,
+        member_name: &Node<Name>,
     ) {
         for union_type in sources.values().flatten() {
             // As soon as we find a subgraph that has the union type but not the member, we hint
@@ -134,7 +134,7 @@ mod tests {
 
         for member_name in member_names {
             let name_value = Name::new(member_name).expect("Valid name");
-            let component_name = ComponentName::from(name_value);
+            let component_name = name_value.to_node(None);
             union_type.members.insert(component_name);
         }
 
@@ -188,12 +188,12 @@ mod tests {
         assert!(
             union1
                 .members
-                .contains(&ComponentName::from(Name::new("User").expect("Valid name")))
+                .contains(&Node::<Name>::from(Name::new("User").expect("Valid name")))
         );
         assert!(
             union1
                 .members
-                .contains(&ComponentName::from(Name::new("Post").expect("Valid name")))
+                .contains(&Node::<Name>::from(Name::new("Post").expect("Valid name")))
         );
     }
 
@@ -223,9 +223,9 @@ mod tests {
             .expect("union in supergraph")
             .members;
         assert_eq!(members.len(), 3);
-        assert!(members.contains(&ComponentName::from(Name::new("User").expect("Valid name"))));
-        assert!(members.contains(&ComponentName::from(Name::new("Post").expect("Valid name"))));
-        assert!(members.contains(&ComponentName::from(
+        assert!(members.contains(&Node::<Name>::from(Name::new("User").expect("Valid name"))));
+        assert!(members.contains(&Node::<Name>::from(Name::new("Post").expect("Valid name"))));
+        assert!(members.contains(&Node::<Name>::from(
             Name::new("Comment").expect("Valid name")
         )));
     }
@@ -258,8 +258,8 @@ mod tests {
 
         // Should contain both members
         assert_eq!(members.len(), 2);
-        assert!(members.contains(&ComponentName::from(Name::new("User").expect("Valid name"))));
-        assert!(members.contains(&ComponentName::from(Name::new("Post").expect("Valid name"))));
+        assert!(members.contains(&Node::<Name>::from(Name::new("User").expect("Valid name"))));
+        assert!(members.contains(&Node::<Name>::from(Name::new("Post").expect("Valid name"))));
 
         // Verify that no hints were generated
         let (_errors, hints) = merger.error_reporter.into_errors_and_hints();

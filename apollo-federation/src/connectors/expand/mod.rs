@@ -254,16 +254,12 @@ fn split_subgraph(
 mod helpers {
     use apollo_compiler::Name;
     use apollo_compiler::Node;
-    use apollo_compiler::ast;
     use apollo_compiler::ast::Argument;
     use apollo_compiler::ast::Directive;
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::ast::Value;
     use apollo_compiler::name;
-    use apollo_compiler::schema::Component;
-    use apollo_compiler::schema::ComponentName;
-    use apollo_compiler::schema::ComponentOrigin;
     use apollo_compiler::schema::DirectiveList;
     use apollo_compiler::schema::EnumType;
     use apollo_compiler::schema::ObjectType;
@@ -308,7 +304,7 @@ mod helpers {
     fn insert_field_if_missing(
         type_pos: &TypeDefinitionPosition,
         field_name: Name,
-        field_def: Component<FieldDefinition>,
+        field_def: Node<FieldDefinition>,
         to_schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let pos: ObjectOrInterfaceFieldDefinitionPosition = match type_pos {
@@ -410,7 +406,7 @@ mod helpers {
                 .schema_definition
                 .query
                 .as_ref()
-                .map(|m| m.name.clone())
+                .map(|m| (**m).clone())
                 .unwrap_or(name!("Query"));
             let mutation_alias = self
                 .original_schema
@@ -418,7 +414,7 @@ mod helpers {
                 .schema_definition
                 .mutation
                 .as_ref()
-                .map(|m| m.name.clone());
+                .map(|m| (**m).clone());
 
             let element = connector
                 .id
@@ -666,7 +662,7 @@ mod helpers {
                         insert_field_if_missing(
                             &key_for_type,
                             Name::new(field_name)?,
-                            Component::new(FieldDefinition {
+                            Node::new(FieldDefinition {
                                 description: field_def.description.clone(),
                                 name: field_def.name.clone(),
                                 arguments: field_def.arguments.clone(),
@@ -696,10 +692,10 @@ mod helpers {
 
             match &key_for_type {
                 TypeDefinitionPosition::Object(o) => {
-                    o.insert_directive(to_schema, Component::new(key_directive))?;
+                    o.insert_directive(to_schema, Node::new(key_directive))?;
                 }
                 TypeDefinitionPosition::Interface(i) => {
-                    i.insert_directive(to_schema, Component::new(key_directive.clone()))?;
+                    i.insert_directive(to_schema, Node::new(key_directive.clone()))?;
                     // Federation requires implementing types to also have the interface's @key
                     if let Some(implementers) = self
                         .original_schema
@@ -711,10 +707,8 @@ mod helpers {
                             let obj_pos = ObjectTypeDefinitionPosition {
                                 type_name: implementer.clone(),
                             };
-                            obj_pos.insert_directive(
-                                to_schema,
-                                Component::new(key_directive.clone()),
-                            )?;
+                            obj_pos
+                                .insert_directive(to_schema, Node::new(key_directive.clone()))?;
                         }
                     }
                 }
@@ -781,7 +775,7 @@ mod helpers {
                         }),
                     ],
                 };
-                pos.insert_directive(to_schema, Component::new(key))?;
+                pos.insert_directive(to_schema, Node::new(key))?;
             }
 
             Ok(())
@@ -804,7 +798,7 @@ mod helpers {
                     value: Node::new(Value::String("__typename".to_string())),
                 })],
             };
-            pos.insert_directive(to_schema, Component::new(key_directive))?;
+            pos.insert_directive(to_schema, Node::new(key_directive))?;
             Ok(())
         }
 
@@ -824,12 +818,12 @@ mod helpers {
                 };
                 field_pos.insert(
                     schema,
-                    Component::new(FieldDefinition {
+                    Node::new(FieldDefinition {
                         description: None,
                         name: name!("_"),
                         arguments: Vec::new(),
                         ty: ty!(ID),
-                        directives: ast::DirectiveList(vec![Node::new(Directive {
+                        directives: DirectiveList(vec![Node::new(Directive {
                             name: name!("inaccessible"),
                             arguments: Vec::new(),
                         })]),
@@ -938,7 +932,7 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ty!(ID),
-                    directives: ast::DirectiveList(vec![Node::new(Directive {
+                    directives: DirectiveList(vec![Node::new(Directive {
                         name: name!("inaccessible"),
                         arguments: Vec::new(),
                     })]),
@@ -954,7 +948,7 @@ mod helpers {
                         directives: DirectiveList::new(),
                         fields: IndexMap::from_iter([(
                             dummy_field_def.name.clone(),
-                            Component::new(dummy_field_def),
+                            Node::new(dummy_field_def),
                         )]),
                     }),
                 )?;
@@ -963,13 +957,7 @@ mod helpers {
             SchemaRootDefinitionPosition {
                 root_kind: SchemaRootDefinitionKind::Query,
             }
-            .insert(
-                to_schema,
-                ComponentName {
-                    origin: ComponentOrigin::Definition,
-                    name: query_alias.clone(),
-                },
-            )?;
+            .insert(to_schema, query_alias.clone().to_node(None))?;
 
             Ok(())
         }
@@ -985,13 +973,7 @@ mod helpers {
                 let mutation_root = SchemaRootDefinitionPosition {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };
-                mutation_root.insert(
-                    to_schema,
-                    ComponentName {
-                        origin: ComponentOrigin::Definition,
-                        name: mutation_alias.clone(),
-                    },
-                )?;
+                mutation_root.insert(to_schema, mutation_alias.clone().to_node(None))?;
             }
 
             Ok(())
@@ -1079,7 +1061,7 @@ mod helpers {
                 .schema_definition
                 .query
                 .as_ref()
-                .map(|m| m.name.clone())
+                .map(|m| (**m).clone())
                 .unwrap_or(name!("Query"));
             let mutation_alias = self
                 .original_schema
@@ -1087,7 +1069,7 @@ mod helpers {
                 .schema_definition
                 .mutation
                 .as_ref()
-                .map(|m| m.name.clone());
+                .map(|m| (**m).clone());
 
             let element = connector
                 .id
@@ -1333,7 +1315,7 @@ mod helpers {
                         insert_field_if_missing(
                             &key_for_type,
                             Name::new(field_name)?,
-                            Component::new(FieldDefinition {
+                            Node::new(FieldDefinition {
                                 description: field_def.description.clone(),
                                 name: field_def.name.clone(),
                                 arguments: field_def.arguments.clone(),
@@ -1363,10 +1345,10 @@ mod helpers {
 
             match &key_for_type {
                 TypeDefinitionPosition::Object(o) => {
-                    o.insert_directive(to_schema, Component::new(key_directive))?;
+                    o.insert_directive(to_schema, Node::new(key_directive))?;
                 }
                 TypeDefinitionPosition::Interface(i) => {
-                    i.insert_directive(to_schema, Component::new(key_directive.clone()))?;
+                    i.insert_directive(to_schema, Node::new(key_directive.clone()))?;
                     // Federation requires implementing types to also have the interface's @key
                     if let Some(implementers) = self
                         .original_schema
@@ -1378,10 +1360,8 @@ mod helpers {
                             let obj_pos = ObjectTypeDefinitionPosition {
                                 type_name: implementer.clone(),
                             };
-                            obj_pos.insert_directive(
-                                to_schema,
-                                Component::new(key_directive.clone()),
-                            )?;
+                            obj_pos
+                                .insert_directive(to_schema, Node::new(key_directive.clone()))?;
                         }
                     }
                 }
@@ -1442,7 +1422,7 @@ mod helpers {
                             }),
                         ],
                     };
-                    pos.insert_directive(to_schema, Component::new(key))?;
+                    pos.insert_directive(to_schema, Node::new(key))?;
                 }
             }
 
@@ -1562,7 +1542,7 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ty!(ID),
-                    directives: ast::DirectiveList(vec![Node::new(Directive {
+                    directives: DirectiveList(vec![Node::new(Directive {
                         name: name!("inaccessible"),
                         arguments: Vec::new(),
                     })]),
@@ -1578,7 +1558,7 @@ mod helpers {
                         directives: DirectiveList::new(),
                         fields: IndexMap::from_iter([(
                             dummy_field_def.name.clone(),
-                            Component::new(dummy_field_def),
+                            Node::new(dummy_field_def),
                         )]),
                     }),
                 )?;
@@ -1587,13 +1567,7 @@ mod helpers {
             SchemaRootDefinitionPosition {
                 root_kind: SchemaRootDefinitionKind::Query,
             }
-            .insert(
-                to_schema,
-                ComponentName {
-                    origin: ComponentOrigin::Definition,
-                    name: query_alias.clone(),
-                },
-            )?;
+            .insert(to_schema, query_alias.clone().to_node(None))?;
 
             Ok(())
         }
@@ -1609,13 +1583,7 @@ mod helpers {
                 let mutation_root = SchemaRootDefinitionPosition {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };
-                mutation_root.insert(
-                    to_schema,
-                    ComponentName {
-                        origin: ComponentOrigin::Definition,
-                        name: mutation_alias.clone(),
-                    },
-                )?;
+                mutation_root.insert(to_schema, mutation_alias.clone().to_node(None))?;
             }
 
             Ok(())
