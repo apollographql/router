@@ -215,6 +215,7 @@ dependencies = [
  "apollo-compiler",
  "apollo-federation",
  "apollo-parser",
+ "base64 0.23.1",
  "clap",
  "derive_more",
  "dhat",
