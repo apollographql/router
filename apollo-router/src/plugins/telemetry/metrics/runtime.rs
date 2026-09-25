@@ -142,6 +142,14 @@ mod tests {
     use super::*;
     use crate::metrics::FutureMetricsExt;
 
+    /// How long the `blocking_safe_*` tests allow for every flush to complete.
+    const FLUSH_COMPLETION_BOUND: Duration = Duration::from_secs(2);
+
+    /// How long the `regular_tokio_runtime_deadlocks_*` tests wait before concluding the
+    /// flush has deadlocked. The deadlock is permanent, so a shorter wait cannot make these
+    /// tests fail; a non-deadlocked flush completes in a few milliseconds.
+    const DEADLOCK_PROBE_BOUND: Duration = Duration::from_millis(250);
+
     // ── PeriodicReader tests (Runtime only) ─────────────────────────────────
 
     /// Use a single worker thread to prove that `new_for_metrics` doesn't prevent other
@@ -224,7 +232,7 @@ mod tests {
     #[test]
     fn regular_tokio_runtime_deadlocks_metrics_force_flush_on_a_single_worker_thread() {
         assert!(
-            !metrics_force_flush_completes_within(Tokio, 1, 1, Duration::from_secs(2)),
+            !metrics_force_flush_completes_within(Tokio, 1, 1, DEADLOCK_PROBE_BOUND),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              on a single-worker-thread runtime - if this fails, either the upstream SDK \
              changed its blocking behavior, or this test is unreliable"
@@ -239,7 +247,7 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_metrics(),
                 1,
                 1,
-                Duration::from_secs(2)
+                FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock PeriodicReader::force_flush \
              on a single-worker-thread runtime"
@@ -249,7 +257,7 @@ mod tests {
     #[test]
     fn regular_tokio_runtime_deadlocks_metrics_force_flush_when_demand_exceeds_a_larger_pool() {
         assert!(
-            !metrics_force_flush_completes_within(Tokio, 4, 8, Duration::from_secs(2)),
+            !metrics_force_flush_completes_within(Tokio, 4, 8, DEADLOCK_PROBE_BOUND),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              when 8 readers concurrently flush on a 4-worker-thread runtime - if this fails, \
              either the upstream SDK changed, or this test itself is unreliable"
@@ -264,7 +272,7 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_metrics(),
                 4,
                 8,
-                Duration::from_secs(2)
+                FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock PeriodicReader::force_flush \
              even when 8 readers concurrently flush on a 4-worker-thread runtime"
@@ -316,7 +324,7 @@ mod tests {
     #[test]
     fn regular_tokio_runtime_deadlocks_tracing_force_flush_on_a_single_worker_thread() {
         assert!(
-            !tracing_force_flush_completes_within(Tokio, 1, 1, Duration::from_secs(2)),
+            !tracing_force_flush_completes_within(Tokio, 1, 1, DEADLOCK_PROBE_BOUND),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              on a single-worker-thread runtime - if this fails, either the upstream SDK \
              changed its blocking behavior, or this test is unreliable"
@@ -331,7 +339,7 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_tracing("test"),
                 1,
                 1,
-                Duration::from_secs(2)
+                FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock BatchSpanProcessor::force_flush \
              on a single-worker-thread runtime"
@@ -341,7 +349,7 @@ mod tests {
     #[test]
     fn regular_tokio_runtime_deadlocks_tracing_force_flush_when_demand_exceeds_a_larger_pool() {
         assert!(
-            !tracing_force_flush_completes_within(Tokio, 4, 8, Duration::from_secs(2)),
+            !tracing_force_flush_completes_within(Tokio, 4, 8, DEADLOCK_PROBE_BOUND),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              when 8 processors concurrently flush on a 4-worker-thread runtime - if this \
              fails, either the upstream SDK changed, or this test itself is unreliable"
@@ -356,7 +364,7 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_tracing("test"),
                 4,
                 8,
-                Duration::from_secs(2)
+                FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock BatchSpanProcessor::force_flush \
              even when 8 processors concurrently flush on a 4-worker-thread runtime"

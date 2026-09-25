@@ -574,10 +574,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn hot_reload_stream_reloads_on_file_change() {
-        const FIXTURE_PATH: &str = "tests/fixtures/persisted-queries-manifest-hot-reload.json";
-        // Note: this directly matches the contents of the file in the fixtures
-        // directory in order to ensure the fixture is restored after we modify
-        // it for this test.
         const ORIGINAL_MANIFEST_CONTENTS: &str = r#"{
     "format": "apollo-persisted-query-manifest",
     "version": 1,
@@ -606,9 +602,32 @@ mod tests {
 }
 "#;
 
+        async fn write_manifest(path: &std::path::Path, contents: &str) {
+            let mut file = tokio::fs::File::create(path).await.unwrap();
+            file.write_all(contents.as_bytes()).await.unwrap();
+            file.sync_all().await.unwrap();
+        }
+
+        /// Polls until `condition` holds, failing after a generous deadline.
+        async fn wait_until(condition: impl Fn() -> bool) {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !condition() {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out waiting for the manifest to be reloaded"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+
         let original_id = "5678".to_string();
         let updated_id = "1234".to_string();
         let body = "query { typename }".to_string();
+
+        // Use a temporary manifest so the test never modifies a checked-in file.
+        let dir = tempfile::tempdir().unwrap();
+        let manifest_path = dir.path().join("persisted-queries-manifest.json");
+        write_manifest(&manifest_path, ORIGINAL_MANIFEST_CONTENTS).await;
 
         let manifest_manager = PersistedQueryManifestPoller::new(
             Configuration::fake_builder()
@@ -616,7 +635,7 @@ mod tests {
                 .persisted_query(
                     PersistedQueries::builder()
                         .enabled(true)
-                        .local_manifests(vec![FIXTURE_PATH.to_string()])
+                        .local_manifests(vec![manifest_path.to_string_lossy().into_owned()])
                         .hot_reload(true)
                         .build(),
                 )
@@ -630,38 +649,35 @@ mod tests {
             Some(body.clone())
         );
 
-        // Change the file
-        let mut file = tokio::fs::File::create(FIXTURE_PATH).await.unwrap();
-        file.write_all(UPDATED_MANIFEST_CONTENTS.as_bytes())
-            .await
-            .unwrap();
-        file.sync_all().await.unwrap();
-
-        // Wait for the file to be reloaded
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        // The original ID should be gone
+        // Change the file: the original ID should be replaced by the updated one
+        write_manifest(&manifest_path, UPDATED_MANIFEST_CONTENTS).await;
+        wait_until(|| {
+            manifest_manager
+                .get_operation_body(&updated_id, None)
+                .is_some()
+        })
+        .await;
         assert_eq!(
             manifest_manager.get_operation_body(&original_id, None),
             None
         );
-        // The updated ID should be present
         assert_eq!(
             manifest_manager.get_operation_body(&updated_id, None),
             Some(body.clone())
         );
 
-        // Cleanup, restore the original file
-        let mut file = tokio::fs::File::create(FIXTURE_PATH).await.unwrap();
-        file.write_all(ORIGINAL_MANIFEST_CONTENTS.as_bytes())
-            .await
-            .unwrap();
-        file.sync_all().await.unwrap();
-
-        // Ensure the restoration is successful
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // Restore the original contents: the change should be picked up again
+        write_manifest(&manifest_path, ORIGINAL_MANIFEST_CONTENTS).await;
+        wait_until(|| {
+            manifest_manager
+                .get_operation_body(&original_id, None)
+                .is_some()
+        })
+        .await;
         assert_eq!(
             manifest_manager.get_operation_body(&original_id, None),
             Some(body)
         );
+        assert_eq!(manifest_manager.get_operation_body(&updated_id, None), None);
     }
 }

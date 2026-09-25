@@ -972,7 +972,8 @@ mod tests {
         crate::plugin::test::await_mock_driver(driver).await;
     }
 
-    #[test(tokio::test)]
+    // Paused time skips through the timeout and `SlowQueryPlanner`'s sleep instead of waiting.
+    #[test(tokio::test(start_paused = true))]
     async fn test_cooperative_cancellation_timeout() {
         let (layer, _guard) = setup_tracing();
 
@@ -1037,9 +1038,6 @@ mod tests {
                 assert!(e.to_string().contains("timed out"));
             }
         }
-
-        // Give a small delay to ensure the span is recorded
-        tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Verify that the span recorded the timeout outcome
         assert_eq!(layer.get("outcome"), Some("timeout".to_string()));
@@ -1241,7 +1239,8 @@ mod tests {
         assert_eq!(layer.get("outcome"), Some("cancelled".to_string()));
     }
 
-    #[test(tokio::test)]
+    // Paused time skips through the timeout and `SlowQueryPlanner`'s sleep instead of waiting.
+    #[test(tokio::test(start_paused = true))]
     async fn test_cooperative_cancellation_measurement_mode_timeout() {
         let (layer, _guard) = setup_tracing();
 
@@ -1306,9 +1305,6 @@ mod tests {
             result.is_ok(),
             "Expected success in measurement mode, got error"
         );
-
-        // Give a small delay to ensure the span is recorded
-        tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Verify that the span recorded the timeout outcome (not success)
         // In measurement mode, we should record timeout and not overwrite it with success
@@ -1544,7 +1540,8 @@ mod tests {
     }
 
     #[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
-    #[test(tokio::test)]
+    // Paused time skips through the timeout and `SlowQueryPlanner`'s sleep instead of waiting.
+    #[test(tokio::test(start_paused = true))]
     async fn test_cooperative_cancellation_measure_mode_both_timeout_and_memory_limit_timeout_first()
      {
         let (layer, _guard) = setup_tracing();
@@ -1612,9 +1609,6 @@ mod tests {
             result.is_ok(),
             "Expected success in measurement mode, got error"
         );
-
-        // Give a small delay to ensure the span is recorded
-        tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Verify that the span recorded the timeout outcome (not success)
         // In measurement mode, we should record timeout and not overwrite it with success
