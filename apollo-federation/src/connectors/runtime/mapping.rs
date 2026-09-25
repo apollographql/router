@@ -1,7 +1,6 @@
 //! Mapping from a Connectors request or response to GraphQL
 
-use std::collections::HashMap;
-
+use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,6 +18,19 @@ pub struct Problem {
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem)
+///
+/// Identical messages at the same path are collapsed into one problem with a
+/// `count`, and array indices are replaced by `@` before grouping, so a
+/// mapping over a large response reports one problem per distinct complaint
+/// rather than one per row.
+///
+/// An [`IndexMap`] rather than a `HashMap`, so the problems come out in the
+/// order the mapping produced them. That is the order an author reads the
+/// debugger in — a diagnostic about a value and an error declared about the
+/// same value belong next to each other — and it is what makes a snapshot of
+/// this output stable. `ConnectorContext::serialize` sorts by
+/// [`ProblemLocation`] and claims its items always come out in the same order;
+/// since that sort is stable, this is the half that makes the claim true.
 pub fn aggregate_apply_to_errors(
     errors: Vec<ApplyToError>,
     location: ProblemLocation,
@@ -26,8 +38,8 @@ pub fn aggregate_apply_to_errors(
     errors
         .into_iter()
         .fold(
-            HashMap::default(),
-            |mut acc: HashMap<(String, String), usize>, err| {
+            IndexMap::default(),
+            |mut acc: IndexMap<(String, String), usize>, err| {
                 let path = err
                     .path()
                     .iter()
@@ -53,14 +65,14 @@ pub fn aggregate_apply_to_errors(
 }
 
 /// Aggregate a list of [`ApplyToError`] into [mapping problems](Problem) while preserving [`ProblemLocation`]
-pub fn aggregate_apply_to_errors_with_problem_locations(
+pub fn aggregate_apply_to_errors_with_warning_locations(
     errors: Vec<(ProblemLocation, ApplyToError)>,
 ) -> impl Iterator<Item = Problem> {
     errors
         .into_iter()
         .fold(
-            HashMap::new(),
-            |mut acc: HashMap<ProblemLocation, Vec<ApplyToError>>, (loc, err)| {
+            IndexMap::default(),
+            |mut acc: IndexMap<ProblemLocation, Vec<ApplyToError>>, (loc, err)| {
                 acc.entry(loc).or_default().push(err);
                 acc
             },
@@ -86,12 +98,11 @@ mod tests {
     /// which is what lets repeats from different elements land in one bucket.
     #[test]
     fn repeated_messages_aggregate_into_one_problem_with_a_count() {
-        let (value, errors) =
-            JSONSelection::parse(r#"codes: rows->map(@.code->withError("unrecognized code:", @))"#)
-                .unwrap()
-                .apply_to(&json!({
-                    "rows": [{ "code": 7 }, { "code": 7 }, { "code": 7 }],
-                }));
+        let (value, errors) = JSONSelection::parse(r#"codes: rows->map(@.code->withWarning(@))"#)
+            .unwrap()
+            .apply_to(&json!({
+                "rows": [{ "code": 7 }, { "code": 7 }, { "code": 7 }],
+            }));
 
         assert_eq!(value, Some(json!({ "codes": [7, 7, 7] })));
 
@@ -99,21 +110,61 @@ mod tests {
             aggregate_apply_to_errors(errors, ProblemLocation::Selection).collect::<Vec<Problem>>();
 
         assert_eq!(problems.len(), 1);
-        assert_eq!(problems[0].message, "unrecognized code: 7");
+        assert_eq!(problems[0].message, "7");
         assert_eq!(problems[0].count, 3);
         assert_eq!(problems[0].location, ProblemLocation::Selection);
+    }
+
+    /// Problems come out in the order the mapping produced them, with a
+    /// declared error sitting among the diagnostics it was declared beside.
+    ///
+    /// This is the property that makes the debugger readable: an author looking
+    /// at why a field came out the way it did wants the complaint about that
+    /// value next to the error they declared about it, not in whichever order a
+    /// hash of the message happened to fall. It is also what makes any snapshot
+    /// of this output stable — without it, aggregation returns a different
+    /// order run to run and the flake is silent until CI finds it.
+    ///
+    /// Asserted here rather than left to `ConnectorContext::serialize`, whose
+    /// sort is by `ProblemLocation` and is stable, so it preserves whatever
+    /// order it is given rather than imposing one.
+    #[test]
+    fn problems_keep_the_order_the_mapping_produced_them_in() {
+        let (_, errors) = JSONSelection::parse(
+            r#"
+            one: x->withWarning("diagnostic about x")
+            two: y->withError("declared about y")
+            three: z->withWarning("diagnostic about z")
+            "#,
+        )
+        .unwrap()
+        .apply_to(&json!({ "x": 1, "y": 2, "z": 3 }));
+
+        let problems =
+            aggregate_apply_to_errors(errors, ProblemLocation::Selection).collect::<Vec<Problem>>();
+
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| problem.message.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "diagnostic about x",
+                "declared about y",
+                "diagnostic about z",
+            ],
+        );
     }
 
     /// The counterpart to the test above: grouping is by message, so distinct
     /// messages stay distinct and the collapsing cannot hide anything.
     #[test]
     fn distinct_messages_aggregate_into_distinct_problems() {
-        let (_, errors) =
-            JSONSelection::parse(r#"codes: rows->map(@.code->withError("unrecognized code:", @))"#)
-                .unwrap()
-                .apply_to(&json!({
-                    "rows": [{ "code": 7 }, { "code": 9 }, { "code": 7 }],
-                }));
+        let (_, errors) = JSONSelection::parse(r#"codes: rows->map(@.code->withWarning(@))"#)
+            .unwrap()
+            .apply_to(&json!({
+                "rows": [{ "code": 7 }, { "code": 9 }, { "code": 7 }],
+            }));
 
         let problems = aggregate_apply_to_errors(errors, ProblemLocation::Selection)
             .sorted_by_key(|problem| problem.message.clone())
@@ -124,7 +175,7 @@ mod tests {
                 .iter()
                 .map(|problem| (problem.message.as_str(), problem.count))
                 .collect::<Vec<_>>(),
-            vec![("unrecognized code: 7", 2), ("unrecognized code: 9", 1)],
+            vec![("7", 2), ("9", 1)],
         );
     }
 }

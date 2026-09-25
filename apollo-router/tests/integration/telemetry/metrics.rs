@@ -20,6 +20,34 @@ const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
 const RESPONSE_CACHE_CONFIG: &str = include_str!("fixtures/response_cache.router.yaml");
 
+/// Prometheus, a connector pointed at the local wiremock, and subgraph errors
+/// included so declared errors are not redacted away.
+const CONNECTOR_DECLARED_ERROR_CONFIG: &str = r#"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        path: /metrics
+include_subgraph_errors:
+  all: true
+connectors:
+  sources: {}
+"#;
+
+/// The same without `include_subgraph_errors`, which is the default and
+/// redacts a connector's declared errors out of the response.
+const CONNECTOR_REDACTED_CONFIG: &str = r#"
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        enabled: true
+        path: /metrics
+connectors:
+  sources: {}
+"#;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
     // Force every request to be sampled by Apollo's field-level
@@ -922,4 +950,186 @@ async fn test_is_primary_response_fires_on_deferred_chunks() {
         &metrics,
         r#"deferred_chunks_total{otel_scope_name="apollo/router"}"#,
     );
+}
+
+/// A connector mapping's `->withError` reaches the client in
+/// `extensions.connectorErrors` and increments `apollo.router.graphql_error`
+/// under the author's code.
+///
+/// Prometheus rather than the Apollo pipeline so this runs without GraphOS
+/// credentials. `apollo.router.operations.error` is denied on public
+/// exporters, and its attributes are covered by the `error_counter` unit
+/// tests.
+///
+/// `include_subgraph_errors: all: true` is not decoration: the default redacts
+/// subgraph errors and takes declared errors with them. `connectors: sources:
+/// {}` points the connector at the local wiremock rather than the schema's
+/// real baseURL.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_declared_connector_error_is_reported_and_counted() {
+    let mut router = IntegrationTest::builder()
+        .config(CONNECTOR_DECLARED_ERROR_CONFIG)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "with_error.graphql",
+        ]))
+        // No `body`, so the mapping's `body ?? $("")->withError(...)` declares
+        // its error and the field still resolves.
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id body}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    // The data is returned *and* the defect is reported, alongside each other.
+    let response = response.text().await.unwrap();
+    assert!(
+        response.contains("connectorErrors"),
+        "expected the declared error in extensions, got: {response}"
+    );
+    assert!(
+        response.contains("POST_BODY_MISSING"),
+        "expected the author's error code, got: {response}"
+    );
+
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_graphql_error_total{code="POST_BODY_MISSING"<any>} 1"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+/// Counted at the connector, so redaction cannot suppress the metric.
+///
+/// The two halves are decided in different places: `include_subgraph_errors`
+/// governs what a client receives, telemetry config governs what is counted.
+/// Without `include_subgraph_errors` (the default, asserted here by its
+/// absence) an operator would otherwise have no way to know these happened.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_declared_connector_error_is_counted_even_when_redacted() {
+    let mut router = IntegrationTest::builder()
+        .config(CONNECTOR_REDACTED_CONFIG)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "with_error.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id body}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    // Redacted out of the response entirely, not replaced by a placeholder.
+    let response = response.text().await.unwrap();
+    assert!(
+        !response.contains("POST_BODY_MISSING"),
+        "a redacted subgraph's declared errors must not reach the client, got: {response}"
+    );
+
+    // And counted anyway.
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_graphql_error_total{code="POST_BODY_MISSING"<any>} 1"#,
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+/// `->withWarning` reaches neither the client nor the error counters.
+///
+/// The negative case is the one that can regress invisibly: a warning that
+/// started counting as an error would break the promise the method exists for
+/// without breaking any assertion about `->withError`.
+///
+/// The responder omits `title` and supplies `body`, so the fixture's
+/// `->withWarning` fires and its `->withError` does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_mapping_warning_is_not_reported_or_counted() {
+    let mut router = IntegrationTest::builder()
+        .config(CONNECTOR_DECLARED_ERROR_CONFIG)
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "with_error.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "body": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id title}}","variables":{}}))
+                .build(),
+        )
+        .await;
+
+    let response = response.text().await.unwrap();
+    assert!(
+        !response.contains("connectorErrors"),
+        "a warning must not be reported to the client, got: {response}"
+    );
+    assert!(
+        !response.contains("Post title was missing"),
+        "a warning's message must not reach the client, got: {response}"
+    );
+
+    // The whole counter, not just this code: the query succeeds with no
+    // errors of any kind, so any increment at all is a regression. Asserted
+    // after scraping an unrelated counter, so this is "absent once metrics
+    // were flowing" rather than "nothing had arrived yet".
+    router
+        .assert_metrics_contains(r#"apollo_router_operations_total"#, None)
+        .await;
+    router
+        .assert_metrics_does_not_contain(r#"apollo_router_graphql_error_total"#)
+        .await;
+
+    router.graceful_shutdown().await;
 }

@@ -71,5 +71,7 @@ pub(crate) use arithmetic::DivMethod;
 pub(crate) use arithmetic::ModMethod;
 pub(crate) use arithmetic::MulMethod;
 pub(crate) use arithmetic::SubMethod;
+mod with_warning;
+pub(crate) use with_warning::WithWarningMethod;
 mod with_error;
 pub(crate) use with_error::WithErrorMethod;

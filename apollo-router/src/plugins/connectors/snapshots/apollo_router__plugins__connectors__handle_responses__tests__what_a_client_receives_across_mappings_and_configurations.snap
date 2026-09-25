@@ -1,0 +1,257 @@
+---
+source: apollo-router/src/plugins/connectors/handle_responses.rs
+expression: report
+---
+=== plain field
+    status: code->withError("Unrecognized code")
+
+  --- include_subgraph_errors: all: true
+  data: {"account":{"status":7}}
+    message: Unrecognized code
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+  --- the default, which redacts subgraph errors
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"account":{"status":7}}
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+
+  --- redact_message with a deny list
+  data: {"account":{"status":7}}
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+=== renamed field, `??` default
+    balance: amount ?? $("0")->withError("Amount was missing")
+
+  --- include_subgraph_errors: all: true
+  data: {"account":{"balance":"0"}}
+    message: Amount was missing
+    path:    ["account","balance"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+  --- the default, which redacts subgraph errors
+  data: {"account":{"balance":"0"}}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"account":{"balance":"0"}}
+    message: Subgraph errors redacted
+    path:    ["account","balance"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+
+  --- redact_message with a deny list
+  data: {"account":{"balance":"0"}}
+    message: Subgraph errors redacted
+    path:    ["account","balance"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+=== one error per element, inside `->map`
+    $.rows->map(@.code->withError("bad code"))
+
+  --- include_subgraph_errors: all: true
+  data: {"rows":[1,2]}
+    message: bad code
+    path:    ["rows",0]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"rows.0.code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+    message: bad code
+    path:    ["rows",1]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"rows.1.code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+  --- the default, which redacts subgraph errors
+  data: {"rows":[1,2]}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"rows":[1,2]}
+    message: Subgraph errors redacted
+    path:    ["rows",0]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+    message: Subgraph errors redacted
+    path:    ["rows",1]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+
+  --- redact_message with a deny list
+  data: {"rows":[1,2]}
+    message: Subgraph errors redacted
+    path:    ["rows",0]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"rows.0.code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+    message: Subgraph errors redacted
+    path:    ["rows",1]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"rows.1.code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+=== chained, two errors about one value
+    status: code->withError("first")->withError("second")
+
+  --- include_subgraph_errors: all: true
+  data: {"account":{"status":7}}
+    message: first
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+    message: second
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+  --- the default, which redacts subgraph errors
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"account":{"status":7}}
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+
+  --- redact_message with a deny list
+  data: {"account":{"status":7}}
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+=== structured argument, author's code and extensions
+    balance: amount ?? $("<missing>")->withError({
+                        message: "Field 'amount' was not found"
+                        extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
+                    })
+
+  --- include_subgraph_errors: all: true
+  data: {"account":{"balance":"<missing>"}}
+    message: Field 'amount' was not found
+    path:    ["account","balance"]
+    ext:     code = "INTERNAL_SERVER_ERROR"
+    ext:     connector = {"coordinate":"subgraph_name:Query.account[0]"}
+    ext:     number = 210099
+    ext:     service = "subgraph_name"
+
+
+  --- the default, which redacts subgraph errors
+  data: {"account":{"balance":"<missing>"}}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"account":{"balance":"<missing>"}}
+    message: Subgraph errors redacted
+    path:    ["account","balance"]
+    ext:     code = "INTERNAL_SERVER_ERROR"
+    ext:     service = "subgraph_name"
+
+
+  --- redact_message with a deny list
+  data: {"account":{"balance":"<missing>"}}
+    message: Subgraph errors redacted
+    path:    ["account","balance"]
+    ext:     code = "INTERNAL_SERVER_ERROR"
+    ext:     connector = {"coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+=== `->withWarning` alone, which reaches no client
+    status: code->withWarning("Unrecognized code")
+
+  --- include_subgraph_errors: all: true
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+  --- the default, which redacts subgraph errors
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+  --- redact_message with a deny list
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+=== both methods on one value
+    status: code->withWarning("for the author")->withError("for the client")
+
+  --- include_subgraph_errors: all: true
+  data: {"account":{"status":7}}
+    message: for the client
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"
+
+
+  --- the default, which redacts subgraph errors
+  data: {"account":{"status":7}}
+  (nothing reported)
+
+  --- redact_message with an allow list
+  data: {"account":{"status":7}}
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     service = "subgraph_name"
+
+
+  --- redact_message with a deny list
+  data: {"account":{"status":7}}
+    message: Subgraph errors redacted
+    path:    ["account","status"]
+    ext:     code = "CONNECTORS_MAPPING_ERROR"
+    ext:     connector = {"selectionPath":"code","coordinate":"subgraph_name:Query.account[0]"}
+    ext:     service = "subgraph_name"

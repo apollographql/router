@@ -1,22 +1,17 @@
-### Add the `->withError` mapping method for connectors
+### Add the `->withWarning` and `->withError` mapping methods for connectors
 
-Connector mappings can now report a problem without failing the field. `->withError` returns its input unchanged and records its arguments as a mapping error, so a mapping that recognizes a value it cannot vouch for can say so and still return the data:
+Connector mappings can now flag a suspect value without failing the field. Both methods pass their input through unchanged:
+
+- `->withWarning("...")` records a diagnostic for the mapping author, visible in the connectors debugger and the `connector_response_mapping_problems` telemetry selector. It never reaches clients.
+- `->withError("...")` (or `->withError({ message, extensions })`) reports an error to the client in the response's `extensions.connectorErrors` array, alongside the data. It is counted by the `apollo.router.graphql_error` metric.
 
 ```graphql
-@connect(
-  http: { GET: "/v1/accounts/{$args.id}" }
-  selection: """
-  id
-  status: type_code->match(
-    ["2", $("VAN")],
-    [@, @->withError("Unrecognized type code:", @, "for", $args.id)]
-  )
-  """
+availability: stock_code->match(
+  ["A", "IN_STOCK"],
+  [@, @->withError("Unrecognized stock code")]
 )
 ```
 
-Any number of arguments is allowed, and they may be of any type. String arguments are interpolated as written, every other value is serialized as `->jsonStringify` would serialize it, and the parts are joined with single spaces into one message. Use `??` to supply a fallback where a path may be missing, since an argument that produces no value short-circuits the method rather than recording a partial message.
+Declared errors follow the [`include_subgraph_errors`](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion) setting for the connector's subgraph, so they are redacted by default. See [Connectors error handling](https://www.apollographql.com/docs/graphos/connectors/responses/error-handling#report-errors-without-failing-a-field) for details.
 
-Recorded messages travel the same path as any other mapping problem: they appear in the connectors debugger and are available to telemetry, with identical messages collapsed into a single problem carrying a count.
-
-By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10050
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10050 and [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160

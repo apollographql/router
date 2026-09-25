@@ -5300,6 +5300,28 @@ async fn create_connector_cache_factory(
         Error = tower::BoxError,
     >,
 > {
+    create_connector_cache_factory_with_schema(
+        CONNECTOR_SCHEMA,
+        connector_uri,
+        namespace,
+        extra_config,
+    )
+    .await
+}
+
+async fn create_connector_cache_factory_with_schema(
+    schema: &str,
+    connector_uri: &str,
+    namespace: &str,
+    extra_config: Option<serde_json_bytes::Value>,
+) -> impl crate::services::new_service::ServiceFactory<
+    crate::services::router::Request,
+    Service = impl tower::Service<
+        crate::services::router::Request,
+        Response = crate::services::router::Response,
+        Error = tower::BoxError,
+    >,
+> {
     let connector_url = format!("{connector_uri}/");
 
     let mut config = serde_json_bytes::json!({
@@ -5342,7 +5364,7 @@ async fn create_connector_cache_factory(
         .create(
             false,
             Arc::new(config.clone()),
-            Arc::new(crate::spec::Schema::parse(CONNECTOR_SCHEMA, &config).unwrap()),
+            Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
             Arc::new(LicenseState::Licensed { limits: None }),
@@ -5690,6 +5712,61 @@ async fn connector_root_field_cache_miss_then_hit() {
     assert_eq!(
         received_after_first, received_after_second,
         "second request should be served from cache, but mock received new requests"
+    );
+}
+
+/// A root-field response whose mapping declared errors (`->withError`) is not stored. The cache
+/// entry has no place for declared errors, so a hit would return the data without the
+/// `extensions.connectorErrors` the first client was sent.
+#[tokio::test]
+async fn connector_root_field_with_declared_errors_not_stored() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("cache-control", "public, max-age=300")
+                .set_body_json(serde_json::json!([{"id": 1, "name": "Alice"}])),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let schema = CONNECTOR_SCHEMA.replace(
+        r#"http: {GET: "/users"}, selection: "id name""#,
+        r#"http: {GET: "/users"}, selection: "id name: name->withError(\"suspect name\")""#,
+    );
+    assert_ne!(
+        schema, CONNECTOR_SCHEMA,
+        "schema substitution did not apply"
+    );
+
+    let uri = mock_server.uri();
+    let namespace = Uuid::new_v4().to_string();
+
+    for attempt in 1..=2 {
+        let service = create_connector_cache_factory_with_schema(&schema, &uri, &namespace, None)
+            .await
+            .create();
+        let request = make_connector_cache_request("query { users { id name } }");
+        let response = service.oneshot(request).await.unwrap();
+        let body = connector_response_body(response).await;
+        assert_eq!(
+            body.pointer("/data/users/0/name"),
+            Some(&serde_json::json!("Alice")),
+            "request {attempt} should return data, got: {body:?}"
+        );
+        assert_eq!(
+            body.pointer("/extensions/connectorErrors/0/message"),
+            Some(&serde_json::json!("suspect name")),
+            "request {attempt} should report the declared error, got: {body:?}"
+        );
+        grace_period_for_unwanted_insert().await;
+    }
+
+    assert_eq!(
+        mock_requests_for_path(&mock_server, "/users").await,
+        2,
+        "both requests should reach the connector, since the first was not stored"
     );
 }
 

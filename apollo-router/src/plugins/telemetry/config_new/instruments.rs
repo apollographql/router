@@ -3461,6 +3461,7 @@ mod tests {
                                                 .expect("expecting valid JSON"),
                                             key: response_key,
                                             problems: mapping_problems,
+                                            declared_errors: vec![],
                                         },
                                     };
                                     connector_instruments
