@@ -19,6 +19,7 @@ fn planner_with(sources: &[(&str, &str)], incremental: bool) -> QueryPlanner {
         .expect("valid supergraph");
     let mut config = QueryPlannerConfig::default();
     config.incremental_planner.enabled = incremental;
+    config.incremental_delivery.enable_defer = true;
     QueryPlanner::new(&supergraph, config).expect("query planner")
 }
 
@@ -32,6 +33,21 @@ fn supergraph_sdl(sources: &[(&str, &str)]) -> String {
         apollo_federation::composition::compose(subgraphs, CompositionOptions::default())
             .unwrap_or_else(|e| panic!("composition failed: {e:#?}"));
     supergraph.schema().schema().to_string()
+}
+
+/// Plan without the correctness check, for plans the checker cannot interpret yet (e.g. input
+/// `KeyRenamer` rewrites of aliased requirements, which it rejects for `_entities` fetches too).
+#[track_caller]
+fn plan_unchecked(planner: &QueryPlanner, operation: &str) -> QueryPlan {
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        operation,
+        "operation.graphql",
+    )
+    .expect("valid operation");
+    planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan")
 }
 
 #[track_caller]
@@ -458,6 +474,257 @@ fn different_lookups_at_the_same_path_run_in_parallel() {
             },
           },
         },
+      },
+    }
+    "#);
+}
+
+#[test]
+fn chained_hops_through_source_schemas() {
+    // `inventory` recalls products by `sku` only; `products` provides the `sku` from `id`.
+    let planner = planner(&[
+        (
+            "catalog",
+            r#"
+            type Query { featured: [Product!]! }
+            type Product @key(fields: "id") { id: ID! }
+            "#,
+        ),
+        (
+            "products",
+            r#"
+            type Query { productById(id: ID!): Product @lookup @internal }
+            type Product @key(fields: "id") @key(fields: "sku") { id: ID! sku: String! }
+            "#,
+        ),
+        (
+            "inventory",
+            r#"
+            type Query { productBySku(sku: String!): Product @lookup @internal }
+            type Product @key(fields: "sku") { sku: String! stock: Int! }
+            "#,
+        ),
+    ]);
+    let plan = plan(&planner, "{ featured { stock } }");
+    insta::assert_snapshot!(plan, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "catalog") {
+          {
+            featured {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "featured.@") {
+          Fetch(service: "products", lookup: "productById") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            $lookupArgument_0 = id
+            {
+              productById(id: $lookupArgument_0) {
+                sku
+              }
+            }
+          },
+        },
+        Flatten(path: "featured.@") {
+          Fetch(service: "inventory", lookup: "productBySku") {
+            {
+              ... on Product {
+                __typename
+                sku
+              }
+            } =>
+            $lookupArgument_0 = sku
+            {
+              productBySku(sku: $lookupArgument_0) {
+                stock
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+#[test]
+fn requirement_reenters_the_same_source_schema() {
+    // `shipping` owns the root field and the estimate, but the estimate requires the weight,
+    // which only `products` has: fetch it, then re-enter `shipping` through its lookup.
+    let planner = planner(&[
+        (
+            "shipping",
+            r#"
+            type Query {
+              deliveries: [Product!]!
+              productById(id: ID!): Product @lookup @internal
+            }
+            type Product @key(fields: "id") {
+              id: ID!
+              estimate(weight: Int! @require(field: "weight")): Int
+            }
+            "#,
+        ),
+        (
+            "products",
+            r#"
+            type Query { productById(id: ID!): Product @lookup @internal }
+            type Product @key(fields: "id") { id: ID! weight: Int! }
+            "#,
+        ),
+    ]);
+    // The requirement is aliased to avoid a response-path collision and renamed back by an input
+    // rewrite, which the correctness checker does not support (see `plan_unchecked`).
+    let plan = plan_unchecked(&planner, "{ deliveries { estimate } }");
+    insta::assert_snapshot!(plan, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "shipping") {
+          {
+            deliveries {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "deliveries.@") {
+          Fetch(service: "products", lookup: "productById") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            $lookupArgument_0 = id
+            {
+              productById(id: $lookupArgument_0) {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Flatten(path: "deliveries.@") {
+          Fetch(service: "shipping", lookup: "productById") {
+            {
+              ... on Product {
+                __typename
+                id
+                __require_0_weight: weight
+              }
+            } =>
+            $lookupArgument_0 = id
+            $requireArgument_0 = weight
+            {
+              productById(id: $lookupArgument_0) {
+                estimate(weight: $requireArgument_0)
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+#[test]
+fn mutation_result_entities_are_looked_up() {
+    let planner = planner(&[
+        (
+            "products",
+            r#"
+            type Query { productById(id: ID!): Product @lookup }
+            type Mutation { createProduct(name: String!): Product! }
+            type Product @key(fields: "id") { id: ID! name: String! }
+            "#,
+        ),
+        ("reviews", REVIEWS),
+    ]);
+    let plan = plan(
+        &planner,
+        r#"mutation { createProduct(name: "x") { name reviewCount } }"#,
+    );
+    insta::assert_snapshot!(plan, @r#"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "products") {
+          {
+            createProduct(name: "x") {
+              __typename
+              name
+              id
+            }
+          }
+        },
+        Flatten(path: "createProduct") {
+          Fetch(service: "reviews", lookup: "productById") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            $lookupArgument_0 = id
+            {
+              productById(id: $lookupArgument_0) {
+                reviewCount
+              }
+            }
+          },
+        },
+      },
+    }
+    "#);
+}
+
+#[test]
+fn deferred_lookup_fetch() {
+    let planner = planner(&[("products", PRODUCTS), ("reviews", REVIEWS)]);
+    let plan = plan(
+        &planner,
+        "{ topProducts { name ... @defer { reviewCount } } }",
+    );
+    insta::assert_snapshot!(plan, @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { topProducts { name } }:
+          Fetch(service: "products", id: 0) {
+            {
+              topProducts {
+                __typename
+                name
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "topProducts") {
+            { reviewCount }:
+            Flatten(path: "topProducts.@") {
+              Fetch(service: "reviews", lookup: "productById") {
+                {
+                  ... on Product {
+                    __typename
+                    id
+                  }
+                } =>
+                $lookupArgument_0 = id
+                {
+                  productById(id: $lookupArgument_0) {
+                    reviewCount
+                  }
+                }
+              },
+            },
+          },
+        ]
       },
     }
     "#);
