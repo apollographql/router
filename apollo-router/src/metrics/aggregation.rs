@@ -189,14 +189,6 @@ impl AggregateMeterProvider {
         swap.0
     }
 
-    /// Invalidate all the cached instruments
-    #[cfg(test)]
-    pub(crate) fn invalidate(&self) {
-        if let Some(inner) = self.inner.lock().as_mut() {
-            inner.invalidate();
-        }
-    }
-
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         /// Prefix internal failure error message with "[providername]".
@@ -288,15 +280,6 @@ impl AggregateMeterProvider {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn registered_instruments(&self) -> usize {
-        self.inner
-            .lock()
-            .as_ref()
-            .expect("cannot use meter provider after shutdown")
-            .registered_instruments
-            .len()
-    }
 }
 
 impl Inner {
