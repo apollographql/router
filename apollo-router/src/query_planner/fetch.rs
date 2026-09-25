@@ -526,18 +526,33 @@ impl FetchNode {
         schema: &Valid<apollo_compiler::Schema>,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = ExecutableDocument::parse(
-            schema,
-            self.operation.as_serialized().to_string(),
-            "query.graphql",
-        )
-        // Assume query planing creates a valid document: ignore parse errors
-        .unwrap_or_else(|invalid| invalid.partial);
+        // A lookup fetch selects entities under its lookup field rather than under `_entities`;
+        // analyze the equivalent `_entities` document so that authorization requirements of the
+        // entity selections are found (the lookup field itself may not even exist in the
+        // supergraph, when it is `@internal`).
+        let (operation, entity_query) = match self
+            .entity_lookup
+            .as_ref()
+            .and_then(|entity_lookup| self.entity_selections_operation(entity_lookup))
+        {
+            Some(operation) => (operation, false),
+            None => (
+                self.operation.as_serialized().to_string(),
+                !self.requires.is_empty(),
+            ),
+        };
+        let doc = ExecutableDocument::parse(schema, operation, "query.graphql")
+            // Assume query planing creates a valid document: ignore parse errors
+            .unwrap_or_else(|invalid| invalid.partial);
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
             &doc,
-            self.operation_name.as_deref(),
+            if entity_query {
+                self.operation_name.as_deref()
+            } else {
+                None
+            },
             schema,
-            !self.requires.is_empty(),
+            entity_query,
         );
 
         // we need to intersect the cache keys because the global key already takes into account
@@ -546,6 +561,76 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
+    }
+
+    /// The entity selections of a lookup operation, as casts to the entity types selected from the
+    /// query root: `{ ... on Product { reviewCount } }`. Parsed against the supergraph, this keeps
+    /// every entity field (the lookup field itself may not exist there when it is `@internal`),
+    /// so the authorization requirements of what the fetch selects are all visible.
+    pub(crate) fn entity_selections_operation(
+        &self,
+        entity_lookup: &EntityLookup,
+    ) -> Option<String> {
+        let document = self.operation.as_parsed().ok()?;
+        let operation = document.operations.iter().next()?;
+        let mut selection_set = &operation.selection_set;
+        for key in &entity_lookup.path {
+            selection_set =
+                selection_set
+                    .selections
+                    .iter()
+                    .find_map(|selection| match selection {
+                        apollo_compiler::executable::Selection::Field(field)
+                            if field.name.as_str() == key =>
+                        {
+                            Some(&field.selection_set)
+                        }
+                        _ => None,
+                    })?;
+        }
+        Some(self.entity_selections_document(document, selection_set))
+    }
+
+    fn entity_selections_document(
+        &self,
+        document: &ExecutableDocument,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) -> String {
+        let entity_types: Vec<&apollo_compiler::Name> = self
+            .requires
+            .iter()
+            .filter_map(|selection| match selection {
+                requires_selection::Selection::InlineFragment(fragment) => {
+                    fragment.type_condition.as_ref()
+                }
+                requires_selection::Selection::Field(_) => None,
+            })
+            .collect();
+        let mut casts = Vec::new();
+        let mut untyped = Vec::new();
+        for selection in &selection_set.selections {
+            let printed = selection.serialize().no_indent().to_string();
+            match selection {
+                apollo_compiler::executable::Selection::InlineFragment(fragment)
+                    if fragment.type_condition.is_some() =>
+                {
+                    casts.push(printed)
+                }
+                _ => untyped.push(printed),
+            }
+        }
+        if !untyped.is_empty() {
+            let selections = untyped.join(" ");
+            for entity_type in entity_types {
+                casts.push(format!("... on {entity_type} {{ {selections} }}"));
+            }
+        }
+        let mut text = format!("{{ {} }}", casts.join(" "));
+        for fragment in document.fragments.values() {
+            text.push(' ');
+            text.push_str(&fragment.serialize().no_indent().to_string());
+        }
+        text
     }
 }
 
