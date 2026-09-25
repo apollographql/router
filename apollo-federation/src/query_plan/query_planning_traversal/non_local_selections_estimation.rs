@@ -926,6 +926,460 @@ pub(crate) fn precompute_non_local_selection_metadata(
     Ok(metadata)
 }
 
+/// Reconstruct every query-graph attribute used by non-local-selection estimation from raw
+/// nodes, raw edges, and schema runtime-type intersections. This intentionally lives beside the
+/// private metadata representation, while the property that drives it lives with the broader
+/// `QueryGraph` fixture auditor.
+#[cfg(test)]
+pub(crate) fn audit_precomputed_query_graph_metadata(
+    graph: &QueryGraph,
+) -> Result<(), proptest::test_runner::TestCaseError> {
+    use crate::query_graph::QueryGraphNodeType;
+
+    let metadata = graph.non_local_selection_metadata();
+
+    let mut expected_fields = Vec::new();
+    for edge in graph.graph().edge_references() {
+        let QueryGraphEdgeTransition::FieldCollection {
+            field_definition_position,
+            ..
+        } = &edge.weight().transition
+        else {
+            continue;
+        };
+        if CompositeTypeDefinitionPosition::try_from(
+            graph.node_weight(edge.target()).unwrap().type_.clone(),
+        )
+        .is_err()
+        {
+            continue;
+        }
+        expected_fields.push((
+            field_definition_position.field_name().to_string(),
+            edge.source().index(),
+            edge.target().index(),
+            edge.weight()
+                .override_condition
+                .as_ref()
+                .map(|condition| (condition.label.to_string(), condition.condition)),
+        ));
+    }
+    expected_fields.sort();
+    let mut actual_fields = metadata
+        .fields_to_endpoints
+        .iter()
+        .flat_map(|(field_name, endpoints)| {
+            endpoints.iter().map(|(source, target)| match target {
+                FieldTarget::NonOverride(target) => {
+                    (field_name.to_string(), source.index(), target.index(), None)
+                }
+                FieldTarget::Override(target, condition) => (
+                    field_name.to_string(),
+                    source.index(),
+                    target.index(),
+                    Some((condition.label.to_string(), condition.condition)),
+                ),
+            })
+        })
+        .collect::<Vec<_>>();
+    actual_fields.sort();
+    proptest::prop_assert_eq!(
+        actual_fields,
+        expected_fields,
+        "field endpoint metadata differs from raw field edges"
+    );
+
+    let mut expected_inline_fragments = Vec::new();
+    for edge in graph.graph().edge_references() {
+        let type_name = match &edge.weight().transition {
+            QueryGraphEdgeTransition::Downcast {
+                to_type_position, ..
+            } => Some(to_type_position.type_name()),
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
+                Some(to_type_name)
+            }
+            _ => None,
+        };
+        if let Some(type_name) = type_name {
+            expected_inline_fragments.push((
+                type_name.to_string(),
+                edge.source().index(),
+                edge.target().index(),
+            ));
+        }
+    }
+    for (node, weight) in graph.graph().node_references() {
+        if let Ok(position) = CompositeTypeDefinitionPosition::try_from(weight.type_.clone()) {
+            expected_inline_fragments.push((
+                position.type_name().to_string(),
+                node.index(),
+                node.index(),
+            ));
+        }
+    }
+    expected_inline_fragments.sort();
+    expected_inline_fragments.dedup();
+    let mut actual_inline_fragments = metadata
+        .inline_fragments_to_endpoints
+        .iter()
+        .flat_map(|(type_name, endpoints)| {
+            endpoints
+                .iter()
+                .map(|(source, target)| (type_name.to_string(), source.index(), target.index()))
+        })
+        .collect::<Vec<_>>();
+    actual_inline_fragments.sort();
+    proptest::prop_assert_eq!(
+        actual_inline_fragments,
+        expected_inline_fragments,
+        "inline-fragment endpoint metadata differs from casts plus synthetic self-casts"
+    );
+
+    // Normalize the enum into `(source, kind, type name, optional target)`: kind 0 is an ordinary
+    // object downcast and kind 1 is an interface-object fake downcast.
+    let mut expected_object_downcasts = Vec::new();
+    for edge in graph.graph().edge_references() {
+        match &edge.weight().transition {
+            QueryGraphEdgeTransition::Downcast {
+                to_type_position, ..
+            } if to_type_position.is_object_type() => expected_object_downcasts.push((
+                edge.source().index(),
+                0_u8,
+                to_type_position.type_name().to_string(),
+                Some(edge.target().index()),
+            )),
+            QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { to_type_name, .. } => {
+                expected_object_downcasts.push((
+                    edge.source().index(),
+                    1_u8,
+                    to_type_name.to_string(),
+                    None,
+                ));
+            }
+            _ => {}
+        }
+    }
+    for (node, weight) in graph.graph().node_references() {
+        let QueryGraphNodeType::SchemaType(position) = &weight.type_ else {
+            continue;
+        };
+        if matches!(
+            position,
+            crate::schema::position::OutputTypeDefinitionPosition::Object(_)
+        ) && !graph
+            .schema_by_source(&weight.source)
+            .unwrap()
+            .is_interface_object_type(position.clone().into())
+            .unwrap()
+        {
+            expected_object_downcasts.push((
+                node.index(),
+                0_u8,
+                position.type_name().to_string(),
+                Some(node.index()),
+            ));
+        }
+    }
+    expected_object_downcasts.sort();
+    expected_object_downcasts.dedup();
+    let mut actual_object_downcasts = metadata
+        .nodes_to_object_type_downcasts
+        .iter()
+        .flat_map(|(source, downcasts)| match downcasts {
+            ObjectTypeDowncasts::NonInterfaceObject(downcasts) => downcasts
+                .iter()
+                .map(|(type_name, target)| {
+                    (
+                        source.index(),
+                        0_u8,
+                        type_name.to_string(),
+                        Some(target.index()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            ObjectTypeDowncasts::InterfaceObject(downcasts) => downcasts
+                .iter()
+                .map(|type_name| (source.index(), 1_u8, type_name.to_string(), None))
+                .collect::<Vec<_>>(),
+        })
+        .collect::<Vec<_>>();
+    actual_object_downcasts.sort();
+    proptest::prop_assert_eq!(
+        actual_object_downcasts,
+        expected_object_downcasts,
+        "object-runtime downcast metadata differs from raw casts plus object self-casts"
+    );
+
+    let mut same_type_options: IndexMap<Name, IndexSet<NodeIndex>> = Default::default();
+    let mut raw_interface_options: IndexMap<NodeIndex, IndexSet<Name>> = Default::default();
+    for edge in graph.graph().edge_references() {
+        if !matches!(
+            edge.weight().transition,
+            QueryGraphEdgeTransition::KeyResolution
+                | QueryGraphEdgeTransition::RootTypeResolution { .. }
+        ) {
+            continue;
+        }
+        let head: CompositeTypeDefinitionPosition = graph
+            .node_weight(edge.source())
+            .unwrap()
+            .type_
+            .clone()
+            .try_into()
+            .unwrap();
+        let tail: CompositeTypeDefinitionPosition = graph
+            .node_weight(edge.target())
+            .unwrap()
+            .type_
+            .clone()
+            .try_into()
+            .unwrap();
+        if head.type_name() == tail.type_name() {
+            same_type_options
+                .entry(tail.type_name().clone())
+                .or_default()
+                .insert(edge.target());
+        } else {
+            raw_interface_options
+                .entry(edge.source())
+                .or_default()
+                .insert(tail.type_name().clone());
+        }
+    }
+    let mut complete_interface_options: IndexMap<Name, IndexSet<Name>> = Default::default();
+    let mut remaining_interface_options = IndexMap::default();
+    for (node, options) in raw_interface_options {
+        let node_type: CompositeTypeDefinitionPosition = graph
+            .node_weight(node)
+            .unwrap()
+            .type_
+            .clone()
+            .try_into()
+            .unwrap();
+        if same_type_options
+            .get(node_type.type_name())
+            .is_some_and(|nodes| nodes.contains(&node))
+        {
+            complete_interface_options
+                .entry(node_type.type_name().clone())
+                .or_default()
+                .extend(options);
+        } else {
+            remaining_interface_options.insert(node, options);
+        }
+    }
+    for (node, options) in &mut remaining_interface_options {
+        let node_type: CompositeTypeDefinitionPosition = graph
+            .node_weight(*node)
+            .unwrap()
+            .type_
+            .clone()
+            .try_into()
+            .unwrap();
+        if let Some(complete) = complete_interface_options.get(node_type.type_name()) {
+            options.retain(|option| !complete.contains(option));
+        }
+    }
+    remaining_interface_options.retain(|_, options| !options.is_empty());
+
+    let mut expected_same_type = same_type_options
+        .iter()
+        .flat_map(|(type_name, nodes)| {
+            nodes
+                .iter()
+                .map(|node| (type_name.to_string(), node.index()))
+        })
+        .collect::<Vec<_>>();
+    expected_same_type.sort();
+    let mut actual_same_type = metadata
+        .types_to_indirect_options
+        .iter()
+        .flat_map(|(type_name, options)| {
+            options
+                .same_type_options
+                .iter()
+                .map(|node| (type_name.to_string(), node.index()))
+        })
+        .collect::<Vec<_>>();
+    actual_same_type.sort();
+    proptest::prop_assert_eq!(actual_same_type, expected_same_type);
+
+    let mut expected_complete_interfaces = complete_interface_options
+        .iter()
+        .flat_map(|(type_name, options)| {
+            options
+                .iter()
+                .map(|option| (type_name.to_string(), option.to_string()))
+        })
+        .collect::<Vec<_>>();
+    expected_complete_interfaces.sort();
+    let mut actual_complete_interfaces = metadata
+        .types_to_indirect_options
+        .iter()
+        .flat_map(|(type_name, options)| {
+            options
+                .interface_object_options
+                .iter()
+                .map(|option| (type_name.to_string(), option.to_string()))
+        })
+        .collect::<Vec<_>>();
+    actual_complete_interfaces.sort();
+    proptest::prop_assert_eq!(actual_complete_interfaces, expected_complete_interfaces);
+
+    let mut expected_remaining_interfaces = remaining_interface_options
+        .iter()
+        .flat_map(|(node, options)| {
+            options
+                .iter()
+                .map(|option| (node.index(), option.to_string()))
+        })
+        .collect::<Vec<_>>();
+    expected_remaining_interfaces.sort();
+    let mut actual_remaining_interfaces = metadata
+        .remaining_nodes_to_interface_object_options
+        .iter()
+        .flat_map(|(node, options)| {
+            options
+                .iter()
+                .map(|option| (node.index(), option.to_string()))
+        })
+        .collect::<Vec<_>>();
+    actual_remaining_interfaces.sort();
+    proptest::prop_assert_eq!(actual_remaining_interfaces, expected_remaining_interfaces);
+
+    let mut expected_rebaseable_fields = Vec::new();
+    let mut expected_rebaseable_fragments = Vec::new();
+    for (parent_node, parent_weight) in graph.graph().node_references() {
+        let QueryGraphNodeType::SchemaType(parent_position) = &parent_weight.type_ else {
+            continue;
+        };
+        let Ok(parent_composite) =
+            CompositeTypeDefinitionPosition::try_from(parent_position.clone())
+        else {
+            continue;
+        };
+        let schema = graph.schema_by_source(&parent_weight.source).unwrap();
+        let Some(subgraph_metadata) = schema.subgraph_metadata() else {
+            continue;
+        };
+        let from_context_name = &subgraph_metadata
+            .federation_spec_definition()
+            .from_context_directive_definition(schema)
+            .unwrap()
+            .name;
+        match schema.schema().types.get(parent_composite.type_name()) {
+            Some(ExtendedType::Object(type_)) => {
+                for (field_name, field) in &type_.fields {
+                    if !field
+                        .arguments
+                        .iter()
+                        .any(|argument| argument.directives.has(from_context_name))
+                    {
+                        expected_rebaseable_fields
+                            .push((field_name.to_string(), parent_node.index()));
+                    }
+                }
+                expected_rebaseable_fields.push((
+                    INTROSPECTION_TYPENAME_FIELD_NAME.to_string(),
+                    parent_node.index(),
+                ));
+            }
+            Some(ExtendedType::Interface(type_)) => {
+                for (field_name, field) in &type_.fields {
+                    if !field
+                        .arguments
+                        .iter()
+                        .any(|argument| argument.directives.has(from_context_name))
+                    {
+                        expected_rebaseable_fields
+                            .push((field_name.to_string(), parent_node.index()));
+                    }
+                }
+                expected_rebaseable_fields.push((
+                    INTROSPECTION_TYPENAME_FIELD_NAME.to_string(),
+                    parent_node.index(),
+                ));
+            }
+            Some(ExtendedType::Union(_)) => expected_rebaseable_fields.push((
+                INTROSPECTION_TYPENAME_FIELD_NAME.to_string(),
+                parent_node.index(),
+            )),
+            _ => {}
+        }
+
+        let parent_runtime_types = schema.possible_runtime_types(parent_composite).unwrap();
+        for candidate_weight in graph.graph().node_weights() {
+            if candidate_weight.source != parent_weight.source {
+                continue;
+            }
+            let Ok(candidate) =
+                CompositeTypeDefinitionPosition::try_from(candidate_weight.type_.clone())
+            else {
+                continue;
+            };
+            let candidate_runtime_types = schema.possible_runtime_types(candidate.clone()).unwrap();
+            if parent_runtime_types
+                .iter()
+                .any(|runtime| candidate_runtime_types.contains(runtime))
+            {
+                expected_rebaseable_fragments
+                    .push((candidate.type_name().to_string(), parent_node.index()));
+            }
+        }
+    }
+    expected_rebaseable_fields.sort();
+    expected_rebaseable_fields.dedup();
+    let mut actual_rebaseable_fields = metadata
+        .fields_to_rebaseable_parent_nodes
+        .iter()
+        .flat_map(|(field_name, nodes)| {
+            nodes
+                .iter()
+                .map(|node| (field_name.to_string(), node.index()))
+        })
+        .collect::<Vec<_>>();
+    actual_rebaseable_fields.sort();
+    proptest::prop_assert_eq!(
+        actual_rebaseable_fields,
+        expected_rebaseable_fields,
+        "field-rebase metadata differs from subgraph field availability"
+    );
+
+    expected_rebaseable_fragments.sort();
+    expected_rebaseable_fragments.dedup();
+    let mut actual_rebaseable_fragments = metadata
+        .inline_fragments_to_rebaseable_parent_nodes
+        .iter()
+        .flat_map(|(type_name, nodes)| {
+            nodes
+                .iter()
+                .map(|node| (type_name.to_string(), node.index()))
+        })
+        .collect::<Vec<_>>();
+    actual_rebaseable_fragments.sort();
+    proptest::prop_assert_eq!(
+        actual_rebaseable_fragments,
+        expected_rebaseable_fragments,
+        "inline-fragment rebase metadata differs from runtime-type intersection"
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn metadata_allows_inline_fragment_rebase(
+    graph: &QueryGraph,
+    type_condition: &str,
+    parent_node: NodeIndex,
+) -> bool {
+    graph
+        .non_local_selection_metadata()
+        .inline_fragments_to_rebaseable_parent_nodes
+        .iter()
+        .find(|(name, _)| name.as_str() == type_condition)
+        .is_some_and(|(_, nodes)| nodes.contains(&parent_node))
+}
+
 /// During query graph creation, we pre-compute metadata that helps us greatly speed up the
 /// estimation process during request execution. The expected time and memory consumed for
 /// pre-computation is (in the worst case) expected to be on the order of the number of nodes
