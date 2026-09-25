@@ -948,6 +948,20 @@ fn default_config_matches_parsing_an_empty_document() {
     assert_eq!(default.plugin_configs.user_plugins().count(), 0);
 }
 
+#[test]
+fn from_str_reads_environment_variables_on_every_parse() {
+    const NAME: &str = "TEST_CONFIGURATION_FROM_STR_HEALTH_PATH"; // unique to this test
+    let text = format!("health_check:\n  path: ${{env.{NAME}}}\n");
+    for path in ["/first", "/second"] {
+        // SAFETY: no other test reads or writes this variable.
+        unsafe { std::env::set_var(NAME, path) };
+        let config = Configuration::from_str(&text).unwrap();
+        assert_eq!(config.health_check.path, path);
+    }
+    // SAFETY: as above.
+    unsafe { std::env::remove_var(NAME) };
+}
+
 #[rstest::rstest]
 #[case("")]
 #[case("plugins:")]

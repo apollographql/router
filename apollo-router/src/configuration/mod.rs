@@ -751,6 +751,22 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Test builds share one parser, so tests do not compile the schema for every parse. Each
+        // parse still reads expansions afresh; overrides and `--dev` are read when it is built.
+        #[cfg(test)]
+        {
+            static PARSER: std::sync::OnceLock<parking_lot::Mutex<ConfigurationParser>> =
+                std::sync::OnceLock::new();
+            let parser = match PARSER.get() {
+                Some(parser) => parser,
+                None => {
+                    let parser = ConfigurationParser::new()?;
+                    PARSER.get_or_init(|| parking_lot::Mutex::new(parser))
+                }
+            };
+            parser.lock().parse(s)
+        }
+        #[cfg(not(test))]
         ConfigurationParser::new()?.parse(s)
     }
 }
