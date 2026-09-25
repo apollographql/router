@@ -16,4 +16,5 @@ snapshot_kind: text
           opt.apollo.supergraph.path: true
           opt.apollo.supergraph.urls: true
           opt.security.non_local_selections: true
+          opt.security.non_local_selections_limit: false
           opt.security.recursive_selections: true

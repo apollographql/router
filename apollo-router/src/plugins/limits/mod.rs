@@ -111,9 +111,8 @@ pub(crate) struct RouterLimitsConfig {
     /// query planning. Default: 10000000 (10 million).
     pub(crate) max_recursive_selections: u32,
 
-    /// If set to true (which is the default is dev mode),
-    /// requests that exceed a `max_*` limit are *not* rejected.
-    /// Instead they are executed normally, and a warning is logged.
+    /// Execute requests that exceed `max_depth`, `max_height`, `max_aliases`,
+    /// `max_root_fields`, or `max_recursive_selections` and log a warning. Other limits remain enforced.
     pub(crate) warn_only: bool,
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.

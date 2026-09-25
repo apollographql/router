@@ -9013,7 +9013,7 @@ expression: "&schema"
         },
         "warn_only": {
           "default": false,
-          "description": "If set to true (which is the default is dev mode),\nrequests that exceed a `max_*` limit are *not* rejected.\nInstead they are executed normally, and a warning is logged.",
+          "description": "Execute requests that exceed `max_depth`, `max_height`, `max_aliases`,\n`max_root_fields`, or `max_recursive_selections` and log a warning. Other limits remain enforced.",
           "type": "boolean"
         }
       },

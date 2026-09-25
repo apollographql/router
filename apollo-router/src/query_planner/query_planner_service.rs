@@ -11,6 +11,7 @@ use apollo_compiler::Name;
 use apollo_compiler::ast;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::query_plan::query_planner::DEFAULT_MAX_NON_LOCAL_SELECTIONS;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -64,13 +65,9 @@ const INTERNAL_INIT_ERROR: &str = "internal";
 
 const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
     "APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK";
-/// Should we enforce the non-local selections limit? Default true, can be toggled off with an
-/// environment variable.
-///
-/// Disabling this check is very much not advisable and we don't expect that anyone will need to do
-/// it. In the extremely unlikely case that the new protection breaks someone's legitimate queries,
-/// though, they could temporarily disable this individual limit so they can still benefit from the
-/// other new limits, until we improve the detection.
+/// Enforces the limit unless `APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK=true`.
+/// The environment setting is read once, on the first call. To allow larger operations while
+/// retaining the check, raise `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT`.
 pub(crate) fn non_local_selections_check_enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
@@ -79,6 +76,110 @@ pub(crate) fn non_local_selections_check_enabled() -> bool {
 
         !disabled
     })
+}
+
+const ENV_NON_LOCAL_SELECTIONS_LIMIT: &str = "APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT";
+
+/// The resolved non-local-selections limit, and whether
+/// `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT` set it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NonLocalSelectionsLimit {
+    value: u64,
+    is_set: bool,
+}
+
+/// Parses the raw value of `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT`.
+///
+/// A value that is not a positive integer keeps the router's protection at its default rather
+/// than disabling it over a typo: the sibling check-disabling variable already treats anything
+/// other than `true` as leaving the check on, and this is the same fail-safe applied to the
+/// limit's value.
+fn parse_non_local_selections_limit(raw: &str) -> u64 {
+    match raw.parse::<u64>() {
+        Ok(value) if value > 0 => value,
+        _ => {
+            tracing::warn!(
+                "{ENV_NON_LOCAL_SELECTIONS_LIMIT}={raw:?} is not a positive integer; using the default of {DEFAULT_MAX_NON_LOCAL_SELECTIONS}"
+            );
+            DEFAULT_MAX_NON_LOCAL_SELECTIONS
+        }
+    }
+}
+
+fn resolve_non_local_selections_limit() -> NonLocalSelectionsLimit {
+    #[cfg(test)]
+    if let Some(limit) = non_local_selections_limit_test_override::current() {
+        return limit;
+    }
+    static LIMIT: OnceLock<NonLocalSelectionsLimit> = OnceLock::new();
+    *LIMIT.get_or_init(|| match std::env::var(ENV_NON_LOCAL_SELECTIONS_LIMIT) {
+        Ok(raw) => NonLocalSelectionsLimit {
+            value: parse_non_local_selections_limit(&raw),
+            is_set: true,
+        },
+        Err(_) => NonLocalSelectionsLimit {
+            value: DEFAULT_MAX_NON_LOCAL_SELECTIONS,
+            is_set: false,
+        },
+    })
+}
+
+/// The non-local-selections limit the query planner enforces, from
+/// `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT` or the router's default.
+pub(crate) fn non_local_selections_limit() -> u64 {
+    resolve_non_local_selections_limit().value
+}
+
+/// Whether `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT` is set, for the
+/// `apollo.router.config.env` usage-adoption gauge.
+pub(crate) fn non_local_selections_limit_is_set() -> bool {
+    resolve_non_local_selections_limit().is_set
+}
+
+/// Pins [`resolve_non_local_selections_limit`] to a fixed value for the duration of one test,
+/// without touching the environment.
+///
+/// The process reads `APOLLO_ROUTER_SECURITY_NON_LOCAL_SELECTIONS_LIMIT` once into a
+/// `OnceLock`, so a test that set the variable would fix the limit for every test sharing the
+/// process — passing under a process-per-test runner and failing under `cargo test`.
+///
+/// The override lives in thread-local storage rather than a process-global slot. `plan_inner`
+/// resolves the limit on the thread that calls it and moves the resolved value into the
+/// planning job, rather than re-resolving it from the job's own worker thread, so a
+/// thread-local override reaches the operation a test plans on its own thread without also
+/// reaching unrelated tests planning operations concurrently on other threads. A process-global
+/// override, tried first, broke every other test doing real query planning for as long as one
+/// test's guard was held.
+#[cfg(test)]
+pub(crate) mod non_local_selections_limit_test_override {
+    use std::cell::Cell;
+
+    use super::NonLocalSelectionsLimit;
+
+    thread_local! {
+        static CURRENT: Cell<Option<NonLocalSelectionsLimit>> = const { Cell::new(None) };
+    }
+
+    pub(crate) fn current() -> Option<NonLocalSelectionsLimit> {
+        CURRENT.with(|cell| cell.get())
+    }
+
+    /// Restores this thread's previous override state when dropped.
+    pub(crate) struct Guard(Option<NonLocalSelectionsLimit>);
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            CURRENT.with(|cell| cell.set(self.0));
+        }
+    }
+
+    /// Overrides the resolved limit for the calling thread. `is_set` should match whether the
+    /// override is meant to simulate the environment variable being present.
+    pub(crate) fn set(value: u64, is_set: bool) -> Guard {
+        let previous =
+            CURRENT.with(|cell| cell.replace(Some(NonLocalSelectionsLimit { value, is_set })));
+        Guard(previous)
+    }
 }
 
 /// A query planner that calls out to the apollo-federation crate.
@@ -155,6 +256,7 @@ impl QueryPlannerService {
     ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
+        let max_non_local_selections = non_local_selections_limit();
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
@@ -163,6 +265,7 @@ impl QueryPlannerService {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
                 non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                max_non_local_selections,
                 disabled_subgraph_names: Default::default(),
             };
 
@@ -1262,6 +1365,107 @@ mod tests {
 
         let subgraph_queries = subgraph_queries2.lock().await;
         insta::assert_snapshot!(*subgraph_queries, @"{ topProducts { name } }")
+    }
+
+    #[test]
+    fn non_local_selections_limit_parses_a_valid_value() {
+        assert_eq!(parse_non_local_selections_limit("250000"), 250_000);
+    }
+
+    #[test]
+    fn non_local_selections_limit_falls_back_on_an_unparseable_value() {
+        assert_eq!(
+            parse_non_local_selections_limit("not-a-number"),
+            DEFAULT_MAX_NON_LOCAL_SELECTIONS
+        );
+    }
+
+    #[test]
+    fn non_local_selections_limit_falls_back_on_zero() {
+        assert_eq!(
+            parse_non_local_selections_limit("0"),
+            DEFAULT_MAX_NON_LOCAL_SELECTIONS
+        );
+    }
+
+    #[rstest::rstest]
+    #[case(false)]
+    #[case(true)]
+    #[tokio::test]
+    async fn non_local_selections_limit_rejects_with_client_error(#[case] warn_only: bool) {
+        // Pins the limit to 0 instead of reading it from the environment: the value is cached
+        // in a `OnceLock` on first read, so setting the real variable here would fix it for
+        // every test sharing the process.
+        let _limit_guard = non_local_selections_limit_test_override::set(0, true);
+
+        // Root selections count toward the estimate even when they stay within one subgraph.
+        let mut harness = crate::TestHarness::builder()
+            .configuration_json(serde_json::json!({
+                "limits": { "router": {
+                    "warn_only": warn_only,
+                } },
+            }))
+            .unwrap()
+            // The operation never reaches a subgraph, but without a hook the harness builds real
+            // subgraph HTTP clients.
+            .subgraph_hook(|_name, _default| {
+                tower::service_fn(|request: subgraph::Request| async move {
+                    Ok(subgraph::Response::builder()
+                        .extensions(crate::json_ext::Object::new())
+                        .id(request.id)
+                        .context(request.context)
+                        .subgraph_name(String::default())
+                        .build())
+                })
+                .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("{ topProducts { name } }")
+            .build()
+            .unwrap();
+        let mut response = harness.ready().await.unwrap().call(request).await.unwrap();
+        assert_eq!(response.response.status(), http::StatusCode::BAD_REQUEST);
+
+        let response = response.next_response().await.unwrap();
+        assert_eq!(response.errors.len(), 1);
+        assert_eq!(
+            response.errors[0]
+                .extensions
+                .get("code")
+                .and_then(|code| code.as_str()),
+            Some("QUERY_PLAN_COMPLEXITY_EXCEEDED")
+        );
+        assert!(
+            response.errors[0]
+                .message
+                .contains("Number of non-local selections exceeds limit of 0"),
+            "unexpected error message: {}",
+            response.errors[0].message
+        );
+    }
+
+    #[test]
+    fn test_metric_query_planning_plan_duration_complexity_exceeded() {
+        let bridge = FederationErrorBridge::QueryPlanComplexityExceeded(
+            "Number of non-local selections exceeds limit of 100000".to_string(),
+        );
+        metric_query_planning_plan_duration(
+            RUST_QP_MODE,
+            0.0,
+            QueryPlanningOutcome::from(&bridge),
+            ComputeJobType::QueryPlanning,
+        );
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust",
+            "outcome" = "error",
+            "job.type" = "query_planning"
+        );
     }
 
     #[test]
