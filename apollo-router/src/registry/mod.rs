@@ -1518,12 +1518,12 @@ mod tests {
 
     fn assert_license_fetch_missing_layer_is_error(result: Result<License, OciError>) {
         // A manifest with no entitlement layer is malformed, not "not yet
-        // present but could be in the future" (see `is_transient_not_found`),
+        // present but could be in the future" (see `is_missing_entitlement_layer`),
         // so it must surface as an error rather than a silent default.
         let err = result.expect_err("missing entitlement layer should be an error, not a default");
         assert!(
-            matches!(err, OciError::LayerNotFound(_)) && !err.is_transient_not_found(),
-            "expected a non-transient LayerNotFound, got {err:?}"
+            err.is_missing_entitlement_layer(),
+            "expected a missing-entitlement-layer error, got {err:?}"
         );
     }
 
