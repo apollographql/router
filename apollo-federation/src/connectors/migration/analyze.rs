@@ -130,11 +130,18 @@ pub struct AnalyzeReport {
     /// show *which* schemas were considered, not just how many, so a
     /// reader can confirm coverage and catch a missed path.
     pub scanned_paths: Vec<String>,
-    /// `connect/v0.n` label of every scanned schema that links the
-    /// connect spec, in walk order — one entry per connector schema.
-    /// Drives the manifest's `Upgrade` line, which names the source
-    /// version(s) being migrated to `connect/v0.4`.
-    pub detected_specs: Vec<String>,
+    /// The `connect` spec each scanned schema links, in walk order —
+    /// one entry per connector schema. Drives the manifest's `Upgrade`
+    /// line, which names the source version(s) being migrated to
+    /// `connect/v0.4`.
+    pub detected_specs: Vec<ConnectSpec>,
+    /// Schemas skipped because they link a `connect` spec version this
+    /// build does not recognize — in practice, one newer than the
+    /// binary. Analyzing them would mean guessing which grammar their
+    /// selections were written against, and a wrong guess produces
+    /// confident rewrites that change behavior. They are reported
+    /// instead.
+    pub skipped_schemas: Vec<SkippedSchema>,
     /// Selections that couldn't be diffed because they failed to parse
     /// under the linked spec, under `connect/v0.4`, or both. Surfaced
     /// (non-fatally) so the developer sees what the analysis skipped
@@ -169,6 +176,16 @@ pub enum NoticeKind {
     /// Parses under neither spec — a pre-existing syntax error, out of
     /// scope for migration.
     FailsUnderBoth,
+}
+
+/// A schema the walk visited but did not analyze, because the
+/// `connect` spec version it links is unknown to this build.
+#[derive(Debug, Clone)]
+pub struct SkippedSchema {
+    /// Path relative to the project root.
+    pub file: String,
+    /// The raw version text from the `@link` URL, e.g. `"0.6"`.
+    pub version: String,
 }
 
 /// Machine-readable result kind for the manifest. Surfaced
@@ -210,6 +227,15 @@ impl ResultKind {
 }
 
 impl AnalyzeReport {
+    /// True when at least one connector schema was found and every one
+    /// of them already links `connect/v0.4` or newer. Such a project has
+    /// nothing to migrate, and telling the developer to point its
+    /// `@link` at v0.4 would be telling them to downgrade.
+    pub fn all_at_or_past_target(&self) -> bool {
+        !self.detected_specs.is_empty()
+            && self.detected_specs.iter().all(|s| *s >= ConnectSpec::V0_4)
+    }
+
     pub fn result_kind(&self) -> ResultKind {
         if self.files_scanned == 0 {
             ResultKind::EmptyScan
@@ -267,16 +293,30 @@ fn scan_file(path: &Path, project_root: &Path, report: &mut AnalyzeReport) {
     // The "from" side of the upgrade is the spec this schema actually
     // links, not a fixed v0.3 — the selection grammar gates at both
     // v0.2→v0.3 (operator chains) and v0.3→v0.4 (the unification), so
-    // the baseline must match the schema's real version. Record it for
-    // the manifest's Upgrade line; fall back to v0.3 when no connect
-    // link is present (a schema with @connect but no connect @link).
-    let detected = detect_connect_spec(&doc);
-    if let Some(spec) = detected {
-        report
-            .detected_specs
-            .push(format!("connect/v{}", spec.as_str()));
-    }
-    let from_spec = detected.unwrap_or(ConnectSpec::V0_3);
+    // the baseline must match the schema's real version.
+    let from_spec = match detect_connect_spec(&doc) {
+        DetectedSpec::Known(spec) => {
+            report.detected_specs.push(spec);
+            spec
+        }
+        // A connect link naming a version we don't know. Every baseline
+        // we could pick would be a guess, and the v0.3 guess is the
+        // worst of them: it makes a newer schema look like one that
+        // needs `$.` fortifications, so the manifest would prescribe
+        // edits that introduce the very behavior change this tool
+        // exists to prevent. Report the schema and analyze nothing in
+        // it.
+        DetectedSpec::Unknown(version) => {
+            report.skipped_schemas.push(SkippedSchema {
+                file: rel.clone(),
+                version,
+            });
+            return;
+        }
+        // No connect link at all: a schema with `@connect` but nothing
+        // declaring a version. v0.3 is the documented fallback.
+        DetectedSpec::Absent => ConnectSpec::V0_3,
+    };
 
     for def in doc.definitions() {
         match def {
@@ -321,11 +361,25 @@ fn scan_file(path: &Path, project_root: &Path, report: &mut AnalyzeReport) {
     }
 }
 
+/// What scanning a schema's `@link` directives turned up about its
+/// `connect` spec version. The distinction between [`Self::Unknown`]
+/// and [`Self::Absent`] is load-bearing: a missing version can be
+/// defaulted, an unrecognized one cannot.
+#[derive(Debug, Clone)]
+enum DetectedSpec {
+    /// The schema links a `connect` spec this build understands.
+    Known(ConnectSpec),
+    /// The schema links a `connect` spec version this build does not
+    /// know, carrying the raw version text for the report.
+    Unknown(String),
+    /// The schema links no `connect` spec at all.
+    Absent,
+}
+
 /// Detect the `connect` spec version a schema links by scanning its
 /// `schema`/`extend schema` `@link(url: ".../connect/v0.n")` directives.
-/// Returns the first connect link found, or `None` if the schema links
-/// no connect spec.
-fn detect_connect_spec(doc: &cst::Document) -> Option<ConnectSpec> {
+/// Reports on the first connect link found.
+fn detect_connect_spec(doc: &cst::Document) -> DetectedSpec {
     for def in doc.definitions() {
         let directives = match def {
             cst::Definition::SchemaDefinition(s) => s.directives(),
@@ -345,26 +399,38 @@ fn detect_connect_spec(doc: &cst::Document) -> Option<ConnectSpec> {
                     continue;
                 }
                 if let Some(cst::Value::StringValue(s)) = arg.value()
-                    && let Some(spec) =
-                        spec_from_link_url(&decode_graphql_string(&s.source_string()))
+                    && let Some(version) =
+                        connect_version_from_link_url(&decode_graphql_string(&s.source_string()))
                 {
-                    return Some(spec);
+                    return match spec_from_version(&version) {
+                        Some(spec) => DetectedSpec::Known(spec),
+                        None => DetectedSpec::Unknown(version),
+                    };
                 }
             }
         }
     }
-    None
+    DetectedSpec::Absent
 }
 
-/// Parse a `connect` spec version out of an `@link` URL like
-/// `https://specs.apollo.dev/connect/v0.2`. Returns `None` for URLs
-/// that don't name a known connect version.
-fn spec_from_link_url(url: &str) -> Option<ConnectSpec> {
+/// Pull the raw `connect` version text out of an `@link` URL like
+/// `https://specs.apollo.dev/connect/v0.2`, which yields `"0.2"`.
+/// Returns `None` when the URL doesn't name the connect spec at all,
+/// which is how a federation or other `@link` is passed over.
+fn connect_version_from_link_url(url: &str) -> Option<String> {
     let rest = url.split("/connect/v").nth(1)?;
-    let version: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.')
-        .collect();
+    Some(
+        rest.chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect(),
+    )
+}
+
+/// Map a raw connect version like `"0.4"` onto a [`ConnectSpec`].
+/// Returns `None` for a version this build does not know — deliberately
+/// distinct from defaulting, so the caller can report rather than
+/// guess.
+fn spec_from_version(version: &str) -> Option<ConnectSpec> {
     let mut parts = version.split('.');
     let major: u32 = parts.next()?.parse().ok()?;
     let minor: u32 = parts.next()?.parse().ok()?;
@@ -373,6 +439,7 @@ fn spec_from_link_url(url: &str) -> Option<ConnectSpec> {
         (0, 2) => Some(ConnectSpec::V0_2),
         (0, 3) => Some(ConnectSpec::V0_3),
         (0, 4) => Some(ConnectSpec::V0_4),
+        (0, 5) => Some(ConnectSpec::V0_5),
         _ => None,
     }
 }
@@ -708,10 +775,47 @@ fn write_upgrade<W: Write>(out: &mut W, report: &AnalyzeReport) -> std::io::Resu
     }
     let froms = counts
         .iter()
-        .map(|(v, n)| format!("`{v}` ({n} schema{})", if *n == 1 { "" } else { "s" }))
+        .map(|(v, n)| {
+            format!(
+                "`connect/v{v}` ({n} schema{})",
+                if *n == 1 { "" } else { "s" }
+            )
+        })
         .collect::<Vec<_>>()
         .join(" · ");
-    writeln!(out, "**Upgrade:** {froms} → `{target}`")?;
+    if report.all_at_or_past_target() {
+        writeln!(
+            out,
+            "**Upgrade:** {froms}. Every scanned schema already links `{target}` or newer, so there is nothing to migrate."
+        )?;
+    } else {
+        writeln!(out, "**Upgrade:** {froms} → `{target}`")?;
+    }
+    Ok(())
+}
+
+/// Emit the "schemas not analyzed" section for schemas skipped because
+/// they link a `connect` spec version this build doesn't recognize.
+/// Writes nothing when there are none.
+fn write_skipped_schemas<W: Write>(out: &mut W, report: &AnalyzeReport) -> std::io::Result<()> {
+    if report.skipped_schemas.is_empty() {
+        return Ok(());
+    }
+    writeln!(out)?;
+    writeln!(
+        out,
+        "## Heads up — schemas not analyzed ({})",
+        report.skipped_schemas.len()
+    )?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "Each schema below links a `connect` spec version this build of `connect-migrate` does not recognize, so none of its selections were analyzed and **the verdict above does not cover it**. The usual cause is a schema on a newer spec than the binary. Upgrade `connect-migrate` and re-run; do not migrate these schemas from a manifest that could not read them."
+    )?;
+    writeln!(out)?;
+    for s in &report.skipped_schemas {
+        writeln!(out, "- `{}` links `connect/v{}`", s.file, s.version)?;
+    }
     Ok(())
 }
 
@@ -837,7 +941,11 @@ pub fn write_markdown<W: Write>(
     writeln!(out, "<!-- no-ops: {} -->", no_ops.len())?;
     writeln!(out, "<!-- questions: {} -->", questions.len())?;
     {
-        let mut froms: Vec<&str> = report.detected_specs.iter().map(String::as_str).collect();
+        let mut froms: Vec<String> = report
+            .detected_specs
+            .iter()
+            .map(|s| format!("connect/v{}", s.as_str()))
+            .collect();
         froms.sort_unstable();
         froms.dedup();
         writeln!(
@@ -852,6 +960,20 @@ pub fn write_markdown<W: Write>(
         "<!-- parse-notices: {} -->",
         report.parse_notices.len()
     )?;
+    writeln!(
+        out,
+        "<!-- schemas-skipped: {} -->",
+        report.skipped_schemas.len()
+    )?;
+    // `upgrade:` above names this tool's target, which for a project
+    // already on v0.4 or newer would read as an instruction to move
+    // there — backwards, for a schema on a newer spec. Say so in a
+    // field of its own rather than leaving the agent to infer it.
+    writeln!(
+        out,
+        "<!-- already-at-target: {} -->",
+        report.all_at_or_past_target()
+    )?;
     writeln!(out)?;
 
     match kind {
@@ -865,16 +987,32 @@ pub fn write_markdown<W: Write>(
             return Ok(());
         }
         ResultKind::NothingToMigrate => {
-            writeln!(
-                out,
-                "# connect-migrate report — no `@connect` directives present"
-            )?;
+            // The headline has to match the reason. "No @connect
+            // directives present" is false when there were directives
+            // in a schema we declined to read.
+            if report.skipped_schemas.is_empty() {
+                writeln!(
+                    out,
+                    "# connect-migrate report — no `@connect` directives present"
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "# connect-migrate report — nothing analyzed (unrecognized `connect` spec)"
+                )?;
+            }
             writeln!(out)?;
             write_scope(out, report, project_root)?;
             // No connect directives → no upgrade to name.
             write_parse_notices(out, report)?;
+            write_skipped_schemas(out, report)?;
             writeln!(out)?;
-            if report.parse_notices.is_empty() {
+            if !report.skipped_schemas.is_empty() {
+                writeln!(
+                    out,
+                    "Nothing was analyzed. Every schema declaring a connect spec links a version this build does not recognize — see the heads-up above. Upgrade `connect-migrate` and re-run before concluding anything about this project."
+                )?;
+            } else if report.parse_notices.is_empty() {
                 writeln!(
                     out,
                     "None of the schemas above declare a `@connect` directive, so there is nothing for this tool to migrate. If your connector schemas live elsewhere, re-run against that path; otherwise the project does not use Apollo Connectors and the `connect/v0.4` upgrade does not apply."
@@ -894,24 +1032,42 @@ pub fn write_markdown<W: Write>(
             writeln!(out)?;
             write_scope(out, report, project_root)?;
             writeln!(out)?;
-            writeln!(
-                out,
-                "Every `@connect(selection: …)` across the schemas above parses identically under `connect/v0.3` and `connect/v0.4` — zero divergent selections. This is a trustworthy verdict from the analyzer, not the absence of one: the upgrade is safe with no source changes."
-            )?;
+            if report.all_at_or_past_target() {
+                writeln!(
+                    out,
+                    "Every `@connect(selection: …)` across the schemas above was parsed at the spec its own schema links, and none of them diverges from the `connect/v0.4` grammar — zero divergent selections. This is a trustworthy verdict from the analyzer, not the absence of one."
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "Every `@connect(selection: …)` across the schemas above parses identically under `connect/v0.3` and `connect/v0.4` — zero divergent selections. This is a trustworthy verdict from the analyzer, not the absence of one: the upgrade is safe with no source changes."
+                )?;
+            }
             writeln!(out)?;
-            writeln!(
-                out,
-                "Update your schema's `@link` to `connect/v0.4` whenever you're ready:"
-            )?;
-            writeln!(out)?;
-            writeln!(out, "```graphql")?;
-            writeln!(out, "extend schema")?;
-            writeln!(
-                out,
-                "  @link(url: \"https://specs.apollo.dev/connect/v0.4\", import: [\"@connect\", \"@source\"])"
-            )?;
-            writeln!(out, "```")?;
+            if report.all_at_or_past_target() {
+                // Already at or past v0.4. Printing the v0.4 `@link`
+                // here would read as instruction, and for a schema on a
+                // newer spec that instruction is a downgrade.
+                writeln!(
+                    out,
+                    "No `@link` change is needed either: every scanned schema already declares `connect/v0.4` or newer. Leave them as they are."
+                )?;
+            } else {
+                writeln!(
+                    out,
+                    "Update your schema's `@link` to `connect/v0.4` whenever you're ready:"
+                )?;
+                writeln!(out)?;
+                writeln!(out, "```graphql")?;
+                writeln!(out, "extend schema")?;
+                writeln!(
+                    out,
+                    "  @link(url: \"https://specs.apollo.dev/connect/v0.4\", import: [\"@connect\", \"@source\"])"
+                )?;
+                writeln!(out, "```")?;
+            }
             write_parse_notices(out, report)?;
+            write_skipped_schemas(out, report)?;
             return Ok(());
         }
         ResultKind::SafeAfterRewrites | ResultKind::NeedsDecisions => {}
@@ -951,6 +1107,7 @@ pub fn write_markdown<W: Write>(
         _ => unreachable!("trivial result kinds returned above"),
     }
     write_parse_notices(out, report)?;
+    write_skipped_schemas(out, report)?;
     writeln!(out)?;
 
     // --- Rewrites to apply ---------------------------------------------
@@ -1477,5 +1634,138 @@ impl LineIndex {
         };
         let line_start = self.line_starts.get(line_idx).copied().unwrap_or(0);
         (line_idx + 1, offset.saturating_sub(line_start) + 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn detect(sdl: &str) -> DetectedSpec {
+        let parser = GqlParser::new(sdl);
+        let cst = parser.parse();
+        detect_connect_spec(&cst.document())
+    }
+
+    fn schema_linking(url: &str) -> String {
+        format!(
+            r#"extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "{url}", import: ["@connect", "@source"])
+"#
+        )
+    }
+
+    #[test]
+    fn every_released_spec_version_maps() {
+        assert_eq!(spec_from_version("0.1"), Some(ConnectSpec::V0_1));
+        assert_eq!(spec_from_version("0.2"), Some(ConnectSpec::V0_2));
+        assert_eq!(spec_from_version("0.3"), Some(ConnectSpec::V0_3));
+        assert_eq!(spec_from_version("0.4"), Some(ConnectSpec::V0_4));
+        assert_eq!(spec_from_version("0.5"), Some(ConnectSpec::V0_5));
+    }
+
+    /// The mapping must stay in step with [`ConnectSpec`]. If a variant
+    /// is added upstream and not added here, a schema linking it is
+    /// treated as an unknown version — better than a wrong baseline,
+    /// but still a gap, and this is where it gets caught.
+    #[test]
+    fn mapping_covers_every_connect_spec_variant() {
+        use strum::IntoEnumIterator;
+        for spec in ConnectSpec::iter() {
+            assert_eq!(
+                spec_from_version(spec.as_str()),
+                Some(spec),
+                "spec_from_version does not know {}, which ConnectSpec defines",
+                spec.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_version_does_not_map() {
+        assert_eq!(spec_from_version("0.9"), None);
+        assert_eq!(spec_from_version("1.0"), None);
+        assert_eq!(spec_from_version(""), None);
+        assert_eq!(spec_from_version("0"), None);
+    }
+
+    #[test]
+    fn link_url_yields_its_version() {
+        assert_eq!(
+            connect_version_from_link_url("https://specs.apollo.dev/connect/v0.4").as_deref(),
+            Some("0.4")
+        );
+        // Trailing path or query text after the version is ignored.
+        assert_eq!(
+            connect_version_from_link_url("https://specs.apollo.dev/connect/v0.5/").as_deref(),
+            Some("0.5")
+        );
+    }
+
+    #[test]
+    fn non_connect_link_url_yields_nothing() {
+        assert_eq!(
+            connect_version_from_link_url("https://specs.apollo.dev/federation/v2.10"),
+            None
+        );
+    }
+
+    #[test]
+    fn known_spec_is_detected() {
+        let sdl = schema_linking("https://specs.apollo.dev/connect/v0.3");
+        assert!(matches!(
+            detect(&sdl),
+            DetectedSpec::Known(ConnectSpec::V0_3)
+        ));
+    }
+
+    #[test]
+    fn newer_known_spec_is_detected_not_defaulted() {
+        let sdl = schema_linking("https://specs.apollo.dev/connect/v0.5");
+        assert!(matches!(
+            detect(&sdl),
+            DetectedSpec::Known(ConnectSpec::V0_5)
+        ));
+    }
+
+    /// The regression this guards: an unrecognized version must not
+    /// silently become v0.3, which would have the analyzer diff a newer
+    /// schema against the v0.3 grammar and prescribe `$.` rewrites that
+    /// change its behavior.
+    #[test]
+    fn unrecognized_version_is_reported_not_guessed() {
+        let sdl = schema_linking("https://specs.apollo.dev/connect/v0.9");
+        match detect(&sdl) {
+            DetectedSpec::Unknown(version) => assert_eq!(version, "0.9"),
+            other => panic!("expected Unknown(\"0.9\"), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn schema_without_a_connect_link_is_absent() {
+        let sdl = r#"extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+"#;
+        assert!(matches!(detect(sdl), DetectedSpec::Absent));
+    }
+
+    #[test]
+    fn at_or_past_target_tracks_the_detected_specs() {
+        let mut report = AnalyzeReport::default();
+        assert!(
+            !report.all_at_or_past_target(),
+            "a project with no connector schemas is not 'at target'"
+        );
+
+        report.detected_specs.push(ConnectSpec::V0_4);
+        report.detected_specs.push(ConnectSpec::V0_5);
+        assert!(report.all_at_or_past_target());
+
+        report.detected_specs.push(ConnectSpec::V0_3);
+        assert!(
+            !report.all_at_or_past_target(),
+            "one schema below the target means the project still migrates"
+        );
     }
 }
