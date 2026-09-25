@@ -733,6 +733,7 @@ mod tests {
             customScalar: CustomScalar
             object: InputObject
             array: [InputObject]
+            strings: [String!]!
             multiLevel: MultiLevelInput
             recursive: RecursiveInput
             mutualA: MutualA
@@ -964,6 +965,9 @@ mod tests {
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
+    #[case::join_not_null_objects(r#"$([{"a": 1}])->joinNotNull(",")"#)]
+    #[case::join_not_null_nested_arrays(r#"$([[1, 2]])->joinNotNull(",")"#)]
+    #[case::join_not_null_mapped_to_objects(r#"$args.strings->map({ s: @ })->joinNotNull(",")"#)]
     fn invalid_expressions_with_method_shape_checking(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should probably be tested here in addition to v0.3/v0.4/v0.5.
@@ -993,6 +997,25 @@ mod tests {
         "$args.string->as($s, @->slice(0, 100))->echo({ full: @, first100: $s })->jsonStringify"
     )]
     fn valid_as_var_bindings(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, scalars(), spec)
+                .expect("expression is valid for this spec version");
+        }
+    }
+
+    // `$args.strings` is still an unresolved named shape when method shapes are
+    // computed, so array methods wrap it as `List<Name>`. These must not be
+    // rejected just because the element shape is not yet known to be scalar.
+    #[rstest]
+    #[case::bare(r#"$args.strings->joinNotNull(",")"#)]
+    #[case::after_map_identity(r#"$args.strings->map(@)->joinNotNull(",")"#)]
+    #[case::after_map_slice(r#"$args.strings->map(@->slice(0, 3))->joinNotNull(",")"#)]
+    #[case::after_map_split_first(r#"$args.strings->map(@->split("x")->first)->joinNotNull(",")"#)]
+    #[case::after_map_trim(r#"$args.strings->map(@->trim)->joinNotNull(",")"#)]
+    #[case::after_filter(r#"$args.strings->filter(@->ne("x"))->joinNotNull(",")"#)]
+    #[case::after_slice(r#"$args.strings->slice(0, 2)->joinNotNull(",")"#)]
+    #[case::literal_with_nulls(r#"$(["a", null, 1])->joinNotNull(",")"#)]
+    fn valid_join_not_null_inputs(#[case] selection: &str) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             validate_with_context(selection, scalars(), spec)
                 .expect("expression is valid for this spec version");

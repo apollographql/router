@@ -1,6 +1,7 @@
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
+use shape::ShapeCase;
 
 use crate::connectors::ApplyToError;
 use crate::connectors::json_selection::immutable::InputPath;
@@ -19,6 +20,102 @@ pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) ->
             || shape2.accepts(&Shape::unknown([]))
     } else {
         false
+    }
+}
+
+/// Returns true if `shape` cannot satisfy `contract`, judging only by the parts
+/// of `shape` that are known when method shapes are computed.
+///
+/// Method shapes are computed before variables like `$args` are resolved, so an
+/// input shape can contain unbound named shapes anywhere inside it (for
+/// example `List<$args.ids.*>` after `->map(@)`). `Shape::validate` rejects
+/// those, as well as `Unknown` and `None` (a value that may be missing), even
+/// though they could turn out to be fine. This treats them as satisfying any
+/// contract, and reports a mismatch only when a part of `shape` that is
+/// actually known cannot satisfy the corresponding part of `contract`.
+pub(crate) fn definitely_mismatches(contract: &Shape, shape: &Shape) -> bool {
+    if contract.validate(shape).is_none() {
+        return false;
+    }
+
+    match shape.case() {
+        ShapeCase::Name(name, weak) => {
+            return weak
+                .upgrade(name)
+                .is_some_and(|named| definitely_mismatches(contract, &named));
+        }
+        ShapeCase::Unknown | ShapeCase::None => return false,
+        // Every member of a union must be able to satisfy the contract.
+        ShapeCase::One(members) => {
+            return members
+                .iter()
+                .any(|member| definitely_mismatches(contract, member));
+        }
+        // An intersection satisfies the contract if any member does.
+        ShapeCase::All(members) => {
+            return members
+                .iter()
+                .all(|member| definitely_mismatches(contract, member));
+        }
+        ShapeCase::Error(shape::Error {
+            partial: Some(partial),
+            ..
+        }) => return definitely_mismatches(contract, partial),
+        _ => {}
+    }
+
+    match (contract.case(), shape.case()) {
+        (ShapeCase::Name(name, weak), _) => weak
+            .upgrade(name)
+            .is_some_and(|named| definitely_mismatches(&named, shape)),
+        // A union contract is satisfied if any of its members could be.
+        (ShapeCase::One(members), _) => members
+            .iter()
+            .all(|member| definitely_mismatches(member, shape)),
+        (ShapeCase::All(members), _) => members
+            .iter()
+            .any(|member| definitely_mismatches(member, shape)),
+        (
+            ShapeCase::Array {
+                prefix: contract_prefix,
+                tail: contract_tail,
+            },
+            ShapeCase::Array { prefix, tail },
+        ) => {
+            let items_mismatch = (0..contract_prefix.len().max(prefix.len())).any(|i| {
+                let expected = match contract_prefix.get(i) {
+                    Some(expected) => expected,
+                    // The contract has no expectations past its prefix.
+                    None if contract_tail.is_none() => return false,
+                    None => contract_tail,
+                };
+                let received = prefix.get(i).unwrap_or(tail);
+                definitely_mismatches(expected, received)
+            });
+            items_mismatch
+                || (!contract_tail.is_none()
+                    && !tail.is_none()
+                    && definitely_mismatches(contract_tail, tail))
+        }
+        (
+            ShapeCase::Object {
+                fields: contract_fields,
+                rest: contract_rest,
+            },
+            ShapeCase::Object { fields, rest },
+        ) => {
+            let fields_mismatch = contract_fields.iter().any(|(name, expected)| {
+                fields
+                    .get(name)
+                    .is_some_and(|received| definitely_mismatches(expected, received))
+            });
+            fields_mismatch
+                || (!contract_rest.is_none()
+                    && !rest.is_none()
+                    && definitely_mismatches(contract_rest, rest))
+        }
+        // `shape` is known here, and `validate` has already rejected it.
+        _ => true,
     }
 }
 
@@ -142,5 +239,89 @@ mod tests {
         #[case] shape2: Shape,
     ) {
         assert!(!is_comparable_shape_combination(&shape1, &shape2));
+    }
+
+    fn scalar_list() -> Shape {
+        Shape::list(
+            Shape::one([Shape::string([]), Shape::int([]), Shape::null([])], []),
+            [],
+        )
+    }
+
+    fn record(field: &str, shape: Shape) -> Shape {
+        Shape::record([(field.to_string(), shape)].into_iter().collect(), [])
+    }
+
+    #[rstest::rstest]
+    #[case::exact(Shape::string([]), Shape::string([]))]
+    #[case::named(Shape::string([]), Shape::name("$args.s", []))]
+    #[case::unknown(Shape::string([]), Shape::unknown([]))]
+    #[case::none(Shape::string([]), Shape::none())]
+    #[case::maybe_missing(
+        Shape::string([]),
+        Shape::one([Shape::string([]), Shape::none()], [])
+    )]
+    #[case::named_or_string(
+        Shape::string([]),
+        Shape::one([Shape::name("$args.s", []), Shape::string([])], [])
+    )]
+    #[case::list_of_named(scalar_list(), Shape::list(Shape::name("$args.ids.*", []), []))]
+    #[case::list_of_unknown(scalar_list(), Shape::list(Shape::unknown([]), []))]
+    #[case::tuple_with_named(
+        scalar_list(),
+        Shape::tuple([Shape::string([]), Shape::name("$args.id", [])], [])
+    )]
+    #[case::union_contract(
+        Shape::one([Shape::string([]), scalar_list()], []),
+        Shape::list(Shape::name("$args.ids.*", []), [])
+    )]
+    #[case::union_on_both_sides(
+        Shape::one([Shape::string([]), scalar_list()], []),
+        Shape::one(
+            [Shape::string([]), Shape::list(Shape::name("$args.ids.*", []), [])],
+            []
+        )
+    )]
+    #[case::record_with_named_field(
+        record("a", Shape::string([])),
+        record("a", Shape::name("$args.a", []))
+    )]
+    fn test_definitely_mismatches_negative_cases(#[case] contract: Shape, #[case] shape: Shape) {
+        assert!(!definitely_mismatches(&contract, &shape));
+    }
+
+    #[rstest::rstest]
+    #[case::wrong_scalar(Shape::string([]), Shape::int([]))]
+    #[case::list_for_string(
+        Shape::string([]),
+        Shape::list(Shape::name("$args.ids.*", []), [])
+    )]
+    #[case::object_for_string(Shape::string([]), Shape::dict(Shape::name("$args.v", []), []))]
+    #[case::named_or_object(
+        Shape::string([]),
+        Shape::one(
+            [Shape::name("$args.s", []), Shape::dict(Shape::string([]), [])],
+            []
+        )
+    )]
+    #[case::list_of_objects(scalar_list(), Shape::list(Shape::dict(Shape::string([]), []), []))]
+    #[case::list_of_lists(
+        scalar_list(),
+        Shape::list(Shape::list(Shape::name("$args.ids.*", []), []), [])
+    )]
+    #[case::tuple_with_object(
+        scalar_list(),
+        Shape::tuple([Shape::name("$args.id", []), Shape::empty_object([])], [])
+    )]
+    #[case::union_contract(
+        Shape::one([Shape::string([]), scalar_list()], []),
+        Shape::list(Shape::empty_object([]), [])
+    )]
+    #[case::record_with_wrong_field(
+        record("a", Shape::string([])),
+        record("a", Shape::bool([]))
+    )]
+    fn test_definitely_mismatches_positive_cases(#[case] contract: Shape, #[case] shape: Shape) {
+        assert!(definitely_mismatches(&contract, &shape));
     }
 }
