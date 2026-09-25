@@ -1,5 +1,10 @@
 //! Condition satisfiability: can a set of @requires / @key fields be resolved
 //! at a given query graph node?
+//!
+//! Three flavors of check, each deeper than the last:
+//! - `can_satisfy_conditions`: pure schema lookup (field exists, not external).
+//! - `conditions_resolvable_at_node`: graph-based, path-sensitive variant.
+//! - `conditions_have_requires`: detects @requires on condition edges.
 
 use petgraph::graph::NodeIndex;
 
@@ -7,6 +12,7 @@ use super::FieldRoutingSearchSpace;
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -30,9 +36,17 @@ impl FieldRoutingSearchSpace {
         for selection in conditions.selections.values() {
             match selection {
                 crate::operation::Selection::Field(field_sel) => {
+                    if *field_sel.field.name() == TYPENAME_FIELD {
+                        continue;
+                    }
                     let Some(edge) = self.edge_for_field(node, &field_sel.field) else {
                         return Ok(false);
                     };
+                    // A field carrying @requires draws data from the entity
+                    // representation; it cannot be selected in place.
+                    if self.query_graph.edge_weight(edge)?.conditions.is_some() {
+                        return Ok(false);
+                    }
                     if let Some(sub) = &field_sel.selection_set {
                         let (_, tail) = self.query_graph.edge_endpoints(edge)?;
                         if !self.conditions_resolvable_at_node(tail, sub)? {
@@ -318,6 +332,21 @@ mod tests {
                 .conditions_resolvable_at_node(s2_t, &cond)
                 .expect("check runs"),
             "S2 has an edge for a but none for A.c",
+        );
+    }
+
+    /// A condition field that itself carries @requires cannot be resolved
+    /// in place; the graph check must reject it.
+    #[test]
+    fn requires_fields_are_not_resolvable_in_place() {
+        let (space, _, s2_schema) = space_and_schemas();
+        let cond = conditions(&s2_schema, "y");
+        let s2_t = t_node(&space, "S2");
+        assert!(
+            !space
+                .conditions_resolvable_at_node(s2_t, &cond)
+                .expect("check runs"),
+            "y carries @requires and must not count as resolvable in place",
         );
     }
 

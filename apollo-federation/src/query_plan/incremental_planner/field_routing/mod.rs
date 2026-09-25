@@ -18,6 +18,8 @@ pub(super) mod state;
 #[cfg(test)]
 mod test_support;
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -63,6 +65,21 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) override_conditions: OverrideConditions,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
+    /// In-flight guard for breaking the mutual recursion between
+    /// `conditions_routable` and key-hop enumeration. A (node, key) pair
+    /// present in this set means that key-hop enumeration for that
+    /// position is on the call stack; re-entering it would loop
+    /// forever, so the guard returns "no hops" (the fixpoint for
+    /// circular keys).
+    pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingCacheKey)>>,
+}
+
+/// Identity of the selection a key-hop enumeration serves; paired with the
+/// origin node in the in-flight cycle guard.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum RoutingCacheKey {
+    Field(Name),
+    InlineFragment(Option<Name>),
 }
 
 impl FieldRoutingSearchSpace {
@@ -147,40 +164,44 @@ impl FieldRoutingSearchSpace {
         self.query_graph.edge_for_inline_fragment(node, fragment)
     }
 
-    /// Advance through everything that is not a genuine decision: commit
-    /// single-option selections greedily, drop zero-option ones, and lift
-    /// forced entries above open decisions so their fetch groups inform
-    /// scoring. Stops at the first multi-option selection (conditions
-    /// included: which subgraph serves a key or requires field set is a
-    /// decision like any other). A failed commit drops the selection; the
-    /// search's discrepancy iterations explore the routings that avoid the
-    /// failure, running unbudgeted until a complete plan exists.
+    /// Advance past deterministic decisions in-place: commit single-option
+    /// and zero-option selections, lift forced entries above open decisions
+    /// so their fetch groups inform scoring. Stops at the first multi-option
+    /// ordinary selection.
+    ///
+    /// Forced commits keep a trail of frames so a drop deeper in the chain
+    /// can rewind to an ancestor with untried options: a circular-key hop
+    /// failing its commit is often avoidable only by routing an ancestor
+    /// condition differently, and no BULB decision frame exists between
+    /// forced commits to recover through.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
+        let mut trail = ForcedTrail::default();
         // Routing options are state-independent, so within this call they
         // are memoized per pending instance: the lift scan below would
         // otherwise re-enumerate every entry under the top once per lift.
-        // Keyed by Arc address; the value keeps the Arc alive so addresses
-        // cannot be recycled within the memo's lifetime.
         let mut memo: OptionsMemo = HashMap::new();
         while let Some(top) = state.pending.last() {
+            if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
+                self.recover_doomed(state, &mut trail);
+                continue;
+            }
             let options = self.memoized_options(&mut memo, top)?;
             match options.len() {
                 0 => {
-                    if let Some(pending) = state.pop_pending() {
-                        self.drop_unresolvable(state, &pending);
-                    }
+                    trail.doomed.insert(pending_site(top));
+                    self.recover_doomed(state, &mut trail);
                 }
-                1 => self.commit_single(state, &options[0]),
+                1 => self.commit_forced(state, options, &mut trail),
+                _ if top.condition.is_some() => self.commit_forced(state, options, &mut trail),
                 _ => {
-                    // A decision point. Before stopping, commit any forced
-                    // pendings deeper in the stack so their fetch groups
-                    // inform this decision's scoring.
+                    // A BULB decision point. Before stopping, commit any
+                    // forced pendings deeper in the stack so their fetch
+                    // groups inform this decision's scoring.
                     let mut lifted = false;
                     for index in (0..state.pending.len().saturating_sub(1)).rev() {
-                        if self
-                            .memoized_options(&mut memo, &state.pending[index])?
-                            .len()
-                            <= 1
+                        let entry = &state.pending[index];
+                        if entry.condition.is_some()
+                            || self.memoized_options(&mut memo, entry)?.len() <= 1
                         {
                             state.lift_pending(index);
                             lifted = true;
@@ -213,25 +234,107 @@ impl FieldRoutingSearchSpace {
         Ok(computed)
     }
 
-    /// Pop the top pending and commit its only option. A failed commit
-    /// rolls back to just after the pop and counts the drop: commit_choice
-    /// pushes pendings mid-flight, and a graph-only rollback would leak
-    /// entries whose ordering dependent names a freed node index.
-    fn commit_single(&self, state: &mut PlanState, choice: &RoutingChoice) {
-        let Some(pending) = state.pop_pending() else {
-            return;
-        };
+    /// Pop a pending whose site is proven hopeless and recover: rewind an
+    /// ancestor forced commit if one has untried options, otherwise drop the
+    /// selection.
+    fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
+        let pending = state.pop_pending().unwrap();
+        if !self.backtrack_forced(state, trail) {
+            self.drop_unresolvable(state, &pending);
+        }
+    }
+
+    /// Pop the top pending and commit its best-ranked option. Multi-option
+    /// forced commits push a trail frame so a later failure can rewind and
+    /// try the next-ranked alternative.
+    fn commit_forced(
+        &self,
+        state: &mut PlanState,
+        options: Arc<Vec<RoutingChoice>>,
+        trail: &mut ForcedTrail,
+    ) {
+        let pending = state.pop_pending().unwrap();
         let checkpoint = state.checkpoint();
-        if let Err(e) = self.commit_choice(state, &pending, choice) {
-            state.rollback(checkpoint);
+        let result = self.commit_choice(state, &pending, &options[0]);
+        if let Err(e) = &result {
+            state.rollback(checkpoint.clone());
             debug!(
                 selection = %selection_label(&pending.selection),
-                subgraph = %choice.target_subgraph(),
+                subgraph = %options[0].target_subgraph(),
+                direct = options[0].is_direct(),
                 error = ?e,
-                "single-option commit failed, dropping",
+                "forced commit failed, backtracking",
             );
+        }
+        let failed = result.is_err();
+        if options.len() > 1 {
+            trail.frames.push(ForcedFrame {
+                pending: pending.clone(),
+                options,
+                next_option: 1,
+                checkpoint,
+            });
+        } else if failed {
+            trail.doomed.insert(pending_site(&pending));
+        }
+        if failed && !self.backtrack_forced(state, trail) {
             state.dropped_fields += 1;
         }
+    }
+
+    /// Rewind the forced-commit trail after a drop and try alternatives,
+    /// deepest frame first. Returns `true` when the state was rewound to a
+    /// committed alternative. Returns `false` when nothing was attempted
+    /// (empty trail or budget spent).
+    fn backtrack_forced(&self, state: &mut PlanState, trail: &mut ForcedTrail) -> bool {
+        let mut parked: Option<(Arc<PendingSelection>, RoutingChoice)> = None;
+        loop {
+            while trail
+                .frames
+                .last()
+                .is_some_and(|f| f.next_option >= f.options.len())
+            {
+                let exhausted = trail.frames.pop().unwrap();
+                trail.doomed.insert(pending_site(&exhausted.pending));
+            }
+            let Some(frame) = trail.frames.last_mut() else {
+                break;
+            };
+            if state.forced_backtracks >= FORCED_BACKTRACK_CAP {
+                break;
+            }
+            state.forced_backtracks += 1;
+            let checkpoint = frame.checkpoint.clone();
+            let pending = frame.pending.clone();
+            let choice = frame.options[frame.next_option].clone();
+            let option_index = frame.next_option;
+            frame.next_option += 1;
+            state.rollback(checkpoint.clone());
+            parked = Some((pending.clone(), frame.options[0].clone()));
+            trace!(
+                selection = %selection_label(&pending.selection),
+                subgraph = %choice.target_subgraph(),
+                option_index,
+                "backtracking forced commit to alternative option",
+            );
+            match self.commit_choice(state, &pending, &choice) {
+                Ok(_) => return true,
+                Err(_) => state.rollback(checkpoint),
+            }
+        }
+        // Re-drive the greedy choice so the caller resumes from a
+        // committed state; descendants that drop again find the budget
+        // spent and fall through to plain drops. Returns true so the
+        // caller in commit_forced skips its own dropped_fields increment,
+        // which is correct: if the re-drive fails, the increment happens
+        // here; if it succeeds, no field was dropped.
+        if let Some((pending, choice)) = parked {
+            if self.commit_choice(state, &pending, &choice).is_err() {
+                state.dropped_fields += 1;
+            }
+            return true;
+        }
+        false
     }
 }
 
@@ -248,6 +351,67 @@ pub(super) fn selection_label(selection: &Selection) -> String {
             Some(type_cond) => format!("... on {}", type_cond.type_name()),
             None => "...".to_string(),
         },
+    }
+}
+
+/// Upper bound on forced-commit backtracking attempts per candidate. Each
+/// attempt is one rollback + commit; the cap keeps unplannable operations
+/// from spending unbounded time in the budget-free greedy pass.
+const FORCED_BACKTRACK_CAP: u64 = 256;
+
+/// One multi-option forced commit on the fast-forward path, kept so a later
+/// drop can rewind to it and try the next-ranked option.
+struct ForcedFrame {
+    pending: Arc<PendingSelection>,
+    options: Arc<Vec<RoutingChoice>>,
+    /// Next untried option index; `options[0]` was the greedy choice.
+    next_option: usize,
+    /// State just after popping `pending`, before any commit.
+    checkpoint: PlanCheckpoint,
+}
+
+/// Backtracking state for a single `fast_forward` call.
+#[derive(Default)]
+struct ForcedTrail {
+    frames: Vec<ForcedFrame>,
+    /// Sites whose every routing option failed during this call. Consulted
+    /// before committing so recurring instances fail fast.
+    doomed: HashSet<PendingSite>,
+}
+
+/// Identity of a pending for fail-fast: query graph node, selection name,
+/// fetch anchor, and ordering dependent. The anchor and dependent are
+/// included because an ordering cycle fails one pending's commit without
+/// saying anything about a sibling anchored or ordered elsewhere.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PendingSite {
+    query_graph_node: NodeIndex,
+    selection: SiteSelection,
+    fetch_node: NodeIndex,
+    ordering_dependent: Option<NodeIndex>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum SiteSelection {
+    Field(Name),
+    InlineFragment(Option<Name>),
+}
+
+fn pending_site(pending: &PendingSelection) -> PendingSite {
+    let selection = match &pending.selection {
+        Selection::Field(f) => SiteSelection::Field(f.field.name().clone()),
+        Selection::InlineFragment(f) => SiteSelection::InlineFragment(
+            f.inline_fragment
+                .type_condition_position
+                .as_ref()
+                .map(|pos| pos.type_name().clone()),
+        ),
+    };
+    PendingSite {
+        query_graph_node: pending.query_graph_node,
+        selection,
+        fetch_node: pending.fetch_node,
+        ordering_dependent: pending.ordering_dependent(),
     }
 }
 
@@ -357,136 +521,4 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
 }
 
 #[cfg(test)]
-mod tests {
-    use apollo_compiler::name;
-
-    use super::state::ConditionScope;
-    use super::test_support;
-    use super::*;
-
-    fn search_space() -> FieldRoutingSearchSpace {
-        test_support::search_space(&[
-            (
-                "S1",
-                r#"
-                type Query { t: T }
-                type T @key(fields: "k") { k: ID, x: Int }
-                "#,
-            ),
-            (
-                "S2",
-                r#"
-                type T @key(fields: "k") { k: ID, y: Int }
-                "#,
-            ),
-        ])
-    }
-
-    fn t_node(space: &FieldRoutingSearchSpace, subgraph: &str) -> NodeIndex {
-        test_support::node_for(space, subgraph, "T")
-    }
-
-    /// A pending for `T.y` (resolvable only in S2) anchored at fetch group
-    /// `fetch_node`, marked as condition data feeding `dependent`.
-    fn y_pending(
-        space: &FieldRoutingSearchSpace,
-        fetch_node: NodeIndex,
-        dependent: Option<NodeIndex>,
-    ) -> PendingSelection {
-        let op = crate::operation::Operation::parse(
-            space.supergraph_schema.clone(),
-            r#"{ t { y } }"#,
-            "op.graphql",
-        )
-        .expect("valid operation");
-        let Some(Selection::Field(t_sel)) = op.selection_set.selections.values().next() else {
-            panic!("expected t field");
-        };
-        let y_sel = t_sel
-            .selection_set
-            .as_ref()
-            .expect("t has sub-selections")
-            .selections
-            .values()
-            .next()
-            .expect("y selection")
-            .clone();
-        PendingSelection {
-            selection: y_sel,
-            query_graph_node: t_node(space, "S1"),
-            fetch_node,
-            op_path: SharedPath::new(),
-            path_in_fetch: SharedPath::new(),
-            condition: dependent.map(|dependent| ConditionScope {
-                dependent,
-                depth: 1,
-            }),
-        }
-    }
-
-    /// State with root group A feeding entity group B, so an ordering
-    /// dependent of A cycles when a new group hangs beneath B.
-    fn cyclic_fixture() -> (PlanState, NodeIndex, NodeIndex) {
-        let mut state = PlanState::new(vec![]);
-        let s1: Arc<str> = Arc::from("S1");
-        let root_pos: CompositeTypeDefinitionPosition = CompositeTypeDefinitionPosition::Object(
-            crate::schema::position::ObjectTypeDefinitionPosition {
-                type_name: name!("Query"),
-            },
-        );
-        let a = state.graph.get_or_create_root_group(&s1, root_pos);
-        let b = state.graph.add_entity_group(&s1, vec![]);
-        state.graph.add_dependency(a, b, vec![]);
-        (state, a, b)
-    }
-
-    /// Reusing an entity group that already (transitively) feeds the anchor
-    /// would close a dependency cycle; the commit must mint a fresh group
-    /// instead. This arm is the release-mode acyclicity guard.
-    #[test]
-    fn cyclic_entity_group_reuse_mints_fresh_group() {
-        let space = search_space();
-        let (mut state, _a, b) = cyclic_fixture();
-        let s2: Arc<str> = Arc::from("S2");
-        // An existing (S2, []) entity group that already feeds b: reusing
-        // it for a hop anchored at b would close a cycle.
-        let existing = state.graph.get_or_create_entity_group(&s2, vec![]);
-        state.graph.add_dependency(existing, b, vec![]);
-
-        let pending = Arc::new(y_pending(&space, b, None));
-        let options = Arc::new(space.routing_options(&pending).expect("options enumerate"));
-        assert!(!options.is_empty(), "y must have a key-hop option");
-
-        space
-            .commit_choice(&mut state, &pending, &options[0])
-            .expect("commit mints a fresh group instead of reusing");
-        assert!(
-            !state.graph.has_edge(b, existing),
-            "reuse would have closed a cycle",
-        );
-        // cost() debug-asserts acyclicity; finite means the graph is a DAG.
-        assert!(state.graph.cost().is_finite());
-    }
-
-    /// A failed commit drops only its own selection and rolls its
-    /// mutations back; the same site under a different anchor commits.
-    #[test]
-    fn failed_commit_drops_only_the_failed_pending() {
-        let space = search_space();
-        let (mut state, a, b) = cyclic_fixture();
-
-        // Bottom of stack: same site, no ordering dependent (commits fine).
-        // Top: condition pending whose ordering edge cycles (commit fails).
-        let ok_pending = y_pending(&space, b, None);
-        let cyclic_pending = y_pending(&space, b, Some(a));
-        state.pending = vec![Arc::new(ok_pending), Arc::new(cyclic_pending)];
-
-        space.fast_forward(&mut state).expect("fast forward runs");
-
-        assert_eq!(
-            state.dropped_fields, 1,
-            "only the cyclic pending drops; the same site with a different anchor commits",
-        );
-        assert!(state.pending.is_empty());
-    }
-}
+mod tests;
