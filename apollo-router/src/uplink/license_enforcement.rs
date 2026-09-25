@@ -892,7 +892,13 @@ impl FromStr for License {
                     &DecodingKey::from_jwk(jwk).expect("router.jwks.json must be valid"),
                     &validation,
                 )
-                .map_err(Error::InvalidLicense)
+                .map_err(|err| {
+                    tracing::debug!(
+                        jwk_key_id = ?jwk.common.key_id,
+                        "failed to decode license against key: {err}"
+                    );
+                    Error::InvalidLicense(err)
+                })
                 .map(|r| License {
                     claims: Some(r.claims),
                 })
@@ -1030,6 +1036,20 @@ mod test {
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
+
+    #[test]
+    fn from_str_logs_debug_on_decode_failure() {
+        use crate::test_harness::tracing_test;
+
+        let _guard = tracing_test::dispatcher_guard();
+
+        let result = License::from_str("not-a-valid-jwt");
+
+        assert!(result.is_err());
+        assert!(tracing_test::logs_contain(
+            "failed to decode license against key"
+        ));
+    }
 
     #[track_caller]
     fn check(
