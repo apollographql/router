@@ -166,7 +166,7 @@ impl From<proteus::parser::Error> for ConfigurationError {
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 #[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
-// We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
+// We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
 pub struct Configuration {
     /// The raw configuration value.
     #[serde(skip)]
@@ -609,8 +609,14 @@ impl Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
-        // We want to trigger all defaulting logic so don't use the raw builder.
-        Configuration::from_str("").expect("default configuration must be valid")
+        // Deserializing an empty document applies every default, as parsing `""` does, without
+        // compiling Router's schema. Only parsing applies `--dev`.
+        let empty = Value::Object(Map::new());
+        let mut config: Configuration =
+            serde_json::from_value(empty.clone()).expect("default configuration must be valid");
+        config.validated_yaml = Some(empty);
+        config.raw_yaml = Some(Arc::from(""));
+        config
     }
 }
 

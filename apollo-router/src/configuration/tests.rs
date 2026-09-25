@@ -917,6 +917,37 @@ fn default_config_has_defaults() {
     insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
 }
 
+#[test]
+fn default_config_matches_parsing_an_empty_document() {
+    let default = Configuration::default();
+    let parsed = Configuration::from_str("").unwrap();
+
+    assert!(
+        default == parsed,
+        "equality compares the retained documents"
+    );
+    assert_eq!(default.raw_yaml, parsed.raw_yaml);
+    assert_eq!(
+        serde_json::to_value(&default).unwrap(),
+        serde_json::to_value(&parsed).unwrap()
+    );
+    assert_eq!(
+        default.apollo_plugins.plugins,
+        parsed.apollo_plugins.plugins
+    );
+    assert!(!default.apollo_plugins.plugins.is_empty());
+    for name in default.apollo_plugins.plugins.keys() {
+        let full_name = format!("apollo.{name}");
+        assert!(
+            default.plugin_configs.apollo(&full_name).is_some()
+                && parsed.plugin_configs.apollo(&full_name).is_some(),
+            "{full_name} has retained config"
+        );
+    }
+    assert!(default.plugin_configs.errors().is_empty());
+    assert_eq!(default.plugin_configs.user_plugins().count(), 0);
+}
+
 #[rstest::rstest]
 #[case("")]
 #[case("plugins:")]
