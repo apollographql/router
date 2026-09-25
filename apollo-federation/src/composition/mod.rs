@@ -153,6 +153,11 @@ pub fn expand_subgraphs(
 #[instrument(skip(subgraphs))]
 pub fn pre_merge_validations(subgraphs: &[Subgraph<Validated>]) -> Result<(), CompositionFailure> {
     validate_consistent_root_fields(subgraphs).map_err(CompositionFailure::from_errors)?;
+    let selection_map_errors =
+        crate::composite_schemas::cross_schema::validate_selection_maps(subgraphs);
+    if !selection_map_errors.is_empty() {
+        return Err(CompositionFailure::from_errors(selection_map_errors));
+    }
     // TODO: (FED-713) Implement any pre-merge validations that require knowledge of all subgraphs.
     Ok(())
 }
