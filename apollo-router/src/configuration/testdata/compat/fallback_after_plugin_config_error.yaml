@@ -1,0 +1,8 @@
+# Startup migration 2045 moves these flat settings under `deduplication.all`.
+subscription:
+  deduplication:
+    enabled: true
+# The schema accepts any string here, but the plugin's config rejects it as a duration.
+traffic_shaping:
+  router:
+    timeout: not-a-duration

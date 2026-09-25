@@ -184,44 +184,40 @@ pub(crate) fn parse_configuration(
     let options =
         external.add_to(ParseYamlOptions::default().schema(router_config_schema().clone()));
 
-    let parse = || -> Result<Configuration, ConfigurationError> {
-        if migrated == file {
-            parse_document(text, &options).map_err(report_error)
-        } else {
-            let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
-                ConfigurationError::MigrationFailure {
-                    error: error.to_string(),
-                }
-            })?;
-            // Diagnostics for the serialized copy would point at lines the operator never wrote, so
-            // any error in it falls back to the supplied text. The fallback still validates that text
-            // in full, so it never accepts an invalid document.
-            match parse_document(&serialized, &options) {
-                Ok(config) => Ok(config),
-                Err(migrated_error) => {
-                    tracing::warn!(
-                        "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
-                    );
-                    parse_document(text, &options).map_err(|error| {
-                        // The file's errors may be ones that migration fixes, so the migrated copy's
-                        // errors are reported too, in case they are the real problem.
-                        ConfigurationError::ApolloConfiguration(format!(
-                            "{}\n\n{}",
-                            report_error(error),
-                            describe_migrated_errors(&migrated_error, &serialized)
-                        ))
-                    })
-                }
+    let mut config = if migrated == file {
+        parse_document(text, &options).map_err(report_error)
+    } else {
+        let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
+            ConfigurationError::MigrationFailure {
+                error: error.to_string(),
+            }
+        })?;
+        // Diagnostics for the serialized copy would point at lines the operator never wrote, so
+        // any error in it falls back to the supplied text. The fallback still validates that text
+        // in full, so it never accepts an invalid document.
+        match parse_document(&serialized, &options) {
+            Ok(config) => Ok(config),
+            Err(migrated_error) => {
+                tracing::warn!(
+                    "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
+                );
+                parse_document(text, &options).map_err(|error| {
+                    // The file's errors may be ones that migration fixes, so the migrated copy's
+                    // errors are reported too, in case they are the real problem.
+                    ConfigurationError::ApolloConfiguration(format!(
+                        "{}\n\n{}",
+                        report_error(error),
+                        describe_migrated_errors(&migrated_error, &serialized)
+                    ))
+                })
             }
         }
-    };
-    let mut config = if dev_mode {
-        let mut config = super::parse_for_dev_mode(parse)?;
-        config.apply_dev_mode()?;
-        config
-    } else {
-        parse()?
-    };
+    }?;
+    if dev_mode {
+        config.apply_dev_mode();
+    }
+    // `--dev` sets these settings, so they are checked only once it has been applied.
+    config.validate_sandbox_settings()?;
     config.raw_yaml = Some(Arc::from(text));
     Ok(config)
 }

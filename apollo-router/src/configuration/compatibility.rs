@@ -413,28 +413,23 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 
 /// Intentional difference from the previous loader, which fell back to the original document
 /// only when the migrated one failed the schema check. apollo-configuration validates in one call,
-/// so a migrated document rejected by deserialization or cross-field validation falls back too.
-/// Here startup migration 2045 fixes the flat deduplication settings, the migrated copy then
-/// fails cross-field validation, and so does the file as written. The file's cross-field conflict
-/// is reported first, because invalid plugin config is reported after the rest of the
-/// configuration deserializes, and the migrated copy's errors follow it.
+/// so a migrated document rejected after the schema check, here by a plugin's config, falls back
+/// too. Startup migration 2045 fixes the flat deduplication settings, the migrated copy then
+/// fails on the traffic shaping timeout, and so does the file as written.
 #[test]
-fn migrated_document_failing_cross_field_validation_falls_back_to_the_file() {
+fn migrated_document_failing_plugin_config_falls_back_to_the_file() {
     let _guard = tracing_test::dispatcher_guard();
 
     let error = parse(include_str!(
-        "testdata/compat/fallback_after_cross_field_validation.yaml"
+        "testdata/compat/fallback_after_plugin_config_error.yaml"
     ))
-    .expect_err("sandbox and homepage are both enabled")
+    .expect_err("the traffic shaping timeout is invalid")
     .to_string();
 
-    assert!(
-        error.contains("sandbox and homepage cannot be enabled"),
-        "{error}"
-    );
+    assert!(error.contains("apollo.traffic_shaping"), "{error}");
     // Only the operator's file has this comment; the serialized migrated copy has none.
     assert!(
-        error.contains("# Startup migration 2045"),
+        error.contains("# The schema accepts any string here"),
         "the diagnostic should quote the operator's file: {error}"
     );
     tracing_test::logs_assert(|lines| {
@@ -445,6 +440,22 @@ fn migrated_document_failing_cross_field_validation_falls_back_to_the_file() {
             .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
     })
     .unwrap();
+}
+
+/// The sandbox checks run once the document has been parsed, so a migrated document that
+/// enables both sandbox and homepage is still rejected, without falling back.
+#[test]
+fn sandbox_conflicts_are_rejected_after_migration() {
+    let error = parse(
+        "subscription:\n  deduplication:\n    enabled: true\nsandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n",
+    )
+    .expect_err("sandbox and homepage cannot both be enabled");
+    assert!(
+        error
+            .to_string()
+            .contains("sandbox and homepage cannot be enabled"),
+        "{error}"
+    );
 }
 
 /// Exercises the shared crate's custom-validation hook with a synthetic configuration type.

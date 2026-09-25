@@ -1,5 +1,4 @@
 //! Logic for loading configuration in to an object model
-use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
@@ -425,6 +424,7 @@ impl Configuration {
             notify,
         };
 
+        conf.validate_sandbox_settings()?;
         conf.validate()
     }
 }
@@ -476,9 +476,8 @@ impl Configuration {
     /// Applies the `--dev` config. Each value replaces whatever the file set at its path, as in
     /// earlier releases, so `include_subgraph_errors.all: true` also replaces per-subgraph config
     /// under `all`. The retained document is updated too, so licence checks and usage telemetry
-    /// see the values the router runs with. The checks that [`parse_for_dev_mode`] left out run
-    /// once the values are set.
-    pub(crate) fn apply_dev_mode(&mut self) -> Result<(), ConfigurationError> {
+    /// see the values the router runs with.
+    pub(crate) fn apply_dev_mode(&mut self) {
         self.supergraph.introspection = true;
         self.sandbox.enabled = true;
         self.homepage.enabled = false;
@@ -512,11 +511,11 @@ impl Configuration {
             let path: Vec<&str> = path.split('.').collect();
             set_path(document, &path, Value::Bool(value));
         }
-        self.validate_dev_mode_settings()
     }
 
-    /// Checks the settings that `--dev` sets.
-    fn validate_dev_mode_settings(&self) -> Result<(), ConfigurationError> {
+    /// Checks the sandbox, homepage and introspection settings together. `--dev` sets all three,
+    /// so parsing runs this once `--dev` is applied, not while deserializing.
+    pub(crate) fn validate_sandbox_settings(&self) -> Result<(), ConfigurationError> {
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -666,30 +665,13 @@ impl Configuration {
             raw_yaml: None,
         };
 
+        configuration.validate_sandbox_settings()?;
         configuration.validate()
     }
 }
 
-thread_local! {
-    /// Whether the configuration being parsed on this thread gets the `--dev` config afterwards.
-    static DEV_MODE_PARSE: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Runs `parse` for a configuration that gets the `--dev` config afterwards. The checks on
-/// settings that `--dev` sets are left until [`Configuration::apply_dev_mode`], as `--dev` would
-/// otherwise fix a file those checks reject.
-pub(crate) fn parse_for_dev_mode<T>(parse: impl FnOnce() -> T) -> T {
-    let previous = DEV_MODE_PARSE.replace(true);
-    let parsed = parse();
-    DEV_MODE_PARSE.set(previous);
-    parsed
-}
-
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
-        if !DEV_MODE_PARSE.get() {
-            self.validate_dev_mode_settings()?;
-        }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "invalid 'server.graphql_path' configuration",
