@@ -120,6 +120,9 @@ impl From<SchemaRootKind> for String {
 pub enum UnsupportedFeatureKind {
     #[strum(to_string = "alias")]
     Alias,
+    /// GraphQL Federation source schemas planned by a planner that cannot call lookups.
+    #[strum(to_string = "source schema")]
+    SourceSchema,
 }
 
 /// Modeled after `SubgraphLocation` defined in `apollo_composition`, so this struct can be

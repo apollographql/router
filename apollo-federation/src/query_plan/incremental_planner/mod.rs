@@ -260,6 +260,7 @@ fn run_bulb_and_finalize(
         // generate_fragments_unchecked; unit tests flip this flag to
         // exercise the validating path.
         skip_validation: true,
+        lookup_index: &parameters.lookup_index,
     };
     let (plan, cost) = result
         .graph

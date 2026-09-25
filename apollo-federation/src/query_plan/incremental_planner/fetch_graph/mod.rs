@@ -2,6 +2,7 @@
 //! entity inputs riding those edges, built incrementally during BULB
 //! search with checkpoint / undo-log rollback.
 
+pub(crate) mod lookup_builder;
 pub(crate) mod plan_builder;
 pub(crate) mod selection_builder;
 

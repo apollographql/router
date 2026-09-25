@@ -20,6 +20,7 @@ use crate::internal_error;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::spec_definition::SpecDefinition;
 use crate::query_plan::requires_selection;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -228,6 +229,55 @@ fn collect_require_condition(
                 supergraph_schema,
                 parent_type.clone(),
                 requires_application.fields,
+            )?;
+            result.merge_with(&rs.add_boolean_conditions(variant.boolean_clause()))?;
+        }
+        // GraphQL Federation `@require` arguments: the argument is only in the subgraph schema.
+        let Some(require_name) = SpecDefinition::directive_name_in_schema(
+            federation_spec_definition,
+            subgraph_schema,
+            &crate::link::federation_spec_definition::FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC,
+        )
+        .filter(|name| {
+            subgraph_schema
+                .schema()
+                .directive_definitions
+                .contains_key(name)
+        }) else {
+            continue;
+        };
+        let Some(subgraph_field) = crate::schema::field_selection_map::validate::field_in_schema(
+            subgraph_schema.schema(),
+            parent_type,
+            &field_def.name,
+        ) else {
+            continue;
+        };
+        for argument in &subgraph_field.arguments {
+            let Some(map) = argument
+                .directives
+                .get(&require_name)
+                .and_then(|d| d.specified_argument_by_name("field"))
+                .and_then(|v| v.as_str())
+                .and_then(|text| crate::schema::field_selection_map::parse(text).ok())
+            else {
+                continue;
+            };
+            let mut tree = crate::schema::field_selection_map::value::SelectionTree::default();
+            for (_, selection) in crate::schema::field_selection_map::value::selections_for_type(
+                &map,
+                supergraph_schema.schema(),
+                parent_type,
+            ) {
+                tree.merge(&selection);
+            }
+            if tree.is_empty() {
+                continue;
+            }
+            let rs = compute_response_shape_for_field_set(
+                supergraph_schema,
+                parent_type.clone(),
+                &tree.to_string(),
             )?;
             result.merge_with(&rs.add_boolean_conditions(variant.boolean_clause()))?;
         }

@@ -10,6 +10,7 @@ use crate::query_plan::query_planner::QueryPlanningStatistics;
 
 pub(crate) mod conditions;
 pub(crate) mod display;
+pub mod entity_lookup;
 pub(crate) mod fetch_dependency_graph;
 pub(crate) mod fetch_dependency_graph_processor;
 pub mod generate;
@@ -112,6 +113,11 @@ pub struct FetchNode {
     /// an argument to a resolver. Note value setters are currently unused here, but may be used in
     /// the future.
     pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
+    /// Set for an entity fetch into a GraphQL Federation source schema: the operation calls a
+    /// `@lookup` field once per entity rather than `_entities` once for all of them.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity_lookup: Option<Arc<entity_lookup::EntityLookup>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

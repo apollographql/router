@@ -2903,6 +2903,7 @@ fn plan_from_subgraph_root(
             &Default::default(),
         ),
         connector_index: Default::default(),
+        lookup_index: Default::default(),
         check_for_cooperative_cancellation: None,
         disabled_subgraphs: Default::default(),
         client_labels: Default::default(),

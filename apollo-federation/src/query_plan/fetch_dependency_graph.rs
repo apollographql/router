@@ -3028,6 +3028,7 @@ impl FetchDependencyGraphNode {
                 .cloned()
                 .map(|r| Arc::new(r.into()))
                 .collect(),
+            entity_lookup: None,
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {

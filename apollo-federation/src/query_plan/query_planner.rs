@@ -340,6 +340,7 @@ pub struct QueryPlanner {
     /// construction so the incremental planner can route fields to connectors
     /// without expanding them into virtual subgraphs.
     connector_index: Arc<crate::connectors::index::ConnectorIndex>,
+    lookup_index: Arc<crate::composite_schemas::lookup_index::LookupIndex>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
@@ -454,6 +455,26 @@ impl QueryPlanner {
             connectors_by_subgraph,
         )?);
 
+        let lookup_index = Arc::new(
+            crate::composite_schemas::lookup_index::LookupIndex::from_subgraphs(
+                query_graph.subgraph_schemas(),
+            )?,
+        );
+        // Entity fetches into a GraphQL Federation source schema must call its lookups; only the
+        // incremental planner does that (the legacy planner would emit `_entities` fetches the
+        // subgraph cannot answer).
+        if !lookup_index.is_empty() && !config.uses_incremental_planner() {
+            return Err(SingleFederationError::UnsupportedFeature {
+                message: "This supergraph includes GraphQL Federation source schemas \
+                    (subgraphs resolving entities through @lookup fields), which only the \
+                    incremental query planner supports. Enable it with \
+                    `supergraph.query_planning.incremental_planner.enabled: true`."
+                    .to_owned(),
+                kind: crate::error::UnsupportedFeatureKind::SourceSchema,
+            }
+            .into());
+        }
+
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
@@ -462,6 +483,7 @@ impl QueryPlanner {
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
             connector_index,
+            lookup_index,
         })
     }
 
@@ -583,6 +605,7 @@ impl QueryPlanner {
                 &IndexSet::from_iter(options.override_conditions),
             ),
             connector_index: self.connector_index.clone(),
+            lookup_index: self.lookup_index.clone(),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
