@@ -671,14 +671,15 @@ impl Checker<'_> {
             };
             let mut demanded = to_requires_field_set(&key_selections);
             demanded.extend(requires_field_set.iter().cloned());
-            if !condition_matches_requirement(
+            if let Err(mismatch) = condition_matches_requirement(
                 self.supergraph_schema,
                 std::slice::from_ref(&require_item),
                 &demanded.iter().collect::<Vec<_>>(),
             ) {
                 unmatched.push(format!(
-                    "  @key({}): the entry does not declare what the subgraph demands",
-                    key.fields
+                    "  @key({}): the entry does not declare what the subgraph demands:\n{}",
+                    key.fields,
+                    indent(&mismatch.to_string())
                 ));
                 continue;
             }

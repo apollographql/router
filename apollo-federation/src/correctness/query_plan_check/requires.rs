@@ -10,6 +10,11 @@
 //! The model carries an explicit fuel here, one unit per level, purely to satisfy Lean's
 //! termination checker — its own notes say "an implementation should simply loop". This loops.
 //!
+//! The model answers with a `Bool`, which states the property and says nothing about a failure.
+//! [`RequirementMismatch`] is the missing half, the way `query_compare::error` is for
+//! `includesBool`: the response keys descended into, and which of the level's checks failed at
+//! the end of them.
+//!
 //! # What a subgraph demands
 //!
 //! [`key_half`] and [`requires_half`] together are the model's `entityFetchRequirement`:
@@ -28,6 +33,8 @@
 //! syntactically and lets the comparison reject such a pair; parsing is how this port builds a
 //! requirement at all, so failing to parse is that same rejection, reported as an `Err` the caller
 //! reads as a non-match.
+
+use std::fmt;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -216,6 +223,115 @@ fn types_covered(narrower: &GroundTypes, wider: &GroundTypes) -> bool {
     }
 }
 
+//==================================================================================================
+// Why an entry does not declare what a subgraph demands
+
+/// Where the two field sets part company, and what parted them.
+///
+/// The model decides this comparison with a `Bool`, which is enough to state the property and not
+/// enough to act on a failure — the same gap `query_compare::error` closes for `includesBool`.
+/// [`path`](Self::path) is the descent by response key, outermost first; [`reason`](Self::reason)
+/// is what failed at the end of it.
+#[derive(Debug)]
+pub(super) struct RequirementMismatch {
+    path: Vec<Name>,
+    reason: RequirementReason,
+}
+
+/// What failed at the end of a [`RequirementMismatch`]'s path. One variant per check
+/// `condition_matches_requirement_at` makes at a key.
+#[derive(Debug)]
+enum RequirementReason {
+    /// The subgraph demands this key and the entry does not declare it.
+    NotDeclared { key: Name },
+
+    /// The entry declares this key and the subgraph does not demand it. A `requires` entry is
+    /// matched to a `@key` exactly, so declaring more is as much a mismatch as declaring less.
+    NotDemanded { key: Name },
+
+    /// One side selects the key with nothing under it and the other selects into it.
+    LeafDisagreement { key: Name, leaf_in_entry: bool },
+
+    /// The entry reaches the key at object types the demand does not, so it asks for the field
+    /// somewhere the subgraph never promised it.
+    TypesNotCovered {
+        key: Name,
+        entry: GroundTypes,
+        demand: GroundTypes,
+    },
+}
+
+/// The object types a side reaches a key at, as the reasons above print them.
+fn render_types(types: &GroundTypes) -> String {
+    match types {
+        None => "every type".to_string(),
+        Some(names) if names.is_empty() => "no type".to_string(),
+        Some(names) => format!(
+            "{{{}}}",
+            names
+                .iter()
+                .map(Name::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+impl fmt::Display for RequirementMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for key in &self.path {
+            writeln!(f, "under response key: {key}")?;
+        }
+        write!(f, "--> ")?;
+        match &self.reason {
+            RequirementReason::NotDeclared { key } => {
+                write!(
+                    f,
+                    "the subgraph demands `{key}`, which the entry does not declare"
+                )
+            }
+            RequirementReason::NotDemanded { key } => {
+                write!(
+                    f,
+                    "the entry declares `{key}`, which the subgraph does not demand"
+                )
+            }
+            RequirementReason::LeafDisagreement { key, leaf_in_entry } => {
+                let (bare, nested) = if *leaf_in_entry {
+                    ("the entry", "the subgraph")
+                } else {
+                    ("the subgraph", "the entry")
+                };
+                write!(
+                    f,
+                    "`{key}` is selected bare by {bare} and selected into by {nested}"
+                )
+            }
+            RequirementReason::TypesNotCovered { key, entry, demand } => write!(
+                f,
+                "the entry reaches `{key}` at {}, which the subgraph's {} does not cover",
+                render_types(entry),
+                render_types(demand)
+            ),
+        }
+    }
+}
+
+impl RequirementMismatch {
+    fn at(reason: RequirementReason) -> RequirementMismatch {
+        RequirementMismatch {
+            path: Vec::new(),
+            reason,
+        }
+    }
+
+    /// Records that this failure was found under `key`, one level further out.
+    fn under(mut self, key: &Name) -> RequirementMismatch {
+        self.path.insert(0, key.clone());
+        self
+    }
+}
+
 /// Does what a subgraph demands match what the fetch declares it requires?
 ///
 /// At each level both must reach the same response keys, agree on which are leaves, and the
@@ -224,7 +340,7 @@ pub(super) fn condition_matches_requirement(
     schema: &ValidFederationSchema,
     requirement: &[&requires_selection::Selection],
     condition: &[&requires_selection::Selection],
-) -> bool {
+) -> Result<(), RequirementMismatch> {
     condition_matches_requirement_at(schema, &None, requirement, condition)
 }
 
@@ -235,7 +351,7 @@ fn condition_matches_requirement_at(
     reached_at: &GroundTypes,
     requirement: &[&requires_selection::Selection],
     condition: &[&requires_selection::Selection],
-) -> bool {
+) -> Result<(), RequirementMismatch> {
     let mut requirement_level = Vec::new();
     level_entries(schema, reached_at, requirement, &mut requirement_level);
     let mut condition_level = Vec::new();
@@ -248,31 +364,53 @@ fn condition_matches_requirement_at(
         }
     }
 
-    keys.iter().all(|key| {
+    for key in &keys {
         let in_requirement = requirement_level.iter().any(|entry| entry.key == *key);
         let in_condition = condition_level.iter().any(|entry| entry.key == *key);
-        in_requirement == in_condition
-            && reaches_leaf(key, &requirement_level) == reaches_leaf(key, &condition_level)
-            && types_covered(
-                &reached_types(key, &requirement_level),
-                &reached_types(key, &condition_level),
-            )
-            // Terminates because the merge is strictly smaller: the key was reached by one of
-            // the two levels. This is what the model needs fuel for.
-            && condition_matches_requirement_at(
-                schema,
-                &child_types(
-                    schema,
-                    key,
-                    &union_types(
-                        reached_types(key, &requirement_level),
-                        reached_types(key, &condition_level),
-                    ),
-                ),
-                &selected_under(key, &requirement_level),
-                &selected_under(key, &condition_level),
-            )
-    })
+        match (in_requirement, in_condition) {
+            (false, true) => {
+                return Err(RequirementMismatch::at(RequirementReason::NotDeclared {
+                    key: key.clone(),
+                }));
+            }
+            (true, false) => {
+                return Err(RequirementMismatch::at(RequirementReason::NotDemanded {
+                    key: key.clone(),
+                }));
+            }
+            _ => {}
+        }
+        let leaf_in_entry = reaches_leaf(key, &requirement_level);
+        if leaf_in_entry != reaches_leaf(key, &condition_level) {
+            return Err(RequirementMismatch::at(
+                RequirementReason::LeafDisagreement {
+                    key: key.clone(),
+                    leaf_in_entry,
+                },
+            ));
+        }
+        let entry_types = reached_types(key, &requirement_level);
+        let demand_types = reached_types(key, &condition_level);
+        if !types_covered(&entry_types, &demand_types) {
+            return Err(RequirementMismatch::at(
+                RequirementReason::TypesNotCovered {
+                    key: key.clone(),
+                    entry: entry_types,
+                    demand: demand_types,
+                },
+            ));
+        }
+        // Terminates because the merge is strictly smaller: the key was reached by one of the
+        // two levels. This is what the model needs fuel for.
+        condition_matches_requirement_at(
+            schema,
+            &child_types(schema, key, &union_types(entry_types, demand_types)),
+            &selected_under(key, &requirement_level),
+            &selected_under(key, &condition_level),
+        )
+        .map_err(|mismatch| mismatch.under(key))?;
+    }
+    Ok(())
 }
 
 /// A selection read back as a field-set selection: its response key becomes the name, and its
@@ -389,4 +527,151 @@ fn inline_fragment(type_condition: Name, selections: Vec<Selection>) -> Selectio
         directives: Default::default(),
         selection_set,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use apollo_compiler::schema::Schema;
+
+    use super::*;
+
+    /// `Review` is an object and `reviewsForLocation` returns `[Review]!`, so `... on Review`
+    /// written there narrows nothing -- the shape Apollo's own FlyBy demo `@requires` takes.
+    /// `Node` is the abstract counterpart, where a condition can be vacuous or genuine.
+    const SCHEMA: &str = r#"
+        type Query { locations: [Location!]!, things: [Node!]! }
+        type Location { id: ID!, reviewsForLocation: [Review]!, reviews: [Review!]! }
+        type Review { id: ID!, rating: Int }
+        interface Node { id: ID! }
+        type Thing implements Node { id: ID! }
+        type Other implements Node { id: ID! }
+    "#;
+
+    fn schema() -> ValidFederationSchema {
+        let schema = Schema::parse_and_validate(SCHEMA, "schema.graphql").unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    /// A `requires` entry, written the way `key_half` and `requires_half` build one: under the
+    /// entity type's own condition, which is what puts level 0 at a known position.
+    fn field_set(schema: &ValidFederationSchema, text: &str) -> Vec<requires_selection::Selection> {
+        let text = format!("... on Query {{ {text} }}");
+        let parsed = super::super::subgraph::parse_field_set(schema, &name!("Query"), &text)
+            .expect("valid field set");
+        to_requires_field_set(&parsed)
+    }
+
+    /// Does the subgraph's demand match the entry? `Err` renders as it would inside a rejection.
+    fn compare(entry: &str, demand: &str) -> Result<(), String> {
+        let schema = schema();
+        let entry = field_set(&schema, entry);
+        let demand = field_set(&schema, demand);
+        condition_matches_requirement(
+            &schema,
+            &entry.iter().collect::<Vec<_>>(),
+            &demand.iter().collect::<Vec<_>>(),
+        )
+        .map_err(|mismatch| mismatch.to_string())
+    }
+
+    //==============================================================================================
+    // Grounding a type condition against its position
+
+    /// `... on Review` inside a field of type `[Review]!` admits everything the position can
+    /// hold, so it selects what its body selects. Reading it as a narrowing rejected a plan the
+    /// router executes correctly.
+    #[test]
+    fn a_vacuous_condition_in_the_demand_is_matched() {
+        compare(
+            "locations { reviewsForLocation { id rating } }",
+            "locations { reviewsForLocation { ... on Review { id rating } } }",
+        )
+        .unwrap();
+    }
+
+    /// The same at an abstract position: a condition naming the whole interface narrows nothing.
+    #[test]
+    fn a_condition_naming_the_position_itself_is_matched() {
+        compare("things { id }", "things { ... on Node { id } }").unwrap();
+    }
+
+    /// A condition that really does narrow still fails, in the same direction as before.
+    #[test]
+    fn a_real_narrowing_in_the_demand_is_not_matched() {
+        assert_eq!(
+            compare("things { id }", "things { ... on Thing { id } }").unwrap_err(),
+            "under response key: things\n\
+             --> the entry reaches `id` at {Other, Thing}, which the subgraph's {Thing} does not cover"
+        );
+    }
+
+    /// An entry narrower than the demand is matched: asking for less than the subgraph promises
+    /// at a position is not a mismatch.
+    #[test]
+    fn a_narrower_entry_is_matched() {
+        compare("things { ... on Thing { id } }", "things { id }").unwrap();
+    }
+
+    //==============================================================================================
+    // What a mismatch says
+
+    #[test]
+    fn a_key_the_entry_omits_is_named_with_its_path() {
+        assert_eq!(
+            compare(
+                "locations { reviewsForLocation { id } }",
+                "locations { reviewsForLocation { id rating } }",
+            )
+            .unwrap_err(),
+            "under response key: locations\n\
+             under response key: reviewsForLocation\n\
+             --> the subgraph demands `rating`, which the entry does not declare"
+        );
+    }
+
+    /// An entry is matched to a `@key` exactly, so declaring more is as much a mismatch as
+    /// declaring less.
+    #[test]
+    fn a_key_the_subgraph_does_not_demand_is_named() {
+        assert_eq!(
+            compare(
+                "locations { reviewsForLocation { id rating } }",
+                "locations { reviewsForLocation { id } }",
+            )
+            .unwrap_err(),
+            "under response key: locations\n\
+             under response key: reviewsForLocation\n\
+             --> the entry declares `rating`, which the subgraph does not demand"
+        );
+    }
+
+    /// Entries and cases are matched many-to-many, so the comparison is asked about pairs no
+    /// validated document could produce -- one selecting a key bare where the other selects into
+    /// it. Built by hand for that reason.
+    #[test]
+    fn selecting_a_key_bare_against_selecting_into_it_is_named() {
+        fn field(
+            name: Name,
+            selections: Vec<requires_selection::Selection>,
+        ) -> requires_selection::Selection {
+            requires_selection::Selection::Field(requires_selection::Field {
+                alias: None,
+                name,
+                selections,
+            })
+        }
+        let entry = [field(name!("x"), vec![])];
+        let demand = [field(name!("x"), vec![field(name!("y"), vec![])])];
+        let mismatch = condition_matches_requirement(
+            &schema(),
+            &entry.iter().collect::<Vec<_>>(),
+            &demand.iter().collect::<Vec<_>>(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            mismatch.to_string(),
+            "--> `x` is selected bare by the entry and selected into by the subgraph"
+        );
+    }
 }
