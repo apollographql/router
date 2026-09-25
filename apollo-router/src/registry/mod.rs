@@ -742,12 +742,13 @@ fn stream_license_from_oci(
                             if !(graph_manifest_state == GraphManifestState::MissingAnnotation
                                 && entitlement_id.is_empty())
                                 // Send the signal, and if `send()` returns an error, log it
-                                && let Err(e) = sender.send(Ok(None)).await {
-                                    tracing::debug!(
-                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
-                                    );
-                                    break;
-                                }
+                                && let Err(e) = sender.send(Ok(None)).await
+                            {
+                                tracing::debug!(
+                                    "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                );
+                                break;
+                            }
                             graph_manifest_state = GraphManifestState::MissingAnnotation;
                         }
                         // Error fetching the entitlement id: transient (network, auth, 5xx),
