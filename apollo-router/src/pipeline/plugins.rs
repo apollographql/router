@@ -40,17 +40,7 @@ pub(crate) async fn create_plugins(
     license: Arc<LicenseState>,
     previous_config: Option<Arc<Configuration>>,
 ) -> Result<Plugins, BoxError> {
-    // The shared parser reports invalid plugin settings. A configuration deserialized directly
-    // still carries them, and no plugin is built from it.
-    let invalid_settings: Vec<ConfigurationError> = configuration
-        .plugin_configs
-        .errors()
-        .iter()
-        .map(|error| error.to_configuration_error())
-        .collect();
-    if !invalid_settings.is_empty() {
-        return Err(configuration_errors(&invalid_settings));
-    }
+    check_plugin_configs(configuration)?;
 
     let extra = extra_plugins.unwrap_or_default();
     let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
@@ -379,6 +369,24 @@ impl PluginRegistrar<'_> {
             Ok(self.plugin_instances)
         }
     }
+}
+
+/// Fails if any plugin's config could not be deserialized. Configuration parsing rejects such a
+/// configuration when it loads, but one deserialized directly with serde still carries the errors.
+pub(crate) fn check_plugin_configs(configuration: &Configuration) -> Result<(), BoxError> {
+    let errors: Vec<ConfigurationError> = configuration
+        .plugin_configs
+        .errors()
+        .iter()
+        .map(|error| error.to_configuration_error())
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
+    }
+    for error in &errors {
+        tracing::error!("{:#}", error);
+    }
+    Err(configuration_errors(&errors))
 }
 
 /// Combines configuration errors into one error that lists each of them.
