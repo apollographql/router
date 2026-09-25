@@ -601,8 +601,8 @@ connector:
             buff.to_string().trim().to_string()
         }
 
-        #[tokio::test]
-        async fn test_json_logging_valuable_is_nested_json() {
+        #[test]
+        fn test_json_logging_valuable_is_nested_json() {
             let log = access_log();
             let raw = json_log_line(|| {
                 info!(log = ::tracing::field::valuable(&log), "request finished");
@@ -621,8 +621,8 @@ connector:
             );
         }
 
-        #[tokio::test]
-        async fn test_json_logging_valuable_keeps_empty_message_deduplication() {
+        #[test]
+        fn test_json_logging_valuable_keeps_empty_message_deduplication() {
             // `otel_error!` style: an explicit `message` field plus a trailing empty format string.
             let log = access_log();
             let raw = json_log_line(|| {
@@ -644,8 +644,8 @@ connector:
             );
         }
 
-        #[tokio::test]
-        async fn test_json_logging_valuable_unserializable_falls_back_to_debug() {
+        #[test]
+        fn test_json_logging_valuable_unserializable_falls_back_to_debug() {
             // JSON object keys must be strings, so a map keyed by a list cannot be converted.
             let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
             let raw = json_log_line(|| {
