@@ -683,8 +683,6 @@ impl From<InstrumentData> for Metrics {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use rust_embed::RustEmbed;
     use serde_json::json;
 
@@ -724,6 +722,8 @@ mod test {
 
     /// Production reads usage gauges from the document that parsing retains. For every fixture,
     /// that document must drive the same gauges as the document startup migrates the file to.
+    /// Parsing uses no environment overrides, such as `APOLLO_USAGE_REPORTING_INGRESS_URL`, so the
+    /// shell running the test cannot change either side.
     #[test]
     fn parsed_configuration_keeps_usage_telemetry_meaning() {
         for file_name in Asset::iter() {
@@ -735,8 +735,12 @@ mod test {
                 crate::configuration::upgrade::UpgradeMode::current_minor(),
             )
             .expect("the fixture migrates");
-            let parsed = crate::Configuration::from_str(input)
-                .unwrap_or_else(|error| panic!("{file_name}: {error}"));
+            let parsed = crate::configuration::parse_configuration(
+                input,
+                crate::configuration::Expansion::builder().build(),
+                crate::configuration::Migration::WithinMajor,
+            )
+            .unwrap_or_else(|error| panic!("{file_name}: {error}"));
 
             let mut from_document = InstrumentData::default();
             from_document.populate_config_instruments(&migrated);
