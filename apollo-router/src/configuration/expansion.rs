@@ -24,17 +24,10 @@ pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
     override_configs: Vec<Override>,
-    /// Values that replace whatever the document sets, such as the `--dev` defaults.
-    replacements: Vec<Replacement>,
+    /// Applies the `--dev` config after parsing.
+    dev_mode: Option<bool>,
     #[cfg(test)]
     mocked_env_vars: HashMap<String, String>,
-}
-
-/// A value set at a fixed path, replacing the document's own value there.
-#[derive(Clone)]
-pub(crate) struct Replacement {
-    config_path: &'static str,
-    value: Value,
 }
 
 #[derive(buildstructor::Builder, Clone)]
@@ -129,15 +122,12 @@ impl Expansion {
             .map(|mode| mode.trim().to_string())
             .collect::<Vec<String>>();
 
-        let dev_mode_defaults = if crate::executable::APOLLO_ROUTER_DEV_MODE.load(Ordering::Relaxed)
-        {
+        let dev_mode = crate::executable::APOLLO_ROUTER_DEV_MODE.load(Ordering::Relaxed);
+        if dev_mode {
             tracing::info!(
                 "Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)"
             );
-            dev_mode_defaults()
-        } else {
-            Vec::new()
-        };
+        }
 
         let builder = Expansion::builder();
         #[cfg(test)]
@@ -166,7 +156,7 @@ impl Expansion {
                     .build(),
             )
             .override_config(listen_override)
-            .replacements(dev_mode_defaults)
+            .dev_mode(dev_mode)
             .build())
     }
 
@@ -185,27 +175,6 @@ impl Expansion {
             Err(VarError::NotUnicode(_)) => Err(ConfigurationError::InvalidExpansionModeConfig),
         }
     }
-}
-
-/// The `--dev` settings. They replace the document's own values, as earlier releases did, so
-/// `include_subgraph_errors.all: true` also replaces per-field settings under `all`.
-fn dev_mode_defaults() -> Vec<Replacement> {
-    [
-        "expose_query_plan",
-        "include_subgraph_errors.all",
-        "telemetry.exporters.tracing.response_trace_id.enabled",
-        "supergraph.introspection",
-        "sandbox.enabled",
-        "connectors.debug_extensions",
-    ]
-    .into_iter()
-    .map(|path| (path, true))
-    .chain([("homepage.enabled", false)])
-    .map(|(config_path, value)| Replacement {
-        config_path,
-        value: Value::Bool(value),
-    })
-    .collect()
 }
 
 impl Expansion {
@@ -253,13 +222,8 @@ impl From<Expansion> for ExternalValues {
                 _ => external,
             };
         }
-        let external = expansion
-            .replacements
-            .iter()
-            .fold(external, |external, replacement| {
-                external.replace(replacement.config_path, replacement.value.clone())
-            });
         external
+            .dev_mode(expansion.dev_mode.unwrap_or_default())
             .add_variables(UnsupportedMode { supported_modes })
             .inject(injections)
     }
@@ -305,7 +269,6 @@ mod test {
     use crate::configuration::expansion::FlagValue;
     use crate::configuration::expansion::Override;
     use crate::configuration::expansion::ValueType;
-    use crate::configuration::expansion::dev_mode_defaults;
 
     /// Expands `yaml` with `expansion`'s providers and overrides, without Router's schema.
     fn expand(expansion: &Expansion, yaml: &str) -> Value {
@@ -520,18 +483,38 @@ mod test {
         })
     }
 
+    /// `--dev` config is applied after migration, so it wins over a legacy key that migration
+    /// moves onto the same path, and it reaches the typed config, the plugin config and the
+    /// retained document alike.
     #[test]
-    fn test_dev_mode() {
-        let expansion = Expansion::builder()
-            .replacements(dev_mode_defaults())
-            .build();
-        let value = expand(
-            &expansion,
-            "homepage:\n  enabled: false\n  some_other_config: should remain\n",
+    fn dev_mode_applies_after_migration() {
+        let expansion = Expansion::builder().dev_mode(true).build();
+
+        let config = crate::configuration::parse_configuration(
+            "cors:\n  origins:\n    - https://example.com\nexpose_query_plan: false\nhomepage:\n  enabled: true\n",
+            expansion,
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect("the migrated document is valid");
+
+        assert!(config.supergraph.introspection);
+        assert!(config.sandbox.enabled);
+        assert!(!config.homepage.enabled);
+        assert!(config.plugin_config("apollo.expose_query_plan").is_some());
+        assert_eq!(config.apollo_plugins.plugins["expose_query_plan"], true);
+        let document = config.validated_yaml.expect("the retained document");
+        assert_eq!(document["expose_query_plan"], true);
+        assert_eq!(document["sandbox"]["enabled"], true);
+        assert_eq!(document["homepage"]["enabled"], false);
+        assert_eq!(document["supergraph"]["introspection"], true);
+        assert_eq!(
+            document["telemetry"]["exporters"]["tracing"]["response_trace_id"]["enabled"],
+            true
         );
-        insta::with_settings!({sort_maps => true}, {
-            assert_yaml_snapshot!(value);
-        })
+        assert_eq!(
+            document["cors"]["policies"][0]["origins"][0],
+            "https://example.com"
+        );
     }
 
     #[test]
@@ -562,16 +545,41 @@ plain: "no dollars here"
         })
     }
 
+    /// `--dev` sets the sandbox, homepage and introspection settings, so a file whose own values
+    /// for them conflict still loads with it, as in earlier releases, and fails without it.
+    #[test]
+    fn dev_mode_fixes_sandbox_settings_the_file_conflicts_on() {
+        let text = "sandbox:\n  enabled: true\n";
+
+        let config = crate::configuration::parse_configuration(
+            text,
+            Expansion::builder().dev_mode(true).build(),
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect("--dev disables the homepage and enables introspection");
+        assert!(config.sandbox.enabled);
+
+        let error = crate::configuration::parse_configuration(
+            text,
+            Expansion::builder().build(),
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect_err("the homepage is enabled by default")
+        .to_string();
+        assert!(
+            error.contains("sandbox and homepage cannot be enabled"),
+            "{error}"
+        );
+    }
+
     /// `--dev` replaces a section that has its own settings, as earlier releases did, instead of
     /// refusing to override it.
     #[test]
     fn dev_mode_replaces_a_section_with_settings() {
-        let expansion = Expansion::builder()
-            .replacements(dev_mode_defaults())
-            .build();
+        let expansion = Expansion::builder().dev_mode(true).build();
 
         let config = crate::configuration::parse_configuration(
-            "include_subgraph_errors:\n  all:\n    redact_message: true\n",
+            "include_subgraph_errors:\n  all:\n    allow_extensions_keys: [code]\n    redact_message: true\n",
             expansion,
             crate::configuration::Migration::WithinMajor,
         )
@@ -583,13 +591,11 @@ plain: "no dollars here"
         );
     }
 
-    /// `--dev` changes the document, but diagnostics still quote the operator's file, so a
+    /// `--dev` config is applied after parsing, so diagnostics quote the operator's file: a
     /// literal anchored into a secret field stays redacted and locations match the file.
     #[test]
     fn dev_mode_diagnostics_quote_the_file_with_anchors_redacted() {
-        let expansion = Expansion::builder()
-            .replacements(dev_mode_defaults())
-            .build();
+        let expansion = Expansion::builder().dev_mode(true).build();
         let text = "# operator comment\napq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        namespace: &pw anchored-secret-value\n        unexpected: true\n        password: *pw\n"; // gitleaks:allow
 
         let error = crate::configuration::parse_configuration(

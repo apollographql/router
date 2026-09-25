@@ -63,7 +63,7 @@ pub(crate) enum Migration {
 pub(crate) struct ExternalValues {
     variables: Vec<Box<dyn VariableProvider>>,
     injections: Vec<Injection>,
-    replacements: Vec<(Vec<String>, Value)>,
+    dev_mode: bool,
 }
 
 impl ExternalValues {
@@ -79,16 +79,10 @@ impl ExternalValues {
         self
     }
 
-    /// Sets `value` at the dotted `path` before parsing, replacing whatever the document has
-    /// there. Unlike an injection, this also replaces a section that has settings in it.
-    pub(crate) fn replace(mut self, path: &str, value: Value) -> Self {
-        let path = path.split('.').map(str::to_string).collect();
-        self.replacements.push((path, value));
+    /// Applies the `--dev` config once the document has been migrated and parsed.
+    pub(crate) fn dev_mode(mut self, dev_mode: bool) -> Self {
+        self.dev_mode = dev_mode;
         self
-    }
-
-    fn apply_replacements(&self, document: &mut Value) {
-        replace_all(&self.replacements, document);
     }
 
     /// Adds the providers and injections to `options`.
@@ -108,35 +102,11 @@ impl ExternalValues {
     /// documents that are not router configuration.
     #[cfg(test)]
     pub(crate) fn expand_without_schema(self, text: &str) -> Result<Value, ConfigError> {
-        let replacements = self.replacements.clone();
-        let ExpandedDocument(mut document) = self
+        let ExpandedDocument(document) = self
             .add_to(ParseYamlOptions::default())
             .parse::<ExpandedDocument>(text)?;
-        replace_all(&replacements, &mut document);
         Ok(document)
     }
-}
-
-fn replace_all(replacements: &[(Vec<String>, Value)], document: &mut Value) {
-    for (path, value) in replacements {
-        replace_at(document, path, value.clone());
-    }
-}
-
-fn replace_at(document: &mut Value, path: &[String], value: Value) {
-    let Some((key, rest)) = path.split_first() else {
-        *document = value;
-        return;
-    };
-    if !document.is_object() {
-        *document = Value::Object(Default::default());
-    }
-    let child = document
-        .as_object_mut()
-        .expect("replaced with an object above")
-        .entry(key.clone())
-        .or_insert(Value::Null);
-    replace_at(child, rest, value);
 }
 
 /// Consults each provider in order, as the shared parser does with separately added providers,
@@ -172,29 +142,19 @@ struct ExpandedDocument(Value);
 impl apollo_configuration::Validate for ExpandedDocument {}
 impl apollo_configuration::Configuration for ExpandedDocument {}
 
-/// Parses `text` into a configuration whose `validated_yaml` holds the expanded document that
-/// configuration-usage telemetry and licence checks read, and whose `raw_yaml` is `text`.
-/// Typed settings and the retained document come from two shared-parser passes with Router's
-/// schema and the same external values. Each expansion reference is resolved once and reused,
-/// so both passes see the same value.
+/// Parses `text` into a configuration. `validated_yaml` keeps the expanded document for
+/// licence checks and usage telemetry, and `raw_yaml` keeps `text`.
 ///
-/// Replacements, such as the `--dev` defaults, are applied to the document before migration.
+/// Migration can change the document, which is then parsed as a serialized copy. If that copy
+/// fails, `text` is parsed as written instead, so diagnostics point at the operator's lines.
+/// `--dev` config is applied last, so migration cannot overwrite it.
 ///
-/// A document that needs no changes is parsed as written, so diagnostics point at the user's
-/// lines and YAML aliases keep the shared parser's anchor redaction. A changed document is
-/// serialized and parsed instead. If the shared parser rejects the migrated document, whether in
-/// expansion, overrides, schema validation, deserialization or cross-field validation, the
-/// unmigrated document is parsed in its place, as earlier releases did after a schema failure.
-/// If replacements changed the document, errors are reported from the operator's file instead of
-/// the serialized copy, so YAML aliases keep the shared parser's anchor redaction.
-///
-/// Known limitation: an expansion reference anchored on a non-secret field and aliased into a
-/// secret field is redacted only in the secret field. A diagnostic about the anchoring field can
-/// quote the value the reference resolved to.
+/// Known limitation: an expansion anchored on a non-secret field and aliased into a secret
+/// field is redacted only in the secret field.
 ///
 /// # Errors
 /// Returns errors from YAML parsing, migration, expansion, overrides, schema validation,
-/// deserialization, or plugin settings.
+/// deserialization, or plugin config.
 pub(crate) fn parse_configuration(
     text: &str,
     external: impl Into<ExternalValues>,
@@ -210,66 +170,50 @@ pub(crate) fn parse_configuration(
             error: error.to_string(),
         })?
     };
-    let external = external.into();
-    let mut original = file.clone();
-    external.apply_replacements(&mut original);
     let migrated = match migration {
-        Migration::WithinMajor => {
-            upgrade_configuration(&original, true, UpgradeMode::current_minor())?
-        }
+        Migration::WithinMajor => upgrade_configuration(&file, true, UpgradeMode::current_minor())?,
         #[cfg(test)]
-        Migration::None => original.clone(),
+        Migration::None => file.clone(),
     };
+    let external = external.into();
+    let dev_mode = external.dev_mode;
     let options =
         external.add_to(ParseYamlOptions::default().schema(router_config_schema().clone()));
-    let parse = |document: &Value| -> Result<_, ConfigurationError> {
-        if *document == file {
-            return Ok(parse_document(text, &options));
-        }
-        let serialized = serde_yaml::to_string(document).map_err(|error| {
-            ConfigurationError::MigrationFailure {
-                error: error.to_string(),
-            }
-        })?;
-        Ok(parse_document(&serialized, &options))
-    };
 
-    // Diagnostics for the serialized copy would point at lines the operator never wrote, so any
-    // error in it falls back to the supplied text. The fallback still validates that text in
-    // full, so it never accepts an invalid document.
-    let parsed = match parse(&migrated)? {
-        Err(_) if migrated != original => {
-            tracing::warn!(
-                "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
-            );
-            parse(&original)?
-        }
-        parsed => parsed,
-    };
-    // A document changed by replacements, such as the `--dev` defaults, was parsed as a
-    // serialized copy, which drops the file's comments and anchors. Diagnostics quote the
-    // operator's file instead.
-    let parsed = match parsed {
-        Err(_) if original != file => match parse_document(text, &options) {
-            Err(error) => Err(error),
-            Ok(_) => {
-                return Err(ConfigurationError::InvalidConfiguration {
-                    message: "configuration is invalid once the --dev settings are applied",
-                    error:
-                        "the file is valid on its own; check it against the settings --dev enables"
-                            .to_string(),
-                });
+    let parse = || -> Result<Configuration, ConfigurationError> {
+        // Diagnostics for the serialized copy would point at lines the operator never wrote, so
+        // any error in it falls back to the supplied text. The fallback still validates that text
+        // in full, so it never accepts an invalid document.
+        let parsed = if migrated == file {
+            parse_document(text, &options)
+        } else {
+            let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: error.to_string(),
+                }
+            })?;
+            parse_document(&serialized, &options).or_else(|_| {
+                tracing::warn!(
+                    "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
+                );
+                parse_document(text, &options)
+            })
+        };
+        Ok(parsed.inspect_err(|error| {
+            if matches!(error, ConfigError::ValidationError(_)) {
+                tracing::warn!(
+                    "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
+                );
             }
-        },
-        parsed => parsed,
+        })?)
     };
-    let mut config = parsed.inspect_err(|error| {
-        if matches!(error, ConfigError::ValidationError(_)) {
-            tracing::warn!(
-                "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
-            );
-        }
-    })?;
+    let mut config = if dev_mode {
+        let mut config = super::parse_for_dev_mode(parse)?;
+        config.apply_dev_mode()?;
+        config
+    } else {
+        parse()?
+    };
     config.raw_yaml = Some(Arc::from(text));
     Ok(config)
 }

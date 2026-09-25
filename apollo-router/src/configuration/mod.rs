@@ -1,4 +1,5 @@
 //! Logic for loading configuration in to an object model
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::hash::Hash;
@@ -341,6 +342,24 @@ impl<'de> serde::Deserialize<'de> for Configuration {
 
 pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
 
+/// Sets `value` at `path` inside `document`, replacing whatever is there and creating objects
+/// along the way.
+fn set_path(document: &mut Value, path: &[&str], value: Value) {
+    let Some((key, rest)) = path.split_first() else {
+        *document = value;
+        return;
+    };
+    if !document.is_object() {
+        *document = Value::Object(Map::new());
+    }
+    let child = document
+        .as_object_mut()
+        .expect("replaced with an object above")
+        .entry(key.to_string())
+        .or_insert(Value::Null);
+    set_path(child, rest, value);
+}
+
 fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
@@ -438,6 +457,72 @@ impl Configuration {
         self.apollo_plugins
             .plugins
             .insert(name.to_string(), settings());
+        self.reparse_plugin_configs();
+    }
+
+    /// Applies the `--dev` config. Each value replaces whatever the file set at its path, as in
+    /// earlier releases, so `include_subgraph_errors.all: true` also replaces per-subgraph config
+    /// under `all`. The retained document is updated too, so licence checks and usage telemetry
+    /// see the values the router runs with. The checks that [`parse_for_dev_mode`] left out run
+    /// once the values are set.
+    pub(crate) fn apply_dev_mode(&mut self) -> Result<(), ConfigurationError> {
+        self.supergraph.introspection = true;
+        self.sandbox.enabled = true;
+        self.homepage.enabled = false;
+        let plugin_paths = [
+            "expose_query_plan",
+            "include_subgraph_errors.all",
+            "telemetry.exporters.tracing.response_trace_id.enabled",
+            "connectors.debug_extensions",
+        ];
+        for path in plugin_paths {
+            let path: Vec<&str> = path.split('.').collect();
+            let (section, rest) = path.split_first().expect("paths are not empty");
+            let section = self
+                .apollo_plugins
+                .plugins
+                .entry(section.to_string())
+                .or_insert(Value::Null);
+            set_path(section, rest, Value::Bool(true));
+        }
+        self.reparse_plugin_configs();
+
+        let document = self
+            .validated_yaml
+            .get_or_insert_with(|| Value::Object(Map::new()));
+        let paths = plugin_paths.into_iter().map(|path| (path, true)).chain([
+            ("supergraph.introspection", true),
+            ("sandbox.enabled", true),
+            ("homepage.enabled", false),
+        ]);
+        for (path, value) in paths {
+            let path: Vec<&str> = path.split('.').collect();
+            set_path(document, &path, Value::Bool(value));
+        }
+        self.validate_dev_mode_settings()
+    }
+
+    /// Checks the settings that `--dev` sets.
+    fn validate_dev_mode_settings(&self) -> Result<(), ConfigurationError> {
+        // Sandbox and Homepage cannot be both enabled
+        if self.sandbox.enabled && self.homepage.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox and homepage cannot be enabled at the same time",
+                error: "disable the homepage if you want to enable sandbox".to_string(),
+            });
+        }
+        // Sandbox needs Introspection to be enabled
+        if self.sandbox.enabled && !self.supergraph.introspection {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox requires introspection",
+                error: "sandbox needs introspection to be enabled".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Deserializes the plugin config again after the plugin sections have been changed in code.
+    fn reparse_plugin_configs(&mut self) {
         self.plugin_configs = Arc::new(PluginConfigs::parse(
             &self.apollo_plugins.plugins,
             self.plugins.plugins.as_ref().unwrap_or(&Map::new()),
@@ -572,21 +657,25 @@ impl Configuration {
     }
 }
 
+thread_local! {
+    /// Whether the configuration being parsed on this thread gets the `--dev` config afterwards.
+    static DEV_MODE_PARSE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Runs `parse` for a configuration that gets the `--dev` config afterwards. The checks on
+/// settings that `--dev` sets are left until [`Configuration::apply_dev_mode`], as `--dev` would
+/// otherwise fix a file those checks reject.
+pub(crate) fn parse_for_dev_mode<T>(parse: impl FnOnce() -> T) -> T {
+    let previous = DEV_MODE_PARSE.replace(true);
+    let parsed = parse();
+    DEV_MODE_PARSE.set(previous);
+    parsed
+}
+
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
-        // Sandbox and Homepage cannot be both enabled
-        if self.sandbox.enabled && self.homepage.enabled {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "sandbox and homepage cannot be enabled at the same time",
-                error: "disable the homepage if you want to enable sandbox".to_string(),
-            });
-        }
-        // Sandbox needs Introspection to be enabled
-        if self.sandbox.enabled && !self.supergraph.introspection {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "sandbox requires introspection",
-                error: "sandbox needs introspection to be enabled".to_string(),
-            });
+        if !DEV_MODE_PARSE.get() {
+            self.validate_dev_mode_settings()?;
         }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
