@@ -2777,6 +2777,8 @@ impl FetchDependencyGraphNode {
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
             let fetch_selection_set = &mut self.selection_set;
+            // Removing selections can change whether this fetch needs to execute.
+            fetch_selection_set.conditions.take();
             for (_, selection) in &inputs.selection_sets_per_parent_type {
                 fetch_selection_set.selection_set =
                     Arc::new(fetch_selection_set.selection_set.minus(selection)?);
@@ -5365,6 +5367,7 @@ fn path_for_parent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::field_set::parse_field_set;
 
     #[test]
     fn type_condition_fetching_disabled() {
@@ -5618,6 +5621,43 @@ mod tests {
                 defer_ref.map(String::from),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn removing_inputs_recomputes_warmed_conditions() {
+        for (selected, removed) in [("id", "id"), ("id v1 @include(if: false)", "id")] {
+            let mut graph = make_test_dep_graph();
+            let node_id = add_test_node(&mut graph, "Subgraph2", None);
+            let schema = graph
+                .federated_query_graph
+                .schema_by_source("Subgraph2")
+                .unwrap()
+                .clone();
+            let parent = schema.get_type(&name!("T")).unwrap().try_into().unwrap();
+            let selection = SelectionSet::parse(schema, parent, selected).unwrap();
+            let inputs =
+                parse_field_set(&graph.supergraph_schema, name!("T"), removed, true).unwrap();
+            let node = Arc::make_mut(graph.graph.node_weight_mut(node_id).unwrap());
+            node.selection_set_mut()
+                .add_selections(&Arc::new(selection))
+                .unwrap();
+            node.add_inputs(&inputs, iter::empty()).unwrap();
+            assert_eq!(
+                node.selection_set.conditions().unwrap(),
+                &Conditions::always()
+            );
+
+            graph.remove_inputs_from_selection(node_id).unwrap();
+
+            let node = &graph.graph[node_id];
+            let expected = node.selection_set.selection_set.conditions().unwrap();
+            assert_ne!(expected, Conditions::always());
+            assert_eq!(
+                node.selection_set.selection_set.is_empty(),
+                selected == "id"
+            );
+            assert_eq!(node.selection_set.conditions().unwrap(), &expected);
+        }
     }
 
     fn add_test_edge(graph: &mut FetchDependencyGraph, from: NodeIndex, to: NodeIndex) {
