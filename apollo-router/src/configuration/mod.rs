@@ -39,9 +39,12 @@ use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
+pub use self::apollo_configuration_parse::ConfigurationParser;
 pub(crate) use self::apollo_configuration_parse::Migration;
+#[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::parse_configuration;
 use self::cors::Cors;
+#[cfg(test)]
 use self::expansion::Expansion;
 use self::plugin_configs::PluginConfigs;
 pub(crate) use self::schema::generate_config_schema;
@@ -737,12 +740,12 @@ impl Configuration {
     }
 }
 
-/// Parse configuration from a string in YAML syntax
+/// Parses one configuration from YAML. For repeated loading, reuse a [`ConfigurationParser`].
 impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        parse_configuration(s, Expansion::default()?, Migration::WithinMajor)
+        ConfigurationParser::new()?.parse(s)
     }
 }
 

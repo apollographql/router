@@ -9,6 +9,7 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::Configuration;
+use crate::ConfigurationParser;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::RhaiReload;
@@ -78,31 +79,47 @@ impl ConfigurationSource {
                     );
                     stream::empty().boxed()
                 } else {
-                    match ConfigurationSource::read_config(&path) {
+                    let mut parser = match ConfigurationParser::new() {
+                        Ok(parser) => parser,
+                        Err(err) => {
+                            tracing::error!("Failed to prepare configuration parsing: {}", err);
+                            return stream::iter(vec![NoMoreConfiguration]).boxed();
+                        }
+                    };
+                    match ConfigurationSource::read_config(&path, &mut parser) {
                         Ok(mut configuration) => {
                             if watch {
-                                let config_watcher = crate::files::watch(&path)
-                                    .filter_map(move |_| {
+                                let config_watcher = stream::unfold(
+                                    (crate::files::watch(&path).boxed(), parser),
+                                    move |(mut watcher, mut parser)| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
                                         async move {
-                                            match ConfigurationSource::read_config_async(&path)
+                                            loop {
+                                                watcher.next().await?;
+                                                match ConfigurationSource::read_config_async(
+                                                    &path,
+                                                    &mut parser,
+                                                )
                                                 .await
-                                            {
-                                                Ok(mut configuration) => {
-                                                    configuration.uplink = uplink_config.clone();
-                                                    Some(UpdateConfiguration(Arc::new(
-                                                        configuration,
-                                                    )))
-                                                }
-                                                Err(err) => {
-                                                    tracing::error!("{}", err);
-                                                    None
+                                                {
+                                                    Ok(mut configuration) => {
+                                                        configuration.uplink =
+                                                            uplink_config.clone();
+                                                        return Some((
+                                                            UpdateConfiguration(Arc::new(
+                                                                configuration,
+                                                            )),
+                                                            (watcher, parser),
+                                                        ));
+                                                    }
+                                                    Err(err) => tracing::error!("{}", err),
                                                 }
                                             }
                                         }
-                                    })
-                                    .boxed();
+                                    },
+                                )
+                                .boxed();
                                 if let Some(rhai_plugin) =
                                     configuration.apollo_plugins.plugins.get("rhai")
                                 {
@@ -149,13 +166,19 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+    fn read_config(
+        path: &Path,
+        parser: &mut ConfigurationParser,
+    ) -> Result<Configuration, ReadConfigError> {
         let config = std::fs::read_to_string(path)?;
-        config.parse().map_err(ReadConfigError::Validation)
+        parser.parse(&config).map_err(ReadConfigError::Validation)
     }
-    async fn read_config_async(path: &Path) -> Result<Configuration, ReadConfigError> {
+    async fn read_config_async(
+        path: &Path,
+        parser: &mut ConfigurationParser,
+    ) -> Result<Configuration, ReadConfigError> {
         let config = tokio::fs::read_to_string(path).await?;
-        config.parse().map_err(ReadConfigError::Validation)
+        parser.parse(&config).map_err(ReadConfigError::Validation)
     }
 }
 

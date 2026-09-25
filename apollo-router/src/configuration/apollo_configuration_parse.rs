@@ -15,6 +15,7 @@ use serde_json::json;
 
 use super::Configuration;
 use super::ConfigurationError;
+use super::expansion::Expansion;
 use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
@@ -91,12 +92,13 @@ impl ExternalValues {
 
     /// Builds the parsers for the typed configuration and the retained document. Both share one
     /// snapshot of the providers, so they see the same expanded values.
-    pub(crate) fn into_parsers(mut self) -> Result<Parsers, ConfigError> {
+    pub(crate) fn into_parser(mut self) -> Result<ConfigurationParser, ConfigError> {
         let snapshot = self.snapshot();
-        Ok(Parsers {
+        Ok(ConfigurationParser {
             config: parser_builder(&self.injections, &snapshot).build()?,
             document: parser_builder(&self.injections, &snapshot).build()?,
             dev_mode: self.dev_mode,
+            snapshot,
         })
     }
 
@@ -139,13 +141,14 @@ fn parser_builder<T: apollo_configuration::Configuration>(
     }
 }
 
-/// The parsers for one configuration load, built from its external values. Building compiles
-/// Router's schema, so each load builds them once. They keep the values their providers first
-/// returned, so reuse them only for documents whose external values do not change.
-pub(crate) struct Parsers {
+/// Parses Router YAML with a schema compiled once, fixed overrides, and fresh file expansions.
+/// Own one parser for a sequence of configuration loads. Each load shares expansion values
+/// across validation, the retained document, and migration fallback.
+pub struct ConfigurationParser {
     config: ConfigParser<Configuration>,
     document: ConfigParser<ExpandedDocument>,
     dev_mode: bool,
+    snapshot: Option<Arc<ProviderSnapshot>>,
 }
 
 /// Consults each provider in order, as apollo-configuration does with separately added providers,
@@ -190,81 +193,103 @@ struct ExpandedDocument(Value);
 impl apollo_configuration::Validate for ExpandedDocument {}
 impl apollo_configuration::Configuration for ExpandedDocument {}
 
-/// Parses `text` into a configuration. `validated_yaml` keeps the expanded document for
-/// licence checks and usage telemetry, and `raw_yaml` keeps `text`.
-///
-/// Migration can change the document, which is then parsed as a serialized copy. If that copy
-/// fails, `text` is parsed as written instead, and only its errors are reported, so diagnostics
-/// point at the operator's lines.
-/// `--dev` config is applied last, so migration cannot overwrite it.
-///
-/// Known limitation: an expansion anchored on a non-secret field and aliased into a secret
-/// field is redacted only in the secret field.
-///
-/// # Errors
-/// Returns errors from YAML parsing, migration, expansion, overrides, schema validation,
-/// deserialization, or plugin config.
+impl ConfigurationParser {
+    /// Prepares configuration parsing with the process's environment and command-line inputs.
+    /// Reuse this parser when loading a new configuration or reloading the same file.
+    ///
+    /// # Errors
+    /// Returns invalid expansion-mode configuration or schema compilation errors.
+    pub fn new() -> Result<Self, ConfigurationError> {
+        Ok(ExternalValues::from(Expansion::default()?).into_parser()?)
+    }
+
+    /// Parses configuration with within-major migrations and fresh file expansion values.
+    /// A failed parse leaves the parser ready for the next load.
+    ///
+    /// # Errors
+    /// Returns YAML, migration, expansion, override, schema, or typed configuration errors.
+    pub fn parse(&mut self, text: &str) -> Result<Configuration, ConfigurationError> {
+        self.parse_with_migration(text, Migration::WithinMajor)
+    }
+
+    /// Parses the original text, falling back to it if a migrated copy fails. Dev config and
+    /// sandbox checks run last. Both parsing passes and fallback share one provider snapshot.
+    pub(crate) fn parse_with_migration(
+        &mut self,
+        text: &str,
+        migration: Migration,
+    ) -> Result<Configuration, ConfigurationError> {
+        // Clear on both success and failure (including unwinding), before another load can start.
+        // In particular, a missing or rotated file must be read again on the next reload.
+        scopeguard::defer! {
+            if let Some(snapshot) = &self.snapshot {
+                snapshot.resolved.lock().clear();
+            }
+        }
+        // Migration serialization must not hide duplicate keys in the original document.
+        super::yaml::check_duplicate_keys(text)?;
+        let file: Value = if text.trim().is_empty() {
+            Value::Object(Default::default())
+        } else {
+            serde_yaml::from_str(text).map_err(|error| {
+                ConfigurationError::InvalidConfiguration {
+                    message: "failed to parse yaml",
+                    error: error.to_string(),
+                }
+            })?
+        };
+        let migrated = match migration {
+            Migration::WithinMajor => {
+                upgrade_configuration(&file, true, UpgradeMode::current_minor())?
+            }
+            Migration::WithinMajorQuietly => {
+                upgrade_configuration(&file, false, UpgradeMode::current_minor())?
+            }
+            #[cfg(test)]
+            Migration::None => file.clone(),
+        };
+        let mut config = if migrated == file {
+            parse_document(text, self).map_err(report_error)
+        } else {
+            let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: error.to_string(),
+                }
+            })?;
+            // Diagnostics for the serialized copy would point at lines the operator never wrote, so
+            // any error in it falls back to the supplied text. The fallback still validates that text
+            // in full, so it never accepts an invalid document.
+            match parse_document(&serialized, self) {
+                Ok(config) => Ok(config),
+                Err(_) => {
+                    tracing::warn!(
+                        "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
+                    );
+                    parse_document(text, self).map_err(report_error)
+                }
+            }
+        }?;
+        if self.dev_mode {
+            config.apply_dev_mode();
+        }
+        // `--dev` sets these settings, so they are checked only once it has been applied.
+        config.validate_sandbox_settings()?;
+        config.raw_yaml = Some(Arc::from(text));
+        Ok(config)
+    }
+}
+
+/// Builds independent parsers for tests supplying their own inputs.
+#[cfg(test)]
 pub(crate) fn parse_configuration(
     text: &str,
     external: impl Into<ExternalValues>,
     migration: Migration,
 ) -> Result<Configuration, ConfigurationError> {
-    parse_configuration_with(text, &external.into().into_parsers()?, migration)
-}
-
-/// [`parse_configuration`] with parsers already built, for parsing many documents with the same
-/// external values.
-pub(crate) fn parse_configuration_with(
-    text: &str,
-    parsers: &Parsers,
-    migration: Migration,
-) -> Result<Configuration, ConfigurationError> {
-    // Migration serialization must not hide duplicate keys in the original document.
-    super::yaml::check_duplicate_keys(text)?;
-    let file: Value = if text.trim().is_empty() {
-        Value::Object(Default::default())
-    } else {
-        serde_yaml::from_str(text).map_err(|error| ConfigurationError::InvalidConfiguration {
-            message: "failed to parse yaml",
-            error: error.to_string(),
-        })?
-    };
-    let migrated = match migration {
-        Migration::WithinMajor => upgrade_configuration(&file, true, UpgradeMode::current_minor())?,
-        Migration::WithinMajorQuietly => {
-            upgrade_configuration(&file, false, UpgradeMode::current_minor())?
-        }
-        #[cfg(test)]
-        Migration::None => file.clone(),
-    };
-    let mut config = if migrated == file {
-        parse_document(text, parsers).map_err(report_error)
-    } else {
-        let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
-            ConfigurationError::MigrationFailure {
-                error: error.to_string(),
-            }
-        })?;
-        // Diagnostics for the serialized copy would point at lines the operator never wrote, so
-        // any error in it falls back to the supplied text. The fallback still validates that text
-        // in full, so it never accepts an invalid document.
-        match parse_document(&serialized, parsers) {
-            Ok(config) => Ok(config),
-            Err(_) => {
-                tracing::warn!(
-                    "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
-                );
-                parse_document(text, parsers).map_err(report_error)
-            }
-        }
-    }?;
-    if parsers.dev_mode {
-        config.apply_dev_mode();
-    }
-    // `--dev` sets these settings, so they are checked only once it has been applied.
-    config.validate_sandbox_settings()?;
-    config.raw_yaml = Some(Arc::from(text));
-    Ok(config)
+    external
+        .into()
+        .into_parser()?
+        .parse_with_migration(text, migration)
 }
 
 /// Suggests `router config upgrade` for a configuration that fails validation.
@@ -279,9 +304,9 @@ fn report_error(error: ConfigError) -> ConfigurationError {
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
 /// document shows `plugins: null` as `{}`, which means the same.
-fn parse_document(text: &str, parsers: &Parsers) -> Result<Configuration, ConfigError> {
-    let mut config = parsers.config.parse_yaml(text)?;
-    let ExpandedDocument(mut document) = parsers.document.parse_yaml(text)?;
+fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ConfigError> {
+    let mut config = parser.config.parse_yaml(text)?;
+    let ExpandedDocument(mut document) = parser.document.parse_yaml(text)?;
     if let Some(plugins) = document
         .get_mut("plugins")
         .filter(|plugins| plugins.is_null())
@@ -468,25 +493,97 @@ mod tests {
     }
 
     #[test]
-    fn both_passes_see_one_snapshot_of_each_expanded_value() {
-        let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: ${env.PW}\n";
+    fn reused_parser_keeps_each_load_consistent() {
+        let text = indoc::indoc!(
+            "
+            apq:
+              router:
+                cache:
+                  redis:
+                    urls: [redis://localhost]
+                    password: ${env.PW}
+        "
+        );
         let reads = Arc::new(AtomicUsize::new(0));
-        let external = ExternalValues::default().add_variables(RotatingPassword(reads.clone()));
+        let mut parser = ExternalValues::default()
+            .add_variables(RotatingPassword(reads.clone()))
+            .into_parser()
+            .unwrap();
 
-        let config = parse_configuration(text, external, Migration::WithinMajor)
-            .expect("valid Redis settings");
+        for i in 0..3 {
+            let config = parser.parse(text).expect("valid Redis config");
+            let password = format!("password-read-{i}");
+            assert_eq!(
+                config
+                    .apq
+                    .router
+                    .cache
+                    .redis
+                    .as_ref()
+                    .unwrap()
+                    .password
+                    .as_ref()
+                    .unwrap()
+                    .unredact(),
+                &password
+            );
+            assert_eq!(
+                config.validated_yaml.as_ref().unwrap()["apq"]["router"]["cache"]["redis"]["password"],
+                password
+            );
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 3, "one lookup per load");
+    }
 
-        assert_eq!(reads.load(Ordering::SeqCst), 1, "the provider is read once");
-        let redis = config.apq.router.cache.redis.as_ref().unwrap();
-        assert_eq!(
-            redis.password.as_ref().unwrap().unredact(),
-            "password-read-0"
+    #[test]
+    fn reused_parser_reloads_files_after_success_and_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("password.txt");
+        let reference = serde_json::to_string(&format!("${{file.{}}}", path.display())).unwrap();
+        let text = format!(
+            indoc::indoc!(
+                "
+            apq:
+              router:
+                cache:
+                  redis:
+                    urls: [redis://localhost]
+                    password: {reference}
+        "
+            ),
+            reference = reference
         );
-        assert_eq!(
-            config.validated_yaml.as_ref().unwrap()["apq"]["router"]["cache"]["redis"]["password"],
-            "password-read-0",
-            "the retained document must hold the same value as the typed settings"
+        let mut parser = ConfigurationParser::new().unwrap();
+        assert!(parser.parse(&text).is_err(), "file is initially missing");
+        for password in ["first-value", "rotated-value"] {
+            std::fs::write(&path, password).unwrap();
+            let config = parser.parse(&text).unwrap();
+            assert_eq!(
+                config
+                    .apq
+                    .router
+                    .cache
+                    .redis
+                    .as_ref()
+                    .unwrap()
+                    .password
+                    .as_ref()
+                    .unwrap()
+                    .unredact(),
+                password
+            );
+            assert_eq!(
+                config.validated_yaml.as_ref().unwrap()["apq"]["router"]["cache"]["redis"]["password"],
+                password
+            );
+        }
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            parser.parse(&text).is_err(),
+            "removed file must not stay cached"
         );
+        std::fs::write(&path, "restored-value").unwrap();
+        assert!(parser.parse(&text).is_ok());
     }
 
     /// Redis settings whose non-secret `namespace` anchors the value aliased into `password`,

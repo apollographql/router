@@ -23,11 +23,10 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
+use crate::configuration::ConfigurationParser;
 use crate::configuration::Migration;
-use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::parse_configuration;
 use crate::configuration::uses_migrated_settings;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
@@ -486,11 +485,8 @@ impl Executable {
                 let config_string = std::fs::read_to_string(config_path)?;
                 // Validate what startup would load, including automatic migration. The note below
                 // reports migrations, so the parse does not log them as errors.
-                parse_configuration(
-                    &config_string,
-                    Expansion::default()?,
-                    Migration::WithinMajorQuietly,
-                )?;
+                ConfigurationParser::new()?
+                    .parse_with_migration(&config_string, Migration::WithinMajorQuietly)?;
 
                 println!("Configuration at path {config_path:?} is valid!");
                 if uses_migrated_settings(&config_string) {

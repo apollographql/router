@@ -16,7 +16,6 @@ use walkdir::WalkDir;
 use super::apollo_configuration_parse::ExternalValues;
 use super::apollo_configuration_parse::Migration;
 use super::apollo_configuration_parse::parse_configuration;
-use super::apollo_configuration_parse::parse_configuration_with;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::configuration::cors::Policy;
@@ -387,17 +386,18 @@ cors:
 
 #[test]
 fn validate_project_config_files() {
-    // Every document is parsed with the same external values, so the parsers are built once.
+    // Every document is parsed with the same external values, so the parser is built once.
     let expansion = Expansion::default_builder()
         .mocked_env_vars(super::test_discovery::discovery_env_vars())
         .build()
         .unwrap();
-    let parsers = ExternalValues::from(expansion).into_parsers().unwrap();
+    let mut parser = ExternalValues::from(expansion).into_parser().unwrap();
     // Documents are checked as written, so none relies on startup migration.
     let errors: Vec<String> = super::test_discovery::discover_project_configs()
         .iter()
         .filter_map(|doc| {
-            parse_configuration_with(&doc.yaml, &parsers, Migration::None)
+            parser
+                .parse_with_migration(&doc.yaml, Migration::None)
                 .err()
                 .map(|error| format!("{} configuration error: \n{error}", doc.path.display()))
         })
