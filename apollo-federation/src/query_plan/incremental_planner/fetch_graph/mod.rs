@@ -79,15 +79,18 @@ pub(crate) enum InputContribution {
         /// Destination type and subgraph, for building the input rewrites.
         rewrite_info: InputRewriteInfo,
     },
-    /// @requires condition fields riding an existing edge. Constructed by
-    /// the requires support in a later change.
-    #[allow(dead_code)]
+    /// @requires condition fields riding an existing edge.
     Requires {
         /// Type of the entity in the parent subgraph the condition fields
         /// are selected from.
         source_type_name: Name,
         /// The @requires field selections the parent must provide.
         conditions: Arc<SelectionSet>,
+        /// Alias to original-name pairs for condition fields aliased to
+        /// avoid cross-fetch response path collisions; each generates an
+        /// input KeyRenamer rewrite undoing the alias before the subgraph
+        /// send.
+        condition_alias_rewrites: Vec<(Name, Name)>,
     },
 }
 
@@ -113,6 +116,16 @@ impl InputContribution {
         match self {
             Self::Key { rewrite_info, .. } => Some(rewrite_info),
             Self::Requires { .. } => None,
+        }
+    }
+
+    pub(crate) fn condition_alias_rewrites(&self) -> &[(Name, Name)] {
+        match self {
+            Self::Key { .. } => &[],
+            Self::Requires {
+                condition_alias_rewrites,
+                ..
+            } => condition_alias_rewrites,
         }
     }
 }
@@ -457,10 +470,53 @@ impl FetchGraph {
         })
     }
 
+    /// Iterator over all inputs arriving at `node` from parent fetch
+    /// groups.
+    pub(crate) fn incoming_inputs(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = &InputContribution> {
+        self.graph
+            .edges_directed(node, Direction::Incoming)
+            .flat_map(|edge| edge.weight().inputs.iter())
+    }
+
     /// Get a reference to an edge's weight.
-    #[allow(dead_code)]
-    pub(crate) fn edge_weight(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
+    pub(crate) fn edge_weight_raw(&self, edge: EdgeIndex) -> &FetchEdgeWeight {
         &self.graph[edge]
+    }
+
+    /// Whether adding `new_rewrites` to `edge` would rename two different
+    /// aliases to the same original field name.
+    pub(crate) fn has_conflicting_condition_rewrites(
+        &self,
+        edge: EdgeIndex,
+        new_rewrites: &[(Name, Name)],
+    ) -> bool {
+        let existing = &self.graph[edge].inputs;
+        for (alias, original) in new_rewrites {
+            for input in existing {
+                if input
+                    .condition_alias_rewrites()
+                    .iter()
+                    .any(|(a, orig)| orig == original && a != alias)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Clone an edge's key-hop inputs (those with `rewrite_info`), for
+    /// splitting an entity group.
+    pub(crate) fn clone_key_inputs(&self, edge: EdgeIndex) -> Vec<InputContribution> {
+        self.graph[edge]
+            .inputs
+            .iter()
+            .filter(|i| i.rewrite_info().is_some())
+            .cloned()
+            .collect()
     }
 
     /// Append an input to an existing edge (e.g. @requires conditions
@@ -486,7 +542,6 @@ impl FetchGraph {
     }
 
     /// Get a reference to the node weight.
-    #[allow(dead_code)]
     pub(crate) fn node(&self, node: NodeIndex) -> &FetchNode {
         &self.graph[node]
     }
@@ -516,7 +571,6 @@ impl FetchGraph {
         self.graph.node_count()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn node_indices(&self) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph.node_indices()
     }
@@ -668,6 +722,7 @@ mod tests {
         InputContribution::Requires {
             source_type_name: apollo_compiler::name!("User"),
             conditions: Arc::new(op.selection_set.clone()),
+            condition_alias_rewrites: Vec::new(),
         }
     }
 

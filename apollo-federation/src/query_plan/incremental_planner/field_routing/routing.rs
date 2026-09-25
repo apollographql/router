@@ -38,7 +38,6 @@ pub(crate) struct KeyHopInfo {
     /// @key fields entering the target group.
     pub(crate) key_conditions: Arc<SelectionSet>,
     /// Whether the anchor fetch can select @requires conditions in place.
-    #[allow(dead_code)]
     pub(crate) requires_resolvable_in_place: bool,
     /// The key conditions for this hop are not routable as ordinary
     /// pendings (e.g. circular keys, missing subgraph edges). Commit
@@ -155,7 +154,6 @@ impl RoutingChoice {
     }
 
     /// Whether this is a key hop (entity-based, not root-type-resolution).
-    #[allow(dead_code)]
     pub(crate) fn is_key_hop(&self) -> bool {
         self.key_opt().is_some()
     }
@@ -175,7 +173,6 @@ impl RoutingChoice {
 
     /// Whether @requires conditions are resolvable in place. True for
     /// choices with no key hop, which carry no @requires verdict.
-    #[allow(dead_code)]
     pub(crate) fn requires_resolvable_in_place(&self) -> bool {
         self.key_opt()
             .is_none_or(|key| key.requires_resolvable_in_place)
