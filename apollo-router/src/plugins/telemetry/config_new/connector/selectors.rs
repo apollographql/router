@@ -502,6 +502,7 @@ mod tests {
             entity_resolver: None,
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
+            methods: None,
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
