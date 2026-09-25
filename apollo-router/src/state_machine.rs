@@ -67,11 +67,40 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
 
 const STATE_CHANGE: &str = "state change";
+
+/// True for the states in which requests are refused or a countdown to refusal has
+/// started, per [`LicenseState`].
+fn is_halted_or_warned(license: &LicenseState) -> bool {
+    matches!(
+        license,
+        LicenseState::LicensedHalt { .. } | LicenseState::LicensedWarn { .. }
+    )
+}
+
+/// Logs [`APOLLO_ROUTER_LICENSE_EXPIRED`] once, at the moment a license update makes the
+/// router transition into `LicensedHalt` or `LicensedWarn` from a state that was neither.
+///
+/// This is intentionally independent of `plugins::license_enforcement::layer`'s
+/// rate-limited per-request log: that log only fires once a request actually reaches the
+/// halted router, so a router that stops receiving traffic right as its license expires
+/// would otherwise never explain why — it would just go quiet, indistinguishable from a
+/// crash. Logging on the transition itself guarantees the diagnostic appears regardless
+/// of traffic.
+fn log_license_expired_transition(previous: &LicenseState, new: &LicenseState) {
+    if !is_halted_or_warned(previous) && is_halted_or_warned(new) {
+        tracing::error!(
+            code = APOLLO_ROUTER_LICENSE_EXPIRED,
+            LICENSE_EXPIRED_SHORT_MESSAGE
+        );
+    }
+}
 
 #[derive(Default, Clone)]
 pub(crate) struct ListenAddresses {
@@ -361,6 +390,9 @@ impl<FA: RouterServiceFactory> State<FA> {
                 };
                 let schema = PendingChange::new(schema, new_schema);
                 let license = PendingChange::new(license, new_license);
+                if license.is_pending() {
+                    log_license_expired_transition(license.committed(), license.target());
+                }
 
                 let need_reload = force_reload
                     || configuration.is_pending()
@@ -426,7 +458,11 @@ impl<FA: RouterServiceFactory> State<FA> {
                     configuration = configuration.set_pending(nc);
                 }
                 schema = schema.update(new_schema);
+                let previous_license_target = license.target().clone();
                 license = license.update(new_license);
+                if *license.target() != previous_license_target {
+                    log_license_expired_transition(&previous_license_target, license.target());
+                }
 
                 // Any event while reloading resets the retry budget: new inputs from
                 // Uplink deserve a fresh set of attempts, and explicit Reload/RhaiReload
@@ -1019,6 +1055,50 @@ mod tests {
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
+
+    // `log_license_expired_transition` is what makes the "Apollo license expired"
+    // diagnostic appear even when the router receives no traffic after its license
+    // expires — unlike `plugins::license_enforcement::layer`'s rate-limited log, which
+    // only fires once a request actually reaches the halted router. These tests drive
+    // the pure logging function directly rather than the full state machine, since the
+    // edge-detection logic (log only when transitioning *into* halt/warn) is what's
+    // being verified here.
+    #[test]
+    fn log_license_expired_transition_logs_once_on_entering_warn_or_halt() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+        log_license_expired_transition(
+            &LicenseState::Licensed { limits: None },
+            &LicenseState::Licensed { limits: None },
+        );
+        assert!(
+            !crate::test_harness::tracing_test::logs_contain(APOLLO_ROUTER_LICENSE_EXPIRED),
+            "no transition into halt/warn should not log"
+        );
+
+        log_license_expired_transition(
+            &LicenseState::Licensed { limits: None },
+            &LicenseState::LicensedWarn { limits: None },
+        );
+        assert!(
+            crate::test_harness::tracing_test::logs_contain(APOLLO_ROUTER_LICENSE_EXPIRED),
+            "transitioning from Licensed into LicensedWarn should log the expired diagnostic"
+        );
+    }
+
+    #[test]
+    fn log_license_expired_transition_does_not_relog_while_already_halted_or_warned() {
+        let _guard = crate::test_harness::tracing_test::dispatcher_guard();
+
+        log_license_expired_transition(
+            &LicenseState::LicensedWarn { limits: None },
+            &LicenseState::LicensedHalt { limits: None },
+        );
+        assert!(
+            !crate::test_harness::tracing_test::logs_contain(APOLLO_ROUTER_LICENSE_EXPIRED),
+            "warn -> halt is not a fresh transition out of a licensed state, so it should not re-log"
+        );
+    }
 
     fn example_schema() -> SchemaState {
         SchemaState {

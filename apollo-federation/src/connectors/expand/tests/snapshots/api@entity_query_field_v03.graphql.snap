@@ -1,0 +1,27 @@
+---
+source: apollo-federation/src/connectors/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/entity_query_field_v03.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Query {
+  """
+  A non-entity Query connector that returns the entity type directly, mapping
+  from `$args` with `entity` unset (defaults to false). This must NOT become a
+  resolvable entity path for `Tractor` — otherwise the planner may route
+  reference resolution through here, where `$args` is empty.
+  """
+  tractor(id: ID!): Tractor
+  """
+  A second non-entity root field that returns only `id`, so resolving `name`
+  forces an entity fetch. That fetch must land on the `$this` reference
+  resolver on `Tractor`, never on the `$args` connector above.
+  """
+  seed: Tractor
+}
+
+type Tractor {
+  id: ID!
+  name: String
+}

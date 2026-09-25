@@ -181,6 +181,16 @@ impl InstrumentData {
             "$.supergraph[?(@.defer_support == true)]"
         );
         populate_config_instrument!(
+            apollo.router.config.incremental_planner,
+            "$.supergraph.query_planning.incremental_planner[?(@.enabled == true)]",
+            opt.beam_width,
+            "$[?(@.beam_width)]",
+            opt.fuel,
+            "$[?(@.fuel)]",
+            opt.timeout,
+            "$[?(@.timeout)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.authentication.jwt,
             "$.authentication[?(@..jwt)]",
             opt.on_error,
@@ -542,6 +552,11 @@ impl InstrumentData {
             "$[?(@.expose_query_plan==true)]"
         );
 
+        populate_config_instrument!(
+            apollo.router.config.supergraph.validate_default_values,
+            "$.supergraph[?(@.validate_default_values == false)]"
+        );
+
         // We need to update the entry we just made because the selected strategy is a named object in the config.
         // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
         if let Some((_, demand_control_attributes)) =
@@ -571,6 +586,13 @@ impl InstrumentData {
                 atomic.load(Ordering::Relaxed).into()
             }
         }
+        fn mutex_string(mutex: &Mutex<Option<String>>) -> opentelemetry::Value {
+            if cfg!(test) {
+                "test".into()
+            } else {
+                mutex.lock().clone().unwrap_or_default().into()
+            }
+        }
         let mut attributes = HashMap::new();
         attributes.insert(
             "opt.apollo.key".to_string(),
@@ -591,6 +613,10 @@ impl InstrumentData {
         attributes.insert(
             "opt.apollo.graph_artifact_reference".to_string(),
             mutex_is_some(&crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE),
+        );
+        attributes.insert(
+            "opt.apollo.license.source".to_string(),
+            mutex_string(&crate::executable::APOLLO_ROUTER_LICENSE_SOURCE),
         );
         attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),

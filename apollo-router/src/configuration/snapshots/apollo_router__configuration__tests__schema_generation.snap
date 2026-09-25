@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 28
 expression: "&schema"
 ---
 {
@@ -42,7 +41,8 @@ expression: "&schema"
       "properties": {
         "access_key_id": {
           "description": "The ID for this access key.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "assume_role": {
           "anyOf": [
@@ -61,7 +61,8 @@ expression: "&schema"
         },
         "secret_access_key": {
           "description": "The secret key used to sign requests.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "service_name": {
           "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
@@ -2145,7 +2146,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 5,
@@ -2184,7 +2186,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -5927,7 +5930,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "metadata": {
           "additionalProperties": true,
@@ -6309,6 +6313,40 @@ expression: "&schema"
           "default": {},
           "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "IncrementalPlanner": {
+      "additionalProperties": false,
+      "description": "Configuration for the incremental (BULB) query planner.",
+      "properties": {
+        "beam_width": {
+          "default": 16,
+          "description": "Beam width: how many states advance together per depth in the beam.\nWider beams capture more diversity, reducing expensive backtracking.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether the incremental planner is enabled. When enabled, deferred\noperations still fall back to the default planner.",
+          "type": "boolean"
+        },
+        "fuel": {
+          "default": 5000,
+          "description": "Cap on optimization effort beyond the first draft of the plan, measured in\npending-selection visits. `fuel: 0` returns the first complete plan found.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": null,
+          "description": "Optional wall-clock time limit for the search. When set, the search\nreturns the best complete plan found so far once the limit is reached.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -8067,7 +8105,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8133,7 +8172,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -8192,6 +8232,20 @@ expression: "&schema"
             "integer",
             "null"
           ]
+        },
+        "incremental_planner": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/IncrementalPlanner"
+            }
+          ],
+          "default": {
+            "beam_width": 16,
+            "enabled": false,
+            "fuel": 5000,
+            "timeout": null
+          },
+          "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates. Deferred operations fall\nback to the default planner."
         },
         "warmed_up_queries": {
           "default": null,
@@ -8364,7 +8418,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8427,7 +8482,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -10341,7 +10397,8 @@ expression: "&schema"
         "shared_key": {
           "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         }
       },
       "type": "object"
@@ -11641,6 +11698,12 @@ expression: "&schema"
             },
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
+            "incremental_planner": {
+              "beam_width": 16,
+              "enabled": false,
+              "fuel": 5000,
+              "timeout": null
+            },
             "warmed_up_queries": null
           },
           "description": "Query planning options"
@@ -11658,6 +11721,11 @@ expression: "&schema"
           ],
           "default": "enforce",
           "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
+        },
+        "validate_default_values": {
+          "default": true,
+          "description": "Whether to validate default values in the supergraph schema.\nDefault: true",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -12385,7 +12453,8 @@ expression: "&schema"
         "key": {
           "description": "key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -12411,7 +12480,8 @@ expression: "&schema"
         "key": {
           "description": "server key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -13239,10 +13309,17 @@ expression: "&schema"
           },
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
+          "incremental_planner": {
+            "beam_width": 16,
+            "enabled": false,
+            "fuel": 5000,
+            "timeout": null
+          },
           "warmed_up_queries": null
         },
         "redact_query_validation_errors": false,
-        "strict_variable_validation": "enforce"
+        "strict_variable_validation": "enforce",
+        "validate_default_values": true
       },
       "description": "Configuration for the supergraph"
     },

@@ -52,6 +52,7 @@ pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::ne
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
 pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) static APOLLO_ROUTER_LICENSE_SOURCE: Mutex<Option<String>> = Mutex::new(None);
 pub(crate) static APOLLO_ROUTER_HOT_RELOAD_CLI: AtomicBool = AtomicBool::new(false);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
@@ -292,10 +293,37 @@ impl Opt {
     /// 2. env APOLLO_ROUTER_LICENSE
     /// 3. graph artifact OCI registry (when a graph artifact reference is configured)
     /// 4. uplink
+    ///
+    /// An explicit license (1 or 2) combined with an *Apollo-hosted* graph artifact
+    /// reference is rejected at startup rather than resolved by precedence, since an
+    /// Apollo-hosted artifact is expected to carry its own entitlement layer. A
+    /// self-hosted graph artifact reference has no such expectation, so it keeps the
+    /// precedence order above instead of erroring.
     pub(crate) fn license_source(
         &self,
         current_directory: &std::path::Path,
     ) -> Result<LicenseSource, anyhow::Error> {
+        // Validate that license sources are not conflicting. This only applies to
+        // Apollo-hosted graph artifact references: those are expected to carry an
+        // entitlement layer, so an explicit license alongside one is a contradiction.
+        // A self-hosted registry may have no entitlement layer at all, so an explicit
+        // license there is complementary config, not ambiguity, and falls through to
+        // the precedence order below instead of erroring.
+        let is_apollo_hosted_reference = self
+            .graph_artifact_reference
+            .as_deref()
+            .is_some_and(is_apollo_graph_artifact_reference);
+        if is_apollo_hosted_reference && self.apollo_router_license_path.is_some() {
+            return Err(anyhow!(
+                "--license and --graph-artifact-reference cannot be used together when the graph artifact reference is Apollo-hosted. Please specify only one license source."
+            ));
+        }
+        if is_apollo_hosted_reference && self.apollo_router_license.is_some() {
+            return Err(anyhow!(
+                "APOLLO_ROUTER_LICENSE and --graph-artifact-reference cannot be used together when the graph artifact reference is Apollo-hosted. Please specify only one license source."
+            ));
+        }
+
         Ok(
             match (
                 &self.apollo_router_license,
@@ -754,6 +782,8 @@ impl Executable {
         } else {
             opt.license_source(&current_directory)?
         };
+        tracing::info!("using {} as license source", license);
+        *APOLLO_ROUTER_LICENSE_SOURCE.lock() = Some(license.to_string());
 
         // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
         let user_plugins_present = plugins().filter(|p| !p.is_apollo()).count() > 0;
@@ -1337,7 +1367,11 @@ mod tests {
         }
 
         #[test]
-        fn explicit_license_path_takes_precedence_over_graph_artifact_reference() {
+        fn conflicting_license_path_and_graph_artifact_reference_errors() {
+            // An explicit license file and a graph artifact reference are both
+            // fully-specified license sources: having both set is a
+            // contradiction, not a precedence question, so this must fail
+            // fast instead of silently picking one.
             let opt = Opt {
                 apollo_router_license_path: Some(std::path::PathBuf::from("license.jwt")),
                 graph_artifact_reference: Some(
@@ -1347,15 +1381,21 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let err = opt
+                .license_source(&current_directory)
+                .expect_err("Should fail with conflicting license sources");
+            let error_msg = err.to_string();
             assert!(
-                matches!(source, LicenseSource::File { .. }),
-                "expected File license source, got {source:?}"
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
             );
         }
 
         #[test]
-        fn explicit_license_env_takes_precedence_over_graph_artifact_reference() {
+        fn conflicting_license_env_and_graph_artifact_reference_errors() {
+            // Same contradiction as above, but for the literal
+            // APOLLO_ROUTER_LICENSE env value instead of a license file path.
             let opt = Opt {
                 apollo_router_license: Some("test-license".to_string()),
                 graph_artifact_reference: Some(
@@ -1365,10 +1405,59 @@ mod tests {
             };
 
             let current_directory = std::env::current_dir().unwrap();
-            let source = opt.license_source(&current_directory).unwrap();
+            let err = opt
+                .license_source(&current_directory)
+                .expect_err("Should fail with conflicting license sources");
+            let error_msg = err.to_string();
+            assert!(
+                error_msg.contains("cannot be used together"),
+                "Error should mention conflicting options, got: {}",
+                error_msg
+            );
+        }
+
+        #[test]
+        fn allows_explicit_license_path_with_self_hosted_graph_artifact_reference() {
+            // A self-hosted registry has no expectation of carrying an entitlement
+            // layer, so an explicit license file alongside it is complementary
+            // config, not a contradiction: it must not error, and per the
+            // documented precedence order, the explicit license wins.
+            let opt = Opt {
+                apollo_router_license_path: Some(std::path::PathBuf::from("license.jwt")),
+                graph_artifact_reference: Some(
+                    "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).expect(
+                "self-hosted graph artifact reference must not conflict with an explicit license",
+            );
+            assert!(
+                matches!(source, LicenseSource::File { .. }),
+                "expected the explicit license file to take precedence, got {source:?}"
+            );
+        }
+
+        #[test]
+        fn allows_explicit_license_env_with_self_hosted_graph_artifact_reference() {
+            // Same as above, but for the literal APOLLO_ROUTER_LICENSE env value.
+            let opt = Opt {
+                apollo_router_license: Some("test-license".to_string()),
+                graph_artifact_reference: Some(
+                    "my-registry.example.com/my-graph@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string(),
+                ),
+                ..base_opt()
+            };
+
+            let current_directory = std::env::current_dir().unwrap();
+            let source = opt.license_source(&current_directory).expect(
+                "self-hosted graph artifact reference must not conflict with an explicit license",
+            );
             assert!(
                 matches!(source, LicenseSource::Env),
-                "expected Env license source, got {source:?}"
+                "expected the explicit license env value to take precedence, got {source:?}"
             );
         }
     }

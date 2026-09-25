@@ -131,6 +131,22 @@ impl Operation {
     pub(crate) fn generate_fragments(
         self,
     ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        self.generate_fragments_inner(true)
+    }
+
+    /// Like `generate_fragments` but skips document validation, which is
+    /// redundant for structurally-constructed operations. Debug builds still
+    /// validate to catch construction bugs early.
+    pub(crate) fn generate_fragments_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        self.generate_fragments_inner(false)
+    }
+
+    fn generate_fragments_inner(
+        self,
+        validate: bool,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
         let mut generator = FragmentGenerator::new(&self.selection_set);
         let minified_selection = generator.minify(&self.selection_set)?;
         let fragments = generator.into_inner();
@@ -142,12 +158,22 @@ impl Operation {
             variables: self.variables.deref().clone(),
             directives: self.directives.iter().cloned().collect(),
             selection_set: minified_selection,
+            description: self.description.clone(),
         };
         let mut document = executable::ExecutableDocument::new();
         document.operations.insert(operation);
         document.fragments = fragments;
         coerce_executable_values(self.schema.schema(), &mut document);
-        Ok(document.validate(self.schema.schema())?)
+        if validate {
+            Ok(document.validate(self.schema.schema())?)
+        } else {
+            super::assume_generated_document_valid(
+                document,
+                self.schema.schema(),
+                super::VALIDATE_GENERATED_DOCUMENTS,
+                "generate_fragments_unchecked",
+            )
+        }
     }
 }
 
@@ -412,6 +438,7 @@ impl<'a> FragmentGenerator<'a> {
             name: self.next_name(),
             selection_set: minified_selection_set,
             directives: Default::default(),
+            description: None,
         };
 
         self.minimized_fragments

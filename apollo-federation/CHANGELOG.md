@@ -20,6 +20,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [2.18.x](unreleased) - Unreleased
 
+## ❗ BREAKING CHANGES ❗
+
+### Composition enforces default value validation per the GraphQL 2025 spec ([PR #10119](https://github.com/apollographql/router/pull/10119))
+
+Composition now validates default values against their declared types, as
+required by the GraphQL September 2025 specification. Subgraph schemas with
+invalid defaults (e.g. `{}` for an input type with required fields) that
+previously composed successfully will now produce composition errors.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
+
 ## 🚀 Features
 
 ### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
@@ -118,6 +129,55 @@ pipeline and connectors validation cannot be skipped. Diagnostic codes are
 unchanged.
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
+
+### Composition errors print shape types in the newer `shape` notation ([PR #10118](https://github.com/apollographql/router/pull/10118))
+
+Composition error messages that quote a shape now use the notation introduced by
+`shape` 0.8: `List<T>` prints as `[...T]`, `Dict<T>` as `{...T}`, and a shape
+carrying an error as `<type> (err "message")` rather than `Error<"message">`.
+
+No validation outcome changes. Anything matching on the previous strings, such as
+a test snapshot or a log query, needs updating.
+
+By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10118>
+
+### Connectors validation describes GraphQL types more precisely and stops losing selection errors ([PR #10233](https://github.com/apollographql/router/pull/10233))
+
+Two changes to how connectors validation reasons about shapes, both of which
+can change whether a schema composes.
+
+**A connector selection whose mapping is invalid is now reported.** It could
+previously pass validation silently, depending on whether the selection was
+named:
+
+```graphql
+selection: "a: $->echo({x: 1})->first"   # reported nothing
+selection: "$->echo({x: 1})->first"      # reported an error
+```
+
+Both forms now fail with `INVALID_SELECTION` and `Method ->first requires an
+array or string input`. The mapping was always wrong; at runtime the arrow
+passed its input through and reported the same message per request.
+
+**A field whose type is a built-in scalar now carries that scalar's shape
+rather than `Unknown`.** `ID` is `One<String, Int>`, `String` is `String`, and
+a list keeps the nullability of both itself and its elements. Because
+`Unknown` was compatible with everything, a mapping that fed one of these into
+an incompatible position could validate clean and can now be rejected: an `ID`
+no longer satisfies a `String` on the strength of saying nothing. Custom
+scalars are still `Unknown`, which is correct, since the schema does not say
+what JSON they carry.
+
+Composition messages quoting such a shape now name the real type:
+
+```
+does not accept `One<{ val: One<String, null> }, null>`
+```
+
+where it previously said `{ val: Unknown }`. Anything matching on the old
+strings, such as a test snapshot or a log query, needs updating.
+
+By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10233>
 
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 

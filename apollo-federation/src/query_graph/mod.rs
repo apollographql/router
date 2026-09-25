@@ -142,20 +142,38 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
 /// with the `@fromContext` to its (grand)parent types contain a matching selection.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ContextCondition {
-    context: String,
-    subgraph_name: Arc<str>,
+    pub(crate) context: String,
+    pub(crate) subgraph_name: Arc<str>,
     // This is purposely left unparsed in query graphs, due to @fromContext selection sets being
     // duck-typed.
-    selection: String,
-    types_with_context_set: IndexSet<CompositeTypeDefinitionPosition>,
+    pub(crate) selection: String,
+    pub(crate) types_with_context_set: IndexSet<CompositeTypeDefinitionPosition>,
     // PORT_NOTE: This field was renamed because the JS name (`namedParameter`) left confusion to
     // how it was different from the argument name.
-    argument_name: Name,
+    pub(crate) argument_name: Name,
     // PORT_NOTE: This field was renamed because the JS name (`coordinate`) was too vague.
-    argument_coordinate: ObjectFieldArgumentDefinitionPosition,
+    pub(crate) argument_coordinate: ObjectFieldArgumentDefinitionPosition,
     // PORT_NOTE: This field was renamed from the JS name (`argType`) for consistency with the rest
     // of the naming in this struct.
-    argument_type: Node<Type>,
+    pub(crate) argument_type: Node<Type>,
+}
+
+impl ContextCondition {
+    pub(crate) fn types_with_context_set(&self) -> &IndexSet<CompositeTypeDefinitionPosition> {
+        &self.types_with_context_set
+    }
+
+    pub(crate) fn argument_name(&self) -> &Name {
+        &self.argument_name
+    }
+
+    pub(crate) fn argument_coordinate(&self) -> &ObjectFieldArgumentDefinitionPosition {
+        &self.argument_coordinate
+    }
+
+    pub(crate) fn argument_type(&self) -> &Node<Type> {
+        &self.argument_type
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -698,18 +716,37 @@ impl QueryGraph {
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
-    /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
-        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
-            |edge_ref| {
+    /// in petgraph's unspecified iteration order. The sole definition of which edges
+    /// [`Self::out_edges`] and [`Self::out_edge_ids`] consider, so that the two cannot drift apart.
+    fn out_edges_unsorted(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = EdgeReference<'_, QueryGraphEdge>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter(|edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
                     && matches!(
                         edge_ref.weight().transition,
                         QueryGraphEdgeTransition::KeyResolution
                             | QueryGraphEdgeTransition::RootTypeResolution { .. }
                     ))
-            },
-        ))
+            })
+    }
+
+    /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
+    /// as they're rarely useful (currently only used by `@defer`).
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<'_, QueryGraphEdge>> {
+        Self::sorted_edges(self.out_edges_unsorted(node))
+    }
+
+    /// The same edges as [`Self::out_edges`], in the same order, as owned [`EdgeIndex`] values
+    /// rather than references borrowed from the graph. For callers that need to hold the list
+    /// across a mutation of the query graph, which an `EdgeReference` would forbid.
+    pub(crate) fn out_edge_ids(&self, node: NodeIndex) -> Vec<EdgeIndex> {
+        let mut edge_ids: Vec<EdgeIndex> = self.out_edges_unsorted(node).map(|e| e.id()).collect();
+        edge_ids.sort();
+        edge_ids
     }
 
     /// Edge iteration order is unspecified in petgraph, but appears to be
@@ -1141,5 +1178,17 @@ impl QueryGraph {
                 field_pos.get(schema.schema())
             })
             .ok_and_any(|field| field.directives.has(&provides_directive_definition.name))?)
+    }
+
+    pub(crate) fn subgraph_entering_transitions(
+        &self,
+        node: NodeIndex,
+    ) -> impl Iterator<Item = EdgeReference<'_, QueryGraphEdge>> {
+        self.out_edges(node).into_iter().filter(|edge_ref| {
+            matches!(
+                edge_ref.weight().transition,
+                QueryGraphEdgeTransition::SubgraphEnteringTransition
+            )
+        })
     }
 }

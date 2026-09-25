@@ -94,6 +94,7 @@ pub(super) fn parse_and_expand(
         schema,
         &Default::default(),
         &never_cancel,
+        true,
     )
 }
 
@@ -218,6 +219,7 @@ fn can_remove_introspection_selections() {
             &schema,
             &IndexSet::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -936,6 +938,7 @@ scalar FieldSet
             &schema,
             &interface_objects,
             &never_cancel,
+            true,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1071,6 +1074,7 @@ mod make_selection_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1170,6 +1174,7 @@ mod lazy_map_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1229,6 +1234,7 @@ mod lazy_map_tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
 
@@ -1435,6 +1441,7 @@ fn test_expand_all_fragments1() {
             &schema,
             &IndexSet::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
         insta::assert_snapshot!(normalized_operation, @r###"
@@ -1975,4 +1982,115 @@ fn fragments_with_non_intersecting_types() {
           }
         }
     "###);
+}
+
+/// A concrete object's field must not rebase onto an unrelated interface
+/// that happens to declare a same-named field; that would let planners
+/// merge concrete-typed selections to interface positions without
+/// narrowing. Only @interfaceObject targets accept this cross-type rebase
+/// (can_rebase_on case 3).
+#[test]
+fn field_does_not_rebase_onto_unrelated_interface() {
+    let src = r#"
+query TestQuery { cat { name } }
+
+type Query { cat: Cat }
+type Cat { name: String }
+"#;
+    let (schema, mut executable_document) = parse_schema_and_operation(src);
+    let operation = executable_document
+        .operations
+        .named
+        .get_mut("TestQuery")
+        .expect("operation");
+    let normalized = normalize_operation(
+        operation,
+        &executable_document.fragments,
+        &schema,
+        &IndexSet::default(),
+        &never_cancel,
+        true,
+    )
+    .expect("normalizes");
+    let Selection::Field(cat_sel) = normalized
+        .selection_set
+        .selections
+        .values()
+        .next()
+        .expect("cat selection")
+    else {
+        panic!("expected field selection");
+    };
+    let Selection::Field(name_sel) = cat_sel
+        .selection_set
+        .as_ref()
+        .expect("cat sub-selections")
+        .selections
+        .values()
+        .next()
+        .expect("name selection")
+    else {
+        panic!("expected field selection");
+    };
+
+    let target = Schema::parse_and_validate(
+        r#"
+type Query { animals: [Animal] }
+interface Animal { name: String }
+type Dog implements Animal { name: String }
+"#,
+        "target.graphql",
+    )
+    .expect("target schema parses");
+    let target = ValidFederationSchema::new(target).expect("valid federation schema");
+    let animal: crate::schema::position::CompositeTypeDefinitionPosition = target
+        .get_type(&name!("Animal"))
+        .expect("Animal exists")
+        .try_into()
+        .expect("composite type");
+
+    let result = name_sel.field.rebase_on(&animal, &target);
+    assert!(
+        result.is_err(),
+        "Cat.name must not rebase onto unrelated interface Animal: {result:?}"
+    );
+}
+
+mod generated_document_validation_tests {
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
+
+    use crate::operation::assume_generated_document_valid;
+
+    fn invalid_document() -> (
+        apollo_compiler::validation::Valid<Schema>,
+        ExecutableDocument,
+    ) {
+        let schema =
+            Schema::parse_and_validate("type Query { f(arg: Int): Int }", "schema.graphql")
+                .expect("schema is valid");
+        // `$v` is never declared, which only validation catches.
+        let document = ExecutableDocument::parse(&schema, "{ f(arg: $v) }", "op.graphql")
+            .expect("document parses");
+        (schema, document)
+    }
+
+    #[test]
+    fn release_path_passes_invalid_document_through() {
+        let (schema, document) = invalid_document();
+        let valid = assume_generated_document_valid(document, &schema, false, "test")
+            .expect("release builds do not validate");
+        assert_eq!(valid.to_string().trim(), "{\n  f(arg: $v)\n}");
+    }
+
+    #[test]
+    fn debug_path_rejects_invalid_document() {
+        let (schema, document) = invalid_document();
+        let err = assume_generated_document_valid(document, &schema, true, "test")
+            .expect_err("debug builds validate");
+        assert!(
+            err.to_string().contains("test produced invalid document"),
+            "unexpected error: {err}"
+        );
+    }
 }
