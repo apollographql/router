@@ -7,4 +7,4 @@ The router now emits `apollo.router.license.fetch.failure.total`, a counter tagg
 and why. Debug-level logging was also added along the license-fetch and JWT-decode paths
 that previously had little or no diagnostic detail.
 
-By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/####
+By [@BobaFetters](https://github.com/BobaFetters) in https://github.com/apollographql/router/pull/10279
