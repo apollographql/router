@@ -530,11 +530,12 @@ impl FetchNode {
         // analyze the equivalent `_entities` document so that authorization requirements of the
         // entity selections are found (the lookup field itself may not even exist in the
         // supergraph, when it is `@internal`).
-        let (operation, entity_query) = match self
-            .entity_lookup
-            .as_ref()
-            .and_then(|entity_lookup| self.entity_selections_operation(entity_lookup))
-        {
+        let entity_selections = match &self.entity_lookup {
+            Some(entity_lookup) => self.entity_selections_operation(entity_lookup),
+            None if !self.requires.is_empty() => self.entities_selections_operation(),
+            None => None,
+        };
+        let (operation, entity_query) = match entity_selections {
             Some(operation) => (operation, false),
             None => (
                 self.operation.as_serialized().to_string(),
@@ -588,6 +589,27 @@ impl FetchNode {
                         _ => None,
                     })?;
         }
+        Some(self.entity_selections_document(document, selection_set))
+    }
+
+    /// The entity selections of an `_entities` operation (see
+    /// [`Self::entity_selections_operation`]): `_entities` is not in the supergraph, so parsing
+    /// the operation itself would drop every entity field.
+    fn entities_selections_operation(&self) -> Option<String> {
+        let document = self.operation.as_parsed().ok()?;
+        let operation = document.operations.iter().next()?;
+        let selection_set = operation
+            .selection_set
+            .selections
+            .iter()
+            .find_map(|selection| match selection {
+                apollo_compiler::executable::Selection::Field(field)
+                    if field.name.as_str() == "_entities" =>
+                {
+                    Some(&field.selection_set)
+                }
+                _ => None,
+            })?;
         Some(self.entity_selections_document(document, selection_set))
     }
 
