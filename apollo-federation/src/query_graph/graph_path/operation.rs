@@ -1170,13 +1170,11 @@ impl OpGraphPath {
                         Ok((field_path.map(|p| vec![p.into()]), None))
                     }
                     OutputTypeDefinitionPosition::Interface(tail_type_pos) => {
-                        // Due to `@interfaceObject`, we could be in a case where the field asked is
-                        // not on the interface but rather on one of it's implementations. This can
-                        // happen if we just entered the subgraph on an interface `@key` and are
-                        // and coming from an `@interfaceObject`. In that case, we'll skip checking
-                        // for a direct interface edge and simply cast into that implementation
-                        // below.
-                        let field_is_of_an_implementation =
+                        // After entering through an interface key from an @interfaceObject,
+                        // the field may belong to an implementation or an overlapping interface.
+                        // Skip the direct edge in that case and consider only matching runtime
+                        // types below.
+                        let field_has_different_parent =
                             *operation_field.field_position.type_name() != tail_type_pos.type_name;
 
                         // First, we check if there is a direct edge from the interface (which only
@@ -1195,7 +1193,7 @@ impl OpGraphPath {
                         //   `@provides` are involved; if a `@provides` is involved in one of the
                         //    implementations, then type-exploding may lead to a shorter overall
                         //    plan thanks to that `@provides`).
-                        let interface_edge = if field_is_of_an_implementation {
+                        let interface_edge = if field_has_different_parent {
                             None
                         } else {
                             self.next_edge_for_field(operation_field, override_conditions)
@@ -1293,30 +1291,40 @@ impl OpGraphPath {
                         //   and so we should type-explode because either we didn't had a direct
                         //   edge, or `@provides` makes it potentially worthwhile to check with type
                         //   explosion.
-                        // - But, as mentioned earlier, we could be in the case where the field
-                        //   queried is actually of one of the implementation of the interface. In
-                        //   that case, we only want to consider that one implementation.
-                        let implementations = if field_is_of_an_implementation {
-                            let CompositeTypeDefinitionPosition::Object(field_parent_pos) =
-                                &operation_field.field_position.parent()
-                            else {
-                                return Err(FederationError::internal(format!(
-                                    "{} requested on {}, but field's parent {} is not an object type",
-                                    operation_field.field_position,
-                                    tail_type_pos,
-                                    operation_field.field_position.type_name()
-                                )));
-                            };
-                            if !self.runtime_types_of_tail.contains(field_parent_pos) {
-                                return Err(FederationError::internal(format!(
-                                    "{} requested on {}, but field's parent {} is not an implementation type",
-                                    operation_field.field_position,
-                                    tail_type_pos,
-                                    operation_field.field_position.type_name()
-                                )));
+                        // - A field from a different parent applies only to implementations
+                        //   shared with that parent.
+                        let implementations = if field_has_different_parent {
+                            match operation_field.field_position.parent() {
+                                CompositeTypeDefinitionPosition::Object(field_parent_pos) => {
+                                    if !self.runtime_types_of_tail.contains(&field_parent_pos) {
+                                        return Err(FederationError::internal(format!(
+                                            "{} requested on {}, but field's parent {} is not an implementation type",
+                                            operation_field.field_position,
+                                            tail_type_pos,
+                                            operation_field.field_position.type_name()
+                                        )));
+                                    }
+                                    Arc::new(IndexSet::from_iter([field_parent_pos]))
+                                }
+                                abstract_parent @ (CompositeTypeDefinitionPosition::Interface(
+                                    _,
+                                )
+                                | CompositeTypeDefinitionPosition::Union(_)) => {
+                                    // After leaving an interface object, a field can still belong
+                                    // to an overlapping interface from the original fragment.
+                                    let field_types = supergraph_schema
+                                        .possible_runtime_types(abstract_parent)?;
+                                    let implementations: IndexSet<_> = self
+                                        .runtime_types_of_tail
+                                        .intersection(&field_types)
+                                        .cloned()
+                                        .collect();
+                                    if implementations.is_empty() {
+                                        return Ok((None, None));
+                                    }
+                                    Arc::new(implementations)
+                                }
                             }
-                            debug!("Casting into requested type {field_parent_pos}");
-                            Arc::new(IndexSet::from_iter([field_parent_pos.clone()]))
                         } else {
                             match &interface_path {
                                 Some(_) => debug!(
@@ -1510,11 +1518,28 @@ impl OpGraphPath {
                     };
                     return Ok((Some(vec![fragment_path.into()]), None));
                 }
-                match tail_type_pos {
+                // An @interfaceObject is locally an object, but represents the concrete
+                // implementations of an interface in the supergraph. An abstract fragment can
+                // overlap those implementations even though it does not contain the local object.
+                let is_interface_object = self.tail_is_interface_object()?;
+                let fragment_tail_type = if is_interface_object
+                    && matches!(
+                        supergraph_schema.get_type(&type_condition_name)?,
+                        TypeDefinitionPosition::Interface(_) | TypeDefinitionPosition::Union(_)
+                    ) {
+                    supergraph_schema
+                        .get_type(tail_type_pos.type_name())?
+                        .try_into()?
+                } else {
+                    tail_type_pos.clone()
+                };
+                let local_parent_type: CompositeTypeDefinitionPosition =
+                    tail_type_pos.clone().try_into()?;
+                match &fragment_tail_type {
                     OutputTypeDefinitionPosition::Interface(_)
                     | OutputTypeDefinitionPosition::Union(_) => {
                         let tail_type_pos: AbstractTypeDefinitionPosition =
-                            tail_type_pos.clone().try_into()?;
+                            fragment_tail_type.clone().try_into()?;
 
                         // If we have an edge for the typecast, take that.
                         if let Some(edge) =
@@ -1541,7 +1566,14 @@ impl OpGraphPath {
                         // Otherwise, check what the intersection is between the possible runtime
                         // types of the tail type and the ones of the typecast. We need to be able
                         // to go into all those types simultaneously (a.k.a. type explosion).
-                        let from_types = self.runtime_types_of_tail.clone();
+                        let from_types = if is_interface_object {
+                            Arc::new(
+                                supergraph_schema
+                                    .possible_runtime_types(tail_type_pos.clone().into())?,
+                            )
+                        } else {
+                            self.runtime_types_of_tail.clone()
+                        };
                         let to_types = supergraph_schema.possible_runtime_types(
                             supergraph_schema
                                 .get_type(&type_condition_name)?
@@ -1561,7 +1593,7 @@ impl OpGraphPath {
                             let guard = span.enter();
                             let implementation_inline_fragment = InlineFragment {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
-                                parent_type_position: tail_type_pos.clone().into(),
+                                parent_type_position: local_parent_type.clone(),
                                 type_condition_position: Some(
                                     implementation_type_pos.clone().into(),
                                 ),
