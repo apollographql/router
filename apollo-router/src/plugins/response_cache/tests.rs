@@ -30,6 +30,8 @@ use crate::graphql;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::response_cache::cache_tag::CacheScope;
+use crate::plugins::response_cache::debugger::CacheEntryKind;
 use crate::plugins::response_cache::debugger::CacheKeysContext;
 use crate::plugins::response_cache::debugger::CdnInvalidationDebug;
 use crate::plugins::response_cache::invalidation::InvalidationRequest;
@@ -43,6 +45,7 @@ use crate::plugins::response_cache::plugin::CdnInvalidationConfig;
 use crate::plugins::response_cache::plugin::INVALIDATION_SHARED_KEY;
 use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
+use crate::plugins::response_cache::storage::Document;
 use crate::plugins::response_cache::storage::redis::Config;
 use crate::plugins::response_cache::storage::redis::Storage;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -7068,5 +7071,197 @@ async fn connector_entity_private_debug_entry() {
         entry.pointer("/shouldStore").and_then(|v| v.as_bool()),
         Some(false),
         "known-private debug entry should have shouldStore: false, got: {entry:?}"
+    );
+}
+
+/// On a partial `_entities` hit, the entity fetched from the subgraph is stored under the lifetime
+/// the subgraph advertised for it. The client `Cache-Control` stays only as fresh as the oldest
+/// cached entity in the fetch.
+#[tokio::test(flavor = "multi_thread")]
+async fn partial_entity_hit_stores_fetched_entity_under_its_own_ttl() {
+    const ADVERTISED_TTL: u64 = 60;
+    const CACHED_AGE: u64 = 50;
+
+    /// Requests every listed organization's name. `orga` answers only for the `fetched`
+    /// representations, so any other organization must be served from the cache.
+    async fn request_organizations(
+        response_cache: &ResponseCache,
+        listed: &[&str],
+        fetched: &[&str],
+    ) -> supergraph::Response {
+        let organizations: Vec<_> = listed
+            .iter()
+            .map(|id| serde_json::json!({"__typename": "Organization", "id": id}))
+            .collect();
+        let representations: Vec<_> = fetched
+            .iter()
+            .map(|id| serde_json::json!({"id": id, "__typename": "Organization"}))
+            .collect();
+        let entities: Vec<_> = fetched
+            .iter()
+            .map(|id| serde_json::json!({"name": format!("Organization {id}")}))
+            .collect();
+
+        let subgraphs = MockedSubgraphs(
+            [
+                (
+                    "user",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+                            serde_json::json! {{"data": {"currentUser": {"allOrganizations": organizations}}}},
+                        )
+                        .with_header(
+                            CACHE_CONTROL,
+                            HeaderValue::from_static("public, s-maxage=100"),
+                        )
+                        .build(),
+                ),
+                (
+                    "orga",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{
+                                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                                "variables": {"representations": representations}
+                            }},
+                            serde_json::json! {{"data": {"_entities": entities}}},
+                        )
+                        .with_header(
+                            CACHE_CONTROL,
+                            HeaderValue::from_str(&format!("public, s-maxage={ADVERTISED_TTL}"))
+                                .unwrap(),
+                        )
+                        .build(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_private_plugin(response_cache.clone())
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { currentUser { allOrganizations { id name } } }")
+            .context(Context::new())
+            .header(
+                HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+                HeaderValue::from_static("true"),
+            )
+            .build()
+            .unwrap();
+        service.oneshot(request).await.unwrap()
+    }
+
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    // `user` is not cached, so every request plans an `_entities` fetch for the organizations
+    // that miss. Its header still counts towards the client `Cache-Control`, with a lifetime
+    // longer than any organization's.
+    let map = [
+        (
+            "user".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: false.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "orga".to_string(),
+            Subgraph {
+                redis: None,
+                enabled: true.into(),
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let response_cache = ResponseCache::for_test(
+        storage.clone(),
+        create_subgraph_conf(map),
+        valid_schema,
+        true,
+        drop_tx,
+        true,
+    )
+    .await
+    .unwrap();
+
+    // Organizations 1 and 2 are fetched and cached, then rewritten as if they had been cached
+    // `CACHED_AGE` seconds ago.
+    let response = request_organizations(&response_cache, &["1", "2"], &["1", "2"]).await;
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
+    let cached_keys = expected_cached_keys(&cache_keys);
+    assert_eq!(cached_keys.len(), 2);
+    wait_for_cache(&storage, cached_keys.clone()).await;
+
+    let cached_keys: Vec<&str> = cached_keys.iter().map(String::as_str).collect();
+    for entry in storage.fetch_multiple(&cached_keys, "orga").await.unwrap() {
+        let mut entry = entry.expect("organization should be cached");
+        entry.control.backdate(CACHED_AGE);
+        let document = Document {
+            key: entry.key,
+            data: entry.data,
+            control: entry.control,
+            cache_tags: Vec::new(),
+            cdn_invalidation_tags: Vec::new(),
+            expire: Duration::from_secs(ADVERTISED_TTL - CACHED_AGE),
+            scope: CacheScope::Subgraph,
+            mapping_problems: Vec::new(),
+            status: None,
+        };
+        storage.insert(document, "orga").await.unwrap();
+    }
+
+    // Organization 3 is fetched alongside the two cached organizations.
+    let response = request_organizations(&response_cache, &["1", "2", "3"], &["3"]).await;
+
+    let client_cache_control =
+        get_cache_control_header(&response).expect("missing cache-control header");
+    let client_s_maxage: u64 = client_cache_control
+        .iter()
+        .find_map(|directive| directive.trim().strip_prefix("s-maxage="))
+        .expect("cache-control header should carry s-maxage")
+        .parse()
+        .unwrap();
+    assert!(
+        client_s_maxage <= ADVERTISED_TTL - CACHED_AGE,
+        "the client header must be as fresh as the oldest cached organization, got {client_cache_control:?}"
+    );
+
+    let organization_3 = get_cache_keys_context(&response)
+        .expect("missing cache keys")
+        .into_iter()
+        .find(|context| match &context.kind {
+            CacheEntryKind::Entity { entity_key, .. } => {
+                entity_key.get("id").and_then(|id| id.as_str()) == Some("3")
+            }
+            CacheEntryKind::RootFields { .. } => false,
+        })
+        .expect("organization 3 should appear in the cache debug context");
+    wait_for_cache(&storage, vec![organization_3.key.clone()]).await;
+    let stored = storage
+        .fetch(&organization_3.key, "orga")
+        .await
+        .expect("organization 3 should be stored");
+    assert_eq!(
+        stored.control.ttl(),
+        Some(ADVERTISED_TTL),
+        "organization 3 must be stored under the lifetime its subgraph advertised"
     );
 }
