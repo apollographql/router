@@ -176,11 +176,7 @@ subgraphs:
     )
     .expect_err("should have resulted in an error")
     .to_string();
-    assert!(
-        error.contains("Additional properties are not allowed ('subgraphs' was unexpected)"),
-        "{error}"
-    );
-    assert!(error.contains("[4:1]"), "{error}");
+    insta::assert_snapshot!(error);
 }
 
 #[test]
@@ -195,11 +191,7 @@ unknown:
     )
     .expect_err("should have resulted in an error")
     .to_string();
-    assert!(
-        error.contains("Additional properties are not allowed ('unknown' was unexpected)"),
-        "{error}"
-    );
-    assert!(error.contains("[2:1]"), "{error}");
+    insta::assert_snapshot!(error);
 }
 
 #[test]

@@ -596,7 +596,17 @@ plain: "no dollars here"
     #[test]
     fn dev_mode_diagnostics_quote_the_file_with_anchors_redacted() {
         let expansion = Expansion::builder().dev_mode(true).build();
-        let text = "# operator comment\napq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        namespace: &pw anchored-secret-value\n        unexpected: true\n        password: *pw\n"; // gitleaks:allow
+        let text = indoc::indoc! {"
+            # operator comment
+            apq:
+              router:
+                cache:
+                  redis:
+                    urls: [redis://localhost]
+                    namespace: &pw anchored-secret-value
+                    unexpected: true
+                    password: *pw
+        "}; // gitleaks:allow
 
         let error = crate::configuration::parse_configuration(
             text,

@@ -430,6 +430,7 @@ dependencies = [
  "hyper-util",
  "hyperlocal",
  "indexmap 2.14.2",
+ "indoc",
  "insta",
  "itertools 0.15.0",
  "itoa",
@@ -3955,6 +3956,15 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "indoc"
+version = "2.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
