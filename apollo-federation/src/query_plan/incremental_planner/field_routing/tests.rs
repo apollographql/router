@@ -1183,8 +1183,7 @@ fn t_pending(
         defer_ref: None,
         context_anchor: Default::default(),
         parent_types: SharedPath::new(),
-        split_parent: None,
-        split_avoid: None,
+        restrict_to: None,
     }
 }
 
@@ -2638,12 +2637,11 @@ fn context_value_rides_entity_representation_at_boundary() {
     "###);
 }
 
-/// The search enumerates options through cached_routing_options, so a
-/// re-pushed split remainder's split_avoid must exclude the avoided
-/// subgraph from every consumer (fast_forward, the lift scan, BULB
-/// options), not just the re-push validation.
+/// The search enumerates options through cached_routing_options, so a fork
+/// remainder's restrict_to must confine every consumer (fast_forward, the
+/// lift scan, BULB options) to the serving subgraph.
 #[test]
-fn split_avoid_filters_enumerated_options() {
+fn restrict_to_filters_enumerated_options() {
     let space = search_space();
     let fetch_node = NodeIndex::new(0);
 
@@ -2654,26 +2652,33 @@ fn split_avoid_filters_enumerated_options() {
             .expect("options enumerate")
     };
     assert!(!unfiltered.is_empty(), "y must have routing options");
-    let avoided = unfiltered[0].target_subgraph().clone();
+    let only = unfiltered[0].target_subgraph().clone();
 
-    let mut avoiding = t_pending(&space, "y", fetch_node, None);
-    avoiding.split_avoid = Some(avoided.clone());
+    let mut restricted = t_pending(&space, "y", fetch_node, None);
+    restricted.restrict_to = Some(only.clone());
     let filtered = space
-        .cached_routing_options(&Arc::new(avoiding))
+        .cached_routing_options(&Arc::new(restricted))
         .expect("filtered options enumerate");
+    assert!(!filtered.is_empty());
     assert!(
         filtered
             .iter()
-            .all(|choice| *choice.target_subgraph() != avoided),
-        "split_avoid must drop options into {avoided}"
+            .all(|choice| *choice.target_subgraph() == only),
+        "restrict_to must keep only options into {only}"
     );
-    assert!(filtered.len() < unfiltered.len());
+
+    let mut elsewhere = t_pending(&space, "y", fetch_node, None);
+    elsewhere.restrict_to = Some(Arc::from("<no-such-subgraph>"));
+    let none = space
+        .cached_routing_options(&Arc::new(elsewhere))
+        .expect("filtered options enumerate");
+    assert!(none.is_empty(), "restrict_to must drop every other option");
 }
 
 /// A keyless value type (no @key on V) whose fields are split across two
 /// subgraphs: `a` in A and `b` in B. A single fetch can't resolve both, so the
 /// planner must split the parent selection and fetch each half independently.
-/// Targets the split_for_other_subgraph path in commit.rs dispatch_sub_selections.
+/// Targets fork.rs fork_stranded_children.
 #[test]
 fn keyless_value_type_splits_across_subgraphs() {
     let schema = wrap_supergraph(
@@ -2720,10 +2725,10 @@ type Query
     "###);
 }
 
-/// Same keyless split, but the stranded child hides inside a @defer'd
-/// fragment: the split walk must recurse through the fragment and preserve
-/// the wrapper (carrying @defer) on the split-off duplicate.
-/// Targets commit.rs split_fragment_children.
+/// Same keyless fork, but the stranded child hides inside a @defer'd
+/// fragment: the stranded walk must recurse through the fragment and
+/// preserve the wrapper (carrying @defer) on the remainder.
+/// Targets fork.rs stranded_selection.
 #[test]
 fn keyless_value_type_split_recovers_deferred_fragment_children() {
     let schema = wrap_supergraph(
@@ -2757,15 +2762,14 @@ type Query
     );
 }
 
-/// Deep keyless split: the strand sits two keyless levels below the field
-/// with routing alternatives, where the one-level lookahead in
-/// `split_for_other_subgraph` cannot see it. Committing `conn` to A strands
-/// `Inner.b` (Inner and Conn are keyless, so no hop can recover it); the
-/// drop-time recovery re-pushes `conn { inner { b } }` at the entity anchor,
-/// avoiding A, so it key-hops to B and the responses merge at the same path.
-/// Targets mod.rs refetch_ancestor_candidate / wrap_in_parent / split_avoid filtering.
+/// Deep keyless fork: the strand sits two keyless levels below the field
+/// with routing alternatives. Routing `conn` to A strands `Inner.b` (Inner
+/// and Conn are keyless, so no hop can recover it), so the A option becomes
+/// a fork whose remainder `conn { inner { b } }` is pinned to B and
+/// key-hops there, and the responses merge at the same path.
+/// Targets fork.rs stranded_at / commit_fork.
 #[test]
-fn deep_keyless_split_repushes_remainder_at_entity_anchor() {
+fn deep_keyless_fork_reaches_stranded_grandchild() {
     let schema = wrap_supergraph(
         r#"  A @join__graph(name: "a", url: "http://a")
   B @join__graph(name: "b", url: "http://b")"#,
