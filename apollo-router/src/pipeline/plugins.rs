@@ -18,7 +18,6 @@ use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
@@ -96,7 +95,6 @@ pub(crate) async fn create_plugins(
         supergraph_schema: Arc::new(schema.supergraph_schema().clone()),
         subgraph_schemas,
         launch_id: schema.launch_id.clone(),
-        notify: configuration.notify.clone(),
         license,
         raw_yaml: configuration.raw_yaml.clone(),
         validated_yaml: configuration.validated_yaml.clone(),
@@ -204,7 +202,6 @@ struct PluginRegistrar<'a> {
     supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
     subgraph_schemas: Arc<SubgraphSchemas>,
     launch_id: Option<Arc<String>>,
-    notify: Notify<String, crate::graphql::Response>,
     license: Arc<LicenseState>,
     raw_yaml: Option<Arc<str>>,
     /// The full validated configuration, handed only to the telemetry plugin.
@@ -343,7 +340,6 @@ impl PluginRegistrar<'_> {
             .supergraph_schema(self.supergraph_schema.clone())
             .subgraph_schemas(self.subgraph_schemas.clone())
             .launch_id(self.launch_id.clone())
-            .notify(self.notify.clone())
             .license(self.license.clone())
             .and_full_config(full_config)
             .and_original_config_yaml(self.raw_yaml.clone())

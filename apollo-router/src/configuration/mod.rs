@@ -50,16 +50,11 @@ use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
-use crate::graphql;
 use crate::plugin::plugins;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
 use crate::plugins::limits;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
-use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
 mod apollo_configuration_parse;
@@ -83,9 +78,6 @@ mod test_discovery;
 mod tests;
 mod upgrade;
 mod yaml;
-
-// TODO: Talk it through with the teams
-static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?P<first_path>.*/)(?P<sub_path>.+)\*$")
@@ -226,11 +218,6 @@ pub struct Configuration {
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
-    // FIXME(@goto-bus-stop): Sticking this on Configuration is a serious hack just to have
-    // it available everywhere, it is actually not configuration at all
-    #[serde(default, skip_serializing, skip_deserializing)]
-    pub(crate) notify: Notify<String, graphql::Response>,
-
     /// Batching configuration.
     #[serde(default)]
     pub(crate) batching: Batching,
@@ -283,9 +270,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
-        let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-
         // Allow the limits plugin to use the configuration from the configuration struct.
         // This means that the limits plugin will get the regular configuration via plugin init.
         ad_hoc.apollo_plugins.plugins.insert(
@@ -316,8 +300,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
 
-            // serde(skip)
-            notify,
             uplink: None,
             validated_yaml: None,
             raw_yaml: None,
@@ -355,8 +337,6 @@ impl Configuration {
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
-        let notify = Self::notify(&apollo_plugins)?;
-
         let conf = Self {
             validated_yaml: Default::default(),
             raw_yaml: None,
@@ -382,7 +362,6 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
-            notify,
         };
 
         conf.validate()
@@ -400,38 +379,6 @@ impl Configuration {
         hasher.update(defaulted_raw);
         let hash: String = format!("{:x}", hasher.finalize());
         hash
-    }
-
-    fn notify(
-        apollo_plugins: &Map<String, Value>,
-    ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
-        if cfg!(test) {
-            return Ok(Notify::for_tests());
-        }
-        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
-            Some(plugin_conf) => {
-                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
-                    .map_err(|err| ConfigurationError::PluginConfiguration {
-                        plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
-                        error: format!("{err:?}"),
-                    })?;
-                conf.queue_capacity
-            }
-            None => None,
-        };
-        Ok(Notify::builder()
-            .and_queue_size(notify_queue_cap)
-            .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
-            .heartbeat_error_message(
-                graphql::Response::builder()
-                .errors(vec![
-                    graphql::Error::builder()
-                    .message("the connection has been closed because it hasn't heartbeat for a while")
-                    .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
-                    .build()
-                ])
-                .build()
-            ).build())
     }
 
     pub(crate) fn rust_query_planner_config(
@@ -495,7 +442,6 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
-        notify: Option<Notify<String, graphql::Response>>,
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
@@ -521,7 +467,6 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             tls: tls.unwrap_or_default(),
-            notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,

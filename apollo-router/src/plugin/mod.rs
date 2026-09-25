@@ -44,10 +44,8 @@ use tower::buffer::future::ResponseFuture;
 
 use crate::ListenAddr;
 use crate::axum_factory::Endpoint;
-use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
-use crate::plugins::subscription::notification::Notify;
 use crate::services::connector::request_service as connector_request;
 use crate::services::execution;
 use crate::services::router;
@@ -84,8 +82,6 @@ pub struct PluginInit<T> {
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
 
-    pub(crate) notify: Notify<String, graphql::Response>,
-
     /// User's license's state, including any limits of use
     pub(crate) license: Arc<LicenseState>,
 
@@ -117,7 +113,6 @@ where
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
-            .notify(Notify::for_tests())
             .license(Arc::new(LicenseState::default()))
             .build()
     }
@@ -131,8 +126,6 @@ where
     /// Create a new PluginInit builder
     #[builder(entry = "builder", exit = "build", visibility = "pub")]
     /// Build a new PluginInit for the supplied configuration and SDL.
-    ///
-    /// You can reuse a notify instance, or Build your own.
     pub(crate) fn new_builder(
         config: T,
         previous_config: Option<T>,
@@ -141,7 +134,6 @@ where
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Option<Arc<String>>>,
-        notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
@@ -154,7 +146,6 @@ where
             supergraph_schema,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
-            notify,
             license,
             full_config,
             raw_yaml: original_config_yaml,
@@ -164,7 +155,6 @@ where
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
-    /// You can reuse a notify instance, or Build your own.
     /// invoking build() will fail if the JSON doesn't comply with the configuration format.
     pub(crate) fn try_new_builder(
         config: serde_json::Value,
@@ -174,7 +164,6 @@ where
         supergraph_schema: Arc<Valid<Schema>>,
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
-        notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
@@ -189,7 +178,6 @@ where
             supergraph_schema_id,
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
-            notify,
             license,
             full_config,
             raw_yaml: original_config_yaml,
@@ -206,7 +194,6 @@ where
         supergraph_schema: Option<Arc<Valid<Schema>>>,
         subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
-        notify: Option<Notify<String, graphql::Response>>,
         license: Option<Arc<LicenseState>>,
         full_config: Option<Value>,
         original_config_yaml: Option<Arc<str>>,
@@ -220,7 +207,6 @@ where
                 .unwrap_or_else(|| Arc::new(Valid::assume_valid(Schema::new()))),
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
-            notify: notify.unwrap_or_else(Notify::for_tests),
             license: license.unwrap_or_default(),
             full_config,
             raw_yaml: original_config_yaml,
@@ -241,7 +227,6 @@ impl PluginInit<serde_json::Value> {
             .supergraph_schema_id(self.supergraph_schema_id)
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
-            .notify(self.notify.clone())
             .license(self.license)
             .and_full_config(self.full_config)
             .and_original_config_yaml(self.raw_yaml)

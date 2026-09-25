@@ -31,6 +31,7 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
+use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
@@ -51,22 +52,25 @@ use crate::services::SubgraphResponse;
 static CALLBACK_PROTOCOL_ACCEPT: HeaderValue =
     HeaderValue::from_static("application/json;callbackSpec=1.0");
 
+impl Subscription {
+    pub(crate) fn subgraph_layer(&self) -> SubscriptionSubgraphLayer {
+        SubscriptionSubgraphLayer::new(self.notify.clone(), Some(Arc::new(self.config.clone())))
+    }
+}
+
 pub(crate) struct SubscriptionSubgraphLayer {
     notify: Notify<String, graphql::Response>,
     subscription_config: Option<Arc<SubscriptionConfig>>,
-    service_name: Arc<str>,
 }
 
 impl SubscriptionSubgraphLayer {
     pub(crate) fn new(
         notify: Notify<String, graphql::Response>,
         subscription_config: Option<Arc<SubscriptionConfig>>,
-        service_name: Arc<str>,
     ) -> Self {
         Self {
             notify,
             subscription_config,
-            service_name,
         }
     }
 }
@@ -78,7 +82,6 @@ impl<S> tower::Layer<S> for SubscriptionSubgraphLayer {
         SubscriptionSubgraphService {
             notify: self.notify.clone(),
             subscription_config: self.subscription_config.clone(),
-            service_name: self.service_name.clone(),
             inner,
         }
     }
@@ -88,7 +91,6 @@ impl<S> tower::Layer<S> for SubscriptionSubgraphLayer {
 pub(crate) struct SubscriptionSubgraphService<S> {
     notify: Notify<String, graphql::Response>,
     subscription_config: Option<Arc<SubscriptionConfig>>,
-    service_name: Arc<str>,
     inner: S,
 }
 
@@ -117,7 +119,7 @@ where
 
         let notify = self.notify.clone();
         let subscription_config = self.subscription_config.clone();
-        let service_name = self.service_name.clone();
+        let service_name = req.subgraph_name.clone();
 
         Box::pin(async move {
             match subgraph_request(notify, req, subscription_config, &service_name).await? {

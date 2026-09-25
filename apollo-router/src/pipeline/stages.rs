@@ -33,8 +33,6 @@ use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::SubscriptionExecutionLayer;
-use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
@@ -198,7 +196,6 @@ pub(crate) fn build_subgraph_service(
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> BufferedSubgraphService {
-    let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
     // Box *inside* the buffer, as [`build_connector_request_services`] does: it erases the
@@ -214,11 +211,7 @@ pub(crate) fn build_subgraph_service(
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
-        .layer(SubscriptionSubgraphLayer::new(
-            configuration.notify.clone(),
-            subscription_config,
-            Arc::from(name),
-        ))
+        .apply_plugin_layer(plugins, Subscription::subgraph_layer)
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service))
@@ -420,9 +413,7 @@ fn build_execution_service(
 
     ServiceBuilder::new()
         .layer(BatchQueryPlanAnalysisLayer::new())
-        .layer(SubscriptionExecutionLayer::new(
-            configuration.notify.clone(),
-        ))
+        .apply_plugin_layer(&plugins, Subscription::execution_layer)
         .apply_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.execution_service(service)

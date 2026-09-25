@@ -22,14 +22,15 @@ use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
-use crate::Notify;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::graphql::Response;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
+use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
@@ -47,6 +48,11 @@ const SUBSCRIPTION_EXECUTION_ERROR_EXTENSION_CODE: &str = "SUBSCRIPTION_EXECUTIO
 pub(crate) const SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE: &str =
     "SUBSCRIPTION_MAX_LIFETIME_EXCEEDED";
 
+impl Subscription {
+    pub(crate) fn execution_layer(&self) -> SubscriptionExecutionLayer {
+        SubscriptionExecutionLayer::new(self.notify.clone())
+    }
+}
 /// The execution side of the subscriptions implementation starts up a side-channel task used to
 /// handle messages received from the subgraph that we subscribed to.
 pub(crate) struct SubscriptionExecutionLayer {

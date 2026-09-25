@@ -39,7 +39,6 @@ pub(crate) use callback::SUBSCRIPTION_CALLBACK_HMAC_KEY;
 pub(crate) use execution::SUBSCRIPTION_CONFIG_RELOAD_EXTENSION_CODE;
 pub(crate) use execution::SUBSCRIPTION_MAX_LIFETIME_EXTENSION_CODE;
 pub(crate) use execution::SUBSCRIPTION_SCHEMA_RELOAD_EXTENSION_CODE;
-pub(crate) use execution::SubscriptionExecutionLayer;
 pub(crate) use execution::SubscriptionTaskParams;
 pub(crate) use fetch::fetch_service_handle_subscription;
 
@@ -51,9 +50,12 @@ pub(crate) const SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS: &str =
 pub(crate) const SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY: &str =
     "apollo::subscription::subgraph_name";
 
+// TODO: Talk it through with the teams
+static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
+
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
-    notify: Notify<String, graphql::Response>,
+    pub(crate) notify: Notify<String, graphql::Response>,
     callback_hmac_key: Option<String>,
     pub(crate) config: SubscriptionConfig,
 }
@@ -280,6 +282,23 @@ impl Plugin for Subscription {
     type Config = SubscriptionConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let notify = {
+            let heartbeat_error = graphql::Response::builder()
+                .error(
+                    graphql::Error::builder()
+                    .message("the connection has been closed because it hasn't heartbeat for a while")
+                    .extension_code("SUBSCRIPTION_HEARTBEAT_ERROR")
+                    .build(),
+                )
+                .build();
+
+            Notify::builder()
+                .and_queue_size(init.config.queue_capacity)
+                .ttl(Duration::from_secs(HEARTBEAT_TIMEOUT_DURATION_SECONDS))
+                .heartbeat_error_message(heartbeat_error)
+                .build()
+        };
+
         let mut callback_hmac_key = None;
         if let Some(callback) = &init.config.mode.callback {
             callback_hmac_key = Some(
@@ -288,7 +307,7 @@ impl Plugin for Subscription {
                     .clone(),
             );
             #[cfg(not(test))]
-            init.notify
+            notify
                 .set_ttl(callback.heartbeat_interval.into_option())
                 .await?;
             #[cfg(test)]
@@ -296,7 +315,7 @@ impl Plugin for Subscription {
         }
 
         Ok(Subscription {
-            notify: init.notify,
+            notify,
             callback_hmac_key,
             config: init.config,
         })
@@ -369,7 +388,6 @@ mod tests {
     use tower::util::BoxCloneService;
 
     use super::*;
-    use crate::Notify;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
     use crate::http_ext;
@@ -383,7 +401,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
-        let mut notify = Notify::builder().build();
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
@@ -404,11 +421,17 @@ mod tests {
                         )
                         .unwrap(),
                     )
-                    .notify(notify.clone())
                     .build(),
             )
             .await
             .unwrap();
+
+        let mut notify = dyn_plugin
+            .as_any()
+            .downcast_ref::<Subscription>()
+            .unwrap()
+            .notify
+            .clone();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
             .body(body::empty())
@@ -529,7 +552,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint_with_bad_verifier() {
-        let mut notify = Notify::builder().build();
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
@@ -550,12 +572,18 @@ mod tests {
                         )
                         .unwrap(),
                     )
-                    .notify(notify.clone())
                     .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
             .unwrap();
+
+        let mut notify = dyn_plugin
+            .as_any()
+            .downcast_ref::<Subscription>()
+            .unwrap()
+            .notify
+            .clone();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
             .body(body::empty())
@@ -621,7 +649,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint_with_complete_subscription() {
-        let mut notify = Notify::builder().build();
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
             .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
             .expect("Plugin not found")
@@ -642,12 +669,18 @@ mod tests {
                         )
                         .unwrap(),
                     )
-                    .notify(notify.clone())
                     .license(Arc::new(LicenseState::default()))
                     .build(),
             )
             .await
             .unwrap();
+
+        let mut notify = dyn_plugin
+            .as_any()
+            .downcast_ref::<Subscription>()
+            .unwrap()
+            .notify
+            .clone();
 
         let http_req_prom = http::Request::get("http://localhost:4000/subscription/callback")
             .body(body::empty())

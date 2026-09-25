@@ -376,7 +376,6 @@ mod tests {
 
     use super::*;
     use crate::Context;
-    use crate::Notify;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql::Error;
     use crate::graphql::Request;
@@ -843,9 +842,8 @@ mod tests {
     > {
         ServiceBuilder::new()
             .layer(SubscriptionSubgraphLayer::new(
-                Notify::builder().build(),
+                crate::plugins::subscription::notification::Notify::builder().build(),
                 Some(Arc::new(subscription_config())),
-                Arc::from(s.service.to_string()),
             ))
             .layer(SubgraphApqLayer::new(false))
             .layer(SubgraphContentNegotiationLayer::default())
@@ -1403,9 +1401,8 @@ mod tests {
             // A single shared `Notify` (unlike `with_subscription_layer`, which would hand each
             // call its own) so both requests below hit the same deduplication topic.
             let subgraph_service = SubscriptionSubgraphLayer::new(
-                Notify::builder().build(),
+                crate::plugins::subscription::notification::Notify::builder().build(),
                 Some(Arc::new(subscription_config())),
-                Arc::from("test"),
             )
             .layer(SubgraphService::new(
                 "test",
@@ -2183,7 +2180,6 @@ mod tests {
             Some(Arc::new(subscription_config_with_reconnect(
                 max_reconnect_attempts,
             ))),
-            Arc::from(s.service.to_string()),
         )
         .layer(s)
     }
@@ -2212,7 +2208,6 @@ mod tests {
                 max_reconnect_attempts,
                 protocol,
             ))),
-            Arc::from(s.service.to_string()),
         )
         .layer(s)
     }
@@ -2917,7 +2912,6 @@ mod tests {
                     3,
                     reconnect_delay,
                 ))),
-                Arc::from("test"),
             )
             .layer(
                 SubgraphService::new("test", test_http_client_service("test")),
@@ -3027,7 +3021,6 @@ mod tests {
                     3,
                     std::time::Duration::from_millis(1),
                 ))),
-                Arc::from("test"),
             )
             .layer(
                 SubgraphService::new("test", test_http_client_service("test")),
