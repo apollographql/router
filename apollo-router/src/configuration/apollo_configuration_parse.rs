@@ -50,8 +50,9 @@ const UPGRADE_GUIDE: &str =
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Migration {
     WithinMajor,
-    /// Applies the same migrations without logging them, for callers that report them
-    /// themselves.
+    /// Applies the same migrations without the summary "needs to be upgraded" error or the
+    /// Rust-side migration logs, for callers that report migrations themselves. Each migration's
+    /// own notices (`Action::Log`) still print, as they do at startup.
     WithinMajorQuietly,
     #[cfg(test)]
     None,
@@ -653,9 +654,10 @@ mod tests {
         .unwrap();
     }
 
-    /// `router config validate` reports migrations itself, so its parse logs nothing about them.
+    /// `router config validate` reports migrations itself, so its parse omits the summary error.
+    /// Each migration's own notice still prints, as it does at startup.
     #[test]
-    fn quiet_migration_logs_nothing_about_what_it_changed() {
+    fn quiet_migration_omits_the_upgrade_required_error() {
         let _guard = tracing_test::dispatcher_guard();
 
         parse_configuration(
@@ -666,13 +668,17 @@ mod tests {
         .expect("the adapter migrates legacy CORS settings");
 
         tracing_test::logs_assert(|lines| {
-            match lines
+            if let Some(line) = lines
                 .iter()
                 .find(|line| line.contains("needs to be upgraded"))
             {
-                Some(line) => Err(format!("unexpected migration log: {line}")),
-                None => Ok(()),
+                return Err(format!("unexpected upgrade-required error: {line}"));
             }
+            lines
+                .iter()
+                .any(|line| line.contains("CORS configuration has been migrated"))
+                .then_some(())
+                .ok_or_else(|| "the CORS migration's own notice must still print".to_string())
         })
         .unwrap();
     }

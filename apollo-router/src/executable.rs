@@ -484,7 +484,8 @@ impl Executable {
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
                 // Validate what startup would load, including automatic migration. The note below
-                // reports migrations, so the parse does not log them as errors.
+                // reports migrations, so the parse omits the "needs to be upgraded" error; each
+                // migration's own notices still print, as they do at startup.
                 ConfigurationParser::new()?
                     .parse_with_migration(&config_string, Migration::WithinMajorQuietly)?;
 
