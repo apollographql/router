@@ -123,6 +123,33 @@ pub mod legacy {
     pub use super::check_plan_with_response_shapes as check_plan;
 }
 
+/// Checks the plan checker can make but does not make by default.
+///
+/// Each one reports a real query-planner defect that the planner cannot currently avoid, so
+/// turning it on will fault plans the router ships today. They are options rather than findings
+/// so that a corpus run can ask how widespread each defect is without the checker rejecting
+/// working plans in ordinary use.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CheckerOptions {
+    /// Report a flatten path element narrowed to no runtime type at all — FED-516.
+    ///
+    /// The planner writes an empty type condition when it has decided the position admits
+    /// nothing, and the judgement is right: the fetch under such a path can never run. It is dead
+    /// code in the plan rather than a soundness violation, and the checker is otherwise silent
+    /// about it, since a path that reaches no type mounts no requirement.
+    pub check_empty_flatten_path_type_condition: bool,
+
+    /// Report two `@requires` on one entity that demand the same response key with different
+    /// arguments — FED-504.
+    ///
+    /// A fetch can only make one of the two calls, so one of the two fields is fed data it did
+    /// not ask for. Neither the plan nor the rest of this checker can see it: the plan's own
+    /// `requires` entry has had its arguments dropped by `trim_requires_selection_set`, and the
+    /// demand the entry is compared against is a concatenation of the two field sets, which
+    /// `query_compare` reads as one call because GraphQL validation would have merged them.
+    pub check_requires_conflict: bool,
+}
+
 /// Check that a query plan is correct for a client operation.
 ///
 /// This is [`query_plan_check`], the port of the Lean `checkQueryPlan` model. It decides the same
@@ -136,8 +163,33 @@ pub fn check_plan(
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
 ) -> Result<(), CorrectnessError> {
+    check_plan_with_options(
+        api_schema,
+        supergraph_schema,
+        subgraphs_by_name,
+        operation_doc,
+        plan,
+        CheckerOptions::default(),
+    )
+}
+
+/// [`check_plan`], with the optional checks in [`CheckerOptions`] turned on or off.
+pub fn check_plan_with_options(
+    api_schema: &ValidFederationSchema,
+    supergraph_schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    operation_doc: &Valid<ExecutableDocument>,
+    plan: &QueryPlan,
+    options: CheckerOptions,
+) -> Result<(), CorrectnessError> {
     let operation_doc = coerce_input_operation(api_schema, operation_doc)?;
-    query_plan_check::check_plan(supergraph_schema, subgraphs_by_name, &operation_doc, plan)?;
+    query_plan_check::check_plan_with_options(
+        supergraph_schema,
+        subgraphs_by_name,
+        &operation_doc,
+        plan,
+        options,
+    )?;
     Ok(())
 }
 

@@ -179,3 +179,55 @@ fn a_requires_field_the_plan_never_fetches_is_reported() {
     "###
     );
 }
+
+//==================================================================================================
+// Optional checks
+//
+// These report planner defects the planner cannot currently avoid, so they are off unless asked
+// for. No plan the planner produces in these tests carries an empty flatten-path condition, so
+// the FED-516 check is pinned on the path directly; the wiring is the one call in the `Flatten`
+// arm of `walk_node`.
+
+use apollo_compiler::name;
+
+use super::check_path_reaches_a_type;
+use crate::query_plan::FetchDataPathElement;
+
+/// `…|[]` says the planner decided the position admits nothing, so the fetch under the path can
+/// never run.
+#[test]
+fn an_empty_path_type_condition_is_reported() {
+    for path in [
+        vec![FetchDataPathElement::Key(name!("a"), Some(Vec::new()))],
+        vec![FetchDataPathElement::AnyIndex(Some(Vec::new()))],
+        vec![
+            FetchDataPathElement::Key(name!("a"), None),
+            FetchDataPathElement::AnyIndex(Some(Vec::new())),
+        ],
+    ] {
+        let error = check_path_reaches_a_type(&path).expect_err("should be reported");
+        assert!(
+            error.description().contains("no runtime type"),
+            "unexpected message: {error}"
+        );
+    }
+}
+
+/// A condition that names a type, and no condition at all, are both ordinary.
+#[test]
+fn a_path_that_reaches_a_type_is_not_reported() {
+    for path in [
+        vec![FetchDataPathElement::Key(name!("a"), None)],
+        vec![FetchDataPathElement::Key(
+            name!("a"),
+            Some(vec![name!("Book")]),
+        )],
+        vec![FetchDataPathElement::AnyIndex(Some(vec![name!("Book")]))],
+        vec![
+            FetchDataPathElement::TypenameEquals(name!("Book")),
+            FetchDataPathElement::Parent,
+        ],
+    ] {
+        check_path_reaches_a_type(&path).expect("should not be reported");
+    }
+}

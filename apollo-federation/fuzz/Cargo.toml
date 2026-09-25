@@ -73,3 +73,7 @@ path = "runners/compose_constraint_fixture.rs"
 [[example]]
 name = "union_case_split"
 path = "runners/union_case_split.rs"
+
+[[example]]
+name = "includes_pair"
+path = "runners/includes_pair.rs"

@@ -93,6 +93,7 @@ use apollo_compiler::validation::Valid;
 use self::context::check_context_rewrites;
 use self::context::context_variables;
 use self::context::remove_context_arguments;
+use self::requires::check_requires_conflict;
 use self::requires::condition_matches_requirement;
 use self::requires::key_half;
 use self::requires::requires_half;
@@ -107,6 +108,7 @@ use super::query_compare;
 use super::query_compare::conditions::BooleanLiteral;
 use super::response_shape_compare::ComparisonError;
 use super::subgraph_constraint::SubgraphConstraint;
+use crate::correctness::CheckerOptions;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
@@ -151,6 +153,8 @@ pub(crate) struct Checker<'a> {
     /// Every variable a condition node of this plan branches on.
     condition_variables: IndexSet<Name>,
     root_type: Name,
+    /// The checks that are off unless the caller asks for them.
+    options: CheckerOptions,
 }
 
 //==================================================================================================
@@ -164,6 +168,7 @@ impl<'a> Checker<'a> {
         operation: &'a executable::Operation,
         plan: &QueryPlan,
         root_type: Name,
+        options: CheckerOptions,
     ) -> Result<Self, ComparisonError> {
         Ok(Checker {
             supergraph_schema,
@@ -174,8 +179,40 @@ impl<'a> Checker<'a> {
             constraint: SubgraphConstraint::new(subgraphs_by_name),
             condition_variables: condition_variables(plan),
             root_type,
+            options,
         })
     }
+}
+
+/// Reports a flatten path element narrowed to no runtime type at all.
+///
+/// The planner writes an empty type condition — `…@|[]` — when it has worked out that the
+/// position admits nothing, which says the fetch under the path can never run. The judgement is
+/// right; emitting the fetch anyway is not. The rest of this checker is silent about it, and
+/// correctly so: a path element that reaches no type mounts no requirement and admits no
+/// fragment, so the fetch demands nothing and contributes nothing. That makes it dead code in the
+/// plan rather than a soundness violation, which is why
+/// [`CheckerOptions::check_empty_flatten_path_type_condition`] is off by default.
+fn check_path_reaches_a_type(path: &[FetchDataPathElement]) -> Result<(), ComparisonError> {
+    for element in path {
+        let condition = match element {
+            FetchDataPathElement::Key(_, condition) | FetchDataPathElement::AnyIndex(condition) => {
+                condition
+            }
+            FetchDataPathElement::TypenameEquals(_) | FetchDataPathElement::Parent => continue,
+        };
+        if condition.as_ref().is_some_and(|types| types.is_empty()) {
+            return Err(ComparisonError::new(format!(
+                "flatten path `{}` narrows `{element}` to no runtime type, \
+                 so the fetch under it can never run",
+                path.iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Every variable a condition node of a plan branches on.
@@ -270,6 +307,9 @@ impl<'a> Checker<'a> {
                 Ok(added)
             }
             PlanNode::Flatten(flatten) => {
+                if self.options.check_empty_flatten_path_type_condition {
+                    check_path_reaches_a_type(&flatten.path)?;
+                }
                 let mut path = reached.path.to_vec();
                 path.extend(flatten.path.iter().cloned());
                 self.walk_node(
@@ -507,6 +547,15 @@ impl Checker<'_> {
                 entity_type,
                 entity_selections,
             )?;
+            if self.options.check_requires_conflict {
+                check_requires_conflict(self.supergraph_schema, &selections).map_err(|e| {
+                    ComparisonError::new(format!(
+                        "fetch to {}: entity case `{entity_type}`: {}",
+                        fetch.subgraph_name,
+                        e.description()
+                    ))
+                })?;
+            }
             let field_set = to_requires_field_set(&selections);
             per_case.push((subgraph.keys(entity_type)?, selections, field_set));
         }
@@ -1040,6 +1089,23 @@ pub fn check_plan(
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
 ) -> Result<(), ComparisonError> {
+    check_plan_with_options(
+        supergraph_schema,
+        subgraphs_by_name,
+        operation_doc,
+        plan,
+        CheckerOptions::default(),
+    )
+}
+
+/// [`check_plan`], with the optional checks in [`CheckerOptions`] turned on or off.
+pub fn check_plan_with_options(
+    supergraph_schema: &ValidFederationSchema,
+    subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    operation_doc: &Valid<ExecutableDocument>,
+    plan: &QueryPlan,
+    options: CheckerOptions,
+) -> Result<(), ComparisonError> {
     let operation = operation_doc.operations.get(None).map_err(|_| {
         ComparisonError::new("expected exactly one operation in the input document".to_string())
     })?;
@@ -1060,6 +1126,7 @@ pub fn check_plan(
         operation,
         plan,
         root_type.clone(),
+        options,
     )?;
     let Some(node) = &plan.node else {
         // A plan with no node fetches nothing, which is correct only for an operation that asks
