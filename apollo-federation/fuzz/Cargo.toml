@@ -1,0 +1,79 @@
+[package]
+name = "query-inclusion-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Its own workspace: this package depends on a Lean checkout for the differential lane and must
+# not be built by the router workspace's ordinary `cargo test`.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+apollo-compiler = "1.33.0"
+apollo-federation = { path = "..", features = ["correctness"] }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+
+[[example]]
+name = "differential"
+path = "runners/differential.rs"
+
+[[example]]
+name = "metamorphic"
+path = "runners/metamorphic.rs"
+
+[[example]]
+name = "boolean_case_split_cost"
+path = "runners/boolean_case_split_cost.rs"
+
+# Symbols in release, so a profiler attached to `check_bench` resolves frames.
+[profile.release]
+debug = true
+
+[[example]]
+name = "check_bench"
+path = "runners/check_bench.rs"
+
+[[example]]
+name = "plan_differential"
+path = "runners/plan_differential.rs"
+
+[[example]]
+name = "plan_disagreements"
+path = "runners/plan_disagreements.rs"
+
+[[example]]
+name = "plan_probe"
+path = "runners/plan_probe.rs"
+
+[[example]]
+name = "plan_smoke"
+path = "runners/plan_smoke.rs"
+
+[[example]]
+name = "benchmark"
+path = "runners/benchmark.rs"
+
+[[example]]
+name = "compose_fixture"
+path = "runners/compose_fixture.rs"
+
+[[example]]
+name = "compose_constraint_fixture"
+path = "runners/compose_constraint_fixture.rs"
+
+[[example]]
+name = "union_case_split"
+path = "runners/union_case_split.rs"
+
+[[example]]
+name = "includes_pair"
+path = "runners/includes_pair.rs"

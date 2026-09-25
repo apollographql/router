@@ -53,60 +53,136 @@ macro_rules! check_match_eq {
     };
 }
 
-/// Path-specific type constraints on top of GraphQL type conditions.
+/// The set of runtime object types that are possible at the current path position (the narrowed
+/// type context). The comparison functions maintain this: it's narrowed by each type condition
+/// (or case-split case) in effect, and re-derived across field boundaries via
+/// `PathConstraint::for_field`.
+#[derive(Debug, Clone)]
+pub(crate) enum PossibleTypes {
+    /// All types are possible (unconstrained).
+    All,
+    /// Only these object types are possible.
+    Restricted(IndexSet<ObjectTypeDefinitionPosition>),
+}
+
+impl PossibleTypes {
+    /// Is `ty` possible?
+    pub(crate) fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
+        match self {
+            PossibleTypes::All => true,
+            PossibleTypes::Restricted(types) => types.contains(ty),
+        }
+    }
+
+    /// Is any type in `ground_set` possible?
+    fn allows_any_of(&self, ground_set: &[ObjectTypeDefinitionPosition]) -> bool {
+        ground_set.iter().any(|ty| self.allows(ty))
+    }
+
+    /// Is any of `defs`' type conditions feasible?
+    fn allows_any_definitions(&self, defs: &PossibleDefinitions) -> bool {
+        defs.iter()
+            .any(|(type_cond, _)| self.allows_any_of(type_cond.ground_set()))
+    }
+
+    /// Returns the possible types narrowed by the given type condition.
+    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
+        let ground_set = type_cond.ground_set().iter();
+        PossibleTypes::Restricted(match self {
+            PossibleTypes::All => ground_set.cloned().collect(),
+            // Both the current possible types and the type condition apply here.
+            // - Callers only use satisfiable type conditions, so the intersection is non-empty.
+            PossibleTypes::Restricted(types) => ground_set
+                .filter(|ty| types.contains(*ty))
+                .cloned()
+                .collect(),
+        })
+    }
+
+    /// Returns the intersection of two sets of possible types.
+    pub(crate) fn intersect(&self, other: &Self) -> Self {
+        match (self, other) {
+            (PossibleTypes::All, other) => other.clone(),
+            (this, PossibleTypes::All) => this.clone(),
+            (PossibleTypes::Restricted(these), PossibleTypes::Restricted(others)) => {
+                PossibleTypes::Restricted(these.intersection(others).cloned().collect())
+            }
+        }
+    }
+}
+
+/// Path-specific oracles for how a field changes the possible types of the response.
+/// - The comparison functions themselves maintain the possible types (`PossibleTypes`) and
+///   narrow them by type conditions; implementations only answer the schema-specific question
+///   at field boundaries.
 pub(crate) trait PathConstraint
 where
     Self: Sized,
 {
-    /// Returns a new path constraint under the given type condition.
-    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self;
+    /// Given the possible parent object types, returns the path constraint for the field's
+    /// sub-selection scope along with the possible object types of the field's response.
+    fn for_field(
+        &self,
+        representative_field: &Field,
+        parent_types: &PossibleTypes,
+    ) -> Result<(Self, PossibleTypes), ComparisonError>;
 
-    /// Returns a new path constraint for field's response shape.
-    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError>;
+    /// Would these two narrow every deeper field the same way?
+    ///
+    /// Only a caller that is about to discard one of them needs to ask. Two constraints can agree
+    /// on a field's response types and still disagree below it, so answering by comparing what
+    /// they just returned is not enough; a stateless constraint answers `true`.
+    fn narrows_alike(&self, other: &Self) -> bool;
+}
 
-    /// Is `ty` allowed under the path constraint?
-    fn allows(&self, _ty: &ObjectTypeDefinitionPosition) -> bool;
+/// The constraint that narrows nothing: every field's response may be any type.
+///
+/// This is the identity for the pair impl below, and the constraint to pass when a comparison
+/// derives its own possible types and wants no oracle on top — `query_compare` does, because the
+/// algorithm it ports computes possible types itself. Being a unit struct rather than an
+/// `Option`, it monomorphizes away instead of costing a branch at every field boundary.
+pub(crate) struct NoConstraint;
 
-    /// Is `defs` feasible under the path constraint?
-    fn allows_any(&self, _defs: &PossibleDefinitions) -> bool;
+impl PathConstraint for NoConstraint {
+    fn for_field(
+        &self,
+        _representative_field: &Field,
+        _parent_types: &PossibleTypes,
+    ) -> Result<(Self, PossibleTypes), ComparisonError> {
+        Ok((NoConstraint, PossibleTypes::All))
+    }
+
+    fn narrows_alike(&self, _other: &Self) -> bool {
+        true
+    }
 }
 
 /// Conjunction of two path constraints: a runtime type is possible only if both constraints
 /// allow it. This is how an extra oracle (e.g. `SubgraphConstraint`) is layered on top of the
 /// base `SchemaConstraint`.
 impl<A: PathConstraint, B: PathConstraint> PathConstraint for (A, B) {
-    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
-        (
-            self.0.under_type_condition(type_cond),
-            self.1.under_type_condition(type_cond),
-        )
+    fn for_field(
+        &self,
+        representative_field: &Field,
+        parent_types: &PossibleTypes,
+    ) -> Result<(Self, PossibleTypes), ComparisonError> {
+        let (a, a_types) = self.0.for_field(representative_field, parent_types)?;
+        let (b, b_types) = self.1.for_field(representative_field, parent_types)?;
+        Ok(((a, b), a_types.intersect(&b_types)))
     }
-
-    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError> {
-        Ok((
-            self.0.for_field(representative_field)?,
-            self.1.for_field(representative_field)?,
-        ))
-    }
-
-    fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
-        self.0.allows(ty) && self.1.allows(ty)
-    }
-
-    fn allows_any(&self, defs: &PossibleDefinitions) -> bool {
-        // Note: More precise than `self.0.allows_any(defs) && self.1.allows_any(defs)`, since
-        //       some ground type must satisfy both constraints simultaneously.
-        defs.iter()
-            .any(|(type_cond, _)| type_cond.ground_set().iter().any(|ty| self.allows(ty)))
+    fn narrows_alike(&self, other: &Self) -> bool {
+        self.0.narrows_alike(&other.0) && self.1.narrows_alike(&other.1)
     }
 }
 
-/// Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
-/// type conditions in `other`.
+/// Check if `this` is a subset of `other`, but ignore `this`'s type conditions that are
+/// infeasible under the possible types and the path constraint.
+/// - `possible_types`: The possible runtime types at the current position.
 /// - `assumption`: Boolean literals that are assumed to be true. This may affect the
 ///   interpretation of the `this` and `other` response shapes.
 pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
     path_constraint: &T,
+    possible_types: &PossibleTypes,
     assumption: &Clause,
     this: &ResponseShape,
     other: &ResponseShape,
@@ -115,14 +191,20 @@ pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
     //       Only response key and definitions are compared.
     this.iter().try_for_each(|(key, this_def)| {
         let Some(other_def) = other.get(key) else {
-            // check this_def's type conditions are feasible under the path constraint.
-            if !path_constraint.allows_any(this_def) {
+            // check this_def's type conditions are feasible under the possible types.
+            if !possible_types.allows_any_definitions(this_def) {
                 return Ok(());
             }
             return Err(ComparisonError::new(format!("missing response key: {key}")));
         };
-        compare_possible_definitions(path_constraint, assumption, this_def, other_def)
-            .map_err(|e| e.add_description(&format!("mismatch for response key: {key}")))
+        compare_possible_definitions(
+            path_constraint,
+            possible_types,
+            assumption,
+            this_def,
+            other_def,
+        )
+        .map_err(|e| e.add_description(&format!("mismatch for response key: {key}")))
     })
 }
 
@@ -153,16 +235,6 @@ pub(crate) fn collect_definitions_for_type_condition(
     Ok(Some(digest))
 }
 
-fn path_constraint_allows_type_condition<T: PathConstraint>(
-    path_constraint: &T,
-    type_cond: &NormalizedTypeCondition,
-) -> bool {
-    type_cond
-        .ground_set()
-        .iter()
-        .any(|ty| path_constraint.allows(ty))
-}
-
 fn detail_single_object_type_condition(type_cond: &NormalizedTypeCondition) -> String {
     let Some(ground_ty) = type_cond.ground_set().iter().next() else {
         return "".to_string();
@@ -176,22 +248,24 @@ fn detail_single_object_type_condition(type_cond: &NormalizedTypeCondition) -> S
 
 fn compare_possible_definitions<T: PathConstraint>(
     path_constraint: &T,
+    possible_types: &PossibleTypes,
     assumption: &Clause,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
 ) -> Result<(), ComparisonError> {
     this.iter().try_for_each(|(this_cond, this_def)| {
-        if !path_constraint_allows_type_condition(path_constraint, this_cond) {
-            // Skip `this_cond` since it's not satisfiable under the path constraint.
+        if !possible_types.allows_any_of(this_cond.ground_set()) {
+            // Skip `this_cond` since it's not satisfiable under the possible types.
             return Ok(());
         }
 
-        let updated_constraint = path_constraint.under_type_condition(this_cond);
+        let updated_types = possible_types.under_type_condition(this_cond);
 
         // First try: Use the single exact match (common case).
         if let Some(other_def) = other.get(this_cond)
             && let Ok(result) = compare_possible_definitions_per_type_condition(
-                &updated_constraint,
+                path_constraint,
+                &updated_types,
                 assumption,
                 this_def,
                 other_def,
@@ -204,7 +278,8 @@ fn compare_possible_definitions<T: PathConstraint>(
         // Second try: Collect all definitions implied by the `this_cond`.
         if let Some(other_def) = collect_definitions_for_type_condition(other, this_cond)? {
             let result = compare_possible_definitions_per_type_condition(
-                &updated_constraint,
+                path_constraint,
+                &updated_types,
                 assumption,
                 this_def,
                 &other_def,
@@ -228,7 +303,7 @@ fn compare_possible_definitions<T: PathConstraint>(
 
         // Finally: Case-split over individual ground types.
         let ground_set_iter = this_cond.ground_set().iter();
-        let mut ground_set_iter = ground_set_iter.filter(|ty| path_constraint.allows(ty));
+        let mut ground_set_iter = ground_set_iter.filter(|ty| possible_types.allows(ty));
         ground_set_iter.try_for_each(|ground_ty| {
             let filter_cond = NormalizedTypeCondition::from_object_type(ground_ty);
             let Some(other_def) = collect_definitions_for_type_condition(other, &filter_cond)?
@@ -237,9 +312,10 @@ fn compare_possible_definitions<T: PathConstraint>(
                     "no definitions found for type condition: {this_cond} (case: {ground_ty})"
                 )));
             };
-            let updated_constraint = path_constraint.under_type_condition(&filter_cond);
+            let case_types = possible_types.under_type_condition(&filter_cond);
             compare_possible_definitions_per_type_condition(
-                &updated_constraint,
+                path_constraint,
+                &case_types,
                 assumption,
                 this_def,
                 &other_def,
@@ -255,6 +331,7 @@ fn compare_possible_definitions<T: PathConstraint>(
 
 fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
     path_constraint: &T,
+    possible_types: &PossibleTypes,
     assumption: &Clause,
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
@@ -269,7 +346,13 @@ fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
     this.conditional_variants()
         .iter()
         .try_for_each(|this_variant| {
-            solve_boolean_constraints(path_constraint, assumption, this_variant, other)
+            solve_boolean_constraints(
+                path_constraint,
+                possible_types,
+                assumption,
+                this_variant,
+                other,
+            )
         })
 }
 
@@ -286,6 +369,7 @@ fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
 ///   match.
 fn solve_boolean_constraints<T: PathConstraint>(
     path_constraint: &T,
+    possible_types: &PossibleTypes,
     assumption: &Clause,
     this_variant: &DefinitionVariant,
     other: &PossibleDefinitionsPerTypeCondition,
@@ -314,7 +398,7 @@ fn solve_boolean_constraints<T: PathConstraint>(
                     "no variants found for Boolean condition in solve_boolean_constraints: {full_clause}"
                 )));
             };
-            compare_definition_variant(path_constraint, &full_clause, this_variant, &other_variant)
+            compare_definition_variant(path_constraint, possible_types, &full_clause, this_variant, &other_variant)
                 .map_err(|e| {
                     e.add_description(&format!(
                         "mismatched variants for hypothesis: {hypothesis}\n\
@@ -464,6 +548,7 @@ pub(crate) fn collect_variants_for_boolean_condition(
 /// Precondition: this.boolean_clause() + hypothesis implies other.boolean_clause().
 fn compare_definition_variant<T: PathConstraint>(
     path_constraint: &T,
+    possible_types: &PossibleTypes,
     hypothesis: &Clause,
     this: &DefinitionVariant,
     other: &DefinitionVariant,
@@ -480,9 +565,11 @@ fn compare_definition_variant<T: PathConstraint>(
     ) {
         (None, None) => Ok(()),
         (Some(this_sub), Some(other_sub)) => {
-            let field_constraint = path_constraint.for_field(this.representative_field())?;
+            let (field_constraint, field_types) =
+                path_constraint.for_field(this.representative_field(), possible_types)?;
             compare_response_shapes_with_constraint(
                 &field_constraint,
+                &field_types,
                 hypothesis,
                 this_sub,
                 other_sub,

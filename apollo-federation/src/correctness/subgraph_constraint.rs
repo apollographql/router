@@ -6,10 +6,9 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 
-use super::response_shape::NormalizedTypeCondition;
-use super::response_shape::PossibleDefinitions;
 use super::response_shape_compare::ComparisonError;
 use super::response_shape_compare::PathConstraint;
+use super::response_shape_compare::PossibleTypes;
 use crate::ValidFederationSchema;
 use crate::error::FederationError;
 use crate::internal_error;
@@ -18,16 +17,15 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
+/// An extra `PathConstraint` oracle for the federated lanes: tracks the set of subgraphs that
+/// are possible under the current context and derives a field's possible response types from
+/// the subgraph schemas' own field definitions.
 pub(crate) struct SubgraphConstraint<'a> {
     /// Reference to the all subgraph schemas in the supergraph.
     subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
 
     /// possible_subgraphs: The set of subgraphs that are possible under the current context.
     possible_subgraphs: IndexSet<Arc<str>>,
-
-    /// subgraph_types: The set of object types that are possible under the current context.
-    /// - Note: The empty subgraph_types means all types are possible.
-    subgraph_types: IndexSet<ObjectTypeDefinitionPosition>,
 }
 
 /// Is the object type resolvable in the subgraph schema?
@@ -47,15 +45,12 @@ fn is_resolvable(
 }
 
 impl<'a> SubgraphConstraint<'a> {
-    /// A constraint with no type information: all subgraphs and types are possible. The
-    /// comparison may start at any scope (e.g. the entity type for `@requires`/`@key`
-    /// conditions); the first type condition encountered narrows the constraint to that scope.
+    /// A constraint with no subgraph information: all subgraphs are possible.
     pub(crate) fn new(subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>) -> Self {
         let all_subgraphs = subgraphs_by_name.keys().cloned().collect();
         SubgraphConstraint {
             subgraphs_by_name,
             possible_subgraphs: all_subgraphs,
-            subgraph_types: Default::default(),
         }
     }
 
@@ -79,12 +74,16 @@ impl<'a> SubgraphConstraint<'a> {
     }
 
     // (Parent type & field type consistency in subgraphs) Considering the field's possible parent
-    // types ( `self.subgraph_types`) and their possible entity subgraphs, find all object types
-    // that the field can resolve to.
-    fn subgraph_types_for_field(&self, field_name: &str) -> Result<Self, FederationError> {
+    // types and their possible entity subgraphs, find all object types that the field can resolve
+    // to, along with the subgraphs that can resolve it.
+    fn subgraph_types_for_field(
+        &self,
+        field_name: &str,
+        parent_types: &IndexSet<ObjectTypeDefinitionPosition>,
+    ) -> Result<(Self, PossibleTypes), FederationError> {
         let mut possible_subgraphs = IndexSet::default();
         let mut subgraph_types = IndexSet::default();
-        for parent_type in &self.subgraph_types {
+        for parent_type in parent_types {
             let candidate_subgraphs = self.possible_subgraphs_for_type(parent_type)?;
             for subgraph_name in candidate_subgraphs.iter() {
                 let Some(subgraph_schema) = self.subgraphs_by_name.get(subgraph_name) else {
@@ -108,49 +107,49 @@ impl<'a> SubgraphConstraint<'a> {
                 }
             }
         }
-        Ok(SubgraphConstraint {
-            subgraphs_by_name: self.subgraphs_by_name,
-            possible_subgraphs,
-            subgraph_types,
-        })
+        let field_types = if subgraph_types.is_empty() {
+            // No subgraph has a composite field definition (e.g. meta-fields).
+            // Fall back to unconstrained, so the sub-selections are fully compared.
+            PossibleTypes::All
+        } else {
+            PossibleTypes::Restricted(subgraph_types)
+        };
+        Ok((
+            SubgraphConstraint {
+                subgraphs_by_name: self.subgraphs_by_name,
+                possible_subgraphs,
+            },
+            field_types,
+        ))
     }
 }
 
 impl PathConstraint for SubgraphConstraint<'_> {
-    fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
-        SubgraphConstraint {
-            subgraphs_by_name: self.subgraphs_by_name,
-            possible_subgraphs: self.possible_subgraphs.clone(),
-            subgraph_types: type_cond.ground_set().iter().cloned().collect(),
-        }
-    }
-
-    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError> {
-        self.subgraph_types_for_field(&representative_field.name)
+    fn for_field(
+        &self,
+        representative_field: &Field,
+        parent_types: &PossibleTypes,
+    ) -> Result<(Self, PossibleTypes), ComparisonError> {
+        let PossibleTypes::Restricted(parent_types) = parent_types else {
+            // Unconstrained parent types: remain unconstrained.
+            return Ok((
+                SubgraphConstraint::new(self.subgraphs_by_name),
+                PossibleTypes::All,
+            ));
+        };
+        self.subgraph_types_for_field(&representative_field.name, parent_types)
             .map_err(|e| {
                 // Note: This is an internal federation error, not a comparison error.
                 //       But, we are only allowed to return `ComparisonError` to keep the
                 //       response_shape_compare module free from internal errors.
                 ComparisonError::new(format!(
                     "failed to compute subgraph types for {} on {:?} due to an error:\n{e}",
-                    representative_field.name, self.subgraph_types,
+                    representative_field.name, parent_types,
                 ))
             })
     }
-
-    fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
-        self.subgraph_types.is_empty() || self.subgraph_types.contains(ty)
-    }
-
-    fn allows_any(&self, defs: &PossibleDefinitions) -> bool {
-        if self.subgraph_types.is_empty() {
-            return true;
-        }
-        let intersects = |ground_set: &[ObjectTypeDefinitionPosition]| {
-            // See if `self.subgraph_types` and `ground_set` have any intersection.
-            ground_set.iter().any(|ty| self.subgraph_types.contains(ty))
-        };
-        defs.iter()
-            .any(|(type_cond, _)| intersects(type_cond.ground_set()))
+    /// The subgraphs still possible are what this narrows by, so two agree only when those do.
+    fn narrows_alike(&self, other: &Self) -> bool {
+        self.possible_subgraphs == other.possible_subgraphs
     }
 }
