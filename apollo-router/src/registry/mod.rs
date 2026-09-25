@@ -724,10 +724,15 @@ fn stream_license_from_oci(
                 // This value will not change once discovered
                 GraphManifestState::Unread | GraphManifestState::MissingAnnotation => {
                     match fetch_entitlement_id(&mut client, &auth, &graph_reference).await {
-                        // Entitlement ID was discovered
+                        // Entitlement ID was discovered. Fall straight through to Step 2
+                        // in this same iteration instead of waiting a full `poll_interval`
+                        // for the next one — otherwise the very first license fetch is
+                        // needlessly delayed by up to `poll_interval` (30s by default)
+                        // after a successful discovery.
                         Ok(Some(id)) => {
                             entitlement_id = id;
                             graph_manifest_state = GraphManifestState::HasAnnotation;
+                            continue;
                         }
                         // There is no annotation on the graph manifest
                         // Let the router retry, but running in an unlicensed state
