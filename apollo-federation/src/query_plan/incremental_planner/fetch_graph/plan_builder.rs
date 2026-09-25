@@ -66,6 +66,9 @@ pub(crate) struct PlanBuildContext<'a> {
     /// Numbers fetch nodes referenced by deferred blocks' `depends`; spans
     /// the whole plan so per-field mutation planning cannot collide ids.
     pub(crate) fetch_id_counter: u64,
+    /// Ids given to the other fetches of a lookup group split into one fetch per lookup, by the id
+    /// of the group: deferred blocks that depend on the group depend on all of them.
+    pub(crate) split_fetch_ids: HashMap<u64, Vec<u64>>,
     /// When true, generated subgraph operations skip document validation
     /// and selection-set validation (valid by construction).
     pub(crate) skip_validation: bool,
@@ -86,26 +89,87 @@ struct PlanScope<'a> {
 
 /// Stamp a fetch ID on the innermost FetchNode: bare, Flatten-wrapped, or
 /// gated behind variable @skip/@include Condition wrappers.
-fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
+fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64, ctx: &mut PlanBuildContext<'_>) {
     match plan_node {
         PlanNode::Fetch(fetch) => {
             fetch.id = Some(id);
         }
         PlanNode::Flatten(flatten) => {
-            stamp_fetch_id(&mut flatten.node, id);
+            stamp_fetch_id(&mut flatten.node, id, ctx);
         }
         PlanNode::Condition(condition) => {
             if let Some(node) = condition.if_clause.as_deref_mut() {
-                stamp_fetch_id(node, id);
+                stamp_fetch_id(node, id, ctx);
             }
             if let Some(node) = condition.else_clause.as_deref_mut() {
-                stamp_fetch_id(node, id);
+                stamp_fetch_id(node, id, ctx);
             }
         }
-        // A lookup group split into one fetch per lookup (see `lookup_builder`).
+        // A lookup group split into one fetch per lookup (see `lookup_builder`). The router
+        // delivers one result per id to a deferred block, so each fetch needs its own id.
+        PlanNode::Parallel(parallel) => {
+            for (index, node) in parallel.nodes.iter_mut().enumerate() {
+                let node_id = if index == 0 {
+                    id
+                } else {
+                    let split_id = ctx.fetch_id_counter;
+                    ctx.fetch_id_counter += 1;
+                    ctx.split_fetch_ids.entry(id).or_default().push(split_id);
+                    split_id
+                };
+                stamp_fetch_id(node, node_id, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Make deferred blocks depending on a split lookup group depend on every fetch of the group.
+fn expand_split_depends(plan_node: &mut PlanNode, split_fetch_ids: &HashMap<u64, Vec<u64>>) {
+    match plan_node {
+        PlanNode::Defer(defer) => {
+            if let Some(node) = defer.primary.node.as_deref_mut() {
+                expand_split_depends(node, split_fetch_ids);
+            }
+            for block in &mut defer.deferred {
+                let depends = std::mem::take(&mut block.depends);
+                for dependency in depends {
+                    let split = dependency
+                        .id
+                        .parse::<u64>()
+                        .ok()
+                        .and_then(|id| split_fetch_ids.get(&id))
+                        .cloned()
+                        .unwrap_or_default();
+                    block.depends.push(dependency);
+                    block.depends.extend(
+                        split
+                            .into_iter()
+                            .map(|id| DeferredDependency { id: id.to_string() }),
+                    );
+                }
+                if let Some(node) = block.node.as_deref_mut() {
+                    expand_split_depends(node, split_fetch_ids);
+                }
+            }
+        }
+        PlanNode::Sequence(sequence) => {
+            for node in &mut sequence.nodes {
+                expand_split_depends(node, split_fetch_ids);
+            }
+        }
         PlanNode::Parallel(parallel) => {
             for node in &mut parallel.nodes {
-                stamp_fetch_id(node, id);
+                expand_split_depends(node, split_fetch_ids);
+            }
+        }
+        PlanNode::Flatten(flatten) => expand_split_depends(&mut flatten.node, split_fetch_ids),
+        PlanNode::Condition(condition) => {
+            if let Some(node) = condition.if_clause.as_deref_mut() {
+                expand_split_depends(node, split_fetch_ids);
+            }
+            if let Some(node) = condition.else_clause.as_deref_mut() {
+                expand_split_depends(node, split_fetch_ids);
             }
         }
         _ => {}
@@ -371,13 +435,16 @@ impl FetchGraph {
             .as_deref()
             .map(|s| s.to_owned());
 
-        let defer_node = PlanNode::Defer(DeferNode {
+        let mut defer_node = PlanNode::Defer(DeferNode {
             primary: PrimaryDeferBlock {
                 sub_selection: primary_sub_selection,
                 node: primary_plan.map(Box::new),
             },
             deferred: deferred_blocks,
         });
+        if !ctx.split_fetch_ids.is_empty() {
+            expand_split_depends(&mut defer_node, &ctx.split_fetch_ids);
+        }
 
         Ok((Some(defer_node), total_cost))
     }
@@ -624,7 +691,7 @@ impl FetchGraph {
                 *cost += node_cost * pipelining_factor(scope.depth[node_idx.index()]);
                 // Fetch IDs are used for defer dependency tracking.
                 if let Some(&fetch_id) = scope.fetch_ids.and_then(|ids| ids.get(&node_idx)) {
-                    stamp_fetch_id(&mut plan_node, fetch_id);
+                    stamp_fetch_id(&mut plan_node, fetch_id, ctx);
                 }
                 plan_node
             });
@@ -1194,6 +1261,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            split_fetch_ids: HashMap::new(),
             skip_validation: false,
             lookup_index: &EMPTY_LOOKUP_INDEX,
         };
@@ -1254,6 +1322,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            split_fetch_ids: HashMap::new(),
             skip_validation: false,
             lookup_index: &EMPTY_LOOKUP_INDEX,
         };
@@ -1324,6 +1393,7 @@ mod tests {
             operation_compression: &mut compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            split_fetch_ids: HashMap::new(),
             skip_validation: false,
             lookup_index: &EMPTY_LOOKUP_INDEX,
         };
@@ -1383,6 +1453,7 @@ mod tests {
             operation_compression: compression,
             operation_counter: 0,
             fetch_id_counter: 0,
+            split_fetch_ids: HashMap::new(),
             skip_validation: false,
             lookup_index: &EMPTY_LOOKUP_INDEX,
         }

@@ -729,3 +729,127 @@ fn deferred_lookup_fetch() {
     }
     "#);
 }
+
+#[test]
+fn deferred_block_depends_on_every_fetch_of_a_split_lookup_group() {
+    let planner = planner(&[
+        ("catalog", MEDIA_CATALOG),
+        ("ratings", MEDIA_RATINGS),
+        ("reviews", RATING_REVIEWS),
+    ]);
+    let plan = plan(
+        &planner,
+        "{ featured { rating { stars ... @defer { text } } } }",
+    );
+    insta::assert_snapshot!(plan, @r#"
+    QueryPlan {
+      Defer {
+        Primary {
+          { featured { rating { stars } } }:
+          Sequence {
+            Fetch(service: "catalog") {
+              {
+                featured {
+                  __typename
+                  ... on Book {
+                    __typename
+                    isbn
+                  }
+                  ... on Movie {
+                    __typename
+                    upc
+                  }
+                }
+              }
+            },
+            Parallel {
+              Flatten(path: "featured.@") {
+                Fetch(service: "ratings", id: 0, lookup: "bookByIsbn") {
+                  {
+                    ... on Book {
+                      __typename
+                      isbn
+                    }
+                  } =>
+                  $lookupArgument_0 = isbn
+                  {
+                    bookByIsbn(isbn: $lookupArgument_0) {
+                      rating {
+                        __typename
+                        stars
+                        id
+                      }
+                    }
+                  }
+                },
+              },
+              Flatten(path: "featured.@") {
+                Fetch(service: "ratings", id: 1, lookup: "movieByUpc") {
+                  {
+                    ... on Movie {
+                      __typename
+                      upc
+                    }
+                  } =>
+                  $lookupArgument_0 = upc
+                  {
+                    movieByUpc(upc: $lookupArgument_0) {
+                      rating {
+                        __typename
+                        stars
+                        id
+                      }
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0, 1], path: "featured/rating") {
+            { text }:
+            Flatten(path: "featured.@.rating") {
+              Fetch(service: "reviews", lookup: "ratingById") {
+                {
+                  ... on Rating {
+                    __typename
+                    id
+                  }
+                } =>
+                $lookupArgument_0 = id
+                {
+                  ratingById(id: $lookupArgument_0) {
+                    text
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "#);
+}
+
+const MEDIA_CATALOG: &str = r#"
+    type Query { featured: [Media!]! }
+    interface Media { id: ID! }
+    type Book implements Media @key(fields: "isbn") { id: ID! @shareable isbn: String! }
+    type Movie implements Media @key(fields: "upc") { id: ID! @shareable upc: String! }
+"#;
+
+const MEDIA_RATINGS: &str = r#"
+    type Query {
+      bookByIsbn(isbn: String!): Book @lookup @internal
+      movieByUpc(upc: String!): Movie @lookup @internal
+    }
+    interface Media { rating: Rating! }
+    type Book implements Media @key(fields: "isbn") { isbn: String! rating: Rating! }
+    type Movie implements Media @key(fields: "upc") { upc: String! rating: Rating! }
+    type Rating @key(fields: "id") { id: ID! stars: Int! }
+"#;
+
+const RATING_REVIEWS: &str = r#"
+    type Query { ratingById(id: ID!): Rating @lookup @internal }
+    type Rating @key(fields: "id") { id: ID! text: String! }
+"#;
