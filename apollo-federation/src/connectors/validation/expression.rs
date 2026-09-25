@@ -966,6 +966,9 @@ mod tests {
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
     #[case::eq_string_int(r#"$("a")->eq(1)"#)]
+    #[case::add_union_non_numeric(r#"$(1)->add($args.string->match(["a", true], [@, "x"]))"#)]
+    #[case::and_union_non_boolean(r#"$(true)->and($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::eq_union_other_types(r#"$(1)->eq($args.string->match(["a", true], [@, "x"]))"#)]
     #[case::in_string_ints(r#"$("a")->in([1, 2])"#)]
     #[case::contains_ints_string(r#"$([1, 2])->contains("a")"#)]
     #[case::join_not_null_objects(r#"$([{"a": 1}])->joinNotNull(",")"#)]
@@ -1102,6 +1105,19 @@ mod tests {
     #[case::parse_int_base(r#"$("10")->parseInt($args.strings->map(@->size)->first)"#)]
     #[case::split_limit(r#"$("a,b")->split(",", $args.strings->map(@->size)->first)"#)]
     #[case::array_literal_join(r#"$([$args.strings->map(@)->first])->joinNotNull(",")"#)]
+    // These methods report an error when an argument has no value, but the
+    // call can still succeed when it has one.
+    #[case::add("$(1)->add($args.strings->map(@->size)->first)")]
+    #[case::split_separator(r#"$("a,b")->split($("a,b")->split(",")->first)"#)]
+    #[case::join_not_null_separator(r#"$args.strings->joinNotNull($("a,b")->split(",")->first)"#)]
+    #[case::filter_condition(r#"$args.strings->filter(@->split(",")->first->eq("a"))"#)]
+    // Union arguments are fine if any member could make the call succeed.
+    #[case::and_union(r#"$(true)->and($args.string->match(["a", true], [@, "x"]))"#)]
+    #[case::add_union(r#"$(1)->add($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::eq_union(r#"$(1)->eq($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::gt_union(r#"$("b")->gt($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::split_union(r#"$("a,b")->split($args.string->match(["a", 1], [@, ","]))"#)]
+    #[case::get_union(r#"$([1, 2])->get($args.string->match(["a", 1], [@, "x"]))"#)]
     fn valid_maybe_missing_arguments(#[case] selection: &str) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             validate_with_context(selection, Shape::unknown([]), spec)

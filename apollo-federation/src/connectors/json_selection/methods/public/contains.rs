@@ -11,6 +11,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::is_same_type_comparison;
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
@@ -136,7 +137,7 @@ fn contains_shape(
     };
 
     // Ensure input is an array
-    if !Shape::tuple([], []).accepts(&input_shape) && !input_shape.accepts(&Shape::unknown([])) {
+    if !could_satisfy(&Shape::tuple([], []), &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array input, but got: {input_shape}",

@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(NotMethod, not_method, not_shape);
@@ -76,8 +77,8 @@ fn not_shape(
         );
     }
 
-    // We will accept anything bool-like OR unknown/named
-    if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
+    // Accept anything that could be a boolean at runtime.
+    if !could_satisfy(&Shape::bool([]), &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} can only be applied to boolean values. Got {input_shape}.",

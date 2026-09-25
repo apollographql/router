@@ -10,7 +10,7 @@ use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
-use crate::connectors::json_selection::methods::common::definitely_mismatches;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -150,7 +150,7 @@ fn join_not_null_method_shape(
         [],
     );
 
-    if definitely_mismatches(&input_shape_contract, &input_shape) {
+    if !could_satisfy(&input_shape_contract, &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array of scalar values as input",
@@ -182,7 +182,7 @@ fn join_not_null_method_shape(
         );
     }
 
-    if definitely_mismatches(&Shape::string([]), &selection_shape) {
+    if !could_satisfy(&Shape::string([]), &selection_shape) {
         return Shape::error(
             format!(
                 "Method ->{} requires a string argument",
@@ -367,6 +367,13 @@ mod tests {
         Shape::one([Shape::name("$args.id", []), Shape::string([])], []),
         []
     ))]
+    #[case::list_of_named_or_object_could_be_scalar(Shape::list(
+        Shape::one(
+            [Shape::name("$args.id", []), Shape::dict(Shape::string([]), [])],
+            []
+        ),
+        []
+    ))]
     fn test_join_not_null_shape_unresolved_elements(#[case] input: Shape) {
         let output_shape = get_shape(
             vec![WithRange::new(LitExpr::String(",".to_string()), None)],
@@ -380,13 +387,6 @@ mod tests {
 
     #[rstest::rstest]
     #[case::list_of_objects(Shape::list(Shape::dict(Shape::string([]), []), []))]
-    #[case::list_of_named_or_object(Shape::list(
-        Shape::one(
-            [Shape::name("$args.id", []), Shape::dict(Shape::string([]), [])],
-            []
-        ),
-        []
-    ))]
     fn test_join_not_null_shape_known_non_scalar_elements(#[case] input: Shape) {
         let output_shape = get_shape(
             vec![WithRange::new(LitExpr::String(",".to_string()), None)],

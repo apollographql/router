@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::or_missing;
 use crate::connectors::json_selection::methods::common::present_part;
@@ -107,8 +108,8 @@ fn and_shape(
         );
     };
 
-    // We will accept anything bool-like OR unknown/named
-    if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
+    // Accept anything that could be a boolean at runtime.
+    if !could_satisfy(&Shape::bool([]), &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} can only be applied to boolean values. Got {input_shape}.",
@@ -129,8 +130,8 @@ fn and_shape(
                 return Shape::none();
             };
 
-            // We will accept anything bool-like OR unknown/named
-            if !(Shape::bool([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
+            // Accept anything that could be a boolean at runtime.
+            if !could_satisfy(&Shape::bool([]), &arg_shape) {
                 return Shape::error(
                     format!(
                         "Method ->{} can only accept boolean arguments. Got {arg_shape} at position {i}.",

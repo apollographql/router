@@ -10,6 +10,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::or_missing;
 use crate::connectors::json_selection::methods::common::present_part;
@@ -200,9 +201,8 @@ fn parse_int_shape(
     }
 
     // Check if input is a string, number, or could be a string/number at runtime
-    if !(Shape::string([]).accepts(&input_shape)
-        || Shape::float([]).accepts(&input_shape)
-        || input_shape.accepts(&Shape::unknown([])))
+    if !(could_satisfy(&Shape::string([]), &input_shape)
+        || could_satisfy(&Shape::float([]), &input_shape))
     {
         return Shape::error_with_partial(
             format!(
@@ -225,7 +225,7 @@ fn parse_int_shape(
             return Shape::none();
         };
 
-        if !(Shape::int([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
+        if !could_satisfy(&Shape::int([]), &arg_shape) {
             return Shape::error_with_partial(
                 format!(
                     "Method ->{} base argument must be an integer. Found: {}",
