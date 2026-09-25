@@ -1391,3 +1391,948 @@ fn inc_query_field_root_hops_to_other_subgraph() {
     "###
     );
 }
+
+// ---------------------------------------------------------------------------
+// Circular keys
+// ---------------------------------------------------------------------------
+
+/// A forced condition commit whose greedy choice strands a descendant on a
+/// circular key must backtrack to the ancestor's alternative. `target` lives
+/// only in T, keyed on `c { cid cm }`. Routing that key: `c` commits
+/// greedily to A (direct), but A cannot resolve `cm`. Its only hop from C
+/// is T's circular `{cid cm}` key, so the commit fails. The condition `c`
+/// was forced (never a BULB decision), so recovery must come from the
+/// fast-forward trail: rewind `c` to its key hop into B, where the whole
+/// key resolves.
+#[test]
+fn inc_circular_key_backtracks_to_alternative() {
+    // Pre-composed with join/v0.2 because join/v0.5 composition omits
+    // per-field @join__field annotations on fields present in every subgraph,
+    // and the query graph builder then fails to rebase key conditions that
+    // reference fields absent from a source subgraph. The circular key
+    // pattern (E's key in T requires `c { cid cm }`, but A's C has no `cm`)
+    // triggers this rebase gap before the incremental planner's circular-key
+    // detection can kick in.
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  T @join__graph(name: "t", url: "http://t")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: E @join__field(graph: A)
+}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: T, key: "c { cid cm }")
+{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  c: C @join__field(graph: A) @join__field(graph: B) @join__field(graph: T)
+  target: String @join__field(graph: T)
+}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: T, key: "cid cm")
+{
+  cid: ID! @join__field(graph: A) @join__field(graph: B) @join__field(graph: T)
+  cm: String @join__field(graph: B) @join__field(graph: T)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    let plan_str = result
+        .as_ref()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|e| format!("<error: {e}>"));
+    assert!(
+        result.is_ok(),
+        "Planning should succeed for circular key schema: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("target"),
+        "Plan should fetch 'target' from T: {plan_str}"
+    );
+    // The key's `c` subtree must route through B (where `cm` resolves),
+    // not A (where `cm` is missing and the key is circular).
+    assert!(
+        plan_str.contains("service: \"b\""),
+        "Plan should route the key's `c` subtree through subgraph b: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("cm"),
+        "Plan should fetch the key field 'cm': {plan_str}"
+    );
+}
+
+/// A field reachable only through two key hops (A has `id`, B has `id` and
+/// `bid`, C has `bid` and the field). No single hop from A reaches `target`
+/// because A lacks `bid`, so the planner must chain A->B->C.
+#[test]
+fn inc_multi_hop_key_chain_reaches_transitive_subgraph() {
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  C @join__graph(name: "c", url: "http://c")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: T @join__field(graph: A)
+}
+
+type T
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: B, key: "bid")
+  @join__type(graph: C, key: "bid")
+{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  bid: ID! @join__field(graph: B) @join__field(graph: C)
+  name: String @join__field(graph: A)
+  target: String @join__field(graph: C)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    let plan_str = result
+        .as_ref()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|e| format!("<error: {e}>"));
+    assert!(
+        result.is_ok(),
+        "Planning should succeed for multi-hop chain schema: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("target"),
+        "Plan should fetch 'target': {plan_str}"
+    );
+    // The chain must transit through B to reach C.
+    assert!(
+        plan_str.contains("service: \"b\""),
+        "Plan should include an intermediate fetch from subgraph b: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("service: \"c\""),
+        "Plan should include a final fetch from subgraph c: {plan_str}"
+    );
+}
+
+/// When the only key hop to a target has statically circular conditions
+/// and no chain alternative exists, the planner must error rather than
+/// silently dropping the field. Here `target` lives only in T, keyed on
+/// `c { cid cm }`, but `cm` exists only in T (the same subgraph). No
+/// intermediate subgraph (like B in the backtrack test) can resolve `cm`,
+/// so no chain or fallback is available.
+#[test]
+fn inc_unresolvable_circular_key_errors() {
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  T @join__graph(name: "t", url: "http://t")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: E @join__field(graph: A)
+}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: T, key: "c { cid cm }")
+{
+  id: ID! @join__field(graph: A)
+  c: C @join__field(graph: A) @join__field(graph: T)
+  target: String @join__field(graph: T)
+}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: T, key: "cid cm")
+{
+  cid: ID! @join__field(graph: A) @join__field(graph: T)
+  cm: String @join__field(graph: T)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    assert!(
+        result.is_err(),
+        "Unresolvable circular key should fail planning, got:\n{}",
+        result.as_ref().map(|p| p.to_string()).unwrap_or_default(),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// @requires: condition aliasing and cross-subgraph routing
+// ---------------------------------------------------------------------------
+
+// @requires chains alias required fields as __require_N_* in generated
+// operations and rename them back with input KeyRenamer rewrites.
+// Based on: requires.rs::it_handles_simple_require_chain
+#[test]
+fn inc_requires_chain_aliases_conditions() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v: Int!
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            v: Int! @external
+            inner: Int! @requires(fields: "v")
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            inner: Int! @external
+            outer: Int! @requires(fields: "inner")
+          }
+        "#
+    );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          {
+            t {
+              outer
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+              v
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                v
+              }
+            } =>
+            {
+              ... on T {
+                __require_0_inner: inner
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph3") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_inner: inner
+              }
+            } =>
+            {
+              ... on T {
+                outer
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Two fetches land in SubgraphA: the operation root, and a root hop under
+/// `computed`. The hop transitively depends on the root fetch through the
+/// @requires condition resolved in SubgraphB, so the two SubgraphA fetches
+/// can never merge or share a node despite hitting the same subgraph root.
+/// Guards root group and root hop reuse against creating a cycle here.
+#[test]
+fn inc_root_hop_after_requires_back_into_same_subgraph_stays_split() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+          type Query {
+            e: E
+            a: Int
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            data: Int
+          }
+        "#,
+        SubgraphB: r#"
+          type Query {
+            b: Int
+          }
+
+          type E @key(fields: "id") {
+            id: ID!
+            data: Int @external
+            computed: Query @requires(fields: "data")
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            a
+            e {
+              computed {
+                a
+                b
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            a
+            e {
+              __typename
+              id
+              data
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on E {
+                __typename
+                id
+                data
+              }
+            } =>
+            {
+              ... on E {
+                computed {
+                  __typename
+                  b
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "e.computed") {
+          Fetch(service: "SubgraphA") {
+            {
+              a
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// A @requires chain that must route its condition field through a key
+/// hop into another subgraph before the dependent field can be fetched.
+#[test]
+fn inc_requires_routes_condition_via_key_hop() {
+    let planner = planner!(
+        config = incremental_config(),
+        SubgraphA: r#"
+        type Query {
+            product: Product
+        }
+
+        type Product @key(fields: "id") {
+            id: ID!
+        }
+        "#,
+        SubgraphB: r#"
+        type Product @key(fields: "id") {
+            id: ID!
+            weight: Float
+        }
+        "#,
+        SubgraphC: r#"
+        type Product @key(fields: "id") {
+            id: ID!
+            weight: Float @external
+            shippingEstimate: Float @requires(fields: "weight")
+        }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            product {
+                shippingEstimate
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "SubgraphA") {
+          {
+            product {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "product") {
+          Fetch(service: "SubgraphB") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Flatten(path: "product") {
+          Fetch(service: "SubgraphC") {
+            {
+              ... on Product {
+                __typename
+                id
+                __require_0_weight: weight
+              }
+            } =>
+            {
+              ... on Product {
+                shippingEstimate
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+// The user requests a parameterized field with one set of arguments while a
+// sibling's @requires needs the same field with different arguments. The
+// condition copy must carry a __require_N_ alias so it doesn't collide with
+// the user's selection. Without the alias the planner merges both into one
+// fetch and produces invalid GraphQL ("conflicting field arguments").
+// Reproduces a customer-reported planning failure.
+#[test]
+fn inc_user_field_argument_conflict_with_requires_condition() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int
+        }
+        "#,
+        Subgraph2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            p(arg: Int): Int @external
+            x: Int @requires(fields: "p(arg: 1)")
+        }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            t {
+                p(arg: 2)
+                x
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              p(arg: 2)
+              id
+              __require_0_p: p(arg: 1)
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_p: p
+              }
+            } =>
+            {
+              ... on T {
+                x
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// When the incoming entity representation already carries the fields needed by
+/// a key condition, the planner skips routing those conditions. Without this
+/// check the planner would try to re-route `id` as a condition pending and
+/// create a circular ordering dependency.
+#[test]
+fn inc_rides_representation_skips_redundant_key_condition_routing() {
+    let planner = planner!(
+        config = incremental_config(),
+        A: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! }
+        "#,
+        B: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            name: String @shareable
+          }
+        "#,
+        C: r#"
+          type T @key(fields: "id name") {
+            id: ID!
+            name: String @shareable
+            detail: String
+          }
+        "#
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              detail
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "A") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "B") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                name
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "C") {
+            {
+              ... on T {
+                __typename
+                id
+                name
+              }
+            } =>
+            {
+              ... on T {
+                detail
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Forced backtracking within fast_forward recovers from a dead-end
+/// circular-key commit by rewinding an ancestor forced commit and trying
+/// the next alternative. This differs from BULB backtracking: forced
+/// commits have no decision frame, so without the trail mechanism the
+/// planner would permanently drop the field.
+///
+/// Schema: E in A (key: id, has `c: C`), E in T (key: "c { cid cm }",
+///         has `target`). C in A (has `cid`), C in B (has `cid, cm`).
+/// Condition `c.cm` is only in B. The greedy first choice routes `c`
+/// through A (closer), but A cannot supply `cm` for the circular key.
+/// The forced trail rewinds `c` to B where the full key resolves.
+///
+/// This is the same schema as inc_circular_key_backtracks_to_alternative
+/// but asserts the exact plan shape to pin the forced-backtracking path.
+#[test]
+fn inc_forced_backtrack_recovers_circular_key_dead_end() {
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  T @join__graph(name: "t", url: "http://t")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: E @join__field(graph: A)
+}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: T, key: "c { cid cm }")
+{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  c: C @join__field(graph: A) @join__field(graph: B) @join__field(graph: T)
+  target: String @join__field(graph: T)
+}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: T, key: "cid cm")
+{
+  cid: ID! @join__field(graph: A) @join__field(graph: B) @join__field(graph: T)
+  cm: String @join__field(graph: B) @join__field(graph: T)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ entry { target } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("forced backtracking should recover from the dead-end circular key");
+    let plan_str = plan.to_string();
+    // The key's `c` subtree must route through B, not A.
+    assert!(
+        plan_str.contains("service: \"b\""),
+        "Plan should route the key conditions through subgraph b: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("target"),
+        "Plan should fetch 'target' from T: {plan_str}"
+    );
+    // The plan must NOT mention subgraph a for any entity fetch beyond
+    // the root query, confirming the forced trail rewound past A.
+    let entity_fetches: Vec<&str> = plan_str
+        .lines()
+        .filter(|l| l.contains("Fetch(service:") && !l.contains("\"a\""))
+        .collect();
+    assert!(
+        !entity_fetches.is_empty(),
+        "There should be non-A entity fetches: {plan_str}"
+    );
+}
+
+// A plain @requires input arriving after an aliased one on the same edge
+// must not overwrite the plain input at runtime. The KeyRenamer's
+// remove-then-insert replaces whatever sits under the original name, so
+// both inputs cannot share a single entity group.
+#[test]
+fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+        type Query { t: T }
+        type T @key(fields: "id") { id: ID!  a: A }
+        type A @key(fields: "id") { id: ID!  y: Int }
+        "#,
+        S3: r#"
+        type A @key(fields: "id") { id: ID!  x: Int }
+        "#,
+        S2: r#"
+        type T @key(fields: "id") {
+            id: ID!
+            a: A @external
+            b: Int @requires(fields: "a { x }")
+            c: Int @requires(fields: "a { y }")
+        }
+        type A @key(fields: "id") {
+            id: ID!
+            x: Int @external
+            y: Int @external
+        }
+        "#,
+    );
+    // b's requires needs S3 (aliased), c's requires is resolvable from S1
+    // (plain). Both orderings must produce a valid plan.
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    let _plan_bc = assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { b c } }",
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_a: a {
+                __typename
+                id
+              }
+              __require_1_a: a {
+                y
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t") {
+            Fetch(service: "S2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_1_a: a {
+                    y
+                  }
+                }
+              } =>
+              {
+                ... on T {
+                  c
+                }
+              }
+            },
+          },
+          Flatten(path: "t.__require_0_a") {
+            Fetch(service: "S3") {
+              {
+                ... on A {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on A {
+                  x
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_a: a {
+                  x
+                }
+              }
+            } =>
+            {
+              ... on T {
+                b
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
