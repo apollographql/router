@@ -9,6 +9,7 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::Configuration;
+use crate::ConfigurationParser;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::RhaiReload;
@@ -46,6 +47,8 @@ pub enum ConfigurationSource {
     },
 }
 
+/// The default configuration, without the process's command-line and environment overrides or
+/// `--dev`. A router started without a configuration source parses an empty document instead.
 impl Default for ConfigurationSource {
     fn default() -> Self {
         ConfigurationSource::Static(Default::default())
@@ -53,6 +56,30 @@ impl Default for ConfigurationSource {
 }
 
 impl ConfigurationSource {
+    /// The events for a router started without a configuration source. An empty document is
+    /// parsed as a file would be, so command-line and environment overrides and `--dev` apply.
+    pub(crate) fn empty_document_stream(
+        uplink_config: Option<UplinkConfig>,
+    ) -> impl Stream<Item = Event> {
+        Self::parse_empty_document(ConfigurationParser::new(), uplink_config)
+    }
+
+    fn parse_empty_document(
+        parser: Result<ConfigurationParser, crate::configuration::ConfigurationError>,
+        uplink_config: Option<UplinkConfig>,
+    ) -> impl Stream<Item = Event> {
+        match parser.and_then(|mut parser| parser.parse("")) {
+            Ok(mut configuration) => {
+                configuration.uplink = uplink_config;
+                stream::iter(vec![UpdateConfiguration(Arc::new(configuration))])
+            }
+            Err(err) => {
+                tracing::error!("{}", err);
+                stream::iter(vec![NoMoreConfiguration])
+            }
+        }
+    }
+
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
     pub(crate) fn into_stream(
         self,
@@ -78,31 +105,47 @@ impl ConfigurationSource {
                     );
                     stream::empty().boxed()
                 } else {
-                    match ConfigurationSource::read_config(&path) {
+                    let mut parser = match ConfigurationParser::new() {
+                        Ok(parser) => parser,
+                        Err(err) => {
+                            tracing::error!("Failed to prepare configuration parsing: {}", err);
+                            return stream::iter(vec![NoMoreConfiguration]).boxed();
+                        }
+                    };
+                    match ConfigurationSource::read_config(&path, &mut parser) {
                         Ok(mut configuration) => {
                             if watch {
-                                let config_watcher = crate::files::watch(&path)
-                                    .filter_map(move |_| {
+                                let config_watcher = stream::unfold(
+                                    (crate::files::watch(&path).boxed(), parser),
+                                    move |(mut watcher, mut parser)| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
                                         async move {
-                                            match ConfigurationSource::read_config_async(&path)
+                                            loop {
+                                                watcher.next().await?;
+                                                match ConfigurationSource::read_config_async(
+                                                    &path,
+                                                    &mut parser,
+                                                )
                                                 .await
-                                            {
-                                                Ok(mut configuration) => {
-                                                    configuration.uplink = uplink_config.clone();
-                                                    Some(UpdateConfiguration(Arc::new(
-                                                        configuration,
-                                                    )))
-                                                }
-                                                Err(err) => {
-                                                    tracing::error!("{}", err);
-                                                    None
+                                                {
+                                                    Ok(mut configuration) => {
+                                                        configuration.uplink =
+                                                            uplink_config.clone();
+                                                        return Some((
+                                                            UpdateConfiguration(Arc::new(
+                                                                configuration,
+                                                            )),
+                                                            (watcher, parser),
+                                                        ));
+                                                    }
+                                                    Err(err) => tracing::error!("{}", err),
                                                 }
                                             }
                                         }
-                                    })
-                                    .boxed();
+                                    },
+                                )
+                                .boxed();
                                 if let Some(rhai_plugin) =
                                     configuration.apollo_plugins.plugins.get("rhai")
                                 {
@@ -149,13 +192,19 @@ impl ConfigurationSource {
         .boxed()
     }
 
-    fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
+    fn read_config(
+        path: &Path,
+        parser: &mut ConfigurationParser,
+    ) -> Result<Configuration, ReadConfigError> {
         let config = std::fs::read_to_string(path)?;
-        config.parse().map_err(ReadConfigError::Validation)
+        parser.parse(&config).map_err(ReadConfigError::Validation)
     }
-    async fn read_config_async(path: &Path) -> Result<Configuration, ReadConfigError> {
+    async fn read_config_async(
+        path: &Path,
+        parser: &mut ConfigurationParser,
+    ) -> Result<Configuration, ReadConfigError> {
         let config = tokio::fs::read_to_string(path).await?;
-        config.parse().map_err(ReadConfigError::Validation)
+        parser.parse(&config).map_err(ReadConfigError::Validation)
     }
 }
 
@@ -170,13 +219,69 @@ enum ReadConfigError {
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
+    use std::net::SocketAddr;
 
     use futures::StreamExt;
 
     use super::*;
+    use crate::configuration::ListenAddr;
+    use crate::configuration::expansion::Expansion;
+    use crate::configuration::expansion::FlagValue;
+    use crate::configuration::expansion::Override;
+    use crate::configuration::expansion::ValueType;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
     use crate::uplink::UplinkConfig;
+
+    fn flag_override(path: &str, value: &str) -> Override {
+        Override::builder()
+            .config_path(path)
+            .flag_value(FlagValue::new("--listen", value))
+            .value_type(ValueType::String)
+            .build()
+    }
+
+    /// Without a configuration source, the router parses an empty document, so `--listen` and
+    /// `--dev` apply as they would with an empty file.
+    #[tokio::test]
+    async fn empty_document_applies_listen_override_and_dev_mode() {
+        let expansion = Expansion::builder()
+            .override_config(flag_override("supergraph.listen", "127.0.0.1:4567"))
+            .dev_mode(true)
+            .build();
+        let events: Vec<Event> = ConfigurationSource::parse_empty_document(
+            ConfigurationParser::with_inputs(expansion),
+            None,
+        )
+        .collect()
+        .await;
+
+        let [UpdateConfiguration(config)] = events.as_slice() else {
+            panic!("expected one configuration update, got {events:?}");
+        };
+        let listen: SocketAddr = "127.0.0.1:4567".parse().unwrap();
+        assert_eq!(config.supergraph.listen, ListenAddr::from(listen));
+        assert!(
+            config.supergraph.introspection,
+            "--dev enables introspection"
+        );
+        assert!(config.sandbox.enabled, "--dev enables the sandbox");
+    }
+
+    #[tokio::test]
+    async fn empty_document_with_an_invalid_override_ends_configuration() {
+        let expansion = Expansion::builder()
+            .override_config(flag_override("unknown_section", "value"))
+            .build();
+        let events: Vec<Event> = ConfigurationSource::parse_empty_document(
+            ConfigurationParser::with_inputs(expansion),
+            None,
+        )
+        .collect()
+        .await;
+
+        assert!(matches!(events.as_slice(), [NoMoreConfiguration]));
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_watching() {

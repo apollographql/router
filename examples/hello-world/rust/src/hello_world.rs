@@ -16,7 +16,7 @@ struct HelloWorld {
     configuration: Conf,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
     name: String, // The name of the entity you'd like to say hello to

@@ -1,0 +1,18 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: flat subscription.deduplication migrates under deduplication.all
+expression: changed_settings(&config)
+---
+{
+  "/subscription": {
+    "deduplication": {
+      "all": {
+        "enabled": true,
+        "ignored_headers": [
+          "authorization",
+          "x-user-id"
+        ]
+      }
+    }
+  }
+}

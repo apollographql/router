@@ -903,6 +903,24 @@ mod tls {
     use crate::integration::IntegrationTest;
     use crate::integration::common::graph_os_enabled;
 
+    /// A `${file.PATH}` reference as a YAML scalar. JSON strings are valid YAML, and encoding
+    /// keeps the backslashes in a Windows path from being read as YAML escapes.
+    fn file_reference(path: &str) -> String {
+        serde_json::to_string(&format!("${{file.{path}}}")).expect("a string serializes")
+    }
+
+    #[test]
+    fn file_reference_keeps_windows_paths_intact() {
+        let path = r"C:\Users\runner\router\apollo-router/src/services/http/testdata/CA/ca.crt";
+        let yaml = format!("certificate_authorities: {}", file_reference(path));
+        let parsed: serde_yaml::Value =
+            serde_yaml::from_str(&yaml).expect("the reference is valid YAML");
+        assert_eq!(
+            parsed["certificate_authorities"].as_str(),
+            Some(format!("${{file.{path}}}").as_str())
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
@@ -912,16 +930,21 @@ mod tls {
             return Ok(());
         };
 
+        // A missing `${file.PATH}` fails configuration loading, so reference a real CA.
+        let ca = file_reference(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/services/http/testdata/CA/ca.crt"
+        ));
         let mut router = IntegrationTest::builder()
-            .config(
+            .config(format!(
                 r#"
                 tls:
                   subgraph:
                     subgraphs:
                       connectors:
-                        certificate_authorities: "${file./path/to/product_ca.crt}"
-        "#,
-            )
+                        certificate_authorities: {ca}
+        "#
+            ))
             .supergraph(PathBuf::from_iter([
                 "tests",
                 "fixtures",

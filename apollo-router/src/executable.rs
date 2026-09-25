@@ -23,11 +23,11 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
-use crate::configuration::expansion::Expansion;
+use crate::configuration::ConfigurationParser;
+use crate::configuration::Migration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::schema::Mode;
-use crate::configuration::validate_yaml_configuration;
+use crate::configuration::uses_migrated_settings;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
@@ -511,14 +511,19 @@ impl Executable {
                 command: ConfigSubcommand::Validate { config_path },
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
-                validate_yaml_configuration(
-                    &config_string,
-                    Expansion::default()?,
-                    Mode::NoUpgrade,
-                )?
-                .validate()?;
+                // Validate what startup would load, including automatic migration. The note below
+                // reports migrations, so the parse omits the "needs to be upgraded" error; each
+                // migration's own notices still print, as they do at startup.
+                ConfigurationParser::new()?
+                    .parse_with_migration(&config_string, Migration::WithinMajorQuietly)?;
 
                 println!("Configuration at path {config_path:?} is valid!");
+                if uses_migrated_settings(&config_string) {
+                    println!(
+                        "Some of its settings are upgraded automatically at startup. Run `router config upgrade {}` to update the file.",
+                        config_path.display()
+                    );
+                }
 
                 Ok(())
             }
@@ -571,24 +576,21 @@ impl Executable {
                     "--config and APOLLO_ROUTER_CONFIG_PATH cannot be used when a custom configuration source is in use"
                 ));
             }
-            (Some(config), None) => config,
+            (Some(config), None) => Some(config),
+            // Without a file, the router parses an empty document, so overrides and `--dev` apply.
             #[allow(clippy::blocks_in_conditions)]
-            _ => opt
-                .config_path
-                .as_ref()
-                .map(|path| {
-                    let path = if path.is_relative() {
-                        current_directory.join(path)
-                    } else {
-                        path.to_path_buf()
-                    };
+            _ => opt.config_path.as_ref().map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
 
-                    ConfigurationSource::File {
-                        path,
-                        watch: opt.hot_reload,
-                    }
-                })
-                .unwrap_or_default(),
+                ConfigurationSource::File {
+                    path,
+                    watch: opt.hot_reload,
+                }
+            }),
         };
 
         let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {
@@ -814,7 +816,7 @@ impl Executable {
 
         let router = RouterHttpServer::builder()
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
-            .configuration(configuration)
+            .and_configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
@@ -1011,6 +1013,7 @@ mod tests {
                 experimental_hoist_orphan_errors: Default::default(),
                 plugins: Default::default(),
                 apollo_plugins: Default::default(),
+                plugin_configs: Default::default(),
                 notify: Default::default(),
                 uplink: None,
                 validated_yaml: None,
@@ -1093,6 +1096,7 @@ mod tests {
                 experimental_hoist_orphan_errors: Default::default(),
                 plugins: Default::default(),
                 apollo_plugins: Default::default(),
+                plugin_configs: Default::default(),
                 notify: Default::default(),
                 uplink: None,
                 validated_yaml: None,

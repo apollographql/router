@@ -57,7 +57,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
                - https://issuer.one
                - https://issuer.two
              allow_missing_exp: true # optional, allow tokens without exp claim
-             poll_interval: <optional poll interval>
+             poll_interval: 60s # optional, how often to refresh the JWKS
              headers: # optional list of static headers added to the HTTP request to the JWKS URL
                - name: User-Agent
                  value: router

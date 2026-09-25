@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
@@ -16,14 +15,12 @@ use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
+use crate::plugin::PluginConfig;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::Plugins;
-use crate::services::apollo_graph_reference;
-use crate::services::apollo_key;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -43,31 +40,8 @@ pub(crate) async fn create_plugins(
     license: Arc<LicenseState>,
     previous_config: Option<Arc<Configuration>>,
 ) -> Result<Plugins, BoxError> {
-    let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
+    check_plugin_configs(configuration)?;
 
-    // Extract previous plugin configurations for hot reload previous config detection
-    let (previous_apollo_plugins_config, previous_user_plugins_config) = match &previous_config {
-        Some(config) => {
-            // Extract apollo plugin configs from the previous router's stored configuration
-            let prev_apollo_configs: HashMap<&str, &Value> = config
-                .apollo_plugins
-                .plugins
-                .iter()
-                .map(|(k, v)| (k.as_str(), v))
-                .collect();
-
-            // Extract user plugin configs from the previous router's stored configuration
-            let prev_user_configs: HashMap<String, &Value> = config
-                .plugins
-                .plugins
-                .as_ref()
-                .map(|plugins| plugins.iter().map(|(k, v)| (k.clone(), v)).collect())
-                .unwrap_or_default();
-
-            (prev_apollo_configs, prev_user_configs)
-        }
-        None => (HashMap::new(), HashMap::new()),
-    };
     let extra = extra_plugins.unwrap_or_default();
     let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
 
@@ -86,20 +60,21 @@ pub(crate) async fn create_plugins(
             })
             .map(|factory| (factory.name.as_str(), &**factory))
             .collect(),
-        apollo_plugins_config: configuration.apollo_plugins.clone().plugins,
-        previous_apollo_plugins_config,
-        previous_user_plugins_config,
+        configuration,
+        previous_config: previous_config.as_deref(),
         plugin_instances: Plugins::default(),
         errors: Vec::new(),
-        supergraph_sdl: schema.as_string().clone(),
-        supergraph_schema_id: schema.schema_id.clone().into_inner(),
-        supergraph_schema: Arc::new(schema.supergraph_schema().clone()),
-        subgraph_schemas,
-        launch_id: schema.launch_id.clone(),
-        notify: configuration.notify.clone(),
-        license,
-        raw_yaml: configuration.raw_yaml.clone(),
-        validated_yaml: configuration.validated_yaml.clone(),
+        context: PluginInit::builder()
+            .config(())
+            .supergraph_sdl(schema.as_string().clone())
+            .supergraph_schema_id(schema.schema_id.clone().into_inner())
+            .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
+            .subgraph_schemas(subgraph_schemas)
+            .launch_id(schema.launch_id.clone())
+            .notify(configuration.notify.clone())
+            .license(license)
+            .and_original_config_yaml(configuration.raw_yaml.clone())
+            .build(),
     };
 
     // Be careful with this list! Moving things around can have subtle consequences.
@@ -141,8 +116,6 @@ pub(crate) async fn create_plugins(
                 let _ = registrar
                     .plugin_instances
                     .insert("apollo.telemetry".to_string(), plugin);
-                // `apollo_plugins_config` is keyed by short plugin name.
-                registrar.apollo_plugins_config.remove("telemetry");
                 registrar.factories.remove("apollo.telemetry");
             }
         }
@@ -171,7 +144,7 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
     registrar.add_optional("expose_query_plan").await;
-    registrar.add_user_plugins(user_plugins_config, extra).await;
+    registrar.add_user_plugins(extra).await;
 
     // Because this plugin intercepts subgraph requests
     // and does not forward them to the next service in the chain,
@@ -184,31 +157,22 @@ pub(crate) async fn create_plugins(
 
 /// Construction-time state shared by every plugin instantiation in [`create_plugins`].
 ///
-/// [`add_mandatory`](Self::add_mandatory), [`add_optional`](Self::add_optional), and
-/// [`add_oss`](Self::add_oss) each claim their factory out of `factories`, take the
-/// plugin's section out of `apollo_plugins_config`, and record the built instance or
-/// the construction error. Bundling the state into one struct lets the methods borrow
-/// it mutably as a unit.
+/// [`add_mandatory`](Self::add_mandatory), [`add_optional`](Self::add_optional) and
+/// [`add_user_plugins`](Self::add_user_plugins) each claim their factory out of `factories`,
+/// construct the plugin from its config deserialized at parse time, and record the built
+/// instance or the construction error. Bundling the state into one struct lets the methods
+/// borrow it mutably as a unit.
 struct PluginRegistrar<'a> {
     /// Apollo plugin factories not yet claimed by an `add_*` call, keyed by full plugin
     /// name (`apollo.<name>`). [`finish`](Self::finish) panics on any leftovers.
     factories: HashMap<&'static str, &'static PluginFactory>,
-    /// Per-plugin config sections not yet consumed, keyed by short plugin name.
-    apollo_plugins_config: Map<String, Value>,
-    previous_apollo_plugins_config: HashMap<&'a str, &'a Value>,
-    previous_user_plugins_config: HashMap<String, &'a Value>,
+    configuration: &'a Configuration,
+    /// The configuration of the pipeline being replaced, on a hot reload.
+    previous_config: Option<&'a Configuration>,
     plugin_instances: Plugins,
     errors: Vec<ConfigurationError>,
-    supergraph_sdl: Arc<String>,
-    supergraph_schema_id: Arc<String>,
-    supergraph_schema: Arc<Valid<apollo_compiler::Schema>>,
-    subgraph_schemas: Arc<SubgraphSchemas>,
-    launch_id: Option<Arc<String>>,
-    notify: Notify<String, crate::graphql::Response>,
-    license: Arc<LicenseState>,
-    raw_yaml: Option<Arc<str>>,
-    /// The full validated configuration, handed only to the telemetry plugin.
-    validated_yaml: Option<Value>,
+    /// The initialisation context every plugin shares; only the configuration differs.
+    context: PluginInit<()>,
 }
 
 impl PluginRegistrar<'_> {
@@ -220,6 +184,13 @@ impl PluginRegistrar<'_> {
             "plugin",
             otel.name = format!("plugin: {full_name}").as_str()
         )
+    }
+
+    /// On a hot reload, the config the built-in plugin named `full_name` ran with before.
+    fn previous_apollo_config(&self, full_name: &str) -> Option<PluginConfig> {
+        self.previous_config
+            .and_then(|previous| previous.plugin_config(full_name))
+            .cloned()
     }
 
     /// Claims the factory for a plugin out of `factories`, panicking if the plugin was
@@ -237,25 +208,29 @@ impl PluginRegistrar<'_> {
         let span = Self::plugin_span(&full_name);
         async {
             let factory = self.take_factory(&full_name);
-            let mut plugin_config = self
-                .apollo_plugins_config
-                .remove(name)
-                .unwrap_or(Value::Object(Map::new()));
-            let mut full_config = None;
-            if full_name == "apollo.telemetry" {
-                // The apollo.telemetry plugin isn't happy with empty config, so we
-                // give it some. If any of the other mandatory plugins need special
-                // treatment, then we'll have to perform it here
-                inject_schema_id(&self.supergraph_schema_id, &mut plugin_config);
-
-                // Only the telemetry plugin should have access to the full configuration
-                full_config = self.validated_yaml.clone();
-            }
-            let previous_config = self.previous_apollo_plugins_config.get(name).copied();
+            let plugin_config = match self.configuration.plugin_config(&full_name) {
+                Some(config) => config.clone(),
+                // Without a section, the plugin runs with its default config.
+                None => match factory.parse_config(Value::Object(Map::new())) {
+                    Ok(config) => config,
+                    Err(error) => {
+                        self.errors.push(ConfigurationError::PluginConfiguration {
+                            plugin: full_name,
+                            error: error.to_string(),
+                        });
+                        return;
+                    }
+                },
+            };
+            // Only the telemetry plugin should have access to the full configuration
+            let full_config = (full_name == "apollo.telemetry")
+                .then(|| self.configuration.validated_yaml.clone())
+                .flatten();
+            let previous_config = self.previous_apollo_config(&full_name);
             self.add_plugin(
                 full_name,
                 factory,
-                &plugin_config,
+                plugin_config,
                 previous_config,
                 full_config,
             )
@@ -274,17 +249,21 @@ impl PluginRegistrar<'_> {
         let span = Self::plugin_span(&full_name);
         async {
             let factory = self.take_factory(&full_name);
-            let Some(plugin_config) = self.apollo_plugins_config.remove(name) else {
+            let Some(plugin_config) = self.configuration.plugin_config(&full_name).cloned() else {
                 return;
             };
             // A plugin whose name maps to no restricted feature is not license-gated.
             let allowed = match AllowedFeature::from_plugin_name(name) {
-                Some(feature) => self.license.get_allowed_features().contains(&feature),
+                Some(feature) => self
+                    .context
+                    .license
+                    .get_allowed_features()
+                    .contains(&feature),
                 None => true,
             };
             if allowed {
-                let previous_config = self.previous_apollo_plugins_config.get(name).copied();
-                self.add_plugin(full_name, factory, &plugin_config, previous_config, None)
+                let previous_config = self.previous_apollo_config(&full_name);
+                self.add_plugin(full_name, factory, plugin_config, previous_config, None)
                     .await;
             } else {
                 tracing::warn!(
@@ -298,24 +277,27 @@ impl PluginRegistrar<'_> {
 
     /// Instantiates every configured user plugin in configuration order, then appends
     /// the pre-built `extra` instances (supplied by tests) verbatim.
-    async fn add_user_plugins(
-        &mut self,
-        user_plugins_config: Map<String, Value>,
-        extra: Vec<(String, Box<dyn DynPlugin>)>,
-    ) {
-        for (name, plugin_config) in user_plugins_config {
-            let user_span = tracing::info_span!("user_plugin", "name" = &name);
+    async fn add_user_plugins(&mut self, extra: Vec<(String, Box<dyn DynPlugin>)>) {
+        let configs = &self.configuration.plugin_configs;
+        for name in configs.unknown_plugins() {
+            self.errors
+                .push(ConfigurationError::PluginUnknown(name.clone()));
+        }
+        for (name, parsed) in configs.user_plugins() {
+            let user_span = tracing::info_span!("user_plugin", "name" = name);
             async {
-                if let Some(factory) = crate::plugin::PLUGINS
-                    .iter()
-                    .find(|factory| factory.name == name)
-                {
-                    let previous_config = self.previous_user_plugins_config.get(&name).copied();
-                    self.add_plugin(name, factory, &plugin_config, previous_config, None)
-                        .await;
-                } else {
-                    self.errors.push(ConfigurationError::PluginUnknown(name))
-                }
+                let previous_config = self
+                    .previous_config
+                    .and_then(|previous| previous.plugin_configs.user(name))
+                    .map(|previous| previous.config.clone());
+                self.add_plugin(
+                    name.to_string(),
+                    parsed.factory,
+                    parsed.config.clone(),
+                    previous_config,
+                    None,
+                )
+                .await
             }
             .instrument(user_span)
             .await;
@@ -331,25 +313,14 @@ impl PluginRegistrar<'_> {
         &mut self,
         name: String,
         factory: &PluginFactory,
-        plugin_config: &Value,
-        previous_plugin_config: Option<&Value>,
+        plugin_config: PluginConfig,
+        previous_config: Option<PluginConfig>,
         full_config: Option<Value>,
     ) {
-        let plugin_init = PluginInit::builder()
-            .config(plugin_config.clone())
-            .and_previous_config(previous_plugin_config.cloned())
-            .supergraph_sdl(self.supergraph_sdl.clone())
-            .supergraph_schema_id(self.supergraph_schema_id.clone())
-            .supergraph_schema(self.supergraph_schema.clone())
-            .subgraph_schemas(self.subgraph_schemas.clone())
-            .launch_id(self.launch_id.clone())
-            .notify(self.notify.clone())
-            .license(self.license.clone())
-            .and_full_config(full_config)
-            .and_original_config_yaml(self.raw_yaml.clone())
-            .build();
+        let mut plugin_init = self.context.with_config(plugin_config, previous_config);
+        plugin_init.full_config = full_config;
 
-        match factory.create_instance(plugin_init).await {
+        match factory.create_from_config(plugin_init).await {
             Ok(plugin) => {
                 let _ = self.plugin_instances.insert(name, plugin);
             }
@@ -393,45 +364,41 @@ impl PluginRegistrar<'_> {
                 tracing::error!("{:#}", error);
             }
 
-            let errors_list = self
-                .errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<String>>()
-                .join("\n");
-
-            Err(BoxError::from(format!(
-                "there were {} configuration errors\n{}",
-                self.errors.len(),
-                errors_list
-            )))
+            Err(configuration_errors(&self.errors))
         } else {
             Ok(self.plugin_instances)
         }
     }
 }
 
-pub(crate) fn inject_schema_id(
-    // Ideally we'd use &SchemaHash, but we'll need to update a bunch of tests to do so
-    schema_id: &str,
-    configuration: &mut Value,
-) {
-    if configuration.get("apollo").is_none() {
-        // Warning: this must be done here, otherwise studio reporting will not work
-        if apollo_key().is_some() && apollo_graph_reference().is_some() {
-            if let Some(telemetry) = configuration.as_object_mut() {
-                telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
-            }
-        } else {
-            return;
-        }
+/// Fails if any plugin's config could not be deserialized. Configuration parsing rejects such a
+/// configuration when it loads, but one deserialized directly with serde still carries the errors.
+pub(crate) fn check_plugin_configs(configuration: &Configuration) -> Result<(), BoxError> {
+    let errors: Vec<ConfigurationError> = configuration
+        .plugin_configs
+        .errors()
+        .iter()
+        .map(|error| error.to_configuration_error())
+        .collect();
+    if errors.is_empty() {
+        return Ok(());
     }
-    if let Some(apollo) = configuration.get_mut("apollo")
-        && let Some(apollo) = apollo.as_object_mut()
-    {
-        apollo.insert(
-            "schema_id".to_string(),
-            Value::String(schema_id.to_string()),
-        );
+    for error in &errors {
+        tracing::error!("{:#}", error);
     }
+    Err(configuration_errors(&errors))
+}
+
+/// Combines configuration errors into one error that lists each of them.
+fn configuration_errors(errors: &[ConfigurationError]) -> BoxError {
+    let errors_list = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<String>>()
+        .join("\n");
+    BoxError::from(format!(
+        "there were {} configuration errors\n{}",
+        errors.len(),
+        errors_list
+    ))
 }

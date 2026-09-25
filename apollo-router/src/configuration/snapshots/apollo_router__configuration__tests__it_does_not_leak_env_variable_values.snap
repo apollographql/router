@@ -2,12 +2,19 @@
 source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-configuration had errors: 
-1. at line 3
+apollo::configuration::expansion
 
-  
-  supergraph:
-    introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
-                   ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "boolean"
+  × could not expand configuration values
+  ╰─▶ could not expand configuration values
 
+Error: apollo::configuration::expansion_not_a_boolean
 
+  × expanded value is not a boolean
+   ╭─[3:18]
+ 2 │ supergraph:
+ 3 │   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
+   ·                  ─────────────────────┬─────────────────────
+   ·                                       ╰── this value does not parse as a boolean
+ 4 │         
+   ╰────
+  help: the schema declares this field as a boolean; use `true` or `false`

@@ -74,6 +74,7 @@ mod registry;
 
 pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
+pub use crate::configuration::ConfigurationParser;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
 pub use crate::context::extensions::Extensions;
