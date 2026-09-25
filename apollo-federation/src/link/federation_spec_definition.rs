@@ -15,7 +15,9 @@ use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
 
 use crate::ContextSpecDefinition;
+use crate::bail;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::link;
@@ -59,6 +61,18 @@ pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("f
 pub(crate) const FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
     name!("composeDirective");
+// GraphQL Federation (composite schemas) source-schema directives, added in federation v2.16.
+pub(crate) const FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC: Name = name!("lookup");
+pub(crate) const FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC: Name = name!("internal");
+pub(crate) const FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC: Name = name!("is");
+pub(crate) const FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC: Name = name!("require");
+pub(crate) const FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC: Name =
+    name!("FieldSelectionMap");
+/// The first federation version defining the GraphQL Federation source-schema directives.
+pub(crate) const COMPOSITE_SCHEMAS_FEDERATION_VERSION: Version = Version {
+    major: 2,
+    minor: 16,
+};
 
 pub(crate) const FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC: Name = name!("FieldSet");
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
@@ -938,6 +952,57 @@ impl FederationSpecDefinition {
         )
     }
 
+    fn lookup_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            None,
+        )
+    }
+
+    fn internal_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::FieldDefinition,
+            ],
+            None,
+        )
+    }
+
+    /// `@is(field: FieldSelectionMap!)` and `@require(field: FieldSelectionMap!)`.
+    fn field_selection_map_directive_specification(name: Name) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            name,
+            &[DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_FIELD_ARGUMENT_NAME,
+                    get_type: |schema, _| {
+                        let name = schema.federation_type_name_in_schema(
+                            FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC,
+                        )?;
+                        Ok(Type::non_null(Type::Named(name)))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            false,
+            &[DirectiveLocation::ArgumentDefinition],
+            None,
+        )
+    }
+
+    /// Whether this version defines the GraphQL Federation source-schema directives.
+    pub(crate) fn supports_composite_schemas(&self) -> bool {
+        self.version().satisfies(&COMPOSITE_SCHEMAS_FEDERATION_VERSION)
+    }
+
     fn cache_tag_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_CACHE_TAG_DIRECTIVE_NAME_IN_SPEC,
@@ -973,9 +1038,107 @@ fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
         .map(|pos| Type::non_null(Type::Named(pos.type_name)))
 }
 
+/// Whether a schema linking a composite-schemas-capable federation version actually uses the
+/// GraphQL Federation source-schema elements: it imports one of them, or applies one under its
+/// namespaced name.
+///
+/// Their definitions are only added to schemas that do. Every extracted subgraph links the latest
+/// federation version, so unconditionally defining them would grow every planner's memory for a
+/// feature most graphs never use.
+fn uses_composite_schema_elements(schema: &FederationSchema, link: &link::Link) -> bool {
+    let directive_names = [
+        FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC,
+        FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC,
+    ];
+    if link.imports.iter().any(|import| {
+        (import.is_directive && directive_names.contains(&import.element))
+            || (!import.is_directive
+                && import.element == FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC)
+    }) {
+        return true;
+    }
+    let names_in_schema: Vec<Name> = directive_names
+        .iter()
+        .map(|name| link.directive_name_in_schema(name))
+        .collect();
+    let applied = |directives: &apollo_compiler::ast::DirectiveList| {
+        directives
+            .iter()
+            .any(|d| names_in_schema.contains(&d.name))
+    };
+    let applied_component = |directives: &apollo_compiler::schema::DirectiveList| {
+        directives
+            .iter()
+            .any(|d| names_in_schema.contains(&d.name))
+    };
+    let field_uses = |field: &apollo_compiler::ast::FieldDefinition| {
+        applied(&field.directives) || field.arguments.iter().any(|a| applied(&a.directives))
+    };
+    schema.schema().types.values().any(|ty| match ty {
+        ExtendedType::Object(object) => {
+            applied_component(&object.directives)
+                || object.fields.values().any(|f| field_uses(f))
+        }
+        ExtendedType::Interface(interface) => {
+            applied_component(&interface.directives)
+                || interface.fields.values().any(|f| field_uses(f))
+        }
+        _ => false,
+    })
+}
+
+fn is_composite_schema_element(name: &Name, is_directive: bool) -> bool {
+    if is_directive {
+        [
+            FEDERATION_LOOKUP_DIRECTIVE_NAME_IN_SPEC,
+            FEDERATION_INTERNAL_DIRECTIVE_NAME_IN_SPEC,
+            FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC,
+            FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC,
+        ]
+        .contains(name)
+    } else {
+        *name == FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC
+    }
+}
+
 impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
+    }
+
+    fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let Some(link) = self.link_in_schema(schema) else {
+            bail!(
+                "The {self_url} specification should have been added to the schema before this is called",
+                self_url = self.url()
+            );
+        };
+        let include_composite =
+            self.supports_composite_schemas() && uses_composite_schema_elements(schema, &link);
+        let mut errors = MultipleFederationErrors { errors: vec![] };
+        for type_spec in self.type_specs() {
+            if !include_composite && is_composite_schema_element(type_spec.name(), false) {
+                continue;
+            }
+            if let Err(err) = type_spec.check_or_add(schema, Some(&link)) {
+                errors.push(err);
+            }
+        }
+        for directive_spec in self.directive_specs() {
+            if !include_composite && is_composite_schema_element(directive_spec.name(), true) {
+                continue;
+            }
+            if let Err(err) = directive_spec.check_or_add(schema, Some(&link)) {
+                errors.push(err);
+            }
+        }
+        match errors.errors.as_slice() {
+            [] => Ok(()),
+            [error] => Err(FederationError::SingleFederationError(error.clone())),
+            _ => Err(FederationError::MultipleFederationErrors(errors)),
+        }
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
@@ -1058,6 +1221,17 @@ impl SpecDefinition for FederationSpecDefinition {
             specs.push(Box::new(Self::cache_tag_directive_specification()));
         }
 
+        if self.supports_composite_schemas() {
+            specs.push(Box::new(Self::lookup_directive_specification()));
+            specs.push(Box::new(Self::internal_directive_specification()));
+            specs.push(Box::new(Self::field_selection_map_directive_specification(
+                FEDERATION_IS_DIRECTIVE_NAME_IN_SPEC,
+            )));
+            specs.push(Box::new(Self::field_selection_map_directive_specification(
+                FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC,
+            )));
+        }
+
         specs
     }
 
@@ -1085,6 +1259,12 @@ impl SpecDefinition for FederationSpecDefinition {
                 ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
                     .type_specs(),
             );
+        }
+
+        if self.supports_composite_schemas() {
+            type_specs.push(Box::new(ScalarTypeSpecification {
+                name: FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC,
+            }));
         }
         type_specs
     }
