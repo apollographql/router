@@ -74,6 +74,7 @@ pub(crate) mod connector;
 pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
 pub(crate) mod expansion;
+pub(crate) mod graphql_federation;
 pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
@@ -245,6 +246,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) batching: Batching,
 
+    /// GraphQL Federation (source schemas with `@lookup` fields) configuration. Preview.
+    #[serde(default)]
+    pub(crate) preview_graphql_federation: graphql_federation::GraphqlFederation,
+
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
@@ -293,6 +298,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             persisted_queries: PersistedQueries,
             limits: limits::Config,
             batching: Batching,
+            preview_graphql_federation: graphql_federation::GraphqlFederation,
             experimental_type_conditioned_fetching: bool,
             experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
         }
@@ -335,6 +341,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ad_hoc.apollo_plugins,
             plugin_configs: Arc::new(plugin_configs),
             batching: ad_hoc.batching,
+            preview_graphql_federation: ad_hoc.preview_graphql_federation,
 
             // serde(skip)
             notify,
@@ -421,6 +428,7 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
+            preview_graphql_federation: Default::default(),
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: experimental_hoist_orphan_errors.unwrap_or_default(),
@@ -681,6 +689,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             experimental_hoist_orphan_errors: Default::default(),
+            preview_graphql_federation: Default::default(),
             batching: batching.unwrap_or_default(),
             raw_yaml: None,
         };
@@ -723,6 +732,8 @@ impl Configuration {
             });
         }
 
+        self.validate_graphql_federation()?;
+
         // PQs.
         if self.persisted_queries.enabled {
             if self.persisted_queries.safelist.enabled && self.apq.enabled {
@@ -754,6 +765,21 @@ impl Configuration {
         }
 
         Ok(self)
+    }
+
+    /// GraphQL Federation source schemas can only be planned by the incremental planner.
+    fn validate_graphql_federation(&self) -> Result<(), ConfigurationError> {
+        if self.preview_graphql_federation.enabled
+            && !self.supergraph.query_planning.incremental_planner.enabled
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'preview_graphql_federation' configuration",
+                error: "GraphQL Federation requires the incremental query planner: set \
+                        'supergraph.query_planning.incremental_planner.enabled: true'"
+                    .to_string(),
+            });
+        }
+        Ok(())
     }
 }
 

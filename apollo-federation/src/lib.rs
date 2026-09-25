@@ -305,6 +305,14 @@ impl Supergraph {
     pub fn extract_subgraphs(&self) -> Result<ValidFederationSubgraphs, FederationError> {
         supergraph::extract_subgraphs_from_supergraph(&self.schema, None)
     }
+
+    /// Whether any subgraph of this supergraph is a GraphQL Federation source schema: a graph
+    /// with internal definitions, or whose fields carry `@lookup`, `@is` or `@require` metadata.
+    /// Linking join v0.6 alone does not make a supergraph use GraphQL Federation, since every
+    /// federation 3.0 composition emits it.
+    pub fn has_graphql_federation_source_schemas(&self) -> Result<bool, FederationError> {
+        supergraph::has_composite_graphs(&self.schema)
+    }
 }
 
 const _: () = {

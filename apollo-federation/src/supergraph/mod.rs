@@ -273,6 +273,15 @@ impl HintCodeDefinition {
     }
 }
 
+/// Whether any graph of the supergraph is a GraphQL Federation source schema.
+pub(crate) fn has_composite_graphs(
+    supergraph_schema: &FederationSchema,
+) -> Result<bool, FederationError> {
+    let (_, join_spec_definition, _) =
+        crate::validate_supergraph_for_query_planning(supergraph_schema)?;
+    Ok(!composite::composite_graphs(supergraph_schema, join_spec_definition)?.is_empty())
+}
+
 /// Assumes the given schema has been validated.
 ///
 /// TODO: A lot of common data gets passed around in the functions called by this one, considering

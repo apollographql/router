@@ -96,6 +96,37 @@ impl FeatureGateEnforcementReport {
                         }
                     }
                 }
+                FeatureRestriction::GraphqlFederationSourceSchemas {
+                    name,
+                    feature_gate_configuration_path,
+                    expected_value,
+                    to_enable,
+                    warning,
+                } => {
+                    // `Schema::parse` already validated the supergraph for query planning.
+                    let relevant = schema
+                        .federation_supergraph()
+                        .has_graphql_federation_source_schemas()
+                        .unwrap_or(false);
+                    let enabled = selector(feature_gate_configuration_path)
+                        .expect("path on restriction was not valid")
+                        .first()
+                        .is_some_and(|config_value| *config_value == expected_value);
+
+                    if relevant
+                        && enabled
+                        && let Some(warning) = warning
+                    {
+                        tracing::warn!("{warning}");
+                    }
+
+                    if relevant && !enabled {
+                        schema_violations.push(FeatureGateViolation::Feature {
+                            name: name.to_string(),
+                            to_enable: to_enable.to_string(),
+                        });
+                    }
+                }
             }
         }
 
@@ -106,7 +137,27 @@ impl FeatureGateEnforcementReport {
         // @link(url: "https://specs.apollo.dev/connect/v0.5") requires `connectors.preview_connect_v0_5: true`
         // This uses join__directives to find specs because the we're looking
         // at links within individual subgraphs.
-        vec![FeatureRestriction::SpecInJoinDirective {
+        vec![
+            // Every federation 3.0 composition links join v0.6, so this looks for the metadata
+            // only GraphQL Federation source schemas produce rather than for the join version.
+            FeatureRestriction::GraphqlFederationSourceSchemas {
+                name: "GraphQL Federation source schemas (@lookup)".to_string(),
+                feature_gate_configuration_path: "$.preview_graphql_federation.enabled"
+                    .to_string(),
+                expected_value: Value::Bool(true),
+                to_enable: "  preview_graphql_federation:
+    enabled: true
+  supergraph:
+    query_planning:
+      incremental_planner:
+        enabled: true"
+                    .to_string(),
+                warning: Some(
+                    "Support for GraphQL Federation source schemas (@lookup) is in preview."
+                        .to_string(),
+                ),
+            },
+            FeatureRestriction::SpecInJoinDirective {
             name: "Connect v0.5".to_string(),
             spec_url: "https://specs.apollo.dev/connect".to_string(),
             version_req: semver::VersionReq {
@@ -124,7 +175,8 @@ impl FeatureGateEnforcementReport {
     preview_connect_v0_5: true"
                 .to_string(),
             warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.5\") is in preview. See https://go.apollo.dev/connectors/v0.5 for more information.".to_string())
-        }]
+            },
+        ]
     }
 }
 
@@ -156,12 +208,24 @@ pub(crate) enum FeatureRestriction {
         to_enable: String,
         warning: Option<String>,
     },
+    /// A supergraph with at least one GraphQL Federation source schema.
+    GraphqlFederationSourceSchemas {
+        name: String,
+        feature_gate_configuration_path: String,
+        expected_value: Value,
+        to_enable: String,
+        warning: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum FeatureGateViolation {
     Spec {
         url: String,
+        name: String,
+        to_enable: String,
+    },
+    Feature {
         name: String,
         to_enable: String,
     },
@@ -179,6 +243,9 @@ impl Display for FeatureGateViolation {
                     f,
                     "* {name} @link(url: \"{url}\")\n  To enable:\n\n{to_enable}"
                 )
+            }
+            FeatureGateViolation::Feature { name, to_enable } => {
+                write!(f, "* {name}\n  To enable:\n\n{to_enable}")
             }
         }
     }
@@ -246,6 +313,73 @@ mod test {
         );
     }
 
+    fn compose(subgraph_sdl: &str) -> String {
+        use apollo_federation::subgraph::typestate::Subgraph;
+        let subgraphs = vec![Subgraph::parse("products", "http://products", subgraph_sdl).unwrap()];
+        apollo_federation::composition::compose(subgraphs, Default::default())
+            .unwrap()
+            .schema()
+            .schema()
+            .to_string()
+    }
+
+    fn source_schema_supergraph() -> String {
+        compose(
+            r#"
+            type Query { topProducts: [Product!]! productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id") { id: ID! name: String! }
+            "#,
+        )
+    }
+
+    #[test]
+    fn graphql_federation_source_schemas_are_gated() {
+        let supergraph = source_schema_supergraph();
+
+        let report = check(include_str!("testdata/oss.router.yaml"), &supergraph);
+        assert_eq!(1, report.gated_features_in_use.len());
+        assert!(matches!(
+            &report.gated_features_in_use[0],
+            FeatureGateViolation::Feature { name, .. } if name.contains("GraphQL Federation")
+        ));
+
+        let report = check(
+            "preview_graphql_federation:\n  enabled: true\nsupergraph:\n  query_planning:\n    incremental_planner:\n      enabled: true\n",
+            &supergraph,
+        );
+        assert_eq!(0, report.gated_features_in_use.len());
+    }
+
+    /// Every federation 3.0 composition links join v0.6, so the join version alone must not
+    /// trigger the GraphQL Federation gate.
+    #[test]
+    fn federation_3_without_source_schemas_is_not_gated() {
+        let supergraph = compose(
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key"])
+            type Query { topProducts: [Product!]! }
+            type Product @key(fields: "id") { id: ID! name: String! }
+            "#,
+        );
+        assert!(
+            supergraph.contains("https://specs.apollo.dev/join/v0.6"),
+            "{supergraph}"
+        );
+
+        let report = check(include_str!("testdata/oss.router.yaml"), &supergraph);
+        assert_eq!(0, report.gated_features_in_use.len());
+    }
+
+    #[test]
+    fn graphql_federation_requires_the_incremental_planner() {
+        let error = Configuration::from_str("preview_graphql_federation:\n  enabled: true\n")
+            .expect_err("the incremental planner is required");
+        assert!(
+            error.to_string().contains("incremental query planner"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn feature_gate_connectors_v0_5() {
         let report = check(
@@ -258,7 +392,9 @@ mod test {
             report.gated_features_in_use.len(),
             "should have found restricted connect feature"
         );
-        let FeatureGateViolation::Spec { url, name, .. } = &report.gated_features_in_use[0];
+        let FeatureGateViolation::Spec { url, name, .. } = &report.gated_features_in_use[0] else {
+            panic!("expected a spec violation");
+        };
 
         assert_eq!("https://specs.apollo.dev/connect/v0.5", url);
         assert_eq!("Connect v0.5", name);
