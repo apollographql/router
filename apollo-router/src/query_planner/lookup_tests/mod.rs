@@ -624,3 +624,128 @@ async fn parallel_lookups_share_one_request_batch() {
     }
     "#);
 }
+
+#[tokio::test]
+async fn deferred_block_receives_every_fetch_of_a_split_lookup_group() {
+    let schema = compose(&[
+        (
+            "catalog",
+            r#"
+            type Query { featured: [Media!]! }
+            interface Media { id: ID! }
+            type Book implements Media @key(fields: "isbn") { id: ID! @shareable isbn: String! }
+            type Movie implements Media @key(fields: "upc") { id: ID! @shareable upc: String! }
+            "#,
+        ),
+        (
+            "ratings",
+            r#"
+            type Query {
+              bookByIsbn(isbn: String!): Book @lookup @internal
+              movieByUpc(upc: String!): Movie @lookup @internal
+            }
+            interface Media { rating: Rating! }
+            type Book implements Media @key(fields: "isbn") { isbn: String! rating: Rating! }
+            type Movie implements Media @key(fields: "upc") { upc: String! rating: Rating! }
+            type Rating @key(fields: "id") { id: ID! stars: Int! }
+            "#,
+        ),
+        (
+            "reviews",
+            r#"
+            type Query { ratingById(id: ID!): Rating @lookup @internal }
+            type Rating @key(fields: "id") { id: ID! text: String! }
+            "#,
+        ),
+    ]);
+    let rating_query =
+        "query($lookupArgument_0: ID!) { ratingById(id: $lookupArgument_0) { text } }";
+    let subgraphs = MockedSubgraphs(
+        [
+            (
+                "catalog",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json!({"query": "{ featured { __typename ... on Book { __typename isbn } ... on Movie { __typename upc } } }"}),
+                        serde_json::json!({"data": {"featured": [
+                            {"__typename": "Book", "isbn": "b1"},
+                            {"__typename": "Movie", "upc": "m1"},
+                        ]}}),
+                    )
+                    .build(),
+            ),
+            (
+                "ratings",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json!({
+                            "query": "query($lookupArgument_0: String!) { bookByIsbn(isbn: $lookupArgument_0) { rating { __typename stars id } } }",
+                            "variables": {"lookupArgument_0": "b1"},
+                        }),
+                        serde_json::json!({"data": {"bookByIsbn": {"rating": {"__typename": "Rating", "stars": 4, "id": "r1"}}}}),
+                    )
+                    .with_json(
+                        serde_json::json!({
+                            "query": "query($lookupArgument_0: String!) { movieByUpc(upc: $lookupArgument_0) { rating { __typename stars id } } }",
+                            "variables": {"lookupArgument_0": "m1"},
+                        }),
+                        serde_json::json!({"data": {"movieByUpc": {"rating": {"__typename": "Rating", "stars": 5, "id": "r2"}}}}),
+                    )
+                    .build(),
+            ),
+            (
+                "reviews",
+                MockSubgraph::builder()
+                    .with_json(
+                        serde_json::json!({"query": rating_query, "variables": {"lookupArgument_0": "r1"}}),
+                        serde_json::json!({"data": {"ratingById": {"text": "good book"}}}),
+                    )
+                    .with_json(
+                        serde_json::json!({"query": rating_query, "variables": {"lookupArgument_0": "r2"}}),
+                        serde_json::json!({"data": {"ratingById": {"text": "good movie"}}}),
+                    )
+                    .build(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let service = TestHarness::builder()
+        .configuration_json(configuration())
+        .unwrap()
+        .schema(&schema)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+    let context = crate::Context::new();
+    context.extensions().with_lock(|lock| {
+        lock.insert(crate::services::router::ClientRequestAccepts {
+            multipart_defer: true,
+            ..Default::default()
+        })
+    });
+    let request = supergraph::Request::fake_builder()
+        .context(context)
+        .query("{ featured { rating { stars ... @defer { text } } } }")
+        .build()
+        .unwrap();
+    let mut stream = service.oneshot(request).await.unwrap();
+    let mut texts = Vec::new();
+    while let Some(response) = stream.next_response().await {
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        for incremental in &response.incremental {
+            assert!(incremental.errors.is_empty(), "{:?}", incremental.errors);
+            if let Some(text) = incremental
+                .data
+                .as_ref()
+                .and_then(|data| data.get("text"))
+                .and_then(|text| text.as_str())
+            {
+                texts.push(text.to_string());
+            }
+        }
+    }
+    texts.sort();
+    assert_eq!(texts, ["good book", "good movie"]);
+}

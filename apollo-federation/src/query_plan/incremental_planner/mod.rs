@@ -254,6 +254,7 @@ fn run_bulb_and_finalize(
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
         fetch_id_counter: naming.fetch_id_counter,
+        split_fetch_ids: Default::default(),
         // Generated subgraph operations are valid by construction, so
         // production always skips the O(n) re-validation. Debug builds
         // still assert validity in into_document_unchecked /
