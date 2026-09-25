@@ -59,32 +59,9 @@ pub enum PlanNode {
     Condition(Box<ConditionNode>),
 }
 
-/// How a fetch communicates with its data source. Extensible for future
-/// non-GraphQL protocols (gRPC, SQL, etc.).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub enum FetchProtocol {
-    /// Standard GraphQL subgraph fetch.
-    #[default]
-    GraphQL,
-    /// Connector-based fetch (REST, etc.). The coordinate string identifies
-    /// the connector (e.g., `subgraph:Type.field[0]`) for execution-layer
-    /// lookup.
-    Connector { coordinate: String },
-}
-
-impl FetchProtocol {
-    pub fn is_graphql(&self) -> bool {
-        matches!(self, FetchProtocol::GraphQL)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FetchNode {
     pub subgraph_name: Arc<str>,
-    /// Protocol used to execute this fetch. Defaults to GraphQL.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "FetchProtocol::is_graphql")]
-    pub protocol: FetchProtocol,
     /// Optional identifier for the fetch for defer support. All fetches of a given plan will be
     /// guaranteed to have a unique `id`.
     pub id: Option<u64>,

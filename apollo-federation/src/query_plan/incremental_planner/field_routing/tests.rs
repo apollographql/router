@@ -69,7 +69,7 @@ fn plan_query_with_router_specs(schema: &str, query: &str) -> String {
 }
 
 /// Like plan_query_with_router_specs, but returns the plan value so tests
-/// can assert on FetchProtocol and coordinates, which Display omits.
+/// can assert on individual fetches.
 fn build_plan_with_router_specs(schema: &str, query: &str) -> crate::query_plan::QueryPlan {
     let supergraph = Supergraph::new_with_router_specs(schema).expect("supergraph parse");
     let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
@@ -2936,17 +2936,6 @@ fn connector_entity_resolver_produces_connector_fetch() {
         CONNECTOR_ENTITY_RESOLVER_SCHEMA,
         "{ currentUser { email name } }",
     );
-    let fetches = collect_fetches(&plan);
-    let connector_fetch = fetches
-        .iter()
-        .find(|f| !f.protocol.is_graphql())
-        .expect("plan should contain a connector fetch");
-    match &connector_fetch.protocol {
-        crate::query_plan::FetchProtocol::Connector { coordinate } => {
-            assert_eq!(coordinate, "connectors:Query.user[0]");
-        }
-        other => panic!("expected connector protocol, got {other:?}"),
-    }
     let plan_str = format!("{plan}");
     insta::assert_snapshot!(plan_str, @r###"
     QueryPlan {
@@ -2994,15 +2983,15 @@ fn connector_outranked_by_local_edge_into_connector_subgraph() {
     );
     let fetches = collect_fetches(&plan);
     assert!(
-        fetches.iter().all(|f| !f.protocol.is_graphql()),
+        fetches
+            .iter()
+            .all(|f| !["c1", "c2"].contains(&f.subgraph_name.as_ref())),
         "every fetch must be connector-backed, got: {plan}"
     );
     assert!(
-        fetches.iter().any(|f| matches!(
-            &f.protocol,
-            crate::query_plan::FetchProtocol::Connector { coordinate }
-                if coordinate == "c2:User.avatar[0]"
-        )),
+        fetches
+            .iter()
+            .any(|f| f.subgraph_name.as_ref() == "c2_User_avatar_0"),
         "avatar must resolve through c2's connector, got: {plan}"
     );
 }
@@ -3022,7 +3011,7 @@ fn connector_root_edge_dropped_in_federated_root_options() {
     assert!(
         fetches
             .iter()
-            .all(|f| f.protocol.is_graphql() == (f.subgraph_name.as_ref() == "graphql")),
+            .all(|f| f.subgraph_name.as_ref() != "connectors"),
         "no plain GraphQL fetch may target the connectors subgraph: {plan}"
     );
 }
@@ -3040,7 +3029,7 @@ fn connector_root_competition_with_sub_selections_routes_through_graphql() {
     assert!(
         fetches
             .iter()
-            .all(|f| f.protocol.is_graphql() == (f.subgraph_name.as_ref() == "graphql")),
+            .all(|f| f.subgraph_name.as_ref() != "connectors"),
         "no plain GraphQL fetch may target the connectors subgraph: {plan}"
     );
 }
@@ -3060,19 +3049,17 @@ fn sibling_connector_entity_groups_not_merged() {
     let fetches = collect_fetches(&plan);
     let coordinates: Vec<&str> = fetches
         .iter()
-        .filter_map(|f| match &f.protocol {
-            crate::query_plan::FetchProtocol::Connector { coordinate } => Some(coordinate.as_str()),
-            _ => None,
-        })
+        .map(|f| f.subgraph_name.as_ref())
+        .filter(|name| name.starts_with("connectors_"))
         .collect();
     assert_eq!(
         coordinates.len(),
         2,
         "each connector resolution keeps its own fetch: {plan}"
     );
-    assert!(coordinates.contains(&"connectors:Query.user[0]"), "{plan}");
+    assert!(coordinates.contains(&"connectors_Query_user_0"), "{plan}");
     assert!(
-        coordinates.contains(&"connectors:Query.userDetails[0]"),
+        coordinates.contains(&"connectors_Query_userDetails_0"),
         "{plan}"
     );
 }

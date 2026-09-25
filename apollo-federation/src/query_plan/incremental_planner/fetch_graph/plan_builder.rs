@@ -809,12 +809,6 @@ impl FetchGraph {
                 Some(c) => Arc::from(c.id.synthetic_name()),
                 None => node.subgraph.clone(),
             },
-            protocol: match &node.connector {
-                Some(c) => crate::query_plan::FetchProtocol::Connector {
-                    coordinate: c.id.coordinate(),
-                },
-                None => Default::default(),
-            },
             id: None,
             variable_usages,
             requires,
