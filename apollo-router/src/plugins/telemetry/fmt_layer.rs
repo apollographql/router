@@ -557,6 +557,113 @@ connector:
         );
     }
 
+    /// Fields recorded with `tracing::field::valuable` only exist in builds that set
+    /// `--cfg tracing_unstable`; the nightly CI run exercises these tests.
+    #[cfg(tracing_unstable)]
+    mod valuable_fields {
+        use super::*;
+
+        #[derive(valuable::Valuable)]
+        struct Entitlements {
+            bypass: Option<bool>,
+        }
+
+        #[derive(valuable::Valuable)]
+        struct AccessLog {
+            client_id: String,
+            entitlements: Entitlements,
+            persisted_query_id: Option<String>,
+        }
+
+        fn access_log() -> AccessLog {
+            AccessLog {
+                client_id: "test-client-id".to_string(),
+                entitlements: Entitlements { bypass: Some(true) },
+                persisted_query_id: None,
+            }
+        }
+
+        /// Formats the single event emitted by `emit` and returns the raw JSON line.
+        fn json_log_line(emit: impl FnOnce()) -> String {
+            let buff = LogBuffer::default();
+            let json_format = JsonFormat {
+                display_timestamp: false,
+                display_span_list: false,
+                display_current_span: false,
+                display_resource: false,
+                ..Default::default()
+            };
+            let format = Json::new(Resource::builder_empty().build(), json_format);
+            let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+
+            ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), emit);
+
+            buff.to_string().trim().to_string()
+        }
+
+        #[tokio::test]
+        async fn test_json_logging_valuable_is_nested_json() {
+            let log = access_log();
+            let raw = json_log_line(|| {
+                info!(log = ::tracing::field::valuable(&log), "request finished");
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(
+                parsed["log"],
+                serde_json::json!({
+                    "client_id": "test-client-id",
+                    "entitlements": { "bypass": true },
+                    "persisted_query_id": null,
+                }),
+                "`log` should be a nested object, not a Debug string; got: {raw}"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_json_logging_valuable_keeps_empty_message_deduplication() {
+            // `otel_error!` style: an explicit `message` field plus a trailing empty format string.
+            let log = access_log();
+            let raw = json_log_line(|| {
+                error!(
+                    log = ::tracing::field::valuable(&log),
+                    message = "explicit error message",
+                    ""
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert!(parsed["log"].is_object(), "got: {raw}");
+            assert_eq!(parsed["message"], "explicit error message");
+            assert_eq!(
+                raw.matches(r#""message":"#).count(),
+                1,
+                "empty-string message should be dropped; got: {raw}"
+            );
+        }
+
+        #[tokio::test]
+        async fn test_json_logging_valuable_unserializable_falls_back_to_debug() {
+            // JSON object keys must be strings, so a map keyed by a list cannot be converted.
+            let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
+            let raw = json_log_line(|| {
+                info!(
+                    keys = ::tracing::field::valuable(&keyed_by_list),
+                    code = 43,
+                    "still logged"
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(parsed["keys"], "{[1, 2]: true}");
+            assert_eq!(parsed["code"], 43);
+            assert_eq!(parsed["message"], "still logged");
+        }
+    }
+
     #[tokio::test]
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
