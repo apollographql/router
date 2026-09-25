@@ -425,3 +425,87 @@ fn entities_fetch_authorization_metadata_covers_entity_fields() {
     );
     assert_eq!(fetch.authorization.scopes, ["read:reviews"]);
 }
+
+/// Lookup requests to a subgraph configured for variable batching reach it as one HTTP request
+/// with a list of variable sets, and its `application/jsonl` answer is placed by `variableIndex`.
+#[tokio::test(flavor = "multi_thread")]
+async fn variable_batched_lookups_over_http() {
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers;
+
+    let schema = compose(&[("products", PRODUCTS), ("reviews", REVIEWS)]);
+    let server = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/products"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {"topProducts": [
+                {"__typename": "Product", "name": "Table", "id": "1"},
+                {"__typename": "Product", "name": "Couch", "id": "2"},
+            ]}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/reviews"))
+        .and(matchers::body_json(serde_json::json!({
+            "query": "query($lookupArgument_0: ID!) { productById(id: $lookupArgument_0) { reviewCount } }",
+            "variables": [{"lookupArgument_0": "1"}, {"lookupArgument_0": "2"}],
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            [
+                r#"{"variableIndex":1,"data":{"productById":{"reviewCount":20}}}"#,
+                r#"{"variableIndex":0,"data":{"productById":{"reviewCount":10}}}"#,
+            ]
+            .join("\n"),
+            "application/jsonl",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut config = configuration();
+    config["override_subgraph_url"] = serde_json::json!({
+        "products": format!("{}/products", server.uri()),
+        "reviews": format!("{}/reviews", server.uri()),
+    });
+    config["preview_graphql_federation"]["subgraph"] =
+        serde_json::json!({"all": {"variable_batching": true}});
+    let service = TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(&schema)
+        .with_subgraph_network_requests()
+        .build_supergraph()
+        .await
+        .unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query("{ topProducts { name reviewCount } }")
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "topProducts": [
+          {
+            "name": "Table",
+            "reviewCount": 10
+          },
+          {
+            "name": "Couch",
+            "reviewCount": 20
+          }
+        ]
+      }
+    }
+    "#);
+}
