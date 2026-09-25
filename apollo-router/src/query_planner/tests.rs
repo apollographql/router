@@ -339,6 +339,7 @@ async fn defer() {
                     context_rewrites: None,
                     schema_aware_hash: Default::default(),
                     authorization: Default::default(),
+                    entity_lookup: None,
                 }))),
             },
             deferred: vec![DeferredNode {
@@ -385,6 +386,7 @@ async fn defer() {
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
+                        entity_lookup: None,
                     })),
                 }))),
             }],
@@ -1878,6 +1880,7 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            entity_lookup: None,
         }))),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
@@ -1949,6 +1952,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
+                            entity_lookup: None,
                         }),
                         // Dependency fetch: gets sub.data (the deferred node depends on this)
                         PlanNode::Flatten(FlattenNode {
@@ -1992,6 +1996,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                                 context_rewrites: None,
                                 schema_aware_hash: Default::default(),
                                 authorization: Default::default(),
+                                entity_lookup: None,
                             })),
                         }),
                     ],
@@ -2074,6 +2079,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
+                        entity_lookup: None,
                     })),
                 }))),
             }],

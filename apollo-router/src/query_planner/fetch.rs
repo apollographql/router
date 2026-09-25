@@ -4,6 +4,7 @@ use std::sync::Arc;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
+use apollo_federation::query_plan::entity_lookup::EntityLookup;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
@@ -141,6 +142,12 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    /// Set for an entity fetch into a GraphQL Federation source schema: the operation calls a
+    /// `@lookup` field, once per entity, with variables computed from each representation.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) entity_lookup: Option<Arc<EntityLookup>>,
 }
 
 #[derive(Default)]
@@ -595,6 +602,7 @@ mod tests {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            entity_lookup: None,
         }
     }
 

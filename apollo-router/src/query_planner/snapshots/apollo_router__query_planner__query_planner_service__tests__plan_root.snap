@@ -22,5 +22,6 @@ Fetch(
             scopes: [],
             policies: [],
         },
+        entity_lookup: None,
     },
 )

@@ -21,6 +21,9 @@ mod convert;
 mod execution;
 pub(crate) mod fetch;
 mod labeler;
+pub(crate) mod lookup;
+#[cfg(test)]
+mod lookup_tests;
 mod plan;
 pub(crate) mod query_planner_service;
 pub(crate) mod rewrites;
