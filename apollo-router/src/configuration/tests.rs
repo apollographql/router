@@ -394,17 +394,20 @@ cors:
 #[test]
 fn validate_project_config_files() {
     let mocked_env_vars = super::test_discovery::discovery_env_vars();
-    for doc in super::test_discovery::discover_project_configs() {
-        let expansion = Expansion::default_builder()
-            .mocked_env_vars(mocked_env_vars.clone())
-            .build()
-            .unwrap();
-
-        // Documents may still use shapes that startup migrates within the major version.
-        if let Err(e) = parse_configuration(&doc.yaml, expansion, Migration::WithinMajor) {
-            panic!("{} configuration error: \n{}", doc.path.display(), e)
-        }
-    }
+    // Documents are checked as written, so none relies on startup migration.
+    let errors: Vec<String> = super::test_discovery::discover_project_configs()
+        .iter()
+        .filter_map(|doc| {
+            let expansion = Expansion::default_builder()
+                .mocked_env_vars(mocked_env_vars.clone())
+                .build()
+                .unwrap();
+            parse_configuration(&doc.yaml, expansion, Migration::None)
+                .err()
+                .map(|error| format!("{} configuration error: \n{error}", doc.path.display()))
+        })
+        .collect();
+    assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 }
 
 #[test]
