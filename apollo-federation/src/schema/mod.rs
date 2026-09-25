@@ -355,8 +355,11 @@ impl FederationSchema {
     // PORT_NOTE: Corresponds to `FederationMetadata.isFed2Schema` in JS
     // This works even if the schema bootstrapping was not completed.
     pub(crate) fn is_fed_2(&self) -> bool {
-        self.federation_link()
-            .is_some_and(|link| link.url.version >= (Version { major: 2, minor: 0 }))
+        self.federation_link().is_some_and(|link| {
+            link.url
+                .version
+                .satisfies_federation(&Version { major: 2, minor: 0 })
+        })
     }
 
     /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
