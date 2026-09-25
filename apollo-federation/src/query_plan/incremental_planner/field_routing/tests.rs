@@ -1240,25 +1240,12 @@ fn t_pending(
         .next()
         .expect("field selection")
         .clone();
-    PendingSelection {
-        selection: field_sel,
-        query_graph_node: t_node(space, "a"),
-        fetch_node,
-        op_path: SharedPath::new(),
-        path_in_fetch: SharedPath::new(),
-        condition: dependent.map(|dependent| ConditionScope {
-            dependent,
-            depth: 1,
-        }),
-        provides_anchor: None,
-        narrowing: Default::default(),
-        routing_options_memo: Default::default(),
-        best_effort: false,
-        defer_ref: None,
-        context_anchor: Default::default(),
-        parent_types: SharedPath::new(),
-        restrict_to: None,
-    }
+    let mut pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
+    pending.condition = dependent.map(|dependent| ConditionScope {
+        dependent,
+        depth: 1,
+    });
+    pending
 }
 
 /// The search enumerates options through cached_routing_options, so a fork
