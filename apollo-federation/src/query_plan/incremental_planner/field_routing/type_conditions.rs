@@ -114,7 +114,7 @@ impl FieldRoutingSearchSpace {
         if let Selection::InlineFragment(frag_sel) = &pending.selection
             && let Some(type_cond) = &frag_sel.inline_fragment.type_condition_position
         {
-            let current_node = self.query_graph.node_weight(pending.query_graph_node)?;
+            let current_node = self.qg().node_weight(pending.query_graph_node)?;
 
             let is_vacuous =
                 if matches!(current_node.type_, QueryGraphNodeType::FederatedRootType(_)) {
@@ -122,7 +122,7 @@ impl FieldRoutingSearchSpace {
                 } else {
                     let current_type: CompositeTypeDefinitionPosition =
                         current_node.type_.clone().try_into()?;
-                    let current_schema = self.query_graph.schema_by_source(&current_node.source)?;
+                    let current_schema = self.qg().schema_by_source(&current_node.source)?;
                     let current_runtime_types =
                         current_schema.possible_runtime_types(current_type.clone())?;
                     let cond_runtime_types = self
@@ -190,10 +190,10 @@ impl FieldRoutingSearchSpace {
         if let Selection::InlineFragment(frag_sel) = &pending.selection
             && let Some(type_cond) = &frag_sel.inline_fragment.type_condition_position
         {
-            let current_node = self.query_graph.node_weight(pending.query_graph_node)?;
+            let current_node = self.qg().node_weight(pending.query_graph_node)?;
             let current_type: CompositeTypeDefinitionPosition =
                 current_node.type_.clone().try_into()?;
-            let current_schema = self.query_graph.schema_by_source(&current_node.source)?;
+            let current_schema = self.qg().schema_by_source(&current_node.source)?;
 
             let current_runtime_types =
                 current_schema.possible_runtime_types(current_type.clone())?;
@@ -275,15 +275,30 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
     ) -> Result<bool, FederationError> {
         if let Selection::Field(field_sel) = &pending.selection {
-            let current_node = self.query_graph.node_weight(pending.query_graph_node)?;
+            let current_node = self.qg().node_weight(pending.query_graph_node)?;
             if let Ok(current_type) =
                 CompositeTypeDefinitionPosition::try_from(current_node.type_.clone())
                 && current_type.is_abstract_type()
             {
-                let current_schema = self.query_graph.schema_by_source(&current_node.source)?;
+                let current_schema = self.qg().schema_by_source(&current_node.source)?;
                 if let Ok(runtime_types) =
                     current_schema.possible_runtime_types(current_type.clone())
                 {
+                    if runtime_types.is_empty() {
+                        // The abstract type has no runtime members in this
+                        // subgraph, so no object can ever appear at this
+                        // position: the selection is dead code. Drop it
+                        // without a penalty, mirroring the exhaustive
+                        // planner, instead of failing the commit (which
+                        // would penalize every candidate that probes the
+                        // explosion and can starve the search of complete
+                        // plans).
+                        trace!(
+                            field = %field_sel.field.field_position,
+                            "abstract position has no local runtime types, dropping selection",
+                        );
+                        return Ok(true);
+                    }
                     let exploded = !runtime_types.is_empty();
                     let inner_sel = Selection::Field(field_sel.clone());
                     let schema = field_sel.field.schema();

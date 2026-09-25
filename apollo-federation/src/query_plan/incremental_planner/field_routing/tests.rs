@@ -603,21 +603,11 @@ fn static_override_routes_field_to_overriding_subgraph() {
     );
 }
 
-/// Demonstrates BULB backtracking actually correcting a greedy mistake,
-/// not just picking correctly the first time. `profile` is a key hop
-/// from A to either B or C, and both hops score identically at the
-/// one-step scoring pass (same fetch shape), so the greedy tiebreak
-/// (declaration order) commits to B. Only once `profile` lands on B do
-/// we discover `detail` isn't there and needs a second hop to C, a cost
-/// the one-step score for the `profile` decision couldn't see.
-///
-/// With fuel=1 (greedy pass only, discrepancies never explored), BULB
-/// returns that suboptimal 3-fetch plan (A -> B -> C). With enough fuel
-/// to run a discrepancy iteration, it explores the C branch to
-/// completion, finds the cheaper 2-fetch plan (A -> C), and replaces the
-/// greedy result. The same "record_completion only if improved"
-/// mechanism the toy `discrepancy_finds_better_alternative_slice` test
-/// exercises, but on a real routing decision.
+/// Demonstrates that BULB backtracking corrects greedy tiebreak mistakes.
+/// `profile` is a key hop from A to either B or C. The greedy pass picks
+/// B, which requires a second hop to C for `detail`, producing a 3-fetch
+/// plan. Backtracking discovers that C can serve `profile.detail` directly
+/// and produces the optimal 2-fetch plan.
 #[test_log::test]
 fn greedy_tiebreak_mistake_is_corrected_by_backtracking() {
     let document_str = "{ user { profile { detail } } }";
@@ -1188,10 +1178,12 @@ fn t_pending(
         }),
         provides_anchor: None,
         narrowing: Default::default(),
+        routing_options_memo: Default::default(),
         best_effort: false,
         defer_ref: None,
         context_anchor: Default::default(),
         parent_types: SharedPath::new(),
+        restrict_to: None,
     }
 }
 
@@ -2635,6 +2627,216 @@ fn context_value_rides_entity_representation_at_boundary() {
               ... on T {
                 child {
                   field(a: $contextualArgument_2_0)
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// The search enumerates options through cached_routing_options, so a fork
+/// remainder's restrict_to must confine every consumer (fast_forward, the
+/// lift scan, BULB options) to the serving subgraph.
+#[test]
+fn restrict_to_filters_enumerated_options() {
+    let space = search_space();
+    let fetch_node = NodeIndex::new(0);
+
+    let unfiltered = {
+        let pending = Arc::new(t_pending(&space, "y", fetch_node, None));
+        space
+            .cached_routing_options(&pending)
+            .expect("options enumerate")
+    };
+    assert!(!unfiltered.is_empty(), "y must have routing options");
+    let only = unfiltered[0].target_subgraph().clone();
+
+    let mut restricted = t_pending(&space, "y", fetch_node, None);
+    restricted.restrict_to = Some(only.clone());
+    let filtered = space
+        .cached_routing_options(&Arc::new(restricted))
+        .expect("filtered options enumerate");
+    assert!(!filtered.is_empty());
+    assert!(
+        filtered
+            .iter()
+            .all(|choice| *choice.target_subgraph() == only),
+        "restrict_to must keep only options into {only}"
+    );
+
+    let mut elsewhere = t_pending(&space, "y", fetch_node, None);
+    elsewhere.restrict_to = Some(Arc::from("<no-such-subgraph>"));
+    let none = space
+        .cached_routing_options(&Arc::new(elsewhere))
+        .expect("filtered options enumerate");
+    assert!(none.is_empty(), "restrict_to must drop every other option");
+}
+
+/// A keyless value type (no @key on V) whose fields are split across two
+/// subgraphs: `a` in A and `b` in B. A single fetch can't resolve both, so the
+/// planner must split the parent selection and fetch each half independently.
+/// Targets fork.rs fork_stranded_children.
+#[test]
+fn keyless_value_type_splits_across_subgraphs() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ v { __typename a b } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Parallel {
+        Fetch(service: "b") {
+          {
+            v {
+              b
+            }
+          }
+        },
+        Fetch(service: "a") {
+          {
+            v {
+              __typename
+              a
+            }
+          }
+        },
+      },
+    }
+    "###);
+}
+
+/// Same keyless fork, but the stranded child hides inside a @defer'd
+/// fragment: the stranded walk must recurse through the fragment and
+/// preserve the wrapper (carrying @defer) on the remainder.
+/// Targets fork.rs stranded_selection.
+#[test]
+fn keyless_value_type_split_recovers_deferred_fragment_children() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query_with_defer(
+        &schema,
+        "query($s: Boolean!) { v { a ... @defer { __typename ... on V @skip(if: $s) { b } } } }",
+    );
+    assert!(plan_str.contains("a"), "Plan should fetch 'a': {plan_str}");
+    assert!(
+        plan_str.contains("b"),
+        "Plan should fetch deferred 'b' from the other subgraph: {plan_str}"
+    );
+}
+
+/// Deep keyless fork: the strand sits two keyless levels below the field
+/// with routing alternatives. Routing `conn` to A strands `Inner.b` (Inner
+/// and Conn are keyless, so no hop can recover it), so the A option becomes
+/// a fork whose remainder `conn { inner { b } }` is pinned to B and
+/// key-hops there, and the responses merge at the same path.
+/// Targets fork.rs stranded_at / commit_fork.
+#[test]
+fn deep_keyless_fork_reaches_stranded_grandchild() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  conn: Conn
+  onlyA: String @join__field(graph: A)
+}
+
+type Conn
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  inner: Inner
+}
+
+type Inner
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  e: E
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ e { onlyA conn { inner { a b } } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            e {
+              __typename
+              onlyA
+              conn {
+                inner {
+                  a
+                }
+              }
+              id
+            }
+          }
+        },
+        Flatten(path: "e") {
+          Fetch(service: "b") {
+            {
+              ... on E {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on E {
+                conn {
+                  inner {
+                    b
+                  }
                 }
               }
             }

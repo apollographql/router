@@ -41,14 +41,23 @@ impl Selection {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
         on_non_intersecting: OnNonIntersecting,
+        allow_interface_target: bool,
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => field
-                .rebase_inner(parent_type, schema, on_non_intersecting)
+                .rebase_inner(
+                    parent_type,
+                    schema,
+                    on_non_intersecting,
+                    allow_interface_target,
+                )
                 .map(|field| field.into()),
-            Selection::InlineFragment(inline) => {
-                inline.rebase_inner(parent_type, schema, on_non_intersecting)
-            }
+            Selection::InlineFragment(inline) => inline.rebase_inner(
+                parent_type,
+                schema,
+                on_non_intersecting,
+                allow_interface_target,
+            ),
         }
     }
 
@@ -57,7 +66,17 @@ impl Selection {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<Selection, FederationError> {
-        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error)
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error, false)
+    }
+
+    /// Like `rebase_on`, but fields may also rebase onto an @interfaceObject
+    /// target, as in `Field::rebase_on_for_incremental_planner`.
+    pub(crate) fn rebase_on_for_incremental_planner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<Selection, FederationError> {
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error, true)
     }
 
     fn can_add_to(
@@ -150,7 +169,7 @@ impl Field {
     }
 
     /// Like `rebase_on`, but allows rebasing a concrete type's field onto
-    /// an interface or @interfaceObject target. Used by the incremental
+    /// an @interfaceObject target. Used by the incremental
     /// planner's plan builder where entity fetch paths cross the
     /// concrete-to-interface boundary in @interfaceObject schemas.
     pub(crate) fn rebase_on_for_incremental_planner(
@@ -213,9 +232,9 @@ impl Field {
     }
 
     /// `allow_interface_target` adds a third case: a concrete type's field on
-    /// an interface target, the reverse of case 2. An @interfaceObject source
-    /// declares the type as a plain object while the target subgraph has the
-    /// interface. `rebase_on` still fails if the interface lacks the field.
+    /// an @interfaceObject target, the reverse of case 2. Plain interface
+    /// targets stay rejected so concrete fields cannot rebase onto unrelated
+    /// interfaces that happen to share a field name.
     fn can_rebase_on_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -239,7 +258,7 @@ impl Field {
         if allow_interface_target {
             let target_is_iface_obj =
                 target_schema.is_interface_object_type(parent_type.clone().into())?;
-            return Ok(parent_type.is_interface_type() || target_is_iface_obj);
+            return Ok(target_is_iface_obj);
         }
         Ok(false)
     }
@@ -315,13 +334,19 @@ impl FieldSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
         on_non_intersecting: OnNonIntersecting,
+        allow_interface_target: bool,
     ) -> Result<FieldSelection, FederationError> {
         if &self.field.schema == schema && &self.field.field_position.parent() == parent_type {
             // we are rebasing field on the same parent within the same schema - we can just return self
             return Ok(self.clone());
         }
 
-        let rebased = self.field.rebase_on(parent_type, schema)?;
+        let rebased = if allow_interface_target {
+            self.field
+                .rebase_on_for_incremental_planner(parent_type, schema)?
+        } else {
+            self.field.rebase_on(parent_type, schema)?
+        };
         let Some(selection_set) = &self.selection_set else {
             // leaf field
             return Ok(FieldSelection {
@@ -347,8 +372,12 @@ impl FieldSelection {
             });
         }
 
-        let rebased_selection_set =
-            selection_set.rebase_inner(&rebased_base_type, schema, on_non_intersecting)?;
+        let rebased_selection_set = selection_set.rebase_inner(
+            &rebased_base_type,
+            schema,
+            on_non_intersecting,
+            allow_interface_target,
+        )?;
         if rebased_selection_set.selections.is_empty() {
             Err(RebaseError::EmptySelectionSet.into())
         } else {
@@ -485,6 +514,7 @@ impl InlineFragmentSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
         on_non_intersecting: OnNonIntersecting,
+        allow_interface_target: bool,
     ) -> Result<Selection, FederationError> {
         if &self.inline_fragment.schema == schema
             && self.inline_fragment.parent_type_position == *parent_type
@@ -505,6 +535,7 @@ impl InlineFragmentSelection {
                 &rebased_casted_type,
                 schema,
                 on_non_intersecting,
+                allow_interface_target,
             )?;
             if rebased_selection_set.selections.is_empty() {
                 // empty selection set
@@ -545,10 +576,16 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
         on_non_intersecting: OnNonIntersecting,
+        allow_interface_target: bool,
     ) -> Result<SelectionSet, FederationError> {
         let mut selections = super::SelectionMap::new();
         for selection in self.selections.values() {
-            match selection.rebase_inner(parent_type, schema, on_non_intersecting) {
+            match selection.rebase_inner(
+                parent_type,
+                schema,
+                on_non_intersecting,
+                allow_interface_target,
+            ) {
                 Ok(rebased) => {
                     selections.insert(rebased);
                 }
@@ -574,7 +611,7 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<SelectionSet, FederationError> {
-        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error)
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Error, false)
     }
 
     /// Like [`Self::rebase_on`], but fragments whose type conditions cannot
@@ -586,7 +623,7 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<SelectionSet, FederationError> {
-        self.rebase_inner(parent_type, schema, OnNonIntersecting::Prune)
+        self.rebase_inner(parent_type, schema, OnNonIntersecting::Prune, false)
     }
 
     /// Returns true if the selection set would select cleanly from the given type in the given
@@ -640,7 +677,7 @@ mod tests {
     }
 
     fn assert_cannot_rebase(result: Result<Field, crate::error::FederationError>) {
-        let error = result.expect_err("legacy rebase should reject a concrete-to-interface hop");
+        let error = result.expect_err("rebase should reject a concrete-to-interface hop");
         assert!(
             error
                 .to_string()
@@ -662,18 +699,15 @@ mod tests {
     }
 
     #[test]
-    fn case_3_interface_target_accepted_on_incremental_planner_path() {
+    fn case_3_interface_target_rejected_on_incremental_planner_path() {
         let schema = schema(INTERFACE_SUBGRAPH);
         let field = concrete_field(&schema);
         let target = CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
             type_name: apollo_compiler::name!("I"),
         });
 
-        assert!(field.can_rebase_on_inner(&target, &schema, true).unwrap());
-        let rebased = field
-            .rebase_on_for_incremental_planner(&target, &schema)
-            .expect("incremental planner rebase onto interface");
-        assert_eq!(rebased.field_position.parent(), target);
+        assert!(!field.can_rebase_on_inner(&target, &schema, true).unwrap());
+        assert_cannot_rebase(field.rebase_on_for_incremental_planner(&target, &schema));
     }
 
     #[test]
@@ -708,5 +742,24 @@ mod tests {
             .expect("incremental planner rebase onto @interfaceObject");
         assert_eq!(rebased.field_position.parent(), target);
         assert_eq!(rebased.schema, target_schema);
+    }
+
+    #[test]
+    fn selection_rebase_onto_interface_object_only_on_incremental_planner_path() {
+        let source_schema = schema(INTERFACE_SUBGRAPH);
+        let target_schema = schema(INTERFACE_OBJECT_SUBGRAPH);
+        let selection = super::Selection::from_field(concrete_field(&source_schema), None);
+        let target = CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(selection.rebase_on(&target, &target_schema).is_err());
+        let rebased = selection
+            .rebase_on_for_incremental_planner(&target, &target_schema)
+            .expect("incremental planner selection rebase onto @interfaceObject");
+        let super::Selection::Field(field) = rebased else {
+            panic!("expected a field selection");
+        };
+        assert_eq!(field.field.field_position.parent(), target);
     }
 }

@@ -10,6 +10,7 @@ use petgraph::graph::NodeIndex;
 use super::super::fetch_graph::FetchGraph;
 use super::super::fetch_graph::FetchGraphCheckpoint;
 use super::super::shared_path::SharedPath;
+use super::routing::RoutingChoice;
 use crate::operation::Selection;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
@@ -35,7 +36,12 @@ pub(crate) struct ConditionScope {
 /// Anchor information for @fromContext across entity boundaries.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ContextAnchor {
+    /// The *parent* fetch feeding this selection's entity fetch, when the
+    /// selection lives inside one. When the ancestor with @context is at or
+    /// above the entity boundary, the context selection must be added here,
+    /// not to the entity fetch.
     pub(crate) fetch: Option<NodeIndex>,
+    /// Op path at the entity boundary in the parent fetch.
     pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
 }
 
@@ -86,6 +92,17 @@ pub(crate) struct PendingSelection {
     /// concrete-`__typename` recovery, where no subgraph may be able to
     /// supply the concrete typename.
     pub(crate) best_effort: bool,
+    /// Set on fork remainders: the subgraph chosen to serve this part of a
+    /// forked field. Routing options into any other subgraph are filtered
+    /// out, so the remainder commits as a forced hop instead of reopening
+    /// the decision the fork already made.
+    pub(crate) restrict_to: Option<Arc<str>>,
+    /// Lazily computed routing options for this exact pending (see
+    /// `cached_routing_options`). Options are a pure function of the pending
+    /// and the immutable query graph, and pendings are only queried once
+    /// frozen behind an `Arc`, so first-query-wins memoization is sound.
+    /// Reset by `fork` since forks change the selection or position.
+    pub(crate) routing_options_memo: std::sync::OnceLock<Arc<Vec<RoutingChoice>>>,
 }
 
 /// Type-narrowing state a pending selection carries down the operation,
@@ -130,6 +147,12 @@ impl PendingSelection {
             parent_types: self.parent_types.clone(),
             context_anchor: self.context_anchor.clone(),
             best_effort: self.best_effort,
+            routing_options_memo: std::sync::OnceLock::new(),
+            // The restriction belongs to one fork remainder only; a fork is
+            // a different selection (a child, a condition, a restructured
+            // shape) that may legitimately need another subgraph.
+            // `commit_fork` sets it explicitly on the remainders it pushes.
+            restrict_to: None,
         }
     }
 
@@ -180,6 +203,11 @@ impl PendingSelection {
         self
     }
 
+    pub(super) fn with_restrict_to(mut self, restrict_to: Option<Arc<str>>) -> Self {
+        self.restrict_to = restrict_to;
+        self
+    }
+
     /// Mark this selection best-effort: a drop is tolerated silently (see
     /// [`Self::best_effort`]).
     pub(super) fn into_best_effort(mut self) -> Self {
@@ -210,6 +238,7 @@ impl PendingSelection {
 }
 
 /// Undo-log entry for one pending-stack mutation.
+#[derive(Clone)]
 enum PendingOp {
     /// An entry was pushed. Undo: pop and drop it.
     Pushed,
@@ -226,6 +255,7 @@ enum PendingOp {
 /// A single `PlanState` is mutated during search; trial branches are
 /// applied, scored, and undone via `checkpoint()` / `rollback()` without
 /// cloning. `snapshot()` saves the best complete candidate.
+#[derive(Clone)]
 pub(crate) struct PlanState {
     /// Lightweight fetch graph tracking groups, dependencies, and selections.
     pub(crate) graph: FetchGraph,
@@ -404,10 +434,12 @@ mod tests {
             condition: None,
             provides_anchor: None,
             narrowing: Default::default(),
+            routing_options_memo: Default::default(),
             best_effort: false,
             defer_ref: None,
             context_anchor: Default::default(),
             parent_types: SharedPath::new(),
+            restrict_to: None,
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state

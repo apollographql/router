@@ -114,6 +114,14 @@ impl Default for QueryPlannerConfig {
     }
 }
 
+impl QueryPlannerConfig {
+    /// Whether operations are planned by the incremental planner. It does not
+    /// implement type_conditioned_fetching, so that flag falls back to legacy.
+    pub(crate) fn uses_incremental_planner(&self) -> bool {
+        self.incremental_planner.enabled && !self.type_conditioned_fetching
+    }
+}
+
 impl std::hash::Hash for QueryPlannerConfig {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // Destructured so adding a field is a compile error until it is
@@ -481,6 +489,7 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
+            !self.config.uses_incremental_planner(),
         )?;
 
         let NormalizedDefer {
@@ -931,10 +940,7 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    // The BULB planner does not implement type_conditioned_fetching, so
-    // queries relying on that flag fall back to the legacy planner.
-    let use_incremental = parameters.config.incremental_planner.enabled
-        && !parameters.config.type_conditioned_fetching;
+    let use_incremental = parameters.config.uses_incremental_planner();
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
         && use_incremental
@@ -1109,7 +1115,11 @@ impl SubgraphOperationCompression {
     pub(crate) fn compress(
         &mut self,
         operation: Operation,
+        skip_validation: bool,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        if skip_validation {
+            return self.compress_unchecked(operation);
+        }
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
@@ -1124,6 +1134,16 @@ impl SubgraphOperationCompression {
                 })?;
                 Ok(operation_document)
             }
+        }
+    }
+
+    fn compress_unchecked(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        match self {
+            Self::GenerateFragments => Ok(operation.generate_fragments_unchecked()?),
+            Self::Disabled => operation.into_document_unchecked(),
         }
     }
 }

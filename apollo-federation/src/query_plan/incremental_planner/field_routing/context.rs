@@ -214,11 +214,11 @@ pub(super) fn handle_from_context(
     // field; for key hops this differs from pending.query_graph_node.
     let (edge_source_node, _) =
         search_space
-            .query_graph
+            .qg()
             .edge_endpoints(ctx.choice.edge_index().ok_or_else(|| {
                 FederationError::internal("edge_index called on non-edge routing choice")
             })?)?;
-    let edge_source_data = search_space.query_graph.node_weight(edge_source_node)?;
+    let edge_source_data = search_space.qg().node_weight(edge_source_node)?;
     let source_subgraph = &edge_source_data.source;
 
     let placement = classify_placement(pending, current_fetch_node, required_contexts);
@@ -236,7 +236,7 @@ pub(super) fn handle_from_context(
     let mut context_args: Vec<(Name, Name)> = Vec::new();
     for cond in required_contexts {
         let context_id = search_space
-            .query_graph
+            .qg()
             .context_id_by_source_and_argument(source_subgraph, &cond.argument_coordinate)?;
 
         let (ancestor_type, ancestor_idx, levels_in_data_path) =
@@ -275,6 +275,7 @@ pub(super) fn handle_from_context(
         // subgraph may declare them as @external.
         let append_subgraph = state.graph.node(append_fetch_node).subgraph.clone();
         let append_schema = search_space
+            .cached_query_graph
             .query_graph
             .schema_by_source(&append_subgraph)?;
         let append_type: CompositeTypeDefinitionPosition = append_schema
@@ -362,6 +363,20 @@ fn classify_placement(
 /// Whether every context condition's nearest @context ancestor is the
 /// entity boundary type, the one the entity representation carries, so the
 /// context data rides the representation and no isolating hop is needed.
+/// The type at the entity boundary, paired with op_path's first element.
+/// Context isolation depends on it, so it keys the routing-options cache.
+pub(super) fn boundary_type_name(pending: &super::PendingSelection) -> Option<Name> {
+    let depth = pending.op_path.len();
+    if depth == 0 {
+        return None;
+    }
+    let mut types = pending.parent_types.clone();
+    for _ in 1..depth {
+        types = types.parent();
+    }
+    types.last().map(|t| t.type_name().clone())
+}
+
 fn at_entity_boundary(
     pending: &super::PendingSelection,
     required_contexts: &[ContextCondition],
@@ -491,7 +506,7 @@ fn ancestor_anchor(
     ancestor_idx: usize,
     ancestor_op_path: &SharedPath<Arc<OpPathElement>>,
 ) -> Option<super::PendingSelection> {
-    let graph = search_space.query_graph.graph();
+    let graph = search_space.qg().graph();
     let node = graph.node_indices().find(|&idx| {
         let data = &graph[idx];
         data.source == *subgraph

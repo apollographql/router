@@ -1813,7 +1813,10 @@ impl SelectionSet {
                             );
                             for selection in selections.iter() {
                                 rebased.add_local_selection(
-                                    &selection.rebase_on(&sub_selection_type_pos, &self.schema)?,
+                                    &selection.rebase_on_for_incremental_planner(
+                                        &sub_selection_type_pos,
+                                        &self.schema,
+                                    )?,
                                 )?;
                             }
                             Ok::<_, FederationError>(rebased)
@@ -3051,6 +3054,47 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     }
 }
 
+impl Operation {
+    /// Build an executable document without validation. The caller is
+    /// responsible for ensuring correctness (e.g. structurally-constructed
+    /// operations from the query planner). Debug builds still validate to
+    /// catch construction bugs early.
+    pub(crate) fn into_document_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        let operation = executable::Operation::try_from(&self)?;
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        coerce_executable_values(self.schema.schema(), &mut document);
+        assume_generated_document_valid(
+            document,
+            self.schema.schema(),
+            VALIDATE_GENERATED_DOCUMENTS,
+            "into_document_unchecked",
+        )
+    }
+}
+
+/// Debug builds validate generated subgraph documents; release builds trust
+/// structural construction and skip the O(n) pass.
+pub(crate) const VALIDATE_GENERATED_DOCUMENTS: bool = cfg!(debug_assertions);
+
+/// Wraps a planner-generated document as valid, checking it first only when
+/// `validate` is set. A failed check is a planning error, not a panic.
+pub(crate) fn assume_generated_document_valid(
+    document: executable::ExecutableDocument,
+    schema: &Valid<apollo_compiler::Schema>,
+    validate: bool,
+    producer: &str,
+) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+    if validate && let Err(err) = document.clone().validate(schema) {
+        return Err(FederationError::internal(format!(
+            "{producer} produced invalid document: {err}"
+        )));
+    }
+    Ok(Valid::assume_valid(document))
+}
+
 // Display implementations for the operation types.
 
 impl Display for Operation {
@@ -3275,6 +3319,7 @@ pub(crate) fn normalize_operation(
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
     check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    strip_sibling_typenames: bool,
 ) -> Result<Operation, FederationError> {
     let fragment_cache = FragmentSpreadCache::init(fragments, schema, check_cancellation);
     let mut normalized_selection_set = SelectionSet::from_selection_set(
@@ -3290,7 +3335,15 @@ pub(crate) fn normalize_operation(
     normalized_selection_set = normalized_selection_set
         .flatten_unnecessary_fragments(&normalized_selection_set.type_position, schema)?;
     remove_introspection(&mut normalized_selection_set);
-    normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    // The strip is an exhaustive-planner optimization whose fetch
+    // construction restores the attachments; the incremental planner routes
+    // __typename like any other field and would immediately rebuild the
+    // stripped branches, retaining a rewritten copy of the operation for the
+    // whole planning session.
+    if strip_sibling_typenames {
+        normalized_selection_set
+            .optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    }
 
     let normalized_operation = Operation {
         schema: schema.clone(),

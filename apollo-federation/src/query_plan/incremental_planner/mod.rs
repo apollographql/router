@@ -108,22 +108,20 @@ pub(crate) fn build_bulb_plan(
     let query_graph = &parameters.federated_query_graph;
     let supergraph_schema = &parameters.supergraph_schema;
 
-    // Normalization strips __typename selections and tags a sibling instead
-    // (`optimize_sibling_typenames`). BULB never branches on __typename, so
-    // restore the stripped selections up front and route them like any other
-    // field.
-    let selection_set = selection_set.add_back_typename_in_attachments()?;
-    let selection_set = &selection_set;
-
+    // Normalization skips the sibling-typename strip for the incremental
+    // planner (see `normalize_operation`), so __typename selections arrive
+    // inline and route like any other field.
     let search_space = FieldRoutingSearchSpace {
-        query_graph: query_graph.clone(),
+        cached_query_graph: field_routing::cached_query_graph::CachedQueryGraph::new(
+            query_graph.clone(),
+            parameters.override_conditions.clone(),
+        ),
         supergraph_schema: supergraph_schema.clone(),
-        override_conditions: parameters.override_conditions.clone(),
         inconsistent_abstract_types: parameters
             .abstract_types_with_inconsistent_runtime_types
             .clone(),
+        caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
-        key_hops_in_flight: Default::default(),
     };
 
     let root_qg_node = parameters.head;
@@ -225,19 +223,8 @@ fn run_bulb_and_finalize(
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
     }
 
-    let result = match result {
-        Some(r) => r,
-        None => {
-            if !parameters.disabled_subgraphs.is_empty() {
-                return Err(
-                    crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into(),
-                );
-            }
-            return Err(FederationError::internal(
-                "BULB planner could not find any complete plan",
-            ));
-        }
-    };
+    let (mut result, stats) =
+        unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?;
 
     debug!(
         pending_remaining = result.pending.len(),
@@ -269,6 +256,8 @@ fn run_bulb_and_finalize(
         )));
     }
 
+    result.graph.merge_sibling_entities();
+
     // Build DeferInfo from the selection set actually being planned (already
     // typename-restored): for mutations that is a single top-level field
     // split from the operation, so each sequential step only sees its own
@@ -287,6 +276,12 @@ fn run_bulb_and_finalize(
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
         fetch_id_counter: naming.fetch_id_counter,
+        // Generated subgraph operations are valid by construction, so
+        // production always skips the O(n) re-validation. Debug builds
+        // still assert validity in into_document_unchecked /
+        // generate_fragments_unchecked; unit tests flip this flag to
+        // exercise the validating path.
+        skip_validation: true,
     };
     let (plan, cost) = result
         .graph
@@ -295,6 +290,27 @@ fn run_bulb_and_finalize(
     naming.fetch_id_counter = build_ctx.fetch_id_counter;
 
     Ok(BulbPlan { plan, cost })
+}
+
+/// Unwrap an `Option<PlanState>`, returning an appropriate error when
+/// no plan was found.
+fn unwrap_plan(
+    result: Option<PlanState>,
+    stats: bulb_search::BulbStats,
+    has_disabled_subgraphs: bool,
+) -> Result<(PlanState, bulb_search::BulbStats), FederationError> {
+    match result {
+        Some(r) => Ok((r, stats)),
+        None => {
+            if has_disabled_subgraphs {
+                Err(crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+            } else {
+                Err(FederationError::internal(
+                    "BULB planner could not find any complete plan",
+                ))
+            }
+        }
+    }
 }
 
 /// One pending entry per top-level selection, anchored at the operation
@@ -318,9 +334,11 @@ fn root_pending_selections(
             defer_ref: None,
             provides_anchor: None,
             narrowing: Default::default(),
+            routing_options_memo: Default::default(),
             parent_types: Default::default(),
             context_anchor: Default::default(),
             best_effort: false,
+            restrict_to: None,
         })
         .collect()
 }

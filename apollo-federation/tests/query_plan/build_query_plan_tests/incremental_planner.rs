@@ -7,6 +7,7 @@ use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn incremental_config() -> QueryPlannerConfig {
@@ -737,6 +738,153 @@ fn inc_mutation_interleaved_subgraph_fields_stay_in_document_order() {
               {
                 m2
               }
+            },
+          },
+        }
+        "###
+    );
+}
+
+/// A shareable mutation root must be invoked once, so the fields the chosen
+/// subgraph lacks are reached through an entity hop rather than a second
+/// root fetch.
+#[test]
+fn inc_mutation_on_shareable_field_invokes_mutation_once() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            dummy: Int
+          }
+
+          type Mutation {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id", resolvable: false) {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            f {
+              x
+              y
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                f {
+                  __typename
+                  id
+                  y
+                }
+              }
+            },
+            Flatten(path: "f") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on F {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on F {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn inc_mutation_key_on_shareable_root_is_ignored() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            dummy: Int
+          }
+
+          type Mutation @key(fields: "__typename") {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation @key(fields: "__typename") {
+            f: F @shareable
+          }
+
+          type F @key(fields: "id", resolvable: false) {
+            id: ID!
+            y: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            f {
+              x
+              y
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                f {
+                  __typename
+                  id
+                  y
+                }
+              }
+            },
+            Flatten(path: "f") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on F {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on F {
+                    x
+                  }
+                }
+              },
             },
           },
         }
@@ -2733,36 +2881,26 @@ fn inc_partial_overlap_explodes_abstract_type() {
             }
           }
         },
-        Parallel {
-          Flatten(path: "u|[C]") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on C {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on C {
-                  v
-                }
+        Flatten(path: "u") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on B {
+                __typename
+                id
               }
-            },
-          },
-          Flatten(path: "u|[B]") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on B {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on B {
-                  v
-                }
+              ... on C {
+                __typename
+                id
               }
-            },
+            } =>
+            {
+              ... on B {
+                v
+              }
+              ... on C {
+                v
+              }
+            }
           },
         },
       },
@@ -5211,4 +5349,258 @@ fn inc_defer_multiple_labels_keep_scopes_separate() {
     }
     "###
     );
+}
+
+/// With type-conditioned fetching the incremental planner falls back to
+/// legacy, which must then plan exactly as if the incremental planner were
+/// off. Legacy relies on the sibling-typename strip for deferred typenames.
+#[test]
+fn inc_type_conditioned_fetching_fallback_matches_legacy_plan() {
+    let supergraph = crate::query_plan::build_query_plan_support::compose(
+        insta::_function_name!(),
+        &[
+            (
+                "Subgraph1",
+                r#"
+                type Query {
+                  t: T
+                }
+
+                type T @key(fields: "id") {
+                  id: ID!
+                  x: Int
+                }
+                "#,
+            ),
+            (
+                "Subgraph2",
+                r#"
+                type T @key(fields: "id") {
+                  id: ID!
+                  y: Int
+                }
+                "#,
+            ),
+        ],
+    );
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    let legacy_config = QueryPlannerConfig {
+        type_conditioned_fetching: true,
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..Default::default()
+    };
+    let fallback_config = QueryPlannerConfig {
+        incremental_planner: incremental_config().incremental_planner,
+        ..legacy_config.clone()
+    };
+    let legacy = QueryPlanner::new(&supergraph, legacy_config).expect("legacy planner builds");
+    let fallback =
+        QueryPlanner::new(&supergraph, fallback_config).expect("fallback planner builds");
+    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
+        legacy.api_schema().schema(),
+        "{ t { x ... @defer { y __typename } } }",
+        "op.graphql",
+    )
+    .expect("valid operation");
+    let plan = |planner: &QueryPlanner| {
+        planner
+            .build_query_plan(&doc, None, Default::default())
+            .expect("plan builds")
+            .to_string()
+    };
+    assert_eq!(plan(&fallback), plan(&legacy));
+}
+
+// ---------------------------------------------------------------------------
+// Sibling entity merging respects defer scopes
+// ---------------------------------------------------------------------------
+
+/// A primary and a deferred entity fetch to the same subgraph at the same
+/// path must stay in separate blocks whatever the field order, or primary
+/// data lands in the deferred payload.
+#[test]
+fn inc_defer_sibling_entity_fetches_stay_in_their_scope() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            y: Int
+            z: Int
+          }
+        "#,
+    );
+    assert_plan!(&planner, "{ t { x y ... @defer { z } } }", @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x y } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  x
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { z }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    z
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+    assert_plan!(&planner, "{ t { x ... @defer { z } y } }", @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x y } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  x
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { z }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    z
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+    assert_plan!(&planner, "{ t { ... @defer { z } x y } }", @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x y } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  id
+                  x
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    y
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { z }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    z
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
 }

@@ -18,7 +18,7 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::NodeSource;
-use super::RoutingCacheKey;
+use super::RoutingSiteKey;
 use super::context;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
@@ -78,6 +78,15 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
+        if let RoutingChoice::Fork {
+            primary,
+            kept,
+            remainders,
+        } = choice
+        {
+            return self.commit_fork(state, pending, primary, kept, remainders);
+        }
+
         if matches!(choice, RoutingChoice::TypeExplosion) {
             return if self.try_explode_interface_field(state, pending)?
                 || self.try_explode_abstract_type(state, pending)?
@@ -103,7 +112,7 @@ impl FieldRoutingSearchSpace {
             };
         }
 
-        let qg = &self.query_graph;
+        let qg = &self.qg();
 
         let edge_index = choice
             .edge_index()
@@ -182,7 +191,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         trace!(
             target_subgraph = %choice.target_subgraph(),
             "committing root type resolution hop",
@@ -236,7 +245,7 @@ impl FieldRoutingSearchSpace {
         subgraph: &Arc<str>,
         type_pos: &CompositeTypeDefinitionPosition,
     ) -> Result<Option<SchemaRootDefinitionKind>, FederationError> {
-        let subgraph_schema = self.query_graph.schema_by_source(subgraph)?;
+        let subgraph_schema = self.qg().schema_by_source(subgraph)?;
         Ok([
             SchemaRootDefinitionKind::Query,
             SchemaRootDefinitionKind::Mutation,
@@ -259,7 +268,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         trace!(
             target_subgraph = %choice.target_subgraph(),
             selection = %selection_label(&pending.selection),
@@ -424,7 +433,7 @@ impl FieldRoutingSearchSpace {
         first_group: NodeIndex,
         merge_at: Vec<FetchDataPathElement>,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         let mut prev_group = first_group;
         let mut last = None;
 
@@ -458,6 +467,7 @@ impl FieldRoutingSearchSpace {
             if let Some(key_conds) = exit_key {
                 let hop_schema = qg.schema_by_source(&hop_node_data.source)?.clone();
                 let hop_source = NodeSource {
+                    subgraph: hop_node_data.source.clone(),
                     type_pos: hop_type_pos.clone(),
                     schema: hop_schema,
                 };
@@ -619,9 +629,12 @@ impl FieldRoutingSearchSpace {
         match &pending.selection {
             Selection::Field(_) => self.field_fetch_node(state, pending, choice),
             Selection::InlineFragment(_) => {
-                let edge = self
-                    .query_graph
-                    .edge_weight(choice.edge_index().expect("edge-based choice"))?;
+                let edge_index = choice.edge_index().ok_or_else(|| {
+                    FederationError::internal(
+                        "direct_fetch_node called with a non-edge routing choice",
+                    )
+                })?;
+                let edge = self.qg().edge_weight(edge_index)?;
                 if matches!(
                     edge.transition,
                     QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. }
@@ -681,7 +694,7 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<NodeIndex, FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         let current_node_data = qg.node_weight(pending.query_graph_node)?;
         if matches!(
             current_node_data.type_,
@@ -711,7 +724,7 @@ impl FieldRoutingSearchSpace {
         edge_index: EdgeIndex,
         selection: &Selection,
     ) -> Result<Option<Vec<FetchDataPathElement>>, FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         let edge = qg.edge_weight(edge_index)?;
         match &edge.transition {
             QueryGraphEdgeTransition::FieldCollection {
@@ -756,7 +769,7 @@ impl FieldRoutingSearchSpace {
         fetch_node: NodeIndex,
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         let is_direct = choice.is_direct();
         let op_path = if is_direct {
             // Direct choices extend the current op path with this selection.
@@ -862,7 +875,7 @@ impl FieldRoutingSearchSpace {
         }
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = self
-            .query_graph
+            .qg()
             .node_weight(pending.query_graph_node)?
             .source
             .clone();
@@ -889,7 +902,7 @@ impl FieldRoutingSearchSpace {
         choice: &RoutingChoice,
         key_conditions: Arc<SelectionSet>,
     ) -> Result<(NodeIndex, EdgeIndex), FederationError> {
-        let qg = &self.query_graph;
+        let qg = &self.qg();
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = qg.node_weight(pending.query_graph_node)?.source.clone();
 
@@ -966,7 +979,7 @@ impl FieldRoutingSearchSpace {
         &self,
         pending: &PendingSelection,
     ) -> Result<Option<Arc<SelectionSet>>, FederationError> {
-        let qg = &self.query_graph;
+        let qg = self.qg();
         let subgraph = &qg.node_weight(pending.query_graph_node)?.source;
         // The self-key edge exists specifically for @defer re-entering a
         // subgraph; out_edges filters self-edges so use the unfiltered view.
@@ -995,7 +1008,7 @@ impl FieldRoutingSearchSpace {
         fetch_node: NodeIndex,
         response_path_elements: Vec<FetchDataPathElement>,
     ) -> Result<CommitTarget, FederationError> {
-        let node_data = self.query_graph.node_weight(pending.query_graph_node)?;
+        let node_data = self.qg().node_weight(pending.query_graph_node)?;
         let type_pos = CompositeTypeDefinitionPosition::try_from(node_data.type_.clone())?;
         let mut op_path = if self
             .subgraph_root_kind(&node_data.source, &type_pos)?
@@ -1044,11 +1057,15 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Sorted possible runtime type names of a composite type in the
-    /// supergraph schema.
+    /// supergraph schema, cached per session (see
+    /// `PlannerCaches::possible_type_names`).
     fn possible_type_names(
         &self,
         ty: &CompositeTypeDefinitionPosition,
     ) -> Result<Arc<Vec<Name>>, FederationError> {
+        if let Some(cached) = self.caches.possible_type_names.borrow().get(ty.type_name()) {
+            return Ok(cached.clone());
+        }
         let mut names: Vec<Name> = self
             .supergraph_schema
             .possible_runtime_types(ty.clone())?
@@ -1056,7 +1073,12 @@ impl FieldRoutingSearchSpace {
             .map(|pos| pos.type_name)
             .collect();
         names.sort();
-        Ok(Arc::new(names))
+        let names = Arc::new(names);
+        self.caches
+            .possible_type_names
+            .borrow_mut()
+            .insert(ty.type_name().clone(), names.clone());
+        Ok(names)
     }
 
     /// Possible-types tracking for a committed selection's children: a field
@@ -1156,7 +1178,7 @@ impl FieldRoutingSearchSpace {
         if !pending.narrowing.shareable_path {
             return Ok(None);
         }
-        let target_data = self.query_graph.node_weight(target_node)?;
+        let target_data = self.qg().node_weight(target_node)?;
         let Ok(target_pos) = CompositeTypeDefinitionPosition::try_from(target_data.type_.clone())
         else {
             return Ok(None);
@@ -1176,12 +1198,18 @@ impl FieldRoutingSearchSpace {
         source_node: NodeIndex,
     ) -> Result<bool, FederationError> {
         let field = &field_sel.field;
-        let has_direct = self.edge_for_field(source_node, field).is_some();
+        let has_direct = self
+            .cached_query_graph
+            .edge_for_field(source_node, field)
+            .is_some();
         let field_name = field.field_position.field_name();
-        let hops = self.key_hops_guarded(
+        // No provides anchor: only which subgraphs hops reach matters here,
+        // which the anchor never changes.
+        let hops = self.cached_key_hops(
             source_node,
-            RoutingCacheKey::Field(field_name.clone()),
-            |target| self.edge_for_field(target, field),
+            None,
+            RoutingSiteKey::Field(field_name.clone()),
+            |target| self.cached_query_graph.edge_for_field(target, field),
         )?;
         if has_direct && !hops.is_empty() {
             return Ok(true);
@@ -1205,7 +1233,7 @@ impl FieldRoutingSearchSpace {
         field_sel: &FieldSelection,
         source_node: NodeIndex,
     ) -> Result<bool, FederationError> {
-        let source_data = self.query_graph.node_weight(source_node)?;
+        let source_data = self.qg().node_weight(source_node)?;
         let Ok(source_pos) = CompositeTypeDefinitionPosition::try_from(source_data.type_.clone())
         else {
             return Ok(false);
@@ -1213,7 +1241,7 @@ impl FieldRoutingSearchSpace {
         let parent_type_name = source_pos.type_name();
         let field_name = field_sel.field.field_position.field_name();
         let mut count = 0u32;
-        for (_source, schema) in self.query_graph.subgraph_schemas() {
+        for (_source, schema) in self.qg().subgraph_schemas() {
             let Ok(parent_type) = schema.get_type(parent_type_name) else {
                 continue;
             };
@@ -1250,7 +1278,7 @@ impl FieldRoutingSearchSpace {
         target_qg_node: NodeIndex,
     ) -> Result<(bool, IntersectionFilter), FederationError> {
         let shareable = if let Selection::Field(field_sel) = &pending.selection {
-            let source_data = self.query_graph.node_weight(pending.query_graph_node)?;
+            let source_data = self.qg().node_weight(pending.query_graph_node)?;
             if matches!(source_data.type_, QueryGraphNodeType::FederatedRootType(_)) {
                 // Root-level shareability is resolved when BULB commits to a
                 // subgraph; only key-hop-based shareability creates
@@ -1362,7 +1390,7 @@ impl FieldRoutingSearchSpace {
         op_path: &SharedPath<Arc<OpPathElement>>,
     ) -> Result<(), FederationError> {
         if let Selection::Field(_) = &pending.selection {
-            let target_data = self.query_graph.node_weight(target_qg_node)?;
+            let target_data = self.qg().node_weight(target_qg_node)?;
             if let Ok(target_pos) =
                 CompositeTypeDefinitionPosition::try_from(target_data.type_.clone())
                 && target_pos.is_abstract_type()
@@ -1403,6 +1431,20 @@ impl FieldRoutingSearchSpace {
             return Ok(());
         };
 
+        // Bulk-insert: when the entire subtree is local to one subgraph
+        // and every sub-selection has a graph edge, record the whole thing
+        // in one shot instead of routing each child individually.
+        if self.is_fully_local(target_qg_node)?
+            && self.all_sub_selections_available(target_qg_node, sub_ss)?
+        {
+            state.graph.append_selection(
+                fetch_node,
+                &target.op_path,
+                Some(&Arc::new(sub_ss.clone())),
+            );
+            return Ok(());
+        }
+
         let child_provides_anchor =
             self.child_provides_anchor(pending, target_qg_node, target.entity_root)?;
 
@@ -1431,14 +1473,14 @@ impl FieldRoutingSearchSpace {
 
         // Extend parent_types with the current target type for @fromContext
         // ancestor resolution.
-        let target_node_data = self.query_graph.node_weight(target_qg_node)?;
+        let target_node_data = self.qg().node_weight(target_qg_node)?;
         let child_parent_types = {
             let mut types = pending.parent_types.clone();
             // From a FederatedRootType node the root type (e.g. Query) is not
             // in parent_types yet (resolved per-field at commit time); inject
             // it so @context on the root type is visible to @fromContext
             // ancestor lookups.
-            let source_data = self.query_graph.node_weight(pending.query_graph_node)?;
+            let source_data = self.qg().node_weight(pending.query_graph_node)?;
             if matches!(source_data.type_, QueryGraphNodeType::FederatedRootType(_))
                 && let Some(root_type) = state.graph.node(fetch_node).root_type().cloned()
             {
@@ -1464,10 +1506,10 @@ impl FieldRoutingSearchSpace {
             pending.context_anchor.clone()
         };
 
-        for sub_sel in sub_ss.selections.values().rev().cloned() {
+        for sub_sel in sub_ss.selections.values().rev() {
             state.push_pending(
                 pending
-                    .fork(sub_sel)
+                    .fork(sub_sel.clone())
                     .at(target_qg_node, fetch_node)
                     .with_op_path(target.op_path.clone())
                     .with_response_path(target.response_path.clone())
@@ -1500,15 +1542,11 @@ impl FieldRoutingSearchSpace {
             return Ok(None);
         }
         let source_is_copy = self
-            .query_graph
+            .qg()
             .node_weight(pending.query_graph_node)?
             .provide_id
             .is_some();
-        let target_is_copy = self
-            .query_graph
-            .node_weight(target_qg_node)?
-            .provide_id
-            .is_some();
+        let target_is_copy = self.qg().node_weight(target_qg_node)?.provide_id.is_some();
         Ok(match (source_is_copy, target_is_copy) {
             // Leaving the copy layer: remember where the provided edges live.
             (true, false) => Some(pending.query_graph_node),
