@@ -12,6 +12,8 @@ use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use super::runtime_types_intersect;
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
@@ -202,10 +204,11 @@ impl Field {
         if let Some(federation_spec_definition) = schema
             .subgraph_metadata()
             .map(|d| d.federation_spec_definition())
+            && let Some(from_context) = federation_spec_definition
+                .try_directive_definition(schema, &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC)
         {
-            let from_context_directive_definition_name = &federation_spec_definition
-                .from_context_directive_definition(schema)?
-                .name;
+            // Older federation schemas have no @fromContext arguments to validate.
+            let from_context_directive_definition_name = &from_context.name;
             // We need to ensure that all arguments with `@fromContext` are provided. If the
             // would-be parent type's field has an argument with `@fromContext` and that argument
             // has no value/data in this field, then we return `None` to indicate the rebase isn't
@@ -496,5 +499,87 @@ impl SelectionSet {
         self.selections
             .values()
             .fallible_all(|selection| selection.can_add_to(parent_type, schema))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::name;
+    use rstest::rstest;
+
+    use crate::schema::ValidFederationSchema;
+    use crate::schema::field_set::parse_field_set;
+    use crate::subgraph::typestate::Subgraph;
+
+    #[rstest]
+    #[case::federation_1("")]
+    #[case::federation_2_0(
+        "extend schema @link(url: \"https://specs.apollo.dev/federation/v2.0\")"
+    )]
+    #[case::federation_2_7(
+        "extend schema @link(url: \"https://specs.apollo.dev/federation/v2.7\")"
+    )]
+    fn rebase_without_context_directive(#[case] link: &str) {
+        let expanded = Subgraph::parse(
+            "test",
+            "http://test",
+            &format!(
+                r#"
+            {link}
+            type Query {{ node: Node }}
+            interface Node {{ value: Int }}
+            type Item implements Node {{ value: Int }}
+        "#
+            ),
+        )
+        .unwrap()
+        .expand_links()
+        .unwrap();
+        let schema = ValidFederationSchema::new_assume_valid(expanded.schema().clone()).unwrap();
+        let selection = parse_field_set(&schema, name!("Node"), "value", true).unwrap();
+        let target = schema.get_type(&name!("Item")).unwrap().try_into().unwrap();
+
+        assert!(selection.can_rebase_on(&target, &schema).unwrap());
+        assert_eq!(
+            selection.rebase_on(&target, &schema).unwrap().to_string(),
+            "{ value }"
+        );
+    }
+
+    #[rstest]
+    #[case::missing_argument("value", false)]
+    #[case::provided_argument("value(arg: 1)", true)]
+    fn rebase_checks_context_arguments(#[case] fields: &str, #[case] expected: bool) {
+        let expanded = Subgraph::parse(
+            "test",
+            "http://test",
+            r#"
+            extend schema @link(url: "https://specs.apollo.dev/federation/v2.8",
+                import: ["@context", "@key", { name: "@fromContext", as: "@contextArg" }])
+            type Query { node: Node }
+            interface Node { value(arg: Int): Int }
+            type Item @key(fields: "id") @context(name: "item") {
+                id: ID!
+                source: Int
+                value(arg: Int @contextArg(field: "$item { source }")): Int
+            }
+        "#,
+        )
+        .unwrap()
+        .expand_links()
+        .unwrap();
+        let schema = ValidFederationSchema::new_assume_valid(expanded.schema().clone()).unwrap();
+        let source = ValidFederationSchema::new(
+            apollo_compiler::Schema::parse_and_validate(
+                "type Query { item: Item } type Item { value(arg: Int): Int }",
+                "source.graphql",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let selection = parse_field_set(&source, name!("Item"), fields, true).unwrap();
+        let target = schema.get_type(&name!("Item")).unwrap().try_into().unwrap();
+
+        assert_eq!(selection.can_rebase_on(&target, &schema).unwrap(), expected);
     }
 }
