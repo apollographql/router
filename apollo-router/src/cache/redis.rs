@@ -27,6 +27,7 @@ use fred::types::cluster::ClusterRouting;
 use fred::types::config::ClusterDiscoveryPolicy;
 use fred::types::config::Config as RedisConfig;
 use fred::types::config::ReconnectPolicy;
+use fred::types::config::ReplicaConfig;
 use fred::types::config::TlsConfig;
 use fred::types::config::TlsHostMapping;
 use fred::types::config::UnresponsiveConfig;
@@ -413,27 +414,7 @@ impl RedisCacheStorage {
                 config.internal_command_timeout = DEFAULT_INTERNAL_REDIS_TIMEOUT;
                 config.max_command_buffer_len = 10_000;
                 config.reconnect_on_auth_error = true;
-                // NOTE: this defaults to true in fred but we're intentionally paying attention to
-                // errors becomes sometimes fred gets into a funky state with its redis
-                // connections. Sometimes, eg, a brief network outage in whatever cloud provider folks are
-                // using can destabilize what fred views as routeable nodes--ignoring errors can
-                // get us into a state where fred can't connect to those nodes and we don't know
-                // that we're unable to connect to them; it's much better to let fred abort and
-                // then recreate the client with a fresh view of the infrastructure
-                config.replica.ignore_reconnection_errors = false;
-                config.replica.primary_fallback = true;
-                // NOTE: lazy_connections must be false! There's a bug in fred's round-robin logic
-                // for selecting replicas when in a cluster that has an even number of replicas.
-                // The details are roughly that when fred looks for a routeable replica, it
-                // increments its round-robin counter, and if it can't find one, it moves on to
-                // creating one but also increments the counter _again_ before requeuing the redis
-                // command to run. When there are, eg, 2 replicas, those requeues will make it so
-                // that fred always tries to route a command to a replica that has no connection.
-                // Redis CPU explodes, GETs fail and fallthrough to backends, and so on. Not great.
-                // Don't set this to true! We originally set it to true to have additional blast
-                // radius for sync failures but we now have a ReplicaFilter doing that work for us
-                // (by removing unrouteable replicas from what we try to route to)
-                config.replica.lazy_connections = false;
+                configure_cluster_replicas(&mut config.replica);
                 config.tcp = TcpConfig {
                     #[cfg(target_os = "linux")]
                     user_timeout: Some(self.redis_client_config.timeout),
@@ -443,8 +424,6 @@ impl RedisCacheStorage {
                     max_timeout: Some(DEFAULT_INTERNAL_REDIS_TIMEOUT),
                     interval: Duration::from_secs(2),
                 };
-
-                config.replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
             })
             .with_performance_config(|config| {
                 config.default_command_timeout = self.redis_client_config.timeout;
@@ -995,6 +974,32 @@ impl RedisCacheStorage {
             Ok(Box::pin(self.client().await?.scan(pattern, count, None)))
         }
     }
+}
+
+/// Replica settings for cluster mode, where reads are routed to replicas.
+fn configure_cluster_replicas(replica: &mut ReplicaConfig) {
+    // NOTE: this defaults to true in fred but we're intentionally paying attention to
+    // errors becomes sometimes fred gets into a funky state with its redis
+    // connections. Sometimes, eg, a brief network outage in whatever cloud provider folks are
+    // using can destabilize what fred views as routeable nodes--ignoring errors can
+    // get us into a state where fred can't connect to those nodes and we don't know
+    // that we're unable to connect to them; it's much better to let fred abort and
+    // then recreate the client with a fresh view of the infrastructure
+    replica.ignore_reconnection_errors = false;
+    replica.primary_fallback = true;
+    // NOTE: lazy_connections must be false! There's a bug in fred's round-robin logic
+    // for selecting replicas when in a cluster that has an even number of replicas.
+    // The details are roughly that when fred looks for a routeable replica, it
+    // increments its round-robin counter, and if it can't find one, it moves on to
+    // creating one but also increments the counter _again_ before requeuing the redis
+    // command to run. When there are, eg, 2 replicas, those requeues will make it so
+    // that fred always tries to route a command to a replica that has no connection.
+    // Redis CPU explodes, GETs fail and fallthrough to backends, and so on. Not great.
+    // Don't set this to true! We originally set it to true to have additional blast
+    // radius for sync failures but we now have a ReplicaFilter doing that work for us
+    // (by removing unrouteable replicas from what we try to route to)
+    replica.lazy_connections = false;
+    replica.filter = Some(Arc::new(RouteableReplicaFilter::default()));
 }
 
 /// Sets up the error, reconnection, and unresponsive event listeners
