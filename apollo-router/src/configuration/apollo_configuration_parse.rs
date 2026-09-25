@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_configuration::ConfigError;
+use apollo_configuration::ConfigParser;
 use apollo_configuration::ErrorCollector;
-use apollo_configuration::ParseYamlOptions;
 use apollo_configuration::expansion::LookupError;
 use apollo_configuration::expansion::VariableProvider;
 use apollo_configuration::provenance::Injection;
@@ -67,13 +67,17 @@ pub(crate) struct ExternalValues {
 }
 
 impl ExternalValues {
-    /// Appends an expansion provider, as [`ParseYamlOptions::add_variables`] does.
+    /// Appends an expansion provider, as [`ConfigParserBuilder::add_variables`] does.
+    ///
+    /// [`ConfigParserBuilder::add_variables`]: apollo_configuration::ConfigParserBuilder::add_variables
     pub(crate) fn add_variables(mut self, provider: impl VariableProvider + 'static) -> Self {
         self.variables.push(Box::new(provider));
         self
     }
 
-    /// Appends injected values, as [`ParseYamlOptions::inject`] does.
+    /// Appends injected values, as [`ConfigParserBuilder::inject`] does.
+    ///
+    /// [`ConfigParserBuilder::inject`]: apollo_configuration::ConfigParserBuilder::inject
     pub(crate) fn inject(mut self, injections: impl IntoIterator<Item = Injection>) -> Self {
         self.injections.extend(injections);
         self
@@ -85,28 +89,63 @@ impl ExternalValues {
         self
     }
 
-    /// Adds the providers and injections to `options`.
-    fn add_to(self, options: ParseYamlOptions) -> ParseYamlOptions {
-        let options = options.inject(self.injections);
-        if self.variables.is_empty() {
-            // Without providers, apollo-configuration leaves expansion syntax unchanged.
-            return options;
-        }
-        options.add_variables(ProviderSnapshot {
-            providers: self.variables,
-            resolved: Default::default(),
+    /// Builds the parsers for the typed configuration and the retained document. Both share one
+    /// snapshot of the providers, so they see the same expanded values.
+    pub(crate) fn into_parsers(mut self) -> Result<Parsers, ConfigError> {
+        let snapshot = self.snapshot();
+        Ok(Parsers {
+            config: parser_builder(&self.injections, &snapshot).build()?,
+            document: parser_builder(&self.injections, &snapshot).build()?,
+            dev_mode: self.dev_mode,
+        })
+    }
+
+    /// Moves the providers into a snapshot, or `None` when there are none.
+    fn snapshot(&mut self) -> Option<Arc<ProviderSnapshot>> {
+        (!self.variables.is_empty()).then(|| {
+            Arc::new(ProviderSnapshot {
+                providers: std::mem::take(&mut self.variables),
+                resolved: Default::default(),
+            })
         })
     }
 
     /// Expands `text` with these values but without Router's schema, for testing expansion on
     /// documents that are not router configuration.
     #[cfg(test)]
-    pub(crate) fn expand_without_schema(self, text: &str) -> Result<Value, ConfigError> {
-        let ExpandedDocument(document) = self
-            .add_to(ParseYamlOptions::default())
-            .parse::<ExpandedDocument>(text)?;
+    pub(crate) fn expand_without_schema(mut self, text: &str) -> Result<Value, ConfigError> {
+        let snapshot = self.snapshot();
+        let mut builder = ConfigParser::<ExpandedDocument>::builder().inject(self.injections);
+        if let Some(snapshot) = snapshot {
+            builder = builder.add_variables(SharedSnapshot(snapshot));
+        }
+        let ExpandedDocument(document) = builder.build()?.parse_yaml(text)?;
         Ok(document)
     }
+}
+
+/// A parser builder with Router's schema, `injections` and, when there are providers, their
+/// `snapshot`. Without providers, apollo-configuration leaves expansion syntax unchanged.
+fn parser_builder<T: apollo_configuration::Configuration>(
+    injections: &[Injection],
+    snapshot: &Option<Arc<ProviderSnapshot>>,
+) -> apollo_configuration::ConfigParserBuilder<T> {
+    let builder = ConfigParser::builder()
+        .schema(router_config_schema().clone())
+        .inject(injections.to_vec());
+    match snapshot {
+        Some(snapshot) => builder.add_variables(SharedSnapshot(Arc::clone(snapshot))),
+        None => builder,
+    }
+}
+
+/// The parsers for one configuration load, built from its external values. Building compiles
+/// Router's schema, so each load builds them once. They keep the values their providers first
+/// returned, so reuse them only for documents whose external values do not change.
+pub(crate) struct Parsers {
+    config: ConfigParser<Configuration>,
+    document: ConfigParser<ExpandedDocument>,
+    dev_mode: bool,
 }
 
 /// Consults each provider in order, as apollo-configuration does with separately added providers,
@@ -117,7 +156,16 @@ struct ProviderSnapshot {
     resolved: Mutex<HashMap<String, Result<String, LookupError>>>,
 }
 
-impl VariableProvider for ProviderSnapshot {
+/// Lets both parsers read one [`ProviderSnapshot`].
+struct SharedSnapshot(Arc<ProviderSnapshot>);
+
+impl VariableProvider for SharedSnapshot {
+    fn get(&self, reference: &str) -> Result<String, LookupError> {
+        self.0.get(reference)
+    }
+}
+
+impl ProviderSnapshot {
     fn get(&self, reference: &str) -> Result<String, LookupError> {
         self.resolved
             .lock()
@@ -161,6 +209,16 @@ pub(crate) fn parse_configuration(
     external: impl Into<ExternalValues>,
     migration: Migration,
 ) -> Result<Configuration, ConfigurationError> {
+    parse_configuration_with(text, &external.into().into_parsers()?, migration)
+}
+
+/// [`parse_configuration`] with parsers already built, for parsing many documents with the same
+/// external values.
+pub(crate) fn parse_configuration_with(
+    text: &str,
+    parsers: &Parsers,
+    migration: Migration,
+) -> Result<Configuration, ConfigurationError> {
     // Migration serialization must not hide duplicate keys in the original document.
     super::yaml::check_duplicate_keys(text)?;
     let file: Value = if text.trim().is_empty() {
@@ -179,13 +237,8 @@ pub(crate) fn parse_configuration(
         #[cfg(test)]
         Migration::None => file.clone(),
     };
-    let external = external.into();
-    let dev_mode = external.dev_mode;
-    let options =
-        external.add_to(ParseYamlOptions::default().schema(router_config_schema().clone()));
-
     let mut config = if migrated == file {
-        parse_document(text, &options).map_err(report_error)
+        parse_document(text, parsers).map_err(report_error)
     } else {
         let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
             ConfigurationError::MigrationFailure {
@@ -195,17 +248,17 @@ pub(crate) fn parse_configuration(
         // Diagnostics for the serialized copy would point at lines the operator never wrote, so
         // any error in it falls back to the supplied text. The fallback still validates that text
         // in full, so it never accepts an invalid document.
-        match parse_document(&serialized, &options) {
+        match parse_document(&serialized, parsers) {
             Ok(config) => Ok(config),
             Err(_) => {
                 tracing::warn!(
                     "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
                 );
-                parse_document(text, &options).map_err(report_error)
+                parse_document(text, parsers).map_err(report_error)
             }
         }
     }?;
-    if dev_mode {
+    if parsers.dev_mode {
         config.apply_dev_mode();
     }
     // `--dev` sets these settings, so they are checked only once it has been applied.
@@ -226,9 +279,9 @@ fn report_error(error: ConfigError) -> ConfigurationError {
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
 /// document shows `plugins: null` as `{}`, which means the same.
-fn parse_document(text: &str, options: &ParseYamlOptions) -> Result<Configuration, ConfigError> {
-    let mut config: Configuration = options.parse(text)?;
-    let ExpandedDocument(mut document) = options.parse(text)?;
+fn parse_document(text: &str, parsers: &Parsers) -> Result<Configuration, ConfigError> {
+    let mut config = parsers.config.parse_yaml(text)?;
+    let ExpandedDocument(mut document) = parsers.document.parse_yaml(text)?;
     if let Some(plugins) = document
         .get_mut("plugins")
         .filter(|plugins| plugins.is_null())

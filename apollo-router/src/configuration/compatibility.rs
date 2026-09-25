@@ -460,8 +460,8 @@ fn sandbox_conflicts_are_rejected_after_migration() {
 
 /// Exercises the shared crate's custom-validation hook with a synthetic configuration type.
 mod custom_plugin_validation {
+    use apollo_configuration::ConfigParser;
     use apollo_configuration::ErrorCollector;
-    use apollo_configuration::ParseYamlOptions;
     use apollo_configuration::configuration;
     use miette::Diagnostic as _;
 
@@ -495,18 +495,22 @@ mod custom_plugin_validation {
     }
 
     /// Passes JSON Schema (both fields are integers) but fails the custom validator, and the
-    /// shared parse call (`ParseYamlOptions::parse`) is what surfaces the rejection.
+    /// shared parse call (`ConfigParser::parse_yaml`) is what surfaces the rejection.
     #[test]
     fn schema_valid_input_is_rejected_by_the_custom_validator() {
         let yaml = "replica_count: 0\nshard_count: 1\n";
-        let error = ParseYamlOptions::default()
-            .parse::<WidgetConfig>(yaml)
+        let error = ConfigParser::<WidgetConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml(yaml)
             .expect_err("zero replicas passes the schema but fails custom validation");
         let messages: Vec<_> = error.related().unwrap().map(ToString::to_string).collect();
         assert_eq!(messages, ["replica_count must be at least 1"]);
 
-        ParseYamlOptions::default()
-            .parse::<WidgetConfig>("replica_count: 1\nshard_count: 1\n")
+        ConfigParser::<WidgetConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml("replica_count: 1\nshard_count: 1\n")
             .expect("positive counts pass custom validation");
     }
 
@@ -515,8 +519,10 @@ mod custom_plugin_validation {
     #[test]
     fn multiple_custom_validation_errors_keep_distinct_nested_locations() {
         let yaml = "widget:\n  replica_count: 0\n  shard_count: 0\n";
-        let error = ParseYamlOptions::default()
-            .parse::<PluginConfig>(yaml)
+        let error = ConfigParser::<PluginConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml(yaml)
             .expect_err("both fields are invalid");
 
         let related: Vec<_> = error

@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.6.3"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49088c936ee0616b3a5ebb63ca6a6bc10c4ef3f870ec5110e8243eeb199d5af1"
+checksum = "885659ffa793dcfae8b568c0ca243db9dc31b3eba7c79e87a3e8dd4b6884b67d"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration-macros"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e0d0e71a1635bf089d3d064d0ff89ae559b4fd422d51465287e57960049c26"
+checksum = "9ed325d2ea016db94bc53f2f1e88984c1acb2e410fbf5efd1d4a3109c5864eb6"
 dependencies = [
  "proc-macro2",
  "quote",
