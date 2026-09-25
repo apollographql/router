@@ -2,7 +2,7 @@
 
 Connector mappings can now report a problem without failing the field. Both methods return their input unchanged and record a problem, so a mapping that recognizes a value it cannot vouch for can say so and still return the data. They differ in the severity they record and in who reads the result.
 
-`->withWarning` records a diagnostic for the mapping author. It reaches the connectors debugger and the mapping-problems telemetry selectors, and never a client:
+`->withWarning` declares a diagnostic addressed to the mapping author. It reaches the connectors debugger and the mapping-problems telemetry selectors, and never a client:
 
 ```graphql
 @connect(
@@ -18,7 +18,7 @@ Connector mappings can now report a problem without failing the field. Both meth
 )
 ```
 
-`->withError` declares an error addressed to the client. Writing it is the statement that this text is fit to leave the router:
+`->withError`, on the other hand, declares an error addressed directly to the client:
 
 ```graphql
 availability: stock_code ?? $("UNKNOWN")->withError({
@@ -26,12 +26,7 @@ availability: stock_code ?? $("UNKNOWN")->withError({
   extensions: { code: "INTERNAL_SERVER_ERROR", number: 210099 }
 })
 ```
-
-The names describe severity, not container. Both methods record a `Problem`, which is why the connectors debugger and the `connector_response_mapping_problems` selector carry both: "problem" is the category, and the method names the severity within it. Only `->withError` escalates past the category, into the client's response and the router's error counters. Further levels can be added under the same category without renaming anything.
-
-Each method takes exactly one argument, and what that argument means is fixed by the method's name rather than by its shape.
-
-For `->withWarning`, a string is the message as written and any other value is JSON-encoded into it. For `->withError`, a string is the error's `message` and an object is `{ message, extensions }` taken as written; anything else is a mistake reported at composition or at request time rather than coerced, so a client never receives an error whose message reads `42`.
+Both `->withError` and `->withWarning` can be constructed by passing the message as the argument:
 
 Composition is also stricter for every mapping method, not only these two. A selection whose field shape is an error, which is what a method called with the wrong arguments produces, is now rejected at composition with the method's own diagnostic. Previously that diagnosis was computed and discarded, the selection type-checked, and the field silently produced nothing at request time. A subgraph carrying such a mapping composes today and will not after this change; the fix is the one the diagnostic names.
 
@@ -77,12 +72,19 @@ Errors declared with `->withError` are reported in the response's `extensions`, 
 
 They are reported there rather than in `errors` because the field they describe resolved: [the GraphQL specification](https://spec.graphql.org/draft/#sec-Errors.Execution-Errors) requires that a response position at which an execution error was raised not appear in `data`, and returning the data is the point.
 
-The method's name follows the response: what an author writes as `->withError` arrives as an entry in `extensions.connectorErrors`. It is a distinct thing from a connector's HTTP request failing, which surfaces as an ordinary GraphQL error in `errors` with a `CONNECTORS_FETCH` code.
+`extensions.connectorErrors` uses the message the error code declared in `->withError` by the author. It is a distinct thing from a connector's HTTP request failing, which surfaces as an ordinary GraphQL error in `errors` with a `CONNECTORS_FETCH` code.
 
-Reporting is governed by [`include_subgraph_errors`](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion), under the name of the subgraph the connector belongs to, since these messages are written by that subgraph's schema author and can interpolate data from the API's response. **This includes the default**: with no `include_subgraph_errors` configuration, subgraph errors are redacted, and a connector's declared errors are omitted from the response along with them. Set `include_subgraph_errors: { all: true }`, or `true` for the connector's subgraph, to have them reported. A fully redacted subgraph's declared errors are omitted rather than replaced by a `Subgraph errors redacted` placeholder; short of full redaction, `redact_message` and the extension allow/deny lists apply exactly as they do to the `errors` array.
-
+Reporting is governed by [`include_subgraph_errors`](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion), under the name of the subgraph the connector belongs to, since these messages are written by that subgraph's schema author and can interpolate data from the API's response. `include_subgraph_errors` configuration is off by default, meaning subgraph errors are redacted. Connector's declared errors will also be redacted. Set `include_subgraph_errors: { all: true }`, or `true` for the connector's subgraph, to have them reported. Declared errors for a fully redacted subgraph are omitted rather than replaced by a `Subgraph errors redacted` placeholder.
 The connector's `service` and `connector.coordinate` extensions are preserved alongside the author's fields.
 
-Both methods' messages appear in the connectors debugger, and in telemetry through the `connector_response_mapping_problems` selector, as all mapping problems do. A declared error is additionally counted as an error, in both of the places an error in the `errors` array is counted: by `apollo.router.graphql_error` under the author's `code`, and by `apollo.router.operations.error` when `telemetry.apollo.errors.preview_extended_error_metrics` is enabled, with `service` naming the connector's subgraph. `apollo.router.graphql_error` counts these for the same reason it already counts response-validation failures, which clients read in `extensions.valueCompletion` and which are likewise absent from `errors`: the instrument counts errors the response reports, not only the ones the `errors` array carries. Counting is decided at the connector, so withholding an error from a client through `include_subgraph_errors` does not suppress its metrics. A warning is never counted as an error by either instrument.
+Both methods' messages appear in the connectors debugger, and in telemetry through the `connector_response_mapping_problems` selector, as all mapping problems do.
+
+A declared error can be monitored under two different metrics using author's `code`:
+* `apollo.router.graphql_error` under the author's `code`
+* `apollo.router.operations.error` when `telemetry.apollo.errors.preview_extended_error_metrics` is enabled
+
+It should be noted that using a wide variety of error codes will increase metric cardinality, so variability is advised to be kept at a minimum.
+
+A warning is never counted as an error by either instrument.
 
 By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10050 and [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/10160
