@@ -15,5 +15,6 @@ snapshot_kind: text
           opt.apollo.license.path: true
           opt.apollo.supergraph.path: true
           opt.apollo.supergraph.urls: true
+          opt.otel.semconv_stability_opt_in: unset
           opt.security.non_local_selections: true
           opt.security.recursive_selections: true
