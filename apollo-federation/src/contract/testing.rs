@@ -238,13 +238,10 @@ impl<'a> Tester<'a> {
     /// pinned separately by the full-SDL snapshots in [`super::tagging`].
     #[track_caller]
     pub(crate) fn tags(&self, coordinate: &str, expected: &[&str]) {
-        let mut actual: Vec<String> = tag_values(
-            self.directives(coordinate)
-                .get_all(&self.tag)
-                .map(|d| &***d),
-        )
-        .into_iter()
-        .collect();
+        let mut actual: Vec<String> =
+            tag_values(self.directives(coordinate).get_all(&self.tag).map(|d| &**d))
+                .into_iter()
+                .collect();
         let mut expected: Vec<String> = expected.iter().map(|t| t.to_string()).collect();
         let deduped = expected
             .iter()
@@ -300,20 +297,14 @@ impl<'a> Tester<'a> {
             .unwrap_or_else(|| panic!("`{coordinate}` should exist in the schema"))
     }
 
-    /// Resolve a coordinate to its directives, normalising the schema's own
-    /// `DirectiveList` and the AST `DirectiveList` used by arguments and enum values
-    /// into one type.
+    /// Resolve a coordinate to its directives.
     fn lookup(&self, coordinate: &str) -> Option<DirectiveList> {
-        let ast_directives = |directives: &apollo_compiler::ast::DirectiveList| {
-            DirectiveList(directives.iter().cloned().map(Into::into).collect())
-        };
-
         // `@directive(arg:)`
         if let Some(rest) = coordinate.strip_prefix('@') {
             let (directive_name, arg_name) = split_argument(rest)?;
             let definition = self.schema.directive_definitions.get(directive_name)?;
             let argument = definition.argument_by_name(arg_name)?;
-            return Some(ast_directives(&argument.directives));
+            return Some(argument.directives.clone());
         }
 
         let Some((type_name, member)) = coordinate.split_once('.') else {
@@ -330,7 +321,7 @@ impl<'a> Tester<'a> {
                 _ => return None,
             };
             let argument = field.argument_by_name(arg_name)?;
-            return Some(ast_directives(&argument.directives));
+            return Some(argument.directives.clone());
         }
 
         // `Type.field`, covering enum values and input object fields
@@ -347,10 +338,8 @@ impl<'a> Tester<'a> {
                     .cloned()
                     .collect(),
             ),
-            ExtendedType::InputObject(input) => {
-                Some(ast_directives(&input.fields.get(member)?.directives))
-            }
-            ExtendedType::Enum(enm) => Some(ast_directives(&enm.values.get(member)?.directives)),
+            ExtendedType::InputObject(input) => Some(input.fields.get(member)?.directives.clone()),
+            ExtendedType::Enum(enm) => Some(enm.values.get(member)?.directives.clone()),
             _ => None,
         }
     }

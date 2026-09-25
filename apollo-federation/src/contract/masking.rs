@@ -1,3 +1,4 @@
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexSet;
 
 use super::ContractFilters;
@@ -220,7 +221,7 @@ pub(crate) fn step11_empty_union_masking(
             .iter()
             .all(|member| {
                 is_inaccessible(
-                    &ObjectTypeDefinitionPosition::new(member.name.clone()),
+                    &ObjectTypeDefinitionPosition::new(Name::clone(member)),
                     schema,
                     metadata,
                 )
