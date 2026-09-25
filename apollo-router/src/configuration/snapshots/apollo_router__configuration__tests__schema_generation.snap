@@ -5897,6 +5897,34 @@ expression: "&schema"
         }
       ]
     },
+    "GraphqlFederation": {
+      "additionalProperties": false,
+      "description": "GraphQL Federation (formerly composite schemas) support: supergraphs that include source\nschemas, whose entities are resolved through `@lookup` fields. Preview; requires the\nincremental query planner.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Allow supergraphs that include GraphQL Federation source schemas.",
+          "type": "boolean"
+        },
+        "subgraph": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SubgraphLookupBatchingConfiguration"
+            }
+          ],
+          "default": {
+            "all": {
+              "maximum_size": null,
+              "request_batching": false,
+              "variable_batching": false
+            },
+            "subgraphs": {}
+          },
+          "description": "How lookup requests are sent to each subgraph."
+        }
+      },
+      "type": "object"
+    },
     "GrpcExporter": {
       "additionalProperties": false,
       "properties": {
@@ -7148,6 +7176,33 @@ expression: "&schema"
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "LookupBatching": {
+      "additionalProperties": false,
+      "description": "Batching of lookup requests to a subgraph, following the draft \"Batching\" appendix of the\nGraphQL-over-HTTP specification. The subgraph must support it: responses are read as\n`application/jsonl`, one result per line with `variableIndex` and `requestIndex`.",
+      "properties": {
+        "maximum_size": {
+          "default": null,
+          "description": "The maximum number of operations (variable sets) in one batched HTTP request. Larger\nbatches are split into several requests.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "request_batching": {
+          "default": false,
+          "description": "Combine the lookup fetches to this subgraph that run at the same time into one HTTP\nrequest (request batching).",
+          "type": "boolean"
+        },
+        "variable_batching": {
+          "default": false,
+          "description": "Send all the entities of a lookup fetch in one request, with a list of variable sets\n(variable batching). When disabled, each entity is fetched with its own request.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -10418,6 +10473,33 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphLookupBatchingConfiguration": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/LookupBatching"
+            }
+          ],
+          "default": {
+            "maximum_size": null,
+            "request_batching": false,
+            "variable_batching": false
+          },
+          "description": "options applying to all subgraphs"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/LookupBatching"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphPassthroughMode": {
       "additionalProperties": false,
       "properties": {
@@ -13219,6 +13301,25 @@ expression: "&schema"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
+    },
+    "preview_graphql_federation": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/GraphqlFederation"
+        }
+      ],
+      "default": {
+        "enabled": false,
+        "subgraph": {
+          "all": {
+            "maximum_size": null,
+            "request_batching": false,
+            "variable_batching": false
+          },
+          "subgraphs": {}
+        }
+      },
+      "description": "GraphQL Federation (source schemas with `@lookup` fields) configuration. Preview."
     },
     "progressive_override": {
       "$ref": "#/definitions/Config5"

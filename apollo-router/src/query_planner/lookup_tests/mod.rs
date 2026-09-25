@@ -47,6 +47,7 @@ const REVIEWS: &str = r#"
 fn configuration() -> serde_json::Value {
     serde_json::json!({
         "include_subgraph_errors": { "all": true },
+        "preview_graphql_federation": { "enabled": true },
         "supergraph": { "query_planning": { "incremental_planner": { "enabled": true } } },
     })
 }

@@ -1,0 +1,19 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "& metrics.non_zero()"
+---
+- name: apollo.router.config.graphql_federation
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.request_batching: true
+          opt.variable_batching: true
+- name: apollo.router.config.incremental_planner
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.beam_width: false
+          opt.fuel: false
+          opt.timeout: false

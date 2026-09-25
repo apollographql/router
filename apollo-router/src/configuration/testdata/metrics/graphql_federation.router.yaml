@@ -1,0 +1,13 @@
+supergraph:
+  query_planning:
+    incremental_planner:
+      enabled: true
+preview_graphql_federation:
+  enabled: true
+  subgraph:
+    all:
+      variable_batching: true
+    subgraphs:
+      products:
+        request_batching: true
+        maximum_size: 50

@@ -106,7 +106,37 @@ impl FeatureGateEnforcementReport {
         // @link(url: "https://specs.apollo.dev/connect/v0.5") requires `connectors.preview_connect_v0_5: true`
         // This uses join__directives to find specs because the we're looking
         // at links within individual subgraphs.
-        vec![FeatureRestriction::SpecInJoinDirective {
+        vec![
+            // Composition only emits join v0.6 for supergraphs that include GraphQL Federation
+            // source schemas (entities resolved through `@lookup` fields).
+            FeatureRestriction::SpecInJoinDirective {
+                name: "GraphQL Federation source schemas (join v0.6)".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 6.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+                feature_gate_configuration_path: "$.preview_graphql_federation.enabled"
+                    .to_string(),
+                expected_value: Value::Bool(true),
+                to_enable: "  preview_graphql_federation:
+    enabled: true
+  supergraph:
+    query_planning:
+      incremental_planner:
+        enabled: true"
+                    .to_string(),
+                warning: Some(
+                    "Support for GraphQL Federation source schemas (@lookup) is in preview."
+                        .to_string(),
+                ),
+            },
+            FeatureRestriction::SpecInJoinDirective {
             name: "Connect v0.5".to_string(),
             spec_url: "https://specs.apollo.dev/connect".to_string(),
             version_req: semver::VersionReq {
@@ -124,7 +154,8 @@ impl FeatureGateEnforcementReport {
     preview_connect_v0_5: true"
                 .to_string(),
             warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.5\") is in preview. See https://go.apollo.dev/connectors/v0.5 for more information.".to_string())
-        }]
+            },
+        ]
     }
 }
 
@@ -243,6 +274,53 @@ mod test {
             0,
             report.gated_features_in_use.len(),
             "should not have found restricted connect feature"
+        );
+    }
+
+    fn source_schema_supergraph() -> String {
+        use apollo_federation::subgraph::typestate::Subgraph;
+        let subgraphs = vec![
+            Subgraph::parse(
+                "products",
+                "http://products",
+                r#"
+                type Query { topProducts: [Product!]! productById(id: ID!): Product @lookup }
+                type Product @key(fields: "id") { id: ID! name: String! }
+                "#,
+            )
+            .unwrap(),
+        ];
+        apollo_federation::composition::compose(subgraphs, Default::default())
+            .unwrap()
+            .schema()
+            .schema()
+            .to_string()
+    }
+
+    #[test]
+    fn graphql_federation_source_schemas_are_gated() {
+        let supergraph = source_schema_supergraph();
+        assert!(supergraph.contains("https://specs.apollo.dev/join/v0.6"));
+
+        let report = check(include_str!("testdata/oss.router.yaml"), &supergraph);
+        assert_eq!(1, report.gated_features_in_use.len());
+        let FeatureGateViolation::Spec { url, .. } = &report.gated_features_in_use[0];
+        assert_eq!("https://specs.apollo.dev/join/v0.6", url);
+
+        let report = check(
+            "preview_graphql_federation:\n  enabled: true\nsupergraph:\n  query_planning:\n    incremental_planner:\n      enabled: true\n",
+            &supergraph,
+        );
+        assert_eq!(0, report.gated_features_in_use.len());
+    }
+
+    #[test]
+    fn graphql_federation_requires_the_incremental_planner() {
+        let error = Configuration::from_str("preview_graphql_federation:\n  enabled: true\n")
+            .expect_err("the incremental planner is required");
+        assert!(
+            error.to_string().contains("incremental query planner"),
+            "{error}"
         );
     }
 

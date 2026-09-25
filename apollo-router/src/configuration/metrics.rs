@@ -395,6 +395,15 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
+            apollo.router.config.graphql_federation,
+            "$.preview_graphql_federation[?(@.enabled == true)]",
+            opt.variable_batching,
+            "$.subgraph..variable_batching[?(@ == true)]",
+            opt.request_batching,
+            "$.subgraph..request_batching[?(@ == true)]"
+        );
+
+        populate_config_instrument!(
             apollo.router.config.file_uploads.multipart,
             "$.preview_file_uploads[?(@.enabled == true)].protocols.multipart[?(@.enabled == true)]",
             opt.limits.max_file_size,
