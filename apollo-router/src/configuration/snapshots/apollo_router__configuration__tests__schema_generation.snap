@@ -7771,7 +7771,10 @@ expression: "&schema"
           "$ref": "#/definitions/Conf"
         }
       },
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "Policy": {
       "additionalProperties": false,

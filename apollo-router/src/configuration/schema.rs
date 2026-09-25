@@ -25,20 +25,11 @@ pub(crate) fn generate_config_schema() -> Schema {
 
 /// [`generate_config_schema`] as JSON, as configuration parsing applies it, generated once and
 /// shared by the adapter and tests.
-///
-/// Earlier releases accepted `plugins: null`, meaning no user plugins. The published schema only
-/// allows an object, so this copy also allows null there. Such a document is then parsed as
-/// written, and its diagnostics refer to the file.
 pub(crate) fn router_config_schema() -> &'static serde_json::Value {
     static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {
-        let mut schema = serde_json::to_value(generate_config_schema())
-            .expect("router's configuration schema serializes");
-        let plugins_type = schema
-            .pointer_mut("/definitions/Plugins/type")
-            .expect("the configuration schema declares the Plugins type");
-        *plugins_type = serde_json::json!(["object", "null"]);
-        schema
+        serde_json::to_value(generate_config_schema())
+            .expect("router's configuration schema serializes")
     })
 }
 
