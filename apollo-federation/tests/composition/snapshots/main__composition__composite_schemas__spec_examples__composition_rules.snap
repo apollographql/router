@@ -1,0 +1,169 @@
+---
+source: apollo-federation/tests/composition/composite_schemas.rs
+expression: report
+---
+Source: graphql/graphql-federation-spec@dbf5cf9, spec/Section 4 -- Composition.md (MIT License, Copyright (c) GraphQL Contributors)
+
+Invalid GraphQL [INVALID_GRAPHQL] counter-example #0: ok
+Invalid GraphQL [INVALID_GRAPHQL] counter-example #1: ok
+Invalid GraphQL [INVALID_GRAPHQL] counter-example #2: ok
+Disallowed Inaccessible Elements [DISALLOWED_INACCESSIBLE] example #0: ok
+Disallowed Inaccessible Elements [DISALLOWED_INACCESSIBLE] counter-example #0: GAP: composes
+Disallowed Inaccessible Elements [DISALLOWED_INACCESSIBLE] counter-example #1: GAP: composes
+Type Definition Invalid [TYPE_DEFINITION_INVALID] counter-example #0: ok
+Type Definition Invalid [TYPE_DEFINITION_INVALID] example #0: GAP: fails with INVALID_GRAPHQL
+Type Definition Invalid [TYPE_DEFINITION_INVALID] counter-example #1: GAP: composes
+Query Root Type Inaccessible [QUERY_ROOT_TYPE_INACCESSIBLE] example #0: ok
+Query Root Type Inaccessible [QUERY_ROOT_TYPE_INACCESSIBLE] counter-example #0: ok
+Root Mutation Used [ROOT_MUTATION_USED] example #0: ok
+Root Mutation Used [ROOT_MUTATION_USED] counter-example #0: ok
+Root Query Used [ROOT_QUERY_USED] example #0: ok
+Root Query Used [ROOT_QUERY_USED] counter-example #0: ok
+Root Subscription Used [ROOT_SUBSCRIPTION_USED] example #0: ok
+Root Subscription Used [ROOT_SUBSCRIPTION_USED] counter-example #0: ok
+External Unused [EXTERNAL_UNUSED] example #0: GAP: fails with EXTERNAL_MISSING_ON_BASE
+External Unused [EXTERNAL_UNUSED] example #1: GAP: fails with EXTERNAL_MISSING_ON_BASE
+External Unused [EXTERNAL_UNUSED] counter-example #0: ok
+External Override Collision [EXTERNAL_OVERRIDE_COLLISION] example #0: GAP: fails with INVALID_FIELD_SHARING
+External Override Collision [EXTERNAL_OVERRIDE_COLLISION] counter-example #0: GAP: fails with EXTERNAL_UNUSED
+External Provides Collision [EXTERNAL_PROVIDES_COLLISION] example #0: GAP: fails with PROVIDES_ON_NON_OBJECT_FIELD
+External Provides Collision [EXTERNAL_PROVIDES_COLLISION] counter-example #0: ok
+External Require Collision [EXTERNAL_REQUIRE_COLLISION] example #0: GAP: fails with INVALID_FIELD_SHARING
+External Require Collision [EXTERNAL_REQUIRE_COLLISION] counter-example #0: GAP: fails with EXTERNAL_UNUSED
+External on Interface [EXTERNAL_ON_INTERFACE] example #0: ok
+External on Interface [EXTERNAL_ON_INTERFACE] counter-example #0: ok
+Is Invalid Syntax [IS_INVALID_SYNTAX] example #0: ok
+Is Invalid Syntax [IS_INVALID_SYNTAX] counter-example #0: ok
+Is Invalid Field Type [IS_INVALID_FIELD_TYPE] example #0: ok
+Is Invalid Field Type [IS_INVALID_FIELD_TYPE] counter-example #0: ok
+Is Invalid Usage [IS_INVALID_USAGE] example #0: ok
+Is Invalid Usage [IS_INVALID_USAGE] counter-example #0: ok
+Is Fields Has Arguments [IS_FIELDS_HAS_ARGUMENTS] example #0: ok
+Is Fields Has Arguments [IS_FIELDS_HAS_ARGUMENTS] example #1: ok
+Is Fields Has Arguments [IS_FIELDS_HAS_ARGUMENTS] counter-example #0: ok
+Key Fields Select Invalid Type [KEY_FIELDS_SELECT_INVALID_TYPE] example #0: ok
+Key Fields Select Invalid Type [KEY_FIELDS_SELECT_INVALID_TYPE] counter-example #0: ok
+Key Fields Select Invalid Type [KEY_FIELDS_SELECT_INVALID_TYPE] counter-example #1: GAP: composes
+Key Fields Select Invalid Type [KEY_FIELDS_SELECT_INVALID_TYPE] counter-example #2: ok
+Key Directive in Fields Argument [KEY_DIRECTIVE_IN_FIELDS_ARGUMENT] example #0: ok
+Key Directive in Fields Argument [KEY_DIRECTIVE_IN_FIELDS_ARGUMENT] counter-example #0: ok
+Key Directive in Fields Argument [KEY_DIRECTIVE_IN_FIELDS_ARGUMENT] counter-example #1: ok
+Key Fields Has Arguments [KEY_FIELDS_HAS_ARGUMENTS] example #0: ok
+Key Fields Has Arguments [KEY_FIELDS_HAS_ARGUMENTS] example #1: GAP: fails with KEY_FIELDS_HAS_ARGS
+Key Fields Has Arguments [KEY_FIELDS_HAS_ARGUMENTS] counter-example #0: GAP: fails with KEY_INVALID_FIELDS
+Key Fields Has Arguments [KEY_FIELDS_HAS_ARGUMENTS] counter-example #1: ok
+Key Invalid Syntax [KEY_INVALID_SYNTAX] example #0: GAP: fails with KEY_FIELDS_SELECT_INVALID_TYPE
+Key Invalid Syntax [KEY_INVALID_SYNTAX] counter-example #0: GAP: fails with KEY_INVALID_FIELDS
+Key Invalid Fields [KEY_INVALID_FIELDS] example #0: GAP: fails with KEY_FIELDS_SELECT_INVALID_TYPE
+Key Invalid Fields [KEY_INVALID_FIELDS] counter-example #0: ok
+Key Invalid Fields Type [KEY_INVALID_FIELDS_TYPE] example #0: ok
+Key Invalid Fields Type [KEY_INVALID_FIELDS_TYPE] counter-example #0: ok
+Lookup Must Have Arguments [LOOKUP_MUST_HAVE_ARGUMENTS] example #0: ok
+Lookup Must Have Arguments [LOOKUP_MUST_HAVE_ARGUMENTS] counter-example #0: ok
+Lookup Returns Non-Nullable Type [LOOKUP_RETURNS_NON_NULLABLE_TYPE] example #0: ok
+Lookup Returns Non-Nullable Type [LOOKUP_RETURNS_NON_NULLABLE_TYPE] counter-example #0: ok
+Lookup Returns List [LOOKUP_RETURNS_LIST] example #0: ok
+Lookup Returns List [LOOKUP_RETURNS_LIST] counter-example #0: ok
+Lookup Key Missing For Type [LOOKUP_KEY_MISSING_FOR_TYPE] example #0: ok
+Lookup Key Missing For Type [LOOKUP_KEY_MISSING_FOR_TYPE] counter-example #0: ok
+Lookup Key Missing For Type [LOOKUP_KEY_MISSING_FOR_TYPE] counter-example #1: ok
+Override from Self [OVERRIDE_FROM_SELF] example #0: GAP: fails with INVALID_FIELD_SHARING
+Override from Self [OVERRIDE_FROM_SELF] counter-example #0: ok
+Override on Interface [OVERRIDE_ON_INTERFACE] example #0: GAP: fails with INVALID_FIELD_SHARING
+Override on Interface [OVERRIDE_ON_INTERFACE] counter-example #0: ok
+Provides Directive in Fields Argument [PROVIDES_DIRECTIVE_IN_FIELDS_ARGUMENT] example #0: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Directive in Fields Argument [PROVIDES_DIRECTIVE_IN_FIELDS_ARGUMENT] counter-example #0: ok
+Provides Fields Has Arguments [PROVIDES_FIELDS_HAS_ARGUMENTS] example #0: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Fields Has Arguments [PROVIDES_FIELDS_HAS_ARGUMENTS] example #1: GAP: fails with PROVIDES_FIELDS_HAS_ARGS, PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Fields Has Arguments [PROVIDES_FIELDS_HAS_ARGUMENTS] counter-example #0: ok
+Provides Fields Has Arguments [PROVIDES_FIELDS_HAS_ARGUMENTS] counter-example #1: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Fields Missing External [PROVIDES_FIELDS_MISSING_EXTERNAL] example #0: GAP: fails with EXTERNAL_MISSING_ON_BASE
+Provides Fields Missing External [PROVIDES_FIELDS_MISSING_EXTERNAL] counter-example #0: ok
+Provides Invalid Syntax [PROVIDES_INVALID_SYNTAX] example #0: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Invalid Syntax [PROVIDES_INVALID_SYNTAX] counter-example #0: GAP: fails with PROVIDES_ON_NON_OBJECT_FIELD
+Provides Invalid Fields [PROVIDES_INVALID_FIELDS] example #0: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Invalid Fields [PROVIDES_INVALID_FIELDS] counter-example #0: ok
+Provides Invalid Fields Type [PROVIDES_INVALID_FIELDS_TYPE] example #0: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides Invalid Fields Type [PROVIDES_INVALID_FIELDS_TYPE] counter-example #0: ok
+Provides on Non-Composite Field [PROVIDES_ON_NON_COMPOSITE_FIELD] example #0: GAP: fails with PROVIDES_FIELDS_MISSING_EXTERNAL
+Provides on Non-Composite Field [PROVIDES_ON_NON_COMPOSITE_FIELD] counter-example #0: ok
+Require Invalid Syntax [REQUIRE_INVALID_SYNTAX] example #0: GAP: fails with REQUIRE_INVALID_FIELDS
+Require Invalid Syntax [REQUIRE_INVALID_SYNTAX] counter-example #0: ok
+Require Invalid Fields Type [REQUIRE_INVALID_FIELD_TYPE] example #0: GAP: fails with REQUIRE_INVALID_FIELDS
+Require Invalid Fields Type [REQUIRE_INVALID_FIELD_TYPE] counter-example #0: ok
+Require Invalid Usage [REQUIRE_INVALID_USAGE] example #0: GAP: fails with SATISFIABILITY_ERROR
+Require Invalid Usage [REQUIRE_INVALID_USAGE] counter-example #0: ok
+Require Inconsistent on Implementation [REQUIRE_INCONSISTENT_ON_IMPLEMENTATION] example #0: ok
+Require Inconsistent on Implementation [REQUIRE_INCONSISTENT_ON_IMPLEMENTATION] counter-example #0: ok
+Invalid Shareable Usage [INVALID_SHAREABLE_USAGE] example #0: ok
+Invalid Shareable Usage [INVALID_SHAREABLE_USAGE] counter-example #0: ok
+Invalid Shareable Usage [INVALID_SHAREABLE_USAGE] counter-example #1: GAP: fails with INVALID_GRAPHQL
+Enum Values Mismatch [ENUM_VALUES_MISMATCH] example #0: ok
+Enum Values Mismatch [ENUM_VALUES_MISMATCH] counter-example #0: GAP: composes
+Enum Values Mismatch [ENUM_VALUES_MISMATCH] example #1: ok
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] example #0: GAP: fails with INVALID_FIELD_SHARING
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] example #1: GAP: fails with INVALID_FIELD_SHARING
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] example #2: GAP: fails with FIELD_TYPE_MISMATCH, INVALID_FIELD_SHARING
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] counter-example #0: ok
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] counter-example #1: ok
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] example #3: ok
+Output Field Types Mergeable [OUTPUT_FIELD_TYPES_NOT_MERGEABLE] counter-example #2: ok
+Field Argument Types Mergeable [FIELD_ARGUMENT_TYPES_NOT_MERGEABLE] example #0: GAP: fails with INVALID_FIELD_SHARING
+Field Argument Types Mergeable [FIELD_ARGUMENT_TYPES_NOT_MERGEABLE] example #1: GAP: fails with INVALID_FIELD_SHARING
+Field Argument Types Mergeable [FIELD_ARGUMENT_TYPES_NOT_MERGEABLE] example #2: GAP: fails with FIELD_ARGUMENT_TYPE_MISMATCH, INVALID_FIELD_SHARING
+Field Argument Types Mergeable [FIELD_ARGUMENT_TYPES_NOT_MERGEABLE] counter-example #0: ok
+Field Argument Types Mergeable [FIELD_ARGUMENT_TYPES_NOT_MERGEABLE] counter-example #1: ok
+Field With Missing Required Arguments [FIELD_WITH_MISSING_REQUIRED_ARGUMENT] example #0: ok
+Field With Missing Required Arguments [FIELD_WITH_MISSING_REQUIRED_ARGUMENT] example #1: ok
+Field With Missing Required Arguments [FIELD_WITH_MISSING_REQUIRED_ARGUMENT] counter-example #0: ok
+Field With Missing Required Arguments [FIELD_WITH_MISSING_REQUIRED_ARGUMENT] counter-example #1: ok
+Input Field Default Mismatch [INPUT_FIELD_DEFAULT_MISMATCH] example #0: ok
+Input Field Default Mismatch [INPUT_FIELD_DEFAULT_MISMATCH] example #1: ok
+Input Field Default Mismatch [INPUT_FIELD_DEFAULT_MISMATCH] counter-example #0: ok
+Input Field Types mergeable [INPUT_FIELD_TYPES_NOT_MERGEABLE] example #0: ok
+Input Field Types mergeable [INPUT_FIELD_TYPES_NOT_MERGEABLE] example #1: GAP: fails with FIELD_TYPE_MISMATCH
+Input Field Types mergeable [INPUT_FIELD_TYPES_NOT_MERGEABLE] counter-example #0: ok
+External Missing on Base [EXTERNAL_MISSING_ON_BASE] example #0: GAP: fails with EXTERNAL_UNUSED
+External Missing on Base [EXTERNAL_MISSING_ON_BASE] counter-example #0: GAP: fails with EXTERNAL_UNUSED
+External Type Mismatch [EXTERNAL_TYPE_MISMATCH] example #0: GAP: fails with EXTERNAL_UNUSED
+External Type Mismatch [EXTERNAL_TYPE_MISMATCH] counter-example #0: GAP: fails with EXTERNAL_UNUSED
+Override Source Has Override [OVERRIDE_SOURCE_HAS_OVERRIDE] example #0: GAP: fails with INVALID_FIELD_SHARING
+Override Source Has Override [OVERRIDE_SOURCE_HAS_OVERRIDE] counter-example #0: ok
+Override Source Has Override [OVERRIDE_SOURCE_HAS_OVERRIDE] counter-example #1: ok
+Override Source Has Override [OVERRIDE_SOURCE_HAS_OVERRIDE] counter-example #2: GAP: fails with INVALID_FIELD_SHARING
+Invalid Field Sharing [INVALID_FIELD_SHARING] example #0: ok
+Invalid Field Sharing [INVALID_FIELD_SHARING] example #1: ok
+Invalid Field Sharing [INVALID_FIELD_SHARING] example #2: GAP: fails with EXTERNAL_UNUSED
+Invalid Field Sharing [INVALID_FIELD_SHARING] counter-example #0: ok
+Reference To Inaccessible Type [REFERENCE_TO_INACCESSIBLE_TYPE] example #0: ok
+Reference To Inaccessible Type [REFERENCE_TO_INACCESSIBLE_TYPE] example #1: ok
+Reference To Inaccessible Type [REFERENCE_TO_INACCESSIBLE_TYPE] counter-example #0: ok
+Reference To Internal Type [REFERENCE_TO_INTERNAL_TYPE] example #0: ok
+Reference To Internal Type [REFERENCE_TO_INTERNAL_TYPE] example #1: ok
+Reference To Internal Type [REFERENCE_TO_INTERNAL_TYPE] counter-example #0: ok
+Empty Merged Object Type [EMPTY_MERGED_OBJECT_TYPE] counter-example #0: GAP: fails with INVALID_FIELD_SHARING
+Empty Merged Interface Type [EMPTY_MERGED_INTERFACE_TYPE] counter-example #0: ok
+Implemented by Inaccessible [IMPLEMENTED_BY_INACCESSIBLE] counter-example #0: ok
+Interface Field No Implementation [INTERFACE_FIELD_NO_IMPLEMENTATION] example #0: ok
+Interface Field No Implementation [INTERFACE_FIELD_NO_IMPLEMENTATION] counter-example #0: ok
+Interface Field Argument No Implementation [INTERFACE_FIELD_ARGUMENT_NO_IMPLEMENTATION] example #0: ok
+Interface Field Argument No Implementation [INTERFACE_FIELD_ARGUMENT_NO_IMPLEMENTATION] counter-example #0: GAP: fails with INVALID_FIELD_SHARING
+Empty Merged Input Object Type [EMPTY_MERGED_INPUT_OBJECT_TYPE] counter-example #0: ok
+Empty Merged Input Object Type [EMPTY_MERGED_INPUT_OBJECT_TYPE] counter-example #1: ok
+Non-Null Input Fields cannot be inaccessible [NON_NULL_INPUT_FIELD_IS_INACCESSIBLE] example #0: ok
+Non-Null Input Fields cannot be inaccessible [NON_NULL_INPUT_FIELD_IS_INACCESSIBLE] example #1: ok
+Non-Null Input Fields cannot be inaccessible [NON_NULL_INPUT_FIELD_IS_INACCESSIBLE] counter-example #0: ok
+Non-Null Input Fields cannot be inaccessible [NON_NULL_INPUT_FIELD_IS_INACCESSIBLE] counter-example #1: ok
+Empty Merged Enum Type [EMPTY_MERGED_ENUM_TYPE] counter-example #0: ok
+Enum Type Default Value Inaccessible [ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE] counter-example #0: ok
+Enum Type Default Value Inaccessible [ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE] counter-example #1: ok
+Enum Type Default Value Inaccessible [ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE] counter-example #2: ok
+Empty Merged Union Type [EMPTY_MERGED_UNION_TYPE] counter-example #0: GAP: fails with INVALID_FIELD_SHARING
+Is Invalid Fields [IS_INVALID_FIELDS] example #0: ok
+Is Invalid Fields [IS_INVALID_FIELDS] counter-example #0: GAP: fails with LOOKUP_KEY_MISSING_FOR_TYPE
+Require Invalid Fields [REQUIRE_INVALID_FIELDS] example #0: ok
+Require Invalid Fields [REQUIRE_INVALID_FIELDS] counter-example #0: ok
+Require Invalid Fields [REQUIRE_INVALID_FIELDS] counter-example #1: ok
+Require Invalid Fields [REQUIRE_INVALID_FIELDS] example #1: ok
+
+109 of 161 cases conform

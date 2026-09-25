@@ -56,6 +56,20 @@ pub struct CompositionOptions {
     pub max_validation_subgraph_paths: Option<usize>,
 }
 
+/// Compose GraphQL Federation source schemas: every subgraph without a federation `@link` is a
+/// source schema, even one that applies none of the dialect's directives (see
+/// [`compose`], which infers it from the directives used).
+#[instrument(skip(subgraphs, options))]
+pub fn compose_source_schemas(
+    mut subgraphs: Vec<Subgraph<Initial>>,
+    options: CompositionOptions,
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
+    for subgraph in &mut subgraphs {
+        subgraph.assume_composite_source_schema_if_unlinked();
+    }
+    compose(subgraphs, options)
+}
+
 /// Mirrors the JS `compose` function.
 #[instrument(skip(subgraphs, options))]
 pub fn compose(

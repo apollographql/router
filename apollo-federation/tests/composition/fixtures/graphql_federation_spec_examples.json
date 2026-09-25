@@ -1,0 +1,2225 @@
+{
+ "source": "graphql/graphql-federation-spec@dbf5cf9, spec/Section 4 -- Composition.md (MIT License, Copyright (c) GraphQL Contributors)",
+ "cases": [
+  {
+   "rule": "Invalid GraphQL",
+   "code": "INVALID_GRAPHQL",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  user: User\n}\n\n# The type \"User\" is never defined; this is invalid GraphQL."
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid GraphQL",
+   "code": "INVALID_GRAPHQL",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "enum Role {\n  ADMIN\n  USER\n}\n\ntype Query {\n  users(role: Role = \"INVALID_VALUE\"): [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid GraphQL",
+   "code": "INVALID_GRAPHQL",
+   "kind": "counter-example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @provides(fields: String!) on FIELD_DEFINITION\n\ntype Product {\n  price: Float @provides\n  # \"fields\" argument is required, but not provided.\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Disallowed Inaccessible Elements",
+   "code": "DISALLOWED_INACCESSIBLE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  price: Float\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Disallowed Inaccessible Elements",
+   "code": "DISALLOWED_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "scalar String @inaccessible\n\ntype Product {\n  price: Float\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Disallowed Inaccessible Elements",
+   "code": "DISALLOWED_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type __Type @inaccessible {\n  kind: __TypeKind!\n  name: String\n  fields(includeDeprecated: Boolean! = false): [__Field!]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Type Definition Invalid",
+   "code": "TYPE_DEFINITION_INVALID",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @require(field: FieldSelectionMap!) on ARGUMENT_DEFINITION\n\ninput FieldSelectionMap {\n  fields: [String!]!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Type Definition Invalid",
+   "code": "TYPE_DEFINITION_INVALID",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @key(\n  fields: FieldSelectionSet!\n  futureArg: String\n) repeatable on OBJECT | INTERFACE"
+    ]
+   ]
+  },
+  {
+   "rule": "Type Definition Invalid",
+   "code": "TYPE_DEFINITION_INVALID",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @key(futureArg: String) repeatable on OBJECT | INTERFACE"
+    ]
+   ]
+  },
+  {
+   "rule": "Query Root Type Inaccessible",
+   "code": "QUERY_ROOT_TYPE_INACCESSIBLE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  query: Query\n}\n\ntype Query {\n  allBooks: [Book]\n}\n\ntype Book {\n  id: ID!\n  title: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Query Root Type Inaccessible",
+   "code": "QUERY_ROOT_TYPE_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  query: Query\n}\n\ntype Query @inaccessible {\n  allBooks: [Book]\n}\n\ntype Book {\n  id: ID!\n  title: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Root Mutation Used",
+   "code": "ROOT_MUTATION_USED",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  mutation: Mutation\n}\n\ntype Mutation {\n  createProduct(name: String): Product\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Root Mutation Used",
+   "code": "ROOT_MUTATION_USED",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  mutation: RootMutation\n}\n\ntype RootMutation {\n  createProduct(name: String): Product\n}\n\ntype Mutation {\n  deprecatedField: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Root Query Used",
+   "code": "ROOT_QUERY_USED",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  query: Query\n}\n\ntype Query {\n  product(id: ID!): Product\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Root Query Used",
+   "code": "ROOT_QUERY_USED",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  query: RootQuery\n}\n\ntype RootQuery {\n  product(id: ID!): Product\n}\n\ntype Query {\n  deprecatedField: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Root Subscription Used",
+   "code": "ROOT_SUBSCRIPTION_USED",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  subscription: Subscription\n}\n\ntype Subscription {\n  productCreated: Product\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Root Subscription Used",
+   "code": "ROOT_SUBSCRIPTION_USED",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "schema {\n  subscription: RootSubscription\n}\n\ntype RootSubscription {\n  productCreated: Product\n}\n\ntype Subscription {\n  deprecatedField: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Unused",
+   "code": "EXTERNAL_UNUSED",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  id: ID\n  name: String @external\n}\n\ntype Query {\n  productByName(name: String): Product @provides(fields: \"name\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Unused",
+   "code": "EXTERNAL_UNUSED",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"sku\") @key(fields: \"upc\") {\n  sku: String! @external\n  upc: String! @external\n  name: String\n}\n\ntype Query {\n  productBySku(sku: String!): Product @lookup\n  productByUpc(upc: String!): Product @lookup\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Unused",
+   "code": "EXTERNAL_UNUSED",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  id: ID\n  name: String @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Override Collision",
+   "code": "EXTERNAL_OVERRIDE_COLLISION",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  id: ID!\n  fullName: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  id: ID!\n  fullName: String @override(from: \"SchemaA\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Override Collision",
+   "code": "EXTERNAL_OVERRIDE_COLLISION",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Payment {\n  id: ID!\n  amount: Int\n}"
+    ],
+    [
+     "SchemaB",
+     "type Payment {\n  id: ID!\n  amount: Int @override(from: \"SchemaA\") @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Provides Collision",
+   "code": "EXTERNAL_PROVIDES_COLLISION",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Invoice {\n  id: ID!\n  description: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Invoice {\n  id: ID!\n  description: String @provides(fields: \"length\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Provides Collision",
+   "code": "EXTERNAL_PROVIDES_COLLISION",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Invoice {\n  id: ID!\n  description: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Invoice {\n  id: ID!\n  description: String @external @provides(fields: \"length\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Require Collision",
+   "code": "EXTERNAL_REQUIRE_COLLISION",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Book {\n  id: ID!\n  title: String\n  subtitle: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Book {\n  id: ID!\n  title(subtitle: String @require(field: \"subtitle\")): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Require Collision",
+   "code": "EXTERNAL_REQUIRE_COLLISION",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Book {\n  id: ID!\n  title: String\n  subtitle: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Book {\n  id: ID!\n  title(subtitle: String @require(field: \"subtitle\")): String @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External on Interface",
+   "code": "EXTERNAL_ON_INTERFACE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Node {\n  id: ID!\n}\n\ntype User implements Node {\n  id: ID!\n  name: String\n}\n\ntype Product implements Node {\n  id: ID!\n  price: Int\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External on Interface",
+   "code": "EXTERNAL_ON_INTERFACE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Node {\n  id: ID! @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Syntax",
+   "code": "IS_INVALID_SYNTAX",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  product(id: ID! @is(field: \"id\")): Product @lookup\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Syntax",
+   "code": "IS_INVALID_SYNTAX",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  product(id: ID! @is(field: \"{ id \")): Product @lookup\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Field Type",
+   "code": "IS_INVALID_FIELD_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  personById(id: ID! @is(field: \"id\")): Person @lookup\n}\n\ntype Person {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Field Type",
+   "code": "IS_INVALID_FIELD_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  personById(id: ID! @is(field: 123)): Person @lookup\n}\n\ntype Person {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Usage",
+   "code": "IS_INVALID_USAGE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  personById(id: ID! @is(field: \"id\")): Person @lookup\n}\n\ntype Person {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Usage",
+   "code": "IS_INVALID_USAGE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  personById(id: ID! @is(field: \"id\")): Person\n}\n\ntype Person {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Fields Has Arguments",
+   "code": "IS_FIELDS_HAS_ARGUMENTS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  productById(id: ID! @is(field: \"id\")): Product @lookup\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Fields Has Arguments",
+   "code": "IS_FIELDS_HAS_ARGUMENTS",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  productById(id: ID! @is(field: \"id\")): Product @lookup\n}\n\ntype Product {\n  id(scope: IdScope): ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Fields Has Arguments",
+   "code": "IS_FIELDS_HAS_ARGUMENTS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  productByLocalId(id: ID! @is(field: \"id(scope: LOCAL)\")): Product @lookup\n}\n\ntype Product {\n  id(scope: IdScope): ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Select Invalid Type",
+   "code": "KEY_FIELDS_SELECT_INVALID_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"sku\") {\n  sku: String!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Select Invalid Type",
+   "code": "KEY_FIELDS_SELECT_INVALID_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"featuredItem { id }\") {\n  featuredItem: Node!\n  sku: String!\n}\n\ninterface Node {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Select Invalid Type",
+   "code": "KEY_FIELDS_SELECT_INVALID_TYPE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"tags\") {\n  tags: [String!]!\n  sku: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Select Invalid Type",
+   "code": "KEY_FIELDS_SELECT_INVALID_TYPE",
+   "kind": "counter-example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"relatedItems\") {\n  relatedItems: Related!\n  sku: String!\n}\n\nunion Related = Product | Service\n\ntype Service {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Directive in Fields Argument",
+   "code": "KEY_DIRECTIVE_IN_FIELDS_ARGUMENT",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id name\") {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Directive in Fields Argument",
+   "code": "KEY_DIRECTIVE_IN_FIELDS_ARGUMENT",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @lowercase on FIELD_DEFINITION\n\ntype User @key(fields: \"id name @lowercase\") {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Directive in Fields Argument",
+   "code": "KEY_DIRECTIVE_IN_FIELDS_ARGUMENT",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @lowercase on FIELD_DEFINITION\n\ntype User @key(fields: \"id name { firstName @lowercase }\") {\n  id: ID!\n  name: FullName\n}\n\ntype FullName {\n  firstName: String\n  lastName: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Has Arguments",
+   "code": "KEY_FIELDS_HAS_ARGUMENTS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id name\") {\n  id: ID!\n  name: String\n  tags: [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Has Arguments",
+   "code": "KEY_FIELDS_HAS_ARGUMENTS",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id tags\") {\n  id: ID!\n  tags(limit: Int = 10): [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Has Arguments",
+   "code": "KEY_FIELDS_HAS_ARGUMENTS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id(scope: LOCAL)\") {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Fields Has Arguments",
+   "code": "KEY_FIELDS_HAS_ARGUMENTS",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id tags\") {\n  id: ID!\n  tags(limit: Int!): [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Invalid Syntax",
+   "code": "KEY_INVALID_SYNTAX",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"sku featuredItem { id }\") {\n  sku: String!\n  featuredItem: Node!\n}\n\ninterface Node {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Invalid Syntax",
+   "code": "KEY_INVALID_SYNTAX",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"featuredItem { id\") {\n  featuredItem: Node!\n  sku: String!\n}\n\ninterface Node {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Invalid Fields",
+   "code": "KEY_INVALID_FIELDS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"sku featuredItem { id }\") {\n  sku: String!\n  featuredItem: Node!\n}\n\ninterface Node {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Invalid Fields",
+   "code": "KEY_INVALID_FIELDS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"id\") {\n  sku: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Invalid Fields Type",
+   "code": "KEY_INVALID_FIELDS_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id uuid\") {\n  id: ID!\n  uuid: ID!\n  name: String\n}\n\ntype Query {\n  users: [User]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Key Invalid Fields Type",
+   "code": "KEY_INVALID_FIELDS_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: true) {\n  id: ID\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Must Have Arguments",
+   "code": "LOOKUP_MUST_HAVE_ARGUMENTS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  productById(id: ID!): Product @lookup\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Must Have Arguments",
+   "code": "LOOKUP_MUST_HAVE_ARGUMENTS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  product: Product @lookup\n}\n\ntype Product {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Returns Non-Nullable Type",
+   "code": "LOOKUP_RETURNS_NON_NULLABLE_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  userById(id: ID!): User @lookup\n}\n\ntype User {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Returns Non-Nullable Type",
+   "code": "LOOKUP_RETURNS_NON_NULLABLE_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  userById(id: ID!): User! @lookup\n}\n\ntype User {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Returns List",
+   "code": "LOOKUP_RETURNS_LIST",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  userById(id: ID!): User @lookup\n}\n\ntype User {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Returns List",
+   "code": "LOOKUP_RETURNS_LIST",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  usersByIds(ids: [ID!]!): [User!] @lookup\n}\n\ntype User {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Key Missing For Type",
+   "code": "LOOKUP_KEY_MISSING_FOR_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  mediaByKey(\n    key: MediaKeyInput!\n      @is(\n        field: \"{ isbn: <Book>.isbn } | { upc: <Movie>.upc } | { feedUrl: <Podcast>.feedUrl }\"\n      )\n  ): Media @lookup\n}\n\ninput MediaKeyInput @oneOf {\n  isbn: String\n  upc: String\n  feedUrl: String\n}\n\ninterface Media {\n  id: ID!\n}\n\ntype Book implements Media {\n  id: ID!\n  isbn: String!\n}\n\ntype Movie implements Media {\n  id: ID!\n  upc: String!\n}\n\ntype Podcast implements Media {\n  id: ID!\n  feedUrl: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Key Missing For Type",
+   "code": "LOOKUP_KEY_MISSING_FOR_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  mediaByKey(\n    key: MediaKeyInput!\n      @is(field: \"{ isbn: <Book>.isbn } | { upc: <Movie>.upc }\")\n  ): Media @lookup\n}\n\ninput MediaKeyInput @oneOf {\n  isbn: String\n  upc: String\n}\n\ninterface Media {\n  id: ID!\n}\n\ntype Book implements Media {\n  id: ID!\n  isbn: String!\n}\n\ntype Movie implements Media {\n  id: ID!\n  upc: String!\n}\n\ntype Podcast implements Media {\n  id: ID!\n  feedUrl: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Lookup Key Missing For Type",
+   "code": "LOOKUP_KEY_MISSING_FOR_TYPE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  product(id: ID!, categoryId: Int): Product @lookup\n}\n\nunion Product = Electronics | Clothing\n\ntype Electronics {\n  id: ID!\n  categoryId: Int\n  name: String\n}\n\ntype Clothing {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override from Self",
+   "code": "OVERRIDE_FROM_SELF",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Bill {\n  id: ID!\n  amount: Int\n}"
+    ],
+    [
+     "SchemaB",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaA\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override from Self",
+   "code": "OVERRIDE_FROM_SELF",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaA\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override on Interface",
+   "code": "OVERRIDE_ON_INTERFACE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Order {\n  id: ID!\n  amount: Int\n}"
+    ],
+    [
+     "SchemaB",
+     "type Order {\n  id: ID!\n  amount: Int @override(from: \"SchemaA\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override on Interface",
+   "code": "OVERRIDE_ON_INTERFACE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaB\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Directive in Fields Argument",
+   "code": "PROVIDES_DIRECTIVE_IN_FIELDS_ARGUMENT",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id name\") {\n  id: ID!\n  name: String\n  profile: Profile @provides(fields: \"name\")\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Directive in Fields Argument",
+   "code": "PROVIDES_DIRECTIVE_IN_FIELDS_ARGUMENT",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "directive @lowercase on FIELD_DEFINITION\n\ntype User @key(fields: \"id name\") {\n  id: ID!\n  name: String\n  profile: Profile @provides(fields: \"name @lowercase\")\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Fields Has Arguments",
+   "code": "PROVIDES_FIELDS_HAS_ARGUMENTS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  tags: [String]\n}\n\ntype Article @key(fields: \"id\") {\n  id: ID!\n  author: User! @provides(fields: \"tags\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Fields Has Arguments",
+   "code": "PROVIDES_FIELDS_HAS_ARGUMENTS",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  tags(limit: Int @require(field: \"tagLimit\")): [String]\n  tagLimit: Int\n}\n\ntype Article @key(fields: \"id\") {\n  id: ID!\n  author: User! @provides(fields: \"tags\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Fields Has Arguments",
+   "code": "PROVIDES_FIELDS_HAS_ARGUMENTS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  tags(limit: UserType = ADMIN): [String]\n}\n\nenum UserType {\n  REGULAR\n  ADMIN\n}\n\ntype Article @key(fields: \"id\") {\n  id: ID!\n  author: User! @provides(fields: \"tags\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Fields Has Arguments",
+   "code": "PROVIDES_FIELDS_HAS_ARGUMENTS",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  tags: [String]\n}\n\ntype Article @key(fields: \"id\") {\n  id: ID!\n  author: User! @provides(fields: \"tags(limit: 10)\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Fields Missing External",
+   "code": "PROVIDES_FIELDS_MISSING_EXTERNAL",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Order {\n  id: ID!\n  customer: User @provides(fields: \"name\")\n}\n\ntype User @key(fields: \"id\") {\n  id: ID!\n  name: String @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Fields Missing External",
+   "code": "PROVIDES_FIELDS_MISSING_EXTERNAL",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  id: ID!\n  address: String\n}\n\ntype Order {\n  id: ID!\n  buyer: User @provides(fields: \"address\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Invalid Syntax",
+   "code": "PROVIDES_INVALID_SYNTAX",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  address: Address @provides(fields: \"street city\")\n}\n\ntype Address {\n  street: String\n  city: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Invalid Syntax",
+   "code": "PROVIDES_INVALID_SYNTAX",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  address: Address @provides(fields: \"{ street city \")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Invalid Fields",
+   "code": "PROVIDES_INVALID_FIELDS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  details: UserDetails @provides(fields: \"hobbies\")\n}\n\ntype UserDetails {\n  hobbies: [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Invalid Fields",
+   "code": "PROVIDES_INVALID_FIELDS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  details: UserDetails @provides(fields: \"unknownField\")\n}\n\ntype UserDetails {\n  hobbies: [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Invalid Fields Type",
+   "code": "PROVIDES_INVALID_FIELDS_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  id: ID!\n  details: ProductDetails @provides(fields: \"features specifications\")\n}\n\ntype ProductDetails {\n  features: [String]\n  specifications: String\n}\n\ntype Query {\n  products: [Product]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides Invalid Fields Type",
+   "code": "PROVIDES_INVALID_FIELDS_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  id: ID!\n  details: ProductDetails @provides(fields: 123)\n}\n\ntype ProductDetails {\n  features: [String]\n  specifications: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides on Non-Composite Field",
+   "code": "PROVIDES_ON_NON_COMPOSITE_FIELD",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Profile {\n  email: String\n  settings: Settings\n}\n\ntype Settings {\n  notificationsEnabled: Boolean\n  theme: String\n}\n\ntype User {\n  id: ID!\n  profile: Profile @provides(fields: \"settings { theme }\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Provides on Non-Composite Field",
+   "code": "PROVIDES_ON_NON_COMPOSITE_FIELD",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  id: ID!\n  email: String @provides(fields: \"length\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Syntax",
+   "code": "REQUIRE_INVALID_SYNTAX",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  profile(name: String @require(field: \"name\")): Profile\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Syntax",
+   "code": "REQUIRE_INVALID_SYNTAX",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  profile(name: String! @require(field: \"{ name \")): Profile\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Fields Type",
+   "code": "REQUIRE_INVALID_FIELD_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  profile(name: String @require(field: \"name\")): Profile\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Fields Type",
+   "code": "REQUIRE_INVALID_FIELD_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  profile(name: String! @require(field: 123)): Profile\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Usage",
+   "code": "REQUIRE_INVALID_USAGE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  productById(id: ID!): Product @lookup\n}\n\ntype Product @key(fields: \"id\") {\n  id: ID!\n  shippingCost(weight: Float @require(field: \"shippingWeight\")): Currency\n}"
+    ],
+    [
+     "SchemaB",
+     "type Product @key(fields: \"id\") {\n  id: ID!\n  shippingWeight: Float\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Usage",
+   "code": "REQUIRE_INVALID_USAGE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  productById(\n    id: ID!\n    locale: String @require(field: \"defaultLocale\")\n  ): Product @lookup\n}\n\ntype Product @key(fields: \"id\") {\n  id: ID!\n}"
+    ],
+    [
+     "SchemaB",
+     "type Query {\n  defaultLocale: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Inconsistent on Implementation",
+   "code": "REQUIRE_INCONSISTENT_ON_IMPLEMENTATION",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Account {\n  id: ID!\n  displayName(locale: String @require(field: \"preferredLocale\")): String\n}\n\ntype User implements Account @key(fields: \"id\") {\n  id: ID!\n  displayName(locale: String @require(field: \"preferredLocale\")): String\n}"
+    ],
+    [
+     "SchemaB",
+     "interface Account {\n  id: ID!\n  preferredLocale: String\n}\n\ntype User implements Account @key(fields: \"id\") {\n  id: ID!\n  preferredLocale: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Inconsistent on Implementation",
+   "code": "REQUIRE_INCONSISTENT_ON_IMPLEMENTATION",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Account {\n  id: ID!\n  displayName(locale: String): String\n}\n\ntype User implements Account @key(fields: \"id\") {\n  id: ID!\n  displayName(locale: String @require(field: \"preferredLocale\")): String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  preferredLocale: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Shareable Usage",
+   "code": "INVALID_SHAREABLE_USAGE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Order {\n  id: ID!\n  orderStatus: String @shareable\n  total: Float\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Shareable Usage",
+   "code": "INVALID_SHAREABLE_USAGE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface InventoryItem {\n  sku: ID! @shareable\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Shareable Usage",
+   "code": "INVALID_SHAREABLE_USAGE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Subscription {\n  newOrderPlaced: Order @shareable\n}\n\ntype Order {\n  id: ID!\n  items: [String]\n}"
+    ],
+    [
+     "SchemaB",
+     "type Subscription {\n  newOrderPlaced: Order @shareable\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Enum Values Mismatch",
+   "code": "ENUM_VALUES_MISMATCH",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "enum Genre {\n  FANTASY\n}"
+    ],
+    [
+     "SchemaB",
+     "enum Genre {\n  FANTASY\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Enum Values Mismatch",
+   "code": "ENUM_VALUES_MISMATCH",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "enum Genre {\n  FANTASY\n}"
+    ],
+    [
+     "SchemaB",
+     "enum Genre {\n  SCIENCE_FICTION\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Enum Values Mismatch",
+   "code": "ENUM_VALUES_MISMATCH",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "enum Genre {\n  FANTASY\n  SCIENCE_FICTION @inaccessible\n}"
+    ],
+    [
+     "SchemaB",
+     "enum Genre {\n  FANTASY\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  birthdate: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  birthdate: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  birthdate: String!\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  birthdate: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  tags: [String!]\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  tags: [String]!\n}"
+    ],
+    [
+     "SchemaC",
+     "type User {\n  tags: [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  birthdate: String!\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  birthdate: DateTime!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  tags: [Tag]\n}\n\ntype Tag {\n  value: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  tags: [Tag]\n}\n\nscalar Tag"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 3,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query @shareable {\n  featured: FeaturedItem\n}\n\nunion FeaturedItem = Product\n\ntype Product @shareable {\n  id: ID\n}"
+    ],
+    [
+     "SchemaB",
+     "type Query @shareable {\n  featured: Product\n}\n\ntype Product @shareable {\n  id: ID\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Output Field Types Mergeable",
+   "code": "OUTPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "counter-example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query @shareable {\n  featured: FeaturedItem\n}\n\nunion FeaturedItem = Product\n\ntype Product @shareable {\n  id: ID\n}"
+    ],
+    [
+     "SchemaB",
+     "type Query @shareable {\n  featured: Review\n}\n\ntype Review @shareable {\n  id: ID\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field Argument Types Mergeable",
+   "code": "FIELD_ARGUMENT_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  field(argument: String): String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  field(argument: String): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field Argument Types Mergeable",
+   "code": "FIELD_ARGUMENT_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  field(argument: String!): String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  field(argument: String): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field Argument Types Mergeable",
+   "code": "FIELD_ARGUMENT_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  field(argument: [String!]): String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  field(argument: [String]!): String\n}"
+    ],
+    [
+     "SchemaC",
+     "type User {\n  field(argument: [String]): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field Argument Types Mergeable",
+   "code": "FIELD_ARGUMENT_TYPES_NOT_MERGEABLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  field(argument: String!): String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  field(argument: DateTime): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field Argument Types Mergeable",
+   "code": "FIELD_ARGUMENT_TYPES_NOT_MERGEABLE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User {\n  field(argument: [String]): String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User {\n  field(argument: [DateTime]): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field With Missing Required Arguments",
+   "code": "FIELD_WITH_MISSING_REQUIRED_ARGUMENT",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  books(author: String!): [Book] @shareable\n}"
+    ],
+    [
+     "SchemaB",
+     "type Query {\n  books(author: String!): [Book] @shareable\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field With Missing Required Arguments",
+   "code": "FIELD_WITH_MISSING_REQUIRED_ARGUMENT",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Collection {\n  books(author: String! @require(field: \"author\")): [Book] @shareable\n}"
+    ],
+    [
+     "SchemaB",
+     "type Collection {\n  books(author: String): [Book] @shareable\n}"
+    ],
+    [
+     "SchemaC",
+     "type Collection {\n  author: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field With Missing Required Arguments",
+   "code": "FIELD_WITH_MISSING_REQUIRED_ARGUMENT",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  books(author: String!): [Book] @shareable\n}"
+    ],
+    [
+     "SchemaB",
+     "type Query {\n  books: [Book] @shareable\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Field With Missing Required Arguments",
+   "code": "FIELD_WITH_MISSING_REQUIRED_ARGUMENT",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Collection {\n  books(author: String! @require(field: \"author\")): [Book] @shareable\n}"
+    ],
+    [
+     "SchemaB",
+     "type Collection {\n  books(author: String!): [Book] @shareable\n}"
+    ],
+    [
+     "SchemaC",
+     "type Collection {\n  author: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Input Field Default Mismatch",
+   "code": "INPUT_FIELD_DEFAULT_MISMATCH",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  genre: Genre = FANTASY\n}\n\nenum Genre {\n  FANTASY\n  SCIENCE_FICTION\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  genre: Genre = FANTASY\n}\n\nenum Genre {\n  FANTASY\n  SCIENCE_FICTION\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Input Field Default Mismatch",
+   "code": "INPUT_FIELD_DEFAULT_MISMATCH",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  genre: Genre\n}\n\nenum Genre {\n  FANTASY\n  SCIENCE_FICTION\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  genre: Genre = FANTASY\n}\n\nenum Genre {\n  FANTASY\n  SCIENCE_FICTION\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Input Field Default Mismatch",
+   "code": "INPUT_FIELD_DEFAULT_MISMATCH",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  minPageCount: Int = 10\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  minPageCount: Int = 20\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Input Field Types mergeable",
+   "code": "INPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input AuthorInput {\n  name: String!\n}"
+    ],
+    [
+     "SchemaB",
+     "input AuthorInput {\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Input Field Types mergeable",
+   "code": "INPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "input AuthorInput {\n  tags: [String!]\n}"
+    ],
+    [
+     "SchemaB",
+     "input AuthorInput {\n  tags: [String]!\n}"
+    ],
+    [
+     "SchemaC",
+     "input AuthorInput {\n  tags: [String]\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Input Field Types mergeable",
+   "code": "INPUT_FIELD_TYPES_NOT_MERGEABLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input AuthorInput {\n  birthdate: String!\n}"
+    ],
+    [
+     "SchemaB",
+     "input AuthorInput {\n  birthdate: DateTime!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Missing on Base",
+   "code": "EXTERNAL_MISSING_ON_BASE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  id: ID\n  name: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Product {\n  id: ID\n  name: String @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Missing on Base",
+   "code": "EXTERNAL_MISSING_ON_BASE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  id: ID\n}"
+    ],
+    [
+     "SchemaB",
+     "type Product {\n  id: ID\n  name: String @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Type Mismatch",
+   "code": "EXTERNAL_TYPE_MISMATCH",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  name: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Product {\n  name: String @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "External Type Mismatch",
+   "code": "EXTERNAL_TYPE_MISMATCH",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product {\n  name: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type Product {\n  name: ProductName @external\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override Source Has Override",
+   "code": "OVERRIDE_SOURCE_HAS_OVERRIDE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Bill {\n  id: ID!\n  amount: Int\n}"
+    ],
+    [
+     "SchemaB",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaA\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override Source Has Override",
+   "code": "OVERRIDE_SOURCE_HAS_OVERRIDE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaB\")\n}"
+    ],
+    [
+     "SchemaB",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaA\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override Source Has Override",
+   "code": "OVERRIDE_SOURCE_HAS_OVERRIDE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"B\")\n}"
+    ],
+    [
+     "SchemaB",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"C\")\n}"
+    ],
+    [
+     "SchemaC",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"A\")\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Override Source Has Override",
+   "code": "OVERRIDE_SOURCE_HAS_OVERRIDE",
+   "kind": "counter-example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaC\")\n}"
+    ],
+    [
+     "SchemaB",
+     "type Bill {\n  id: ID!\n  amount: Int @override(from: \"SchemaC\")\n}"
+    ],
+    [
+     "SchemaC",
+     "type Bill {\n  id: ID!\n  amount: Int\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Field Sharing",
+   "code": "INVALID_FIELD_SHARING",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  username: String\n  fullName: String @shareable\n}"
+    ],
+    [
+     "SchemaB",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String @shareable\n  email: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Field Sharing",
+   "code": "INVALID_FIELD_SHARING",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String @override(from: \"B\")\n}"
+    ],
+    [
+     "SchemaB",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Field Sharing",
+   "code": "INVALID_FIELD_SHARING",
+   "kind": "example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String @external\n}"
+    ],
+    [
+     "SchemaB",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Invalid Field Sharing",
+   "code": "INVALID_FIELD_SHARING",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  fullName: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Reference To Inaccessible Type",
+   "code": "REFERENCE_TO_INACCESSIBLE_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input Input1 {\n  field1: String!\n  field2: Input2\n}\n\ninput Input2 {\n  field3: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Reference To Inaccessible Type",
+   "code": "REFERENCE_TO_INACCESSIBLE_TYPE",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "input Input1 {\n  field1: String!\n  field2: Input2 @inaccessible\n}\n\ninput Input2 @inaccessible {\n  field3: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Reference To Inaccessible Type",
+   "code": "REFERENCE_TO_INACCESSIBLE_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input Input1 {\n  field1: String!\n  field2: Input2!\n}\n\ninput Input2 @inaccessible {\n  field3: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Reference To Internal Type",
+   "code": "REFERENCE_TO_INTERNAL_TYPE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Object1 {\n  field1: String!\n  field2: Object2\n}\n\ntype Object2 {\n  field3: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Reference To Internal Type",
+   "code": "REFERENCE_TO_INTERNAL_TYPE",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Object1 {\n  field1: String!\n  field2: Object2 @internal\n}\n\ntype Object2 @internal {\n  field3: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Reference To Internal Type",
+   "code": "REFERENCE_TO_INTERNAL_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Object1 {\n  field1: String!\n  field2: Object2!\n}\n\ntype Object2 @internal {\n  field3: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Empty Merged Object Type",
+   "code": "EMPTY_MERGED_OBJECT_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Author {\n  name: String @inaccessible\n  registered: Boolean\n}"
+    ],
+    [
+     "SchemaB",
+     "type Author {\n  name: String\n  registered: Boolean @inaccessible\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Empty Merged Interface Type",
+   "code": "EMPTY_MERGED_INTERFACE_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Product {\n  name: String\n  price: Int @inaccessible\n}"
+    ],
+    [
+     "SchemaB",
+     "interface Product {\n  name: String @inaccessible\n  price: Int\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Implemented by Inaccessible",
+   "code": "IMPLEMENTED_BY_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Node {\n  id: ID!\n}\n\ntype User implements Node {\n  id: ID! @inaccessible\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Interface Field No Implementation",
+   "code": "INTERFACE_FIELD_NO_IMPLEMENTATION",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface User {\n  id: ID!\n  name: String!\n  email: String\n}\n\ntype RegisteredUser implements User {\n  id: ID!\n  name: String!\n  email: String\n  lastLogin: DateTime\n}"
+    ],
+    [
+     "SchemaB",
+     "interface User {\n  id: ID!\n  name: String!\n  email: String\n}\n\ntype GuestUser implements User {\n  id: ID!\n  name: String!\n  email: String\n  temporaryCartId: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Interface Field No Implementation",
+   "code": "INTERFACE_FIELD_NO_IMPLEMENTATION",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface User {\n  id: ID!\n  name: String!\n  email: String\n}\n\ntype RegisteredUser implements User {\n  id: ID!\n  name: String!\n  email: String\n  lastLogin: DateTime\n}"
+    ],
+    [
+     "SchemaB",
+     "interface User {\n  id: ID!\n  name: String!\n}\n\ntype GuestUser implements User {\n  id: ID!\n  name: String!\n  temporaryCartId: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Interface Field Argument No Implementation",
+   "code": "INTERFACE_FIELD_ARGUMENT_NO_IMPLEMENTATION",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "interface Account {\n  id: ID!\n  displayName(locale: String): String\n}\n\ntype User implements Account {\n  id: ID!\n  displayName(locale: String): String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Interface Field Argument No Implementation",
+   "code": "INTERFACE_FIELD_ARGUMENT_NO_IMPLEMENTATION",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  displayName(locale: String @require(field: \"preferredLocale\")): String\n}"
+    ],
+    [
+     "SchemaB",
+     "interface Account {\n  id: ID!\n  displayName(locale: String): String\n}\n\ntype User implements Account @key(fields: \"id\") {\n  id: ID!\n  displayName(locale: String): String\n  preferredLocale: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Empty Merged Input Object Type",
+   "code": "EMPTY_MERGED_INPUT_OBJECT_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  name: String @inaccessible\n  paperback: Boolean\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  name: String\n  paperback: Boolean @inaccessible\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Empty Merged Input Object Type",
+   "code": "EMPTY_MERGED_INPUT_OBJECT_TYPE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  paperback: Boolean\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Non-Null Input Fields cannot be inaccessible",
+   "code": "NON_NULL_INPUT_FIELD_IS_INACCESSIBLE",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  author: String!\n  age: Int @inaccessible\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  author: String!\n  age: Int\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Non-Null Input Fields cannot be inaccessible",
+   "code": "NON_NULL_INPUT_FIELD_IS_INACCESSIBLE",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  author: String!\n  age: Int\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  author: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Non-Null Input Fields cannot be inaccessible",
+   "code": "NON_NULL_INPUT_FIELD_IS_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  author: String!\n  age: Int!\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  author: String!\n  age: Int @inaccessible\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Non-Null Input Fields cannot be inaccessible",
+   "code": "NON_NULL_INPUT_FIELD_IS_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "input BookFilter {\n  author: String!\n  age: Int!\n}"
+    ],
+    [
+     "SchemaB",
+     "input BookFilter {\n  author: String!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Empty Merged Enum Type",
+   "code": "EMPTY_MERGED_ENUM_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "enum DeliveryStatus {\n  PENDING @inaccessible\n  DELIVERED\n}"
+    ],
+    [
+     "SchemaB",
+     "enum DeliveryStatus {\n  PENDING\n  DELIVERED @inaccessible\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Enum Type Default Value Inaccessible",
+   "code": "ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  field(arg: Enum1 = FOO): [Baz!]!\n}\n\ninput Input1 {\n  field: Enum1 = FOO\n}\n\nenum Enum1 {\n  FOO @inaccessible\n  BAR\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Enum Type Default Value Inaccessible",
+   "code": "ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  field(arg: Input1 = { field1: FOO }): [Baz!]!\n}\n\ninput Input1 {\n  field1: Enum1\n  field2: Input2 = { field3: FOO }\n}\n\ninput Input2 {\n  field3: Enum1\n}\n\nenum Enum1 {\n  FOO @inaccessible\n  BAR\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Enum Type Default Value Inaccessible",
+   "code": "ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE",
+   "kind": "counter-example",
+   "index": 2,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  field(arg: [Enum1] = [FOO]): [Baz!]!\n}\n\ninput Input1 {\n  field: [Enum1] = [FOO]\n}\n\nenum Enum1 {\n  FOO @inaccessible\n  BAR\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Empty Merged Union Type",
+   "code": "EMPTY_MERGED_UNION_TYPE",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "union SearchResult = User | Product\n\ntype User @inaccessible {\n  id: ID!\n}\n\ntype Product {\n  id: ID!\n}"
+    ],
+    [
+     "SchemaB",
+     "union SearchResult = User | Product\n\ntype User {\n  id: ID!\n}\n\ntype Product @inaccessible {\n  id: ID!\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Fields",
+   "code": "IS_INVALID_FIELDS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  personById(id: ID! @is(field: \"id\")): Person @lookup\n}\n\ntype Person {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Is Invalid Fields",
+   "code": "IS_INVALID_FIELDS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Query {\n  personById(id: ID! @is(field: \"unknownField\")): Person @lookup\n}\n\ntype Person {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Fields",
+   "code": "REQUIRE_INVALID_FIELDS",
+   "kind": "example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  profile(name: String @require(field: \"name\")): Profile\n}\n\ntype Profile {\n  id: ID!\n  name: String\n}"
+    ],
+    [
+     "SchemaB",
+     "type User @key(fields: \"id\") {\n  id: ID!\n  name: String\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Fields",
+   "code": "REQUIRE_INVALID_FIELDS",
+   "kind": "counter-example",
+   "index": 0,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Book {\n  id: ID!\n  pages(pageSize: Int @require(field: \"unknownField\")): Int\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Fields",
+   "code": "REQUIRE_INVALID_FIELDS",
+   "kind": "counter-example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Book {\n  id: ID!\n  size: Int\n  pages(pageSize: Int @require(field: \"size\")): Int\n}"
+    ]
+   ]
+  },
+  {
+   "rule": "Require Invalid Fields",
+   "code": "REQUIRE_INVALID_FIELDS",
+   "kind": "example",
+   "index": 1,
+   "schemas": [
+    [
+     "SchemaA",
+     "type Product @key(fields: \"id\") {\n  id: ID!\n  shippingCost(\n    weight: Float @require(field: \"weight(unit: IMPERIAL)\")\n  ): Currency\n}"
+    ],
+    [
+     "SchemaB",
+     "type Product @key(fields: \"id\") {\n  id: ID!\n  weight(unit: WeightUnit!): Float\n}"
+    ]
+   ]
+  }
+ ]
+}

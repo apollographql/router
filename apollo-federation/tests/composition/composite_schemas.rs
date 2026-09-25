@@ -981,3 +981,239 @@ mod mixed_dialect_detection {
         assert!(errors[0].1.contains("reviewCount"), "{errors:#?}");
     }
 }
+
+/// Conformance corpus: the example and counter-example of every validation rule in the GraphQL
+/// Federation specification's composition section, composed as source schemas.
+///
+/// The snapshot is the known-gaps report: which examples compose, and which counter-examples fail
+/// with the rule's code. Codes are compared after mapping the specification's names to the
+/// federation codes that implement the same rule (composition keeps federation's names). A
+/// divergence is not necessarily a bug: many examples break another rule of the specification
+/// (most often by sharing fields without `@shareable`), and federation's merge rules are kept on
+/// purpose. Read each against the rule before changing composition.
+///
+/// Regenerate the fixture from a checkout of the specification with
+/// `python3 fixtures/extract_spec_examples.py <spec-dir> fixtures/graphql_federation_spec_examples.json`.
+mod spec_examples {
+    use std::collections::BTreeSet;
+
+    use apollo_federation::composition::CompositionOptions;
+
+    use super::*;
+
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        source: String,
+        cases: Vec<Case>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Case {
+        rule: String,
+        code: String,
+        kind: String,
+        index: usize,
+        schemas: Vec<(String, String)>,
+    }
+
+    /// The federation codes that implement a specification code (composition keeps federation's
+    /// names). A few rules are reported by one of several federation codes, depending on where
+    /// federation detects the problem.
+    fn federation_codes(spec_code: &str) -> Vec<&str> {
+        match spec_code {
+            "UNSATISFIABLE_QUERY_PATH" => vec!["SATISFIABILITY_ERROR"],
+            // An object field whose type is a scalar in another schema is also a kind mismatch.
+            "OUTPUT_FIELD_TYPES_NOT_MERGEABLE" => vec!["FIELD_TYPE_MISMATCH", "TYPE_KIND_MISMATCH"],
+            "FIELD_ARGUMENT_TYPES_NOT_MERGEABLE" => vec!["FIELD_ARGUMENT_TYPE_MISMATCH"],
+            "INPUT_FIELD_TYPES_NOT_MERGEABLE" => vec!["FIELD_TYPE_MISMATCH"],
+            "ENUM_VALUES_MISMATCH" => vec!["ENUM_VALUE_MISMATCH"],
+            // A type whose elements are all inaccessible.
+            "EMPTY_MERGED_INPUT_OBJECT_TYPE" => {
+                vec!["EMPTY_MERGED_INPUT_TYPE", "ONLY_INACCESSIBLE_CHILDREN"]
+            }
+            "EMPTY_MERGED_ENUM_TYPE"
+            | "EMPTY_MERGED_INTERFACE_TYPE"
+            | "EMPTY_MERGED_OBJECT_TYPE"
+            | "EMPTY_MERGED_UNION_TYPE" => vec![spec_code, "ONLY_INACCESSIBLE_CHILDREN"],
+            "OVERRIDE_FROM_SELF" => vec!["OVERRIDE_FROM_SELF_ERROR"],
+            "EXTERNAL_OVERRIDE_COLLISION" => vec![
+                "EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE",
+                "OVERRIDE_COLLISION_WITH_ANOTHER_DIRECTIVE",
+            ],
+            "EXTERNAL_PROVIDES_COLLISION" | "EXTERNAL_REQUIRE_COLLISION" => {
+                vec!["EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE"]
+            }
+            "KEY_FIELDS_HAS_ARGUMENTS" => vec!["KEY_FIELDS_HAS_ARGS"],
+            "PROVIDES_FIELDS_HAS_ARGUMENTS" => vec!["PROVIDES_FIELDS_HAS_ARGS"],
+            "KEY_DIRECTIVE_IN_FIELDS_ARGUMENT" => vec!["KEY_DIRECTIVE_IN_FIELDS_ARG"],
+            "PROVIDES_DIRECTIVE_IN_FIELDS_ARGUMENT" => vec!["PROVIDES_DIRECTIVE_IN_FIELDS_ARG"],
+            "FIELD_WITH_MISSING_REQUIRED_ARGUMENT" => {
+                vec!["REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH"]
+            }
+            "PROVIDES_ON_NON_COMPOSITE_FIELD" => vec!["PROVIDES_ON_NON_OBJECT_FIELD"],
+            "REFERENCE_TO_INACCESSIBLE_TYPE" => vec!["REFERENCED_INACCESSIBLE"],
+            // A non-null input field missing from a schema is also inaccessible in the merge.
+            "NON_NULL_INPUT_FIELD_IS_INACCESSIBLE" => vec![
+                "REQUIRED_INACCESSIBLE",
+                "REQUIRED_INPUT_FIELD_MISSING_IN_SOME_SUBGRAPH",
+            ],
+            "ENUM_TYPE_DEFAULT_VALUE_INACCESSIBLE" => vec!["DEFAULT_VALUE_USES_INACCESSIBLE"],
+            "INTERFACE_FIELD_NO_IMPLEMENTATION" => vec!["INTERFACE_FIELD_NO_IMPLEM"],
+            other => vec![other],
+        }
+    }
+
+    const BUILT_IN_SCALARS: [&str; 5] = ["Int", "Float", "String", "Boolean", "ID"];
+
+    /// The names of the types `sdl` defines, and of those it references (none if unparseable).
+    fn type_names(sdl: &str) -> (BTreeSet<String>, BTreeSet<String>) {
+        use apollo_compiler::ast::Definition;
+        use apollo_compiler::ast::Type;
+
+        fn named(ty: &Type) -> &str {
+            match ty {
+                Type::Named(n) | Type::NonNullNamed(n) => n.as_str(),
+                Type::List(inner) | Type::NonNullList(inner) => named(inner),
+            }
+        }
+        let mut defined = BTreeSet::new();
+        let mut referenced = BTreeSet::new();
+        let Ok(document) = apollo_compiler::ast::Document::parse(sdl, "example.graphql") else {
+            return (defined, referenced);
+        };
+        for definition in &document.definitions {
+            if let Some(name) = definition.name() {
+                defined.insert(name.to_string());
+            }
+            let (fields, arguments_of_fields, input_fields) = match definition {
+                Definition::ObjectTypeDefinition(d) => (Some(&d.fields), true, None),
+                Definition::ObjectTypeExtension(d) => (Some(&d.fields), true, None),
+                Definition::InterfaceTypeDefinition(d) => (Some(&d.fields), true, None),
+                Definition::InterfaceTypeExtension(d) => (Some(&d.fields), true, None),
+                Definition::InputObjectTypeDefinition(d) => (None, false, Some(&d.fields)),
+                Definition::InputObjectTypeExtension(d) => (None, false, Some(&d.fields)),
+                Definition::UnionTypeDefinition(d) => {
+                    referenced.extend(d.members.iter().map(|m| m.to_string()));
+                    (None, false, None)
+                }
+                _ => (None, false, None),
+            };
+            for field in fields.into_iter().flatten() {
+                referenced.insert(named(&field.ty).to_string());
+                if arguments_of_fields {
+                    referenced.extend(field.arguments.iter().map(|a| named(&a.ty).to_string()));
+                }
+            }
+            for field in input_fields.into_iter().flatten() {
+                referenced.insert(named(&field.ty).to_string());
+            }
+        }
+        (defined, referenced)
+    }
+
+    fn outcome(case: &Case) -> String {
+        let mut schemas = case.schemas.clone();
+        // Examples name schemas "SchemaA" or just "A"; subgraphs are named "SchemaA".
+        for (_, sdl) in &mut schemas {
+            for letter in 'A'..='H' {
+                *sdl = sdl.replace(
+                    &format!("from: \"{letter}\""),
+                    &format!("from: \"Schema{letter}\""),
+                );
+            }
+        }
+        // Many examples show only the types a rule is about; give the first schema a query root
+        // when none has one, so that the example is judged on its rule.
+        if !schemas.iter().any(|(_, sdl)| sdl.contains("type Query"))
+            && let Some((_, sdl)) = schemas.first_mut()
+        {
+            sdl.push_str("\ntype Query { specExampleRoot: Int }");
+        }
+        // Many also leave out types that play no part in the rule. Stub those as scalars (unless
+        // another schema of the example defines them), except for the rule about undefined types.
+        if case.code != "INVALID_GRAPHQL" {
+            let names: Vec<_> = schemas.iter().map(|(_, sdl)| type_names(sdl)).collect();
+            let defined_anywhere: BTreeSet<&String> =
+                names.iter().flat_map(|(defined, _)| defined).collect();
+            for ((_, sdl), (defined, referenced)) in schemas.iter_mut().zip(&names) {
+                for name in referenced {
+                    if !defined.contains(name)
+                        && !defined_anywhere.contains(name)
+                        && !BUILT_IN_SCALARS.contains(&name.as_str())
+                    {
+                        sdl.push_str(&format!("\nscalar {name}"));
+                    }
+                }
+            }
+        }
+        let subgraphs: Result<Vec<_>, _> = schemas
+            .iter()
+            .map(|(name, sdl)| {
+                Subgraph::parse(name, &format!("http://{}", name.to_lowercase()), sdl)
+            })
+            .collect();
+        let result = match subgraphs {
+            Ok(subgraphs) => apollo_federation::composition::compose_source_schemas(
+                subgraphs,
+                CompositionOptions::default(),
+            )
+            .map(|supergraph| {
+                supergraph
+                    .hints()
+                    .iter()
+                    .map(|h| h.code().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|failure| {
+                let mut codes: Vec<String> = failure
+                    .errors
+                    .iter()
+                    .map(|e| e.code().definition().code().to_string())
+                    .collect();
+                codes.sort();
+                codes.dedup();
+                codes
+            }),
+            Err(_) => Err(vec!["PARSE_ERROR".to_string()]),
+        };
+        let expected = federation_codes(&case.code);
+        let is_expected = |codes: &[String]| codes.iter().any(|c| expected.contains(&c.as_str()));
+        match (case.kind.as_str(), result) {
+            // A warning rule's counter-example composes, with the warning as a hint.
+            ("example", Ok(hints)) if is_expected(&hints) => {
+                format!("GAP: warns with {}", hints.join(", "))
+            }
+            ("example", Ok(_)) => "ok".to_string(),
+            ("example", Err(codes)) => format!("GAP: fails with {}", codes.join(", ")),
+            (_, Ok(hints)) if is_expected(&hints) => "ok".to_string(),
+            (_, Ok(_)) => "GAP: composes".to_string(),
+            (_, Err(codes)) if is_expected(&codes) => "ok".to_string(),
+            (_, Err(codes)) => format!("GAP: fails with {}", codes.join(", ")),
+        }
+    }
+
+    #[test]
+    fn composition_rules() {
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "fixtures/graphql_federation_spec_examples.json"
+        ))
+        .expect("fixture");
+        let mut report = format!("Source: {}\n\n", fixture.source);
+        let mut passing = 0;
+        for case in &fixture.cases {
+            let outcome = outcome(case);
+            if outcome == "ok" {
+                passing += 1;
+            }
+            report.push_str(&format!(
+                "{} [{}] {} #{}: {}\n",
+                case.rule, case.code, case.kind, case.index, outcome
+            ));
+        }
+        report.push_str(&format!(
+            "\n{passing} of {} cases conform\n",
+            fixture.cases.len()
+        ));
+        insta::assert_snapshot!(report);
+    }
+}
