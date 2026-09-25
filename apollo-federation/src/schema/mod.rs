@@ -93,6 +93,24 @@ pub(crate) fn compute_subgraph_metadata(
 }
 pub(crate) mod type_and_directive_specification;
 
+/// Directives the GraphQL spec defines.
+///
+/// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
+/// the end user redefined these directives, we consider them built-in.
+///
+/// Matched by name rather than by `Node::is_built_in`, which only reports whether a
+/// definition came from `FileId::BUILT_IN`: a schema that spells one of these out
+/// explicitly gets a definition that check no longer recognises.
+pub(crate) static GRAPHQL_BUILT_IN_DIRECTIVES: [&str; 7] = [
+    "skip",
+    "include",
+    "deprecated",
+    "specifiedBy",
+    "defer",
+    "stream",
+    "oneOf",
+];
+
 /// A GraphQL schema with federation data.
 #[derive(Clone, Debug)]
 pub struct FederationSchema {

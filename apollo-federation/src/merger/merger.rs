@@ -76,6 +76,7 @@ use crate::merger::merge_field::JoinFieldBuilder;
 use crate::merger::merge_links::SupergraphDirectiveInfo;
 use crate::merger::merge_links::SupergraphInfo;
 use crate::schema::FederationSchema;
+use crate::schema::GRAPHQL_BUILT_IN_DIRECTIVES;
 use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -117,17 +118,6 @@ static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
         Identity::connect_identity(),
     ]
 });
-
-/// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
-/// the end user redefined these directives, we consider them built-in for merging.
-static BUILT_IN_DIRECTIVES: [&str; 6] = [
-    "skip",
-    "include",
-    "deprecated",
-    "specifiedBy",
-    "defer",
-    "stream",
-];
 
 // Patterns for parsing @override labels
 static LABEL_REGEX: LazyLock<regex::Regex> =
@@ -1079,7 +1069,7 @@ impl Merger {
 
         self.merged_federation_directive_names
             .contains(directive.name.as_str())
-            || BUILT_IN_DIRECTIVES.contains(&directive.name.as_str())
+            || GRAPHQL_BUILT_IN_DIRECTIVES.contains(&directive.name.as_str())
     }
 
     pub(in crate::merger) fn is_merged_directive_definition(
@@ -1094,7 +1084,7 @@ impl Merger {
             return true;
         }
 
-        !BUILT_IN_DIRECTIVES.contains(&definition.name.as_str())
+        !GRAPHQL_BUILT_IN_DIRECTIVES.contains(&definition.name.as_str())
             && definition
                 .locations
                 .iter()
