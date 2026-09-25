@@ -547,24 +547,21 @@ impl Executable {
                     "--config and APOLLO_ROUTER_CONFIG_PATH cannot be used when a custom configuration source is in use"
                 ));
             }
-            (Some(config), None) => config,
+            (Some(config), None) => Some(config),
+            // Without a file, the router parses an empty document, so overrides and `--dev` apply.
             #[allow(clippy::blocks_in_conditions)]
-            _ => opt
-                .config_path
-                .as_ref()
-                .map(|path| {
-                    let path = if path.is_relative() {
-                        current_directory.join(path)
-                    } else {
-                        path.to_path_buf()
-                    };
+            _ => opt.config_path.as_ref().map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
 
-                    ConfigurationSource::File {
-                        path,
-                        watch: opt.hot_reload,
-                    }
-                })
-                .unwrap_or_default(),
+                ConfigurationSource::File {
+                    path,
+                    watch: opt.hot_reload,
+                }
+            }),
         };
 
         let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {
@@ -788,7 +785,7 @@ impl Executable {
 
         let router = RouterHttpServer::builder()
             .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
-            .configuration(configuration)
+            .and_configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)

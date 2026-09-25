@@ -47,6 +47,8 @@ pub enum ConfigurationSource {
     },
 }
 
+/// The default configuration, without the process's command-line and environment overrides or
+/// `--dev`. A router started without a configuration source parses an empty document instead.
 impl Default for ConfigurationSource {
     fn default() -> Self {
         ConfigurationSource::Static(Default::default())
@@ -54,6 +56,30 @@ impl Default for ConfigurationSource {
 }
 
 impl ConfigurationSource {
+    /// The events for a router started without a configuration source. An empty document is
+    /// parsed as a file would be, so command-line and environment overrides and `--dev` apply.
+    pub(crate) fn empty_document_stream(
+        uplink_config: Option<UplinkConfig>,
+    ) -> impl Stream<Item = Event> {
+        Self::parse_empty_document(ConfigurationParser::new(), uplink_config)
+    }
+
+    fn parse_empty_document(
+        parser: Result<ConfigurationParser, crate::configuration::ConfigurationError>,
+        uplink_config: Option<UplinkConfig>,
+    ) -> impl Stream<Item = Event> {
+        match parser.and_then(|mut parser| parser.parse("")) {
+            Ok(mut configuration) => {
+                configuration.uplink = uplink_config;
+                stream::iter(vec![UpdateConfiguration(Arc::new(configuration))])
+            }
+            Err(err) => {
+                tracing::error!("{}", err);
+                stream::iter(vec![NoMoreConfiguration])
+            }
+        }
+    }
+
     /// Convert this config into a stream regardless of if is static or not. Allows for unified handling later.
     pub(crate) fn into_stream(
         self,
@@ -193,13 +219,69 @@ enum ReadConfigError {
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
+    use std::net::SocketAddr;
 
     use futures::StreamExt;
 
     use super::*;
+    use crate::configuration::ListenAddr;
+    use crate::configuration::expansion::Expansion;
+    use crate::configuration::expansion::FlagValue;
+    use crate::configuration::expansion::Override;
+    use crate::configuration::expansion::ValueType;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
     use crate::uplink::UplinkConfig;
+
+    fn flag_override(path: &str, value: &str) -> Override {
+        Override::builder()
+            .config_path(path)
+            .flag_value(FlagValue::new("--listen", value))
+            .value_type(ValueType::String)
+            .build()
+    }
+
+    /// Without a configuration source, the router parses an empty document, so `--listen` and
+    /// `--dev` apply as they would with an empty file.
+    #[tokio::test]
+    async fn empty_document_applies_listen_override_and_dev_mode() {
+        let expansion = Expansion::builder()
+            .override_config(flag_override("supergraph.listen", "127.0.0.1:4567"))
+            .dev_mode(true)
+            .build();
+        let events: Vec<Event> = ConfigurationSource::parse_empty_document(
+            ConfigurationParser::with_inputs(expansion),
+            None,
+        )
+        .collect()
+        .await;
+
+        let [UpdateConfiguration(config)] = events.as_slice() else {
+            panic!("expected one configuration update, got {events:?}");
+        };
+        let listen: SocketAddr = "127.0.0.1:4567".parse().unwrap();
+        assert_eq!(config.supergraph.listen, ListenAddr::from(listen));
+        assert!(
+            config.supergraph.introspection,
+            "--dev enables introspection"
+        );
+        assert!(config.sandbox.enabled, "--dev enables the sandbox");
+    }
+
+    #[tokio::test]
+    async fn empty_document_with_an_invalid_override_ends_configuration() {
+        let expansion = Expansion::builder()
+            .override_config(flag_override("unknown_section", "value"))
+            .build();
+        let events: Vec<Event> = ConfigurationSource::parse_empty_document(
+            ConfigurationParser::with_inputs(expansion),
+            None,
+        )
+        .collect()
+        .await;
+
+        assert!(matches!(events.as_slice(), [NoMoreConfiguration]));
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_watching() {

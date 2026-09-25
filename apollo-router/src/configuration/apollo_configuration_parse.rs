@@ -200,7 +200,12 @@ impl ConfigurationParser {
     /// # Errors
     /// Returns invalid expansion-mode configuration or schema compilation errors.
     pub fn new() -> Result<Self, ConfigurationError> {
-        Ok(ExternalValues::from(Expansion::default()?).into_parser()?)
+        Self::with_inputs(Expansion::default()?)
+    }
+
+    /// Prepares configuration parsing with the given environment and command-line inputs.
+    pub(crate) fn with_inputs(expansion: Expansion) -> Result<Self, ConfigurationError> {
+        Ok(ExternalValues::from(expansion).into_parser()?)
     }
 
     /// Parses configuration with within-major migrations and fresh file expansion values.
