@@ -89,10 +89,14 @@ impl FetchNode {
             input_rewrites: _,
             output_rewrites: _,
             context_rewrites: _,
+            entity_lookup,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
             state.write(format_args!(", id: {id:?}"))?;
+        }
+        if let Some(entity_lookup) = entity_lookup {
+            state.write(format_args!(", lookup: {:?}", entity_lookup.path.join(".")))?;
         }
         state.write(") {")?;
         state.indent()?;
@@ -101,6 +105,12 @@ impl FetchNode {
             write_requires_selections(state, requires)?;
             state.write(" =>")?;
             state.new_line()?;
+        }
+        if let Some(entity_lookup) = entity_lookup {
+            for variable in &entity_lookup.variables {
+                state.write(format_args!("${} = {}", variable.name, variable.value))?;
+                state.new_line()?;
+            }
         }
         write_operation(
             state,

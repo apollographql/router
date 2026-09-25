@@ -27,7 +27,7 @@
 
 mod api_schema;
 pub mod compat;
-pub(crate) mod composite_schemas;
+pub mod composite_schemas;
 pub mod composition;
 pub mod connectors;
 pub mod contract;

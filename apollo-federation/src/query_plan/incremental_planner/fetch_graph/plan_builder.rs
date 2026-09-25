@@ -69,6 +69,9 @@ pub(crate) struct PlanBuildContext<'a> {
     /// When true, generated subgraph operations skip document validation
     /// and selection-set validation (valid by construction).
     pub(crate) skip_validation: bool,
+    /// Lookups of GraphQL Federation source schemas: entity groups into those subgraphs
+    /// materialize as lookup fetches (see `lookup_builder`).
+    pub(crate) lookup_index: &'a crate::composite_schemas::lookup_index::LookupIndex,
 }
 
 /// The slice of the graph one plan covers (the whole graph, the primary
@@ -96,6 +99,12 @@ fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
                 stamp_fetch_id(node, id);
             }
             if let Some(node) = condition.else_clause.as_deref_mut() {
+                stamp_fetch_id(node, id);
+            }
+        }
+        // A lookup group split into one fetch per lookup (see `lookup_builder`).
+        PlanNode::Parallel(parallel) => {
+            for node in &mut parallel.nodes {
                 stamp_fetch_id(node, id);
             }
         }
@@ -667,6 +676,13 @@ impl FetchGraph {
     ) -> Result<Option<(PlanNode, QueryPlanCost)>, FederationError> {
         let node = &self.graph[node_idx];
         let is_entity = matches!(node.kind, FetchGroupKind::Entity { .. });
+        // Entity fetches into a GraphQL Federation source schema call its lookups.
+        if is_entity
+            && node.connector.is_none()
+            && ctx.lookup_index.is_source_schema(&node.subgraph)
+        {
+            return self.lookup_node_to_plan_node(ctx, node_idx);
+        }
         // Entity fetches resolve through _entities on the subgraph's Query
         // root regardless of the surrounding operation; a root hop carries
         // its own kind.
@@ -829,6 +845,7 @@ impl FetchGraph {
                 .cloned()
                 .map(|r| Arc::new(r.into()))
                 .collect(),
+            entity_lookup: None,
         }));
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
@@ -871,7 +888,7 @@ impl FetchGraph {
     /// type condition, say narrowing an interface cast to its runtime
     /// object types, which would desync the operation's entity cases from
     /// the requires/representations built in materialize_entity_inputs.
-    fn finalize_selection(
+    pub(super) fn finalize_selection(
         selection_set: &SelectionSet,
         group_conditions: &Conditions,
         is_entity: bool,
@@ -929,12 +946,27 @@ impl FetchGraph {
         node_idx: NodeIndex,
         parent_type: &CompositeTypeDefinitionPosition,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
+        self.materialize_entity_inputs_filtered(ctx, node_idx, parent_type, |_, _| true)
+    }
+
+    /// [`Self::materialize_entity_inputs`] restricted to the inputs `include` accepts (by incoming
+    /// edge and input index), for a group split into several fetches.
+    pub(super) fn materialize_entity_inputs_filtered(
+        &self,
+        ctx: &PlanBuildContext<'_>,
+        node_idx: NodeIndex,
+        parent_type: &CompositeTypeDefinitionPosition,
+        include: impl Fn(petgraph::stable_graph::EdgeIndex, usize) -> bool,
+    ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let mut per_type: IndexMap<CompositeTypeDefinitionPosition, SelectionSet> =
             IndexMap::default();
         let mut rewrites: Vec<Arc<FetchDataRewrite>> = Vec::new();
 
         for edge in self.graph.edges_directed(node_idx, Direction::Incoming) {
-            for input in &edge.weight().inputs {
+            for (input_index, input) in edge.weight().inputs.iter().enumerate() {
+                if !include(edge.id(), input_index) {
+                    continue;
+                }
                 let input_type: CompositeTypeDefinitionPosition = ctx
                     .supergraph_schema
                     .get_type(input.source_type_name())?
@@ -1001,7 +1033,7 @@ impl FetchGraph {
 
     /// Filter the operation's variable definitions to those actually
     /// referenced by the finalized selection and operation directives.
-    fn collect_used_variable_definitions(
+    pub(super) fn collect_used_variable_definitions(
         context_variables: &[(Name, Node<apollo_compiler::ast::Type>)],
         operation_variable_definitions: &[Node<VariableDefinition>],
         operation_directives: &DirectiveList,
@@ -1046,7 +1078,9 @@ impl FetchGraph {
 
 /// Trim a `SelectionSet` from `apollo_compiler::executable` down to the
 /// router's `requires_selection` format, discarding fragment spreads.
-fn trim_requires(selection_set: &executable::SelectionSet) -> Vec<requires_selection::Selection> {
+pub(super) fn trim_requires(
+    selection_set: &executable::SelectionSet,
+) -> Vec<requires_selection::Selection> {
     selection_set
         .selections
         .iter()
@@ -1071,6 +1105,9 @@ fn trim_requires(selection_set: &executable::SelectionSet) -> Vec<requires_selec
 
 #[cfg(test)]
 mod tests {
+    static EMPTY_LOOKUP_INDEX: std::sync::LazyLock<
+        crate::composite_schemas::lookup_index::LookupIndex,
+    > = std::sync::LazyLock::new(Default::default);
     use apollo_compiler::name;
 
     use super::super::InputContribution;
@@ -1158,6 +1195,7 @@ mod tests {
             operation_counter: 0,
             fetch_id_counter: 0,
             skip_validation: false,
+            lookup_index: &EMPTY_LOOKUP_INDEX,
         };
 
         let err = graph
@@ -1217,6 +1255,7 @@ mod tests {
             operation_counter: 0,
             fetch_id_counter: 0,
             skip_validation: false,
+            lookup_index: &EMPTY_LOOKUP_INDEX,
         };
         assert!(
             graph.to_query_plan_with_defer(&mut ctx, None).is_err(),
@@ -1286,6 +1325,7 @@ mod tests {
             operation_counter: 0,
             fetch_id_counter: 0,
             skip_validation: false,
+            lookup_index: &EMPTY_LOOKUP_INDEX,
         };
 
         let (plan, cost) = graph
@@ -1344,6 +1384,7 @@ mod tests {
             operation_counter: 0,
             fetch_id_counter: 0,
             skip_validation: false,
+            lookup_index: &EMPTY_LOOKUP_INDEX,
         }
     }
 

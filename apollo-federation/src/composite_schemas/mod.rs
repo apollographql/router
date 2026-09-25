@@ -7,6 +7,7 @@
 
 pub(crate) mod cross_schema;
 pub(crate) mod detection;
+pub mod lookup_index;
 pub(crate) mod lookups;
 pub(crate) mod normalize;
 pub(crate) mod validation;

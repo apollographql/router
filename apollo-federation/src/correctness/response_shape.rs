@@ -1248,6 +1248,57 @@ pub fn compute_response_shape_for_entity_fetch_operation(
         .collect()
 }
 
+/// A lookup fetch (GraphQL Federation) resolves one entity per operation: `path` leads from the
+/// root to the lookup field, whose selection set is the entity selection. Returns one response
+/// shape per entity type, as `compute_response_shape_for_entity_fetch_operation` does for
+/// `_entities`. This relies on the lookup returning the entity its arguments identify.
+pub fn compute_response_shape_for_lookup_fetch_operation(
+    operation_doc: &Valid<ExecutableDocument>,
+    schema: &ValidFederationSchema,
+    path: &[String],
+    entity_types: &[Name],
+) -> Result<Vec<ResponseShape>, FederationError> {
+    let (operation, fragment_defs) = get_operation_and_fragment_definitions(operation_doc)?;
+    let mut selection_set = &operation.selection_set;
+    for key in path {
+        let Some(field) = selection_set
+            .selections
+            .iter()
+            .find_map(|selection| match selection {
+                Selection::Field(field) if field.name == key.as_str() && field.alias.is_none() => {
+                    Some(field)
+                }
+                _ => None,
+            })
+        else {
+            bail!("Lookup fetch operation is expected to select \"{key}\" along its lookup path")
+        };
+        selection_set = &field.selection_set;
+    }
+    entity_types
+        .iter()
+        .map(|type_name| {
+            let Some(normalized_type_condition) =
+                NormalizedTypeCondition::from_type_name(type_name.clone(), schema)?
+            else {
+                bail!("Unexpected empty type condition for the entity type: {type_name}")
+            };
+            let context = ResponseShapeContext {
+                schema: schema.clone(),
+                fragment_defs: fragment_defs.clone(),
+                parent_type: type_name.clone(),
+                type_condition: normalized_type_condition,
+                inherited_clause: Clause::default(),
+                current_clause: Clause::default(),
+                skip_introspection: false,
+            };
+            let mut response_shape = ResponseShape::new(type_name.clone());
+            context.process_selection_set_within(&mut response_shape, selection_set)?;
+            Ok(response_shape)
+        })
+        .collect()
+}
+
 fn get_fragment_type_condition(
     fragment_defs: &Arc<FragmentMap>,
     selection: &Selection,

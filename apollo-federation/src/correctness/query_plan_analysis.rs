@@ -17,6 +17,7 @@ use super::response_shape::PossibleDefinitions;
 use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_entity_fetch_operation;
+use super::response_shape::compute_response_shape_for_lookup_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
 use super::response_shape_compare::collect_definitions_for_type_condition;
 use super::response_shape_compare::collect_variants_for_boolean_condition;
@@ -422,15 +423,33 @@ fn interpret_fetch_node(
     let boolean_clause = Clause::from_literals(conditions);
     let mut result = if !fetch.requires.is_empty() {
         // Response shapes per entity selection
-        let response_shapes =
-            compute_response_shape_for_entity_fetch_operation(operation_doc, schema).map_err(
-                |e| {
-                    format!(
-                        "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
-                        format_federation_error(e),
-                    )
-                },
-            )?;
+        let response_shapes = match &fetch.entity_lookup {
+            Some(entity_lookup) => {
+                let entity_types: Vec<Name> = fetch
+                    .requires
+                    .iter()
+                    .filter_map(|selection| match selection {
+                        crate::query_plan::requires_selection::Selection::InlineFragment(
+                            fragment,
+                        ) => fragment.type_condition.clone(),
+                        _ => None,
+                    })
+                    .collect();
+                compute_response_shape_for_lookup_fetch_operation(
+                    operation_doc,
+                    schema,
+                    &entity_lookup.path,
+                    &entity_types,
+                )
+            }
+            None => compute_response_shape_for_entity_fetch_operation(operation_doc, schema),
+        }
+        .map_err(|e| {
+            format!(
+                "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
+                format_federation_error(e),
+            )
+        })?;
 
         // Soundness check
         // TODO: also check `context_rewrites` requirements.
@@ -474,6 +493,16 @@ fn interpret_fetch_node(
     }
     if !fetch.context_rewrites.is_empty() {
         result = remove_context_arguments(&fetch.context_rewrites, &result)?;
+    }
+    // Arguments passed from per-entity lookup variables (`@require` values) are not part of the
+    // client operation.
+    if let Some(entity_lookup) = &fetch.entity_lookup {
+        let variables: HashSet<Name> = entity_lookup
+            .variables
+            .iter()
+            .filter_map(|v| Name::new(&v.name).ok())
+            .collect();
+        result = remove_context_arguments_in_response_shape(&variables, &result);
     }
     Ok(result)
 }
