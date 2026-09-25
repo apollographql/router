@@ -43,8 +43,10 @@ pub(crate) fn validate_key_directives(
         Box::new(DenyFieldsWithArguments::new()),
     ];
 
-    let allow_on_interface =
-        meta.federation_spec_definition().version() >= &Version { major: 2, minor: 3 };
+    let allow_on_interface = meta
+        .federation_spec_definition()
+        .version()
+        .satisfies_federation(&Version { major: 2, minor: 3 });
 
     for key_directive in schema.key_directive_applications()? {
         match key_directive {

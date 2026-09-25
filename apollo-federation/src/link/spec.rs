@@ -120,6 +120,19 @@ impl Version {
 
         self.major == min.major && self.minor >= min.minor && self.minor <= max.minor
     }
+
+    /// Whether this federation version satisfies the provided minimum federation version.
+    ///
+    /// Unlike [`Version::satisfies`], federation versions are cumulative across majors from v2.0
+    /// onwards: federation v3.0 supports everything federation v2.x does. Federation v1 remains a
+    /// separate line, so a fed 1 requirement is only satisfied by a fed 1 version.
+    pub(crate) fn satisfies_federation(&self, required: &Version) -> bool {
+        if required.major < 2 {
+            self.satisfies(required)
+        } else {
+            self >= required
+        }
+    }
 }
 
 /// A `@link` specification url, which identifies a specific version of a specification.
@@ -239,6 +252,29 @@ mod tests {
             Version { major: 2, minor: 3 },
             Version { major: 2, minor: 3 }
         );
+    }
+
+    #[test]
+    fn federation_versions_satisfy_across_majors() {
+        let fed_1_0 = Version { major: 1, minor: 0 };
+        let fed_2_0 = Version { major: 2, minor: 0 };
+        let fed_2_12 = Version {
+            major: 2,
+            minor: 12,
+        };
+        let fed_3_0 = Version { major: 3, minor: 0 };
+
+        assert!(fed_3_0.satisfies_federation(&fed_2_0));
+        assert!(fed_3_0.satisfies_federation(&fed_2_12));
+        assert!(fed_3_0.satisfies_federation(&fed_3_0));
+        assert!(fed_2_12.satisfies_federation(&fed_2_0));
+        assert!(!fed_2_12.satisfies_federation(&fed_3_0));
+        assert!(!fed_1_0.satisfies_federation(&fed_2_0));
+
+        // Fed 1 requirements are only met by fed 1 versions.
+        assert!(fed_1_0.satisfies_federation(&fed_1_0));
+        assert!(!fed_2_0.satisfies_federation(&fed_1_0));
+        assert!(!fed_3_0.satisfies_federation(&fed_1_0));
     }
 
     #[test]

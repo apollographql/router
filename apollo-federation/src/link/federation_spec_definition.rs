@@ -296,7 +296,10 @@ impl FederationSpecDefinition {
         &self,
         schema: &'schema FederationSchema,
     ) -> Result<Option<&'schema Node<DirectiveDefinition>>, FederationError> {
-        if *self.version() < (Version { major: 2, minor: 3 }) {
+        if !self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 3 })
+        {
             return Ok(None);
         }
         self.directive_definition(schema, &FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)?
@@ -314,7 +317,10 @@ impl FederationSpecDefinition {
         &self,
         schema: &FederationSchema,
     ) -> Result<Directive, FederationError> {
-        if *self.version() < (Version { major: 2, minor: 3 }) {
+        if !self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 3 })
+        {
             return Err(SingleFederationError::Internal {
                 message: "Must be using federation >= v2.3 to use interface object".to_owned(),
             }
@@ -872,7 +878,8 @@ impl FederationSpecDefinition {
         DirectiveSpecification::new(
             FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
             &[],
-            self.version().ge(&Version { major: 2, minor: 2 }),
+            self.version()
+                .satisfies_federation(&Version { major: 2, minor: 2 }),
             &[
                 DirectiveLocation::Object,
                 DirectiveLocation::FieldDefinition,
@@ -890,7 +897,10 @@ impl FederationSpecDefinition {
             },
             composition_strategy: None,
         }];
-        if self.version().satisfies(&Version { major: 2, minor: 7 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 7 })
+        {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
@@ -986,7 +996,10 @@ impl SpecDefinition for FederationSpecDefinition {
             Box::new(Self::external_directive_specification()),
         ];
         // Federation 2.3+ use tag spec v0.3, otherwise use v0.2
-        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 3 })
+        {
             if let Some(tag_spec) = TAG_VERSIONS.find(&Version { major: 0, minor: 3 }) {
                 specs.extend(tag_spec.directive_specs());
             }
@@ -1011,17 +1024,26 @@ impl SpecDefinition for FederationSpecDefinition {
 
         specs.push(Box::new(self.override_directive_specification()));
 
-        if self.version().satisfies(&Version { major: 2, minor: 1 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 1 })
+        {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 3 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 3 })
+        {
             specs.push(Box::new(
                 Self::interface_object_directive_directive_specification(),
             ));
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 5 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 5 })
+        {
             if let Some(auth_spec) = AUTHENTICATED_VERSIONS.find(&Version { major: 0, minor: 1 }) {
                 specs.extend(auth_spec.directive_specs());
             }
@@ -1032,26 +1054,33 @@ impl SpecDefinition for FederationSpecDefinition {
             }
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 6 })
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 6 })
             && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 })
         {
             specs.extend(policy_spec.directive_specs());
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 8 })
+        {
             let context_spec_definitions =
                 ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
                     .directive_specs();
             specs.extend(context_spec_definitions);
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 9 })
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 9 })
             && let Some(cost_spec) = COST_VERSIONS.find(&Version { major: 0, minor: 1 })
         {
             specs.extend(cost_spec.directive_specs());
         }
 
-        if self.version().satisfies(&Version {
+        if self.version().satisfies_federation(&Version {
             major: 2,
             minor: 12,
         }) {
@@ -1067,20 +1096,27 @@ impl SpecDefinition for FederationSpecDefinition {
                 name: FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC,
             })];
 
-        if self.version().satisfies(&Version { major: 2, minor: 5 })
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 5 })
             && let Some(requires_scopes_spec) =
                 REQUIRES_SCOPES_VERSIONS.find(&Version { major: 0, minor: 1 })
         {
             type_specs.extend(requires_scopes_spec.type_specs());
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 6 })
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 6 })
             && let Some(policy_spec) = POLICY_VERSIONS.find(&Version { major: 0, minor: 1 })
         {
             type_specs.extend(policy_spec.type_specs());
         }
 
-        if self.version().satisfies(&Version { major: 2, minor: 8 }) {
+        if self
+            .version()
+            .satisfies_federation(&Version { major: 2, minor: 8 })
+        {
             type_specs.extend(
                 ContextSpecDefinition::new(self.version().clone(), Version { major: 2, minor: 8 })
                     .type_specs(),
@@ -1172,8 +1208,8 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
             minor: 15,
         }));
         definitions.add(FederationSpecDefinition::new(Version {
-            major: 2,
-            minor: 16,
+            major: 3,
+            minor: 0,
         }));
         definitions
     });

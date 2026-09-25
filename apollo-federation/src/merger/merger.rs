@@ -273,9 +273,6 @@ impl Merger {
         if let Some(spec) = spec_with_max_implied_version
             && spec
                 .minimum_federation_version()
-                .satisfies(linked_federation_version)
-            && spec
-                .minimum_federation_version()
                 .gt(linked_federation_version)
         {
             let locations = subgraph

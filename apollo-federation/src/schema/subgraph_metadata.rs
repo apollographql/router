@@ -86,7 +86,7 @@ impl SubgraphMetadata {
     pub(crate) fn is_fed_2_schema(&self) -> bool {
         self.federation_spec_definition()
             .version()
-            .satisfies(&Version { major: 2, minor: 0 })
+            .satisfies_federation(&Version { major: 2, minor: 0 })
     }
 
     pub(crate) fn is_field_external(&self, field: &FieldDefinitionPosition) -> bool {
@@ -405,7 +405,7 @@ impl ExternalMetadata {
         // added in places where it should be.
         let is_fed2 = federation_spec_definition
             .version()
-            .satisfies(&Version { major: 2, minor: 0 });
+            .satisfies_federation(&Version { major: 2, minor: 0 });
         let fields_on_external_types = if is_fed2 {
             Self::collect_fields_on_external_types(federation_spec_definition, schema)?
         } else {
