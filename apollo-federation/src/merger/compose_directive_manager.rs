@@ -24,6 +24,7 @@ use crate::link::metadata::LinkedElement;
 use crate::link::policy_spec_definition::POLICY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::requires_scopes_spec_definition::REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::link::spec_registry::APOLLO_SPEC_DOMAIN;
 use crate::merger::error_reporter::ErrorReporter;
 use crate::merger::hints::HintCode;
@@ -537,6 +538,12 @@ impl ComposeDirectiveManager {
         let mut any_composed = false;
         // Whether a hint has been raised around major version mismatch yet.
         let mut major_mismatch_hint_raised = false;
+        // Federation versions are cumulative from v2.0 onwards (v3.0 supports everything v2.x
+        // does), so federation v2.x and v3.x links are not a major version mismatch.
+        let is_federation = *identity == Identity::federation_identity();
+        let majors_compatible = |a: &Version, b: &Version| {
+            a.major == b.major || (is_federation && a.major >= 2 && b.major >= 2)
+        };
         for subgraph in subgraphs {
             let Some(link) = subgraph.schema().metadata()?.for_identity(identity) else {
                 continue;
@@ -550,7 +557,7 @@ impl ComposeDirectiveManager {
                 any_composed = composed;
                 continue;
             };
-            if previous_latest_link.url.version.major != link.url.version.major {
+            if !majors_compatible(&previous_latest_link.url.version, &link.url.version) {
                 // If both subgraphs use @composeDirective with differing major versions, we can't
                 // reconcile the incompatible directive semantics so we immediately error and unset
                 // the latest link.
@@ -597,9 +604,9 @@ impl ComposeDirectiveManager {
                 continue;
             }
             // At this point, we know `any_composed` is equal to `composed`, so we just track the
-            // current link provided its minor version isn't earlier than that of the previous
-            // latest link.
-            if previous_latest_link.url.version.minor <= link.url.version.minor {
+            // current link provided its version isn't earlier than that of the previous latest
+            // link.
+            if previous_latest_link.url.version <= link.url.version {
                 *previous_latest_link = link;
             }
         }

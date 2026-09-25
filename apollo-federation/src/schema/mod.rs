@@ -356,7 +356,7 @@ impl FederationSchema {
     // This works even if the schema bootstrapping was not completed.
     pub(crate) fn is_fed_2(&self) -> bool {
         self.federation_link()
-            .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+            .is_some_and(|link| link.url.version >= (Version { major: 2, minor: 0 }))
     }
 
     /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
