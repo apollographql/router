@@ -564,36 +564,37 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::sync::Arc;
 
     use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use apollo_compiler::parser::Parser;
+    use petgraph::graph::EdgeIndex;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
 
+    use crate::Supergraph;
     use crate::error::FederationError;
     use crate::operation::Field;
+    use crate::operation::Selection;
+    use crate::operation::SelectionSet;
     use crate::operation::never_cancel;
     use crate::operation::normalize_operation;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
+    use crate::query_graph::QueryGraphNodeType;
+    use crate::query_graph::build_federated_query_graph;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::operation::OpGraphPath;
+    use crate::query_graph::graph_path::operation::OpGraphPathContext;
     use crate::query_graph::graph_path::operation::OpGraphPathTrigger;
     use crate::query_graph::graph_path::operation::OpPathElement;
     use crate::query_graph::path_tree::OpPathTree;
     use crate::schema::ValidFederationSchema;
-    use crate::schema::position::SchemaRootDefinitionKind;
-
-    use crate::Supergraph;
-    use crate::operation::{Selection, SelectionSet};
-    use crate::query_graph::graph_path::operation::OpGraphPathContext;
-    use crate::query_graph::{QueryGraphNodeType, build_federated_query_graph};
     use crate::schema::position::OutputTypeDefinitionPosition;
-    use apollo_compiler::Schema;
-    use petgraph::graph::EdgeIndex;
-    use std::collections::BTreeSet;
+    use crate::schema::position::SchemaRootDefinitionKind;
 
     fn path_tree_repro_fixture() -> (Arc<QueryGraph>, NodeIndex) {
         let schema = Schema::parse_and_validate(
