@@ -535,77 +535,27 @@ fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_fiel
 }
 
 /// With legacy CORS settings, startup migrates the document first. The migrated copy fails on
-/// the timeout, and so does the file as written, on its unmigrated `origins` key. Both are
-/// reported, so the timeout is not hidden, and the anchored secret is not printed.
+/// the timeout, so the file as written is parsed and only its errors are reported. The anchored
+/// secret is not printed, whether the variable or the reference's default supplies it.
 #[test]
-fn migrated_anchored_expansions_report_both_errors_without_printing_the_secret() {
-    let error = parse_anchored_expansion(&format!(
-        "cors:\n  origins:\n    - https://example.com\n{ANCHORED_EXPANSION}"
-    ));
+fn migrated_anchored_expansions_that_fall_back_do_not_print_the_secret() {
+    for secret in [Some("synthetic-secret"), None] {
+        let mut expansion = Expansion::builder().supported_mode("env");
+        if let Some(secret) = secret {
+            expansion = expansion.mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", secret);
+        }
+        let error = parse_configuration(
+            "cors:\n  origins:\n    - https://example.com\napq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${env.TEST_CONFIG_REDIS_PASSWORD:-fallback-secret-value}\n        password: *pw\n",
+            expansion.build(),
+            Migration::WithinMajor,
+        )
+        .expect_err("the unmigrated origins key is invalid in the file")
+        .to_string();
 
-    assert!(error.contains("'origins' was unexpected"), "{error}");
-    assert!(
-        error.contains("invalid value at `apq.router.cache.redis.timeout`"),
-        "{error}"
-    );
-    assert!(!error.contains("aliased-secret-value"), "{error}");
-}
-
-/// Parses legacy CORS settings plus a Redis `timeout` anchored into `password`, so the migrated
-/// copy and the file both fail, with `TEST_CONFIG_REDIS_PASSWORD` set to `secret` when given.
-fn parse_migrated_anchored_timeout(timeout: &str, secret: Option<&str>) -> String {
-    let mut expansion = Expansion::builder().supported_mode("env");
-    if let Some(secret) = secret {
-        expansion = expansion.mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", secret);
-    }
-    parse_configuration(
-        &format!(
-            "cors:\n  origins:\n    - https://example.com\napq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw {timeout}\n        password: *pw\n"
-        ),
-        expansion.build(),
-        Migration::WithinMajor,
-    )
-    .expect_err("the Redis timeout is invalid")
-    .to_string()
-}
-
-/// Asserts that neither `secret` nor its escaped forms appear in `error`.
-fn assert_not_printed(error: &str, secret: &str) {
-    let escaped = serde_json::to_string(secret).unwrap();
-    let escaped = escaped.trim_matches('"');
-    for form in [secret, escaped, &secret.escape_debug().to_string()] {
-        assert!(!error.contains(form), "{form:?} was printed: {error}");
-    }
-    assert!(
-        error.contains("invalid value at `apq.router.cache.redis.timeout`"),
-        "{error}"
-    );
-}
-
-/// A reference with a default resolves to the variable when it is set, and to the default when
-/// it is not. Neither value is printed from the migrated copy.
-#[test]
-fn migrated_copy_errors_do_not_print_anchored_expansions_with_defaults() {
-    let timeout = "${env.TEST_CONFIG_REDIS_PASSWORD:-fallback-secret-value}";
-
-    let error = parse_migrated_anchored_timeout(timeout, Some("synthetic-secret"));
-    assert_not_printed(&error, "synthetic-secret");
-
-    let error = parse_migrated_anchored_timeout(timeout, None);
-    assert_not_printed(&error, "fallback-secret-value");
-}
-
-/// Secrets with characters that diagnostics escape are not printed in either form.
-#[test]
-fn migrated_copy_errors_do_not_print_escaped_secrets() {
-    for secret in [
-        "quoted\"secret\"value",
-        "back\\slash\\secret",
-        "multi\nline\nsecret",
-    ] {
-        let error =
-            parse_migrated_anchored_timeout("${env.TEST_CONFIG_REDIS_PASSWORD}", Some(secret));
-        assert_not_printed(&error, secret);
+        assert!(error.contains("'origins' was unexpected"), "{error}");
+        for value in ["synthetic-secret", "fallback-secret-value"] {
+            assert!(!error.contains(value), "{value} was printed: {error}");
+        }
     }
 }
 

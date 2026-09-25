@@ -146,8 +146,8 @@ impl apollo_configuration::Configuration for ExpandedDocument {}
 /// licence checks and usage telemetry, and `raw_yaml` keeps `text`.
 ///
 /// Migration can change the document, which is then parsed as a serialized copy. If that copy
-/// fails, `text` is parsed as written instead, so diagnostics point at the operator's lines. If
-/// both fail, the copy's errors are listed after the file's by kind and path only.
+/// fails, `text` is parsed as written instead, and only its errors are reported, so diagnostics
+/// point at the operator's lines.
 /// `--dev` config is applied last, so migration cannot overwrite it.
 ///
 /// Known limitation: an expansion anchored on a non-secret field and aliased into a secret
@@ -197,19 +197,11 @@ pub(crate) fn parse_configuration(
         // in full, so it never accepts an invalid document.
         match parse_document(&serialized, &options) {
             Ok(config) => Ok(config),
-            Err(migrated_error) => {
+            Err(_) => {
                 tracing::warn!(
                     "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
                 );
-                parse_document(text, &options).map_err(|error| {
-                    // The file's errors may be ones that migration fixes, so the migrated copy's
-                    // errors are reported too, in case they are the real problem.
-                    ConfigurationError::ApolloConfiguration(format!(
-                        "{}\n\n{}",
-                        report_error(error),
-                        describe_migrated_errors(&migrated_error, &serialized)
-                    ))
-                })
+                parse_document(text, &options).map_err(report_error)
             }
         }
     }?;
@@ -230,50 +222,6 @@ fn report_error(error: ConfigError) -> ConfigurationError {
         );
     }
     ConfigurationError::from(error)
-}
-
-/// Lists the migrated copy's errors by kind and configuration path only. The copy has no YAML
-/// anchors, so its messages and snippets could quote a value that the file anchors on one field
-/// and aliases into a secret one. Leaving out every message and value keeps anything from the
-/// copy, escaped or not, out of the output.
-fn describe_migrated_errors(error: &ConfigError, serialized: &str) -> String {
-    let kind = match error {
-        ConfigError::ValidationError(_) => "schema validation error",
-        ConfigError::InvalidValue { .. } => "invalid value",
-        ConfigError::ExpansionError(_) => "expansion error",
-        ConfigError::InjectedValue(_) => "invalid override",
-        ConfigError::InjectionRefused { .. } => "rejected override",
-        _ => "invalid configuration",
-    };
-    let mut paths: Vec<String> = Vec::new();
-    collect_paths(error, serialized, &mut paths);
-    let errors = if paths.is_empty() {
-        format!("- {kind}")
-    } else {
-        paths
-            .iter()
-            .map(|path| format!("- {kind} at `{path}`"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    format!(
-        "Once upgraded automatically, the configuration also had these errors (values are not shown):\n{errors}"
-    )
-}
-
-/// Adds the configuration path of every labelled position in `diagnostic` and its related
-/// diagnostics, without repeats.
-fn collect_paths(diagnostic: &dyn miette::Diagnostic, serialized: &str, paths: &mut Vec<String>) {
-    for label in diagnostic.labels().into_iter().flatten() {
-        if let Some(path) = super::yaml::path_at(serialized, label.offset())
-            && !paths.contains(&path)
-        {
-            paths.push(path);
-        }
-    }
-    for related in diagnostic.related().into_iter().flatten() {
-        collect_paths(related, serialized, paths);
-    }
 }
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
@@ -509,8 +457,8 @@ mod tests {
     }
 
     /// A migrated copy has no YAML aliases, so its diagnostics could not redact an anchor aliased
-    /// into a secret field. This migrated document and the file as written both fail, so both are
-    /// reported: the file with the anchor redacted, and the copy by error kind and path only.
+    /// into a secret field. When the copy fails, only the file's errors are reported, with the
+    /// anchor redacted.
     #[test]
     fn migrated_documents_that_fall_back_redact_anchor_sources() {
         let text = format!("cors:\n  origins:\n    - https://example.com\n{ANCHORED_SECRET}");
