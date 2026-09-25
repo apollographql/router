@@ -1,0 +1,122 @@
+---
+source: apollo-federation/tests/composition/composite_schemas.rs
+expression: composition_summary(&supergraph)
+---
+# Supergraph
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) {
+  query: Query
+}
+
+type Book @join__type(graph: MEDIA, key: "isbn") {
+  id: ID!
+  isbn: String!
+}
+
+union Media @join__type(graph: MEDIA) @join__unionMember(graph: MEDIA, member: "Book") @join__unionMember(graph: MEDIA, member: "Movie") = Book | Movie
+
+input MediaKeyInput @join__type(graph: MEDIA) @oneOf {
+  isbn: String
+  upc: String
+}
+
+type Movie @join__type(graph: MEDIA, key: "upc") {
+  id: ID!
+  upc: String!
+}
+
+type Person @join__type(graph: MEDIA, key: "id") @join__type(graph: MEDIA, key: "email") {
+  id: ID!
+  email: String!
+}
+
+input PersonByInput @join__type(graph: MEDIA) @oneOf {
+  id: ID
+  email: String
+}
+
+type Query @join__type(graph: MEDIA) {
+  mediaByKey(key: MediaKeyInput!): Media @join__field(graph: MEDIA, lookup: true, isArguments: [{name: "key", selection: "{ isbn: <Book>.isbn } | { upc: <Movie>.upc }"}])
+  person(by: PersonByInput!): Person @join__field(graph: MEDIA, lookup: true, isArguments: [{name: "by", selection: "{ id } | { email }"}])
+}
+
+enum join__Graph {
+  MEDIA @join__graph(name: "media", url: "http://media")
+}
+
+# API schema
+
+type Book {
+  id: ID!
+  isbn: String!
+}
+
+union Media = Book | Movie
+
+input MediaKeyInput @oneOf {
+  isbn: String
+  upc: String
+}
+
+type Movie {
+  id: ID!
+  upc: String!
+}
+
+type Person {
+  id: ID!
+  email: String!
+}
+
+input PersonByInput @oneOf {
+  id: ID
+  email: String
+}
+
+type Query {
+  mediaByKey(key: MediaKeyInput!): Media
+  person(by: PersonByInput!): Person
+}
+
+# Extracted subgraph "media"
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+  query: Query
+}
+
+type Book @key(fields: "isbn") {
+  id: ID!
+  isbn: String!
+}
+
+union Media = Book | Movie
+
+input MediaKeyInput {
+  isbn: String
+  upc: String
+}
+
+type Movie @key(fields: "upc") {
+  id: ID!
+  upc: String!
+}
+
+type Person @key(fields: "id") @key(fields: "email") {
+  id: ID!
+  email: String!
+}
+
+input PersonByInput {
+  id: ID
+  email: String
+}
+
+type Query {
+  mediaByKey(
+    key: MediaKeyInput! @federation__is(field: "{ isbn: <Book>.isbn } | { upc: <Movie>.upc }"),
+  ): Media @federation__lookup
+  person(
+    by: PersonByInput! @federation__is(field: "{ id } | { email }"),
+  ): Person @federation__lookup
+  _service: _Service!
+}

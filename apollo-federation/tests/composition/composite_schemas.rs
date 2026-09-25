@@ -608,3 +608,197 @@ mod cross_schema_validation {
         );
     }
 }
+
+/// The printed supergraph, API schema and extracted subgraph schemas, with the boilerplate
+/// definitions (link, join and federation directive definitions and scalars) left out so the
+/// snapshots show what the test is about.
+fn composition_summary(supergraph: &Supergraph<Satisfiable>) -> String {
+    fn strip(sdl: &str) -> String {
+        let mut out = Vec::new();
+        for block in sdl.split("\n\n") {
+            let first = block.trim_start();
+            let boilerplate = first.starts_with("directive @")
+                || first.starts_with("scalar ")
+                || first.starts_with("enum link__Purpose")
+                || first.starts_with("input join__ContextArgument")
+                || first.starts_with("input join__IsArgument")
+                || first.starts_with("input join__RequireArgument")
+                || first.starts_with("type _Service");
+            if !boilerplate {
+                out.push(block.trim_end().to_string());
+            }
+        }
+        out.join("\n\n")
+    }
+    let mut summary = String::new();
+    summary.push_str("# Supergraph\n\n");
+    summary.push_str(&strip(&print_sdl(supergraph.schema().schema())));
+    let api = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    summary.push_str("\n\n# API schema\n\n");
+    summary.push_str(&strip(&print_sdl(api.schema())));
+    let extracted = super::test_helpers::extract_subgraphs_from_supergraph_result(supergraph)
+        .expect("extracts");
+    for (name, subgraph) in extracted {
+        summary.push_str(&format!("\n\n# Extracted subgraph \"{name}\"\n\n"));
+        summary.push_str(&strip(&print_sdl(subgraph.schema.schema())));
+    }
+    summary
+}
+
+mod composition_output {
+    use super::*;
+
+    #[test]
+    fn lookups_internal_elements_and_requirements() {
+        let supergraph = compose_sources(&[
+            (
+                "products",
+                r#"
+                type Query {
+                  productById(id: ID!): Product @lookup
+                  topProducts: [Product!]!
+                }
+                type Product @key(fields: "id") @key(fields: "sku") {
+                  id: ID!
+                  sku: String!
+                  name: String!
+                  dimension: Dimension!
+                }
+                type Dimension { size: Int! weight: Int! }
+                "#,
+            ),
+            (
+                "reviews",
+                r#"
+                type Query {
+                  lookups: InternalLookups! @internal
+                }
+                type InternalLookups @internal {
+                  productBySku(key: String! @is(field: "sku")): Product @lookup
+                }
+                type Product @key(fields: "sku") {
+                  sku: String! @external
+                  reviewCount: Int!
+                  shippingEstimate(
+                    zip: String!
+                    dimension: DimensionInput! @require(field: "dimension.{ size, weight }")
+                  ): Int
+                }
+                input DimensionInput { size: Int! weight: Int! }
+                "#,
+            ),
+        ])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn keys_are_inferred_from_lookups() {
+        // No `@key` at all: the lookups imply `id` (via `@is`) and `upc`.
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query {
+              productById(productId: ID! @is(field: "id")): Product @lookup
+              productByUpc(upc: String!): Product @lookup
+            }
+            type Product { id: ID! upc: String! name: String }
+            "#,
+        )])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn abstract_and_one_of_lookups() {
+        let supergraph = compose_sources(&[(
+            "media",
+            r#"
+            type Query {
+              mediaByKey(
+                key: MediaKeyInput!
+                  @is(field: "{ isbn: <Book>.isbn } | { upc: <Movie>.upc }")
+              ): Media @lookup
+              person(by: PersonByInput! @is(field: "{ id } | { email }")): Person @lookup
+            }
+            input MediaKeyInput @oneOf { isbn: String upc: String }
+            input PersonByInput @oneOf { id: ID email: String }
+            union Media = Book | Movie
+            type Book { id: ID! isbn: String! }
+            type Movie { id: ID! upc: String! }
+            type Person { id: ID! email: String! }
+            "#,
+        )])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn nested_public_lookup() {
+        let supergraph = compose_sources(&[(
+            "a",
+            r#"
+            type Query { lookups: Lookups! }
+            type Lookups { productById(id: ID!): Product @lookup }
+            type Product @key(fields: "id") { id: ID! }
+            "#,
+        )])
+        .expect("composes");
+        insta::assert_snapshot!(composition_summary(&supergraph));
+    }
+
+    #[test]
+    fn federation_2_16_without_source_schemas_keeps_join_0_5() {
+        let supergraph = super::super::test_helpers::compose_as_fed2_subgraphs(&[
+            super::super::test_helpers::ServiceDefinition {
+                name: "a",
+                type_defs: r#"
+                type Query { t: T }
+                type T @key(fields: "id") { id: ID! }
+                "#,
+            },
+        ])
+        .expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(sdl.contains("https://specs.apollo.dev/join/v0.5"), "{sdl}");
+    }
+
+    #[test]
+    fn source_schema_selects_join_0_6() {
+        let supergraph = compose_sources(&[("products", PRODUCTS)]).expect("composes");
+        let sdl = print_sdl(supergraph.schema().schema());
+        assert!(sdl.contains("https://specs.apollo.dev/join/v0.6"), "{sdl}");
+    }
+
+    #[test]
+    fn requirement_conflicting_with_required_client_argument() {
+        assert_error_codes(
+            &[
+                (
+                    "a",
+                    r#"
+                    type Query { productById(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") {
+                      id: ID!
+                      price(weight: Int! @require(field: "weight")): Int @shareable
+                    }
+                    "#,
+                ),
+                (
+                    "b",
+                    r#"
+                    type Query { productByIdInB(id: ID!): Product @lookup }
+                    type Product @key(fields: "id") {
+                      id: ID!
+                      weight: Int
+                      price(weight: Int!): Int @shareable
+                    }
+                    "#,
+                ),
+            ],
+            &["REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH"],
+        );
+    }
+}

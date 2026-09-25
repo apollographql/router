@@ -89,6 +89,7 @@ use crate::schema::position::HasAppliedDirectives;
 use crate::schema::position::HasDescription;
 use crate::schema::position::HasMutableDirectives;
 use crate::schema::position::HasType;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -187,7 +188,7 @@ impl Merger {
         let mut error_reporter = ErrorReporter::new(names.clone());
         let latest_federation_version_used =
             Self::get_latest_federation_version_used(&subgraphs, &mut error_reporter).clone();
-        let Some(join_spec) =
+        let Some(mut join_spec) =
             JOIN_VERSIONS.get_maximum_allowed_version(&latest_federation_version_used)
         else {
             bail!(
@@ -195,6 +196,20 @@ impl Merger {
                 latest_federation_version_used
             )
         };
+        // Join v0.6 exists only to carry GraphQL Federation (composite schemas) metadata. Emitting
+        // it for every federation 2.16 composition would make those supergraphs unreadable by
+        // routers that do not know join v0.6 for no benefit, so it is reserved for compositions
+        // that include a source schema.
+        if join_spec.supports_composite_schemas()
+            && !subgraphs.iter().any(|s| s.metadata().is_composite_schema())
+            && let Some(previous) = JOIN_VERSIONS
+                .versions()
+                .rev()
+                .filter_map(|version| JOIN_VERSIONS.find(version))
+                .find(|spec| !spec.supports_composite_schemas())
+        {
+            join_spec = previous;
+        }
         let Some(link_spec_definition) =
             LINK_VERSIONS.get_minimum_required_version(&latest_federation_version_used)
         else {
@@ -685,6 +700,8 @@ impl Merger {
         trace!("Removing redundant @join__field directives");
         self.remove_redundant_join_fields()?;
 
+        self.remove_private_input_types()?;
+
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {
@@ -725,6 +742,49 @@ impl Merger {
                 }),
             }
         }
+    }
+
+    /// Remove input types that every subgraph defining them uses only for `@require` arguments or
+    /// `@internal` fields (GraphQL Federation): they are not part of the composite schema.
+    /// Extraction restores them from the subgraphs' internal definitions.
+    fn remove_private_input_types(&mut self) -> Result<(), FederationError> {
+        if !self.join_spec_definition.supports_composite_schemas() {
+            return Ok(());
+        }
+        let private: Vec<apollo_compiler::collections::IndexSet<Name>> = self
+            .subgraphs
+            .iter()
+            .map(|subgraph| {
+                subgraph
+                    .internal_definitions()
+                    .map(crate::composite_schemas::normalize::private_input_type_names)
+                    .unwrap_or_default()
+            })
+            .collect();
+        if private.iter().all(|names| names.is_empty()) {
+            return Ok(());
+        }
+        let candidates: IndexSet<Name> = private.iter().flatten().cloned().collect();
+        for type_name in candidates {
+            let mut contributors = self
+                .subgraphs
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.schema().schema().types.contains_key(&type_name))
+                .peekable();
+            if contributors.peek().is_none()
+                || !contributors.all(|(index, _)| private[index].contains(&type_name))
+            {
+                continue;
+            }
+            if self.merged.schema().types.contains_key(&type_name) {
+                InputObjectTypeDefinitionPosition {
+                    type_name: type_name.clone(),
+                }
+                .remove(&mut self.merged)?;
+            }
+        }
+        Ok(())
     }
 
     /// Validate the merged supergraph as a GraphQL schema and check if its API schema can be

@@ -36,7 +36,10 @@ use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_SELECTION_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_TYPE_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME;
+use crate::link::join_spec_definition::JOIN_ISARGUMENTS_ARGUMENT_NAME;
+use crate::link::join_spec_definition::JOIN_LOOKUP_ARGUMENT_NAME;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
+use crate::link::join_spec_definition::JOIN_REQUIREARGUMENTS_ARGUMENT_NAME;
 use crate::merger::merge::Merger;
 use crate::merger::merge::Sources;
 use crate::merger::merge::map_sources;
@@ -1037,6 +1040,7 @@ impl Merger {
             };
 
             let context_arguments = self.extract_context_arguments(idx, &field_def)?;
+            let composite = self.extract_composite_field_metadata(idx, &field_def);
 
             // Build @join__field directive with applicable arguments
             let mut builder = JoinFieldBuilder::new()
@@ -1047,7 +1051,13 @@ impl Merger {
                 .maybe_arg(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC, override_from)
                 .maybe_arg(&JOIN_OVERRIDE_LABEL_ARGUMENT_NAME, override_label)
                 .maybe_bool_arg(&FEDERATION_USED_OVERRIDEN_ARGUMENT_NAME, used_overridden)
-                .maybe_arg(&FEDERATION_CONTEXT_ARGUMENT_NAME, context_arguments.clone());
+                .maybe_arg(&FEDERATION_CONTEXT_ARGUMENT_NAME, context_arguments.clone())
+                .maybe_bool_arg(&JOIN_LOOKUP_ARGUMENT_NAME, composite.lookup)
+                .maybe_arg(&JOIN_ISARGUMENTS_ARGUMENT_NAME, composite.is_arguments)
+                .maybe_arg(
+                    &JOIN_REQUIREARGUMENTS_ARGUMENT_NAME,
+                    composite.require_arguments,
+                );
 
             // Include field type if not uniform across subgraphs.
             if !all_types_equal && !type_string.is_empty() {
@@ -1107,6 +1117,17 @@ impl Merger {
                     }
                 }
                 _ => continue, // Input object fields and other directive targets don't have @fromContext arguments, skip
+            }
+        }
+
+        // GraphQL Federation metadata (`lookup`, `isArguments`, `requireArguments`) lives on
+        // join__field.
+        for (&idx, source) in &sources {
+            let Some(source) = source else {
+                continue;
+            };
+            if self.has_composite_field_metadata(idx, source) {
+                return Ok(true);
             }
         }
 
@@ -1187,6 +1208,88 @@ impl Merger {
         }
 
         Ok(false)
+    }
+
+    /// Whether a field of a GraphQL Federation source schema carries metadata recorded on
+    /// `@join__field`: it is a `@lookup`, or has `@is` or `@require` arguments.
+    fn has_composite_field_metadata(&self, idx: usize, source: &DirectiveTargetPosition) -> bool {
+        if !self.join_spec_definition.supports_composite_schemas() {
+            return false;
+        }
+        let subgraph = &self.subgraphs[idx];
+        let Some(names) = subgraph.composite_names() else {
+            return false;
+        };
+        let schema = subgraph.schema().schema();
+        let field = match source {
+            DirectiveTargetPosition::ObjectField(pos) => pos.try_get(schema).map(|f| &**f),
+            DirectiveTargetPosition::InterfaceField(pos) => pos.try_get(schema).map(|f| &**f),
+            _ => None,
+        };
+        field.is_some_and(|field| {
+            field.directives.has(&names.lookup)
+                || field.arguments.iter().any(|argument| {
+                    argument.directives.has(&names.is) || argument.directives.has(&names.require)
+                })
+        })
+    }
+
+    /// The GraphQL Federation metadata of a source-schema field, for `@join__field`.
+    fn extract_composite_field_metadata(
+        &self,
+        idx: usize,
+        source: &JoinableField,
+    ) -> CompositeFieldMetadata {
+        let mut metadata = CompositeFieldMetadata::default();
+        if !self.join_spec_definition.supports_composite_schemas() {
+            return metadata;
+        }
+        let Some(names) = self.subgraphs[idx].composite_names() else {
+            return metadata;
+        };
+        metadata.lookup = source.directives().has(&names.lookup);
+        let selection = |directive: &Node<Directive>| {
+            directive
+                .specified_argument_by_name(&FEDERATION_FIELD_ARGUMENT_NAME)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        };
+        let mut is_arguments = Vec::new();
+        let mut require_arguments = Vec::new();
+        for argument in source.arguments().iter() {
+            if let Some(selection) = argument.directives.get(&names.is).and_then(selection) {
+                is_arguments.push(Node::new(Value::Object(vec![
+                    (
+                        FEDERATION_NAME_ARGUMENT_NAME,
+                        Node::new(Value::String(argument.name.to_string())),
+                    ),
+                    (
+                        FEDERATION_SELECTION_ARGUMENT_NAME,
+                        Node::new(Value::String(selection)),
+                    ),
+                ])));
+            }
+            if let Some(selection) = argument.directives.get(&names.require).and_then(selection) {
+                require_arguments.push(Node::new(Value::Object(vec![
+                    (
+                        FEDERATION_NAME_ARGUMENT_NAME,
+                        Node::new(Value::String(argument.name.to_string())),
+                    ),
+                    (
+                        FEDERATION_TYPE_ARGUMENT_NAME,
+                        Node::new(Value::String(argument.ty.to_string())),
+                    ),
+                    (
+                        FEDERATION_SELECTION_ARGUMENT_NAME,
+                        Node::new(Value::String(selection)),
+                    ),
+                ])));
+            }
+        }
+        metadata.is_arguments = (!is_arguments.is_empty()).then(|| Value::List(is_arguments));
+        metadata.require_arguments =
+            (!require_arguments.is_empty()).then(|| Value::List(require_arguments));
+        metadata
     }
 
     fn extract_context_arguments(
@@ -1280,6 +1383,14 @@ impl Merger {
 }
 
 /// Simple builder for join__field directives (minimal version for compatibility)
+/// The GraphQL Federation metadata of one subgraph's field, as `@join__field` arguments.
+#[derive(Default)]
+struct CompositeFieldMetadata {
+    lookup: bool,
+    is_arguments: Option<Value>,
+    require_arguments: Option<Value>,
+}
+
 pub(crate) struct JoinFieldBuilder {
     arguments: Vec<Node<Argument>>,
 }

@@ -998,6 +998,29 @@ impl FederationSpecDefinition {
         )
     }
 
+    /// Add the GraphQL Federation source-schema directive and type definitions to a schema linking
+    /// this version, whether or not it uses them yet (see [`uses_composite_schema_elements`]).
+    pub(crate) fn add_composite_schema_elements(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        if !self.supports_composite_schemas() {
+            bail!("federation v{} does not define @lookup", self.version());
+        }
+        let link = self.link_in_schema(schema);
+        for type_spec in self.type_specs() {
+            if is_composite_schema_element(type_spec.name(), false) {
+                type_spec.check_or_add(schema, link.as_ref())?;
+            }
+        }
+        for directive_spec in self.directive_specs() {
+            if is_composite_schema_element(directive_spec.name(), true) {
+                directive_spec.check_or_add(schema, link.as_ref())?;
+            }
+        }
+        Ok(())
+    }
+
     /// Whether this version defines the GraphQL Federation source-schema directives.
     pub(crate) fn supports_composite_schemas(&self) -> bool {
         self.version()

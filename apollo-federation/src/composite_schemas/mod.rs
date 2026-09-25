@@ -7,6 +7,8 @@
 
 pub(crate) mod cross_schema;
 pub(crate) mod detection;
+pub(crate) mod lookups;
+pub(crate) mod normalize;
 pub(crate) mod validation;
 
 use apollo_compiler::Name;

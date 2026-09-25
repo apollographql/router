@@ -107,6 +107,9 @@ pub struct Validated {
     /// Only warnings live here: errors abort the transition into this state, and are carried by the
     /// [`CompositionFailure`] instead. Connectors validation is the only producer today.
     hints: Vec<CompositionHint>,
+    /// For a normalized GraphQL Federation source schema, the SDL of its `@internal` elements,
+    /// which normalization removed from `schema` (see [`crate::composite_schemas::normalize`]).
+    internal_definitions: Option<String>,
 }
 
 impl Expanded {
@@ -613,6 +616,7 @@ impl Subgraph<Expanded> {
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
                 hints,
+                internal_definitions: None,
             },
         })
     }
@@ -700,6 +704,7 @@ impl Subgraph<Upgraded> {
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata,
                 hints,
+                internal_definitions: None,
             },
         })
     }
@@ -737,6 +742,37 @@ impl Subgraph<Validated> {
 
     pub fn validated_schema(&self) -> &ValidFederationSchema {
         &self.state.schema
+    }
+
+    /// The SDL of a normalized source schema's `@internal` elements, if any.
+    pub(crate) fn internal_definitions(&self) -> Option<&str> {
+        self.state.internal_definitions.as_deref()
+    }
+
+    /// Replace the schema with its normalized form (see
+    /// [`crate::composite_schemas::normalize`]).
+    pub(crate) fn with_normalized_schema(
+        self,
+        schema: ValidFederationSchema,
+        internal_definitions: Option<String>,
+    ) -> Result<Self, FederationError> {
+        let Some(metadata) = schema.subgraph_metadata().cloned() else {
+            bail!(
+                "Unable to detect federation version used in subgraph '{}'",
+                self.name
+            )
+        };
+        Ok(Subgraph {
+            name: self.name,
+            url: self.url,
+            state: Validated {
+                schema,
+                orphan_extension_types: self.state.orphan_extension_types,
+                metadata,
+                hints: self.state.hints,
+                internal_definitions,
+            },
+        })
     }
 
     /// Returns true if the given type name is an orphan type extension in this subgraph.
@@ -780,6 +816,22 @@ impl<S: HasMetadata> Subgraph<S> {
                 self.schema(),
                 &FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC,
             )
+    }
+
+    /// The in-schema name of `@require`, when this is a GraphQL Federation source schema.
+    pub(crate) fn require_directive_name(&self) -> Option<Name> {
+        self.composite_names().map(|names| names.require)
+    }
+
+    /// The in-schema names of the GraphQL Federation directives, when this is a source schema.
+    pub(crate) fn composite_names(&self) -> Option<crate::composite_schemas::CompositeNames> {
+        if !self.metadata().is_composite_schema() {
+            return None;
+        }
+        crate::composite_schemas::CompositeNames::new(
+            self.schema(),
+            self.metadata().federation_spec_definition(),
+        )
     }
 
     pub(crate) fn inaccessible_directive_name(&self) -> Option<Name> {

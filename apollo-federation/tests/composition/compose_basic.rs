@@ -681,7 +681,9 @@ fn preserves_one_of_on_input_types() {
         "#,
     }])
     .expect("composes");
-    let api = result.to_api_schema(Default::default()).expect("api schema");
+    let api = result
+        .to_api_schema(Default::default())
+        .expect("api schema");
     let api_sdl = api.schema().to_string();
     assert!(
         api_sdl.contains("input FindInput @oneOf"),

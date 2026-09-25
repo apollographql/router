@@ -1,0 +1,57 @@
+---
+source: apollo-federation/tests/composition/composite_schemas.rs
+expression: composition_summary(&supergraph)
+---
+# Supergraph
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) {
+  query: Query
+}
+
+type Product @join__type(graph: A, key: "id") @join__type(graph: A, key: "upc") {
+  id: ID!
+  upc: String!
+  name: String
+}
+
+type Query @join__type(graph: A) {
+  productById(productId: ID!): Product @join__field(graph: A, lookup: true, isArguments: [{name: "productId", selection: "id"}])
+  productByUpc(upc: String!): Product @join__field(graph: A, lookup: true)
+}
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+}
+
+# API schema
+
+type Product {
+  id: ID!
+  upc: String!
+  name: String
+}
+
+type Query {
+  productById(productId: ID!): Product
+  productByUpc(upc: String!): Product
+}
+
+# Extracted subgraph "a"
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+  query: Query
+}
+
+type Product @key(fields: "id") @key(fields: "upc") {
+  id: ID!
+  upc: String!
+  name: String
+}
+
+type Query {
+  productById(
+    productId: ID! @federation__is(field: "id"),
+  ): Product @federation__lookup
+  productByUpc(upc: String!): Product @federation__lookup
+  _service: _Service!
+}

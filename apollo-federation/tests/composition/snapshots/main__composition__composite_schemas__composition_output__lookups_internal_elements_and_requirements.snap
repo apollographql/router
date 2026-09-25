@@ -1,0 +1,109 @@
+---
+source: apollo-federation/tests/composition/composite_schemas.rs
+expression: composition_summary(&supergraph)
+---
+# Supergraph
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION) {
+  query: Query
+}
+
+type Dimension @join__type(graph: PRODUCTS) {
+  size: Int!
+  weight: Int!
+}
+
+type Product @join__type(graph: PRODUCTS, key: "id") @join__type(graph: PRODUCTS, key: "sku", resolvable: false) @join__type(graph: REVIEWS, key: "sku") {
+  id: ID! @join__field(graph: PRODUCTS)
+  sku: String! @join__field(graph: PRODUCTS) @join__field(graph: REVIEWS, external: true)
+  name: String! @join__field(graph: PRODUCTS)
+  dimension: Dimension! @join__field(graph: PRODUCTS)
+  reviewCount: Int! @join__field(graph: REVIEWS)
+  shippingEstimate(zip: String!): Int @join__field(graph: REVIEWS, requireArguments: [{name: "dimension", type: "DimensionInput!", selection: "dimension.{ size, weight }"}])
+}
+
+type Query @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
+  productById(id: ID!): Product @join__field(graph: PRODUCTS, lookup: true)
+  topProducts: [Product!]! @join__field(graph: PRODUCTS)
+}
+
+enum join__Graph {
+  PRODUCTS @join__graph(name: "products", url: "http://products")
+  REVIEWS @join__graph(name: "reviews", url: "http://reviews", internalDefinitions: "input DimensionInput {\n  size: Int!\n  weight: Int!\n}\n\ntype InternalLookups {\n  productBySku(\n    key: String! @is(field: \"sku\"),\n  ): Product @lookup\n}\n\nextend type Query {\n  lookups: InternalLookups!\n}\n")
+}
+
+# API schema
+
+type Dimension {
+  size: Int!
+  weight: Int!
+}
+
+type Product {
+  id: ID!
+  sku: String!
+  name: String!
+  dimension: Dimension!
+  reviewCount: Int!
+  shippingEstimate(zip: String!): Int
+}
+
+type Query {
+  productById(id: ID!): Product
+  topProducts: [Product!]!
+}
+
+# Extracted subgraph "products"
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+  query: Query
+}
+
+type Dimension {
+  size: Int!
+  weight: Int!
+}
+
+type Product @key(fields: "id") @key(fields: "sku", resolvable: false) {
+  id: ID!
+  sku: String!
+  name: String!
+  dimension: Dimension!
+}
+
+type Query {
+  productById(id: ID!): Product @federation__lookup
+  topProducts: [Product!]!
+  _service: _Service!
+}
+
+# Extracted subgraph "reviews"
+
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) {
+  query: Query
+}
+
+input DimensionInput {
+  size: Int!
+  weight: Int!
+}
+
+type InternalLookups {
+  productBySku(
+    key: String! @federation__is(field: "sku"),
+  ): Product @federation__lookup
+}
+
+type Product @key(fields: "sku") {
+  sku: String! @external
+  reviewCount: Int!
+  shippingEstimate(
+    zip: String!,
+    dimension: DimensionInput! @federation__require(field: "dimension.{ size, weight }"),
+  ): Int
+}
+
+type Query {
+  lookups: InternalLookups!
+  _service: _Service!
+}

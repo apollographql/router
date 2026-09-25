@@ -112,6 +112,64 @@ impl Merger {
 
             let dest_arg_pos = dest.argument_position(arg_name.clone());
 
+            // A `@require` argument (GraphQL Federation) is supplied by the executor, never by the
+            // client, so it is not part of the supergraph field. The merger records it in
+            // `@join__field(requireArguments:)` instead.
+            let requirement_in: Vec<usize> = sources
+                .iter()
+                .filter_map(|(idx, source)| {
+                    let pos = source.as_ref()?;
+                    let subgraph = &self.subgraphs[*idx];
+                    let require = subgraph.require_directive_name()?;
+                    pos.get_argument(subgraph.schema(), arg_name)
+                        .is_some_and(|arg| arg.directives.iter().any(|d| d.name == require))
+                        .then_some(*idx)
+                })
+                .collect();
+            if !requirement_in.is_empty() {
+                for (idx, source) in sources.iter() {
+                    if requirement_in.contains(idx) {
+                        continue;
+                    }
+                    let Some(pos) = source else {
+                        continue;
+                    };
+                    let subgraph = &self.subgraphs[*idx];
+                    let Some(arg) = pos.get_argument(subgraph.schema(), arg_name) else {
+                        continue;
+                    };
+                    let requirement_subgraphs = human_readable_subgraph_names(
+                        requirement_in.iter().map(|i| &self.names[*i]),
+                    );
+                    if arg.is_required() && arg.default_value.is_none() {
+                        self.error_reporter.add_error(
+                            CompositionError::RequiredArgumentMissingInSomeSubgraph {
+                                message: format!(
+                                    "Argument \"{dest_arg_pos}\" is a @require requirement in \
+                                     {requirement_subgraphs}, so it is not part of the supergraph, \
+                                     but subgraph \"{}\" declares it as a required argument \
+                                     without a default value.",
+                                    subgraph.name
+                                ),
+                                locations: subgraph.node_locations(arg),
+                            },
+                        );
+                    } else {
+                        self.error_reporter.add_hint(CompositionHint {
+                            definition: HintCode::InconsistentArgumentPresence.definition(),
+                            message: format!(
+                                "Argument \"{pos}\" will not be included in the supergraph since \
+                                 it is a @require requirement in {requirement_subgraphs}",
+                            ),
+                            locations: subgraph.node_locations(arg),
+                        });
+                    }
+                }
+                dest.remove_argument(&mut self.merged, arg_name)?;
+                removed_args.insert(arg_name.clone());
+                continue;
+            }
+
             // Record whether the argument comes from context in each subgraph.
             let mut is_contextual_in_subgraph: IndexMap<usize, bool> = Default::default();
             for (idx, source) in sources.iter() {

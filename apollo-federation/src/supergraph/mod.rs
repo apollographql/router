@@ -1,3 +1,4 @@
+mod composite;
 mod join_directive;
 mod subgraph;
 
@@ -288,11 +289,13 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     let (link_spec_definition, join_spec_definition, context_spec_definition) =
         crate::validate_supergraph_for_query_planning(supergraph_schema)?;
     let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
+    let composite_graphs = composite::composite_graphs(supergraph_schema, join_spec_definition)?;
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
         collect_empty_subgraphs(
             supergraph_schema,
             join_spec_definition,
             validate_default_values,
+            &composite_graphs,
         )?;
 
     let filtered_types: Vec<_> = supergraph_schema
@@ -324,6 +327,7 @@ pub(crate) fn extract_subgraphs_from_supergraph(
             join_spec_definition,
             context_spec_definition,
             &filtered_types,
+            &composite_graphs,
         )?;
     }
 
@@ -380,6 +384,7 @@ fn collect_empty_subgraphs(
     supergraph_schema: &FederationSchema,
     join_spec_definition: &JoinSpecDefinition,
     validate_default_values: bool,
+    composite_graphs: &composite::CompositeGraphs,
 ) -> Result<CollectEmptySubgraphsOk, FederationError> {
     let mut subgraphs = FederationSubgraphs::new();
     let graph_directive_definition =
@@ -397,10 +402,14 @@ fn collect_empty_subgraphs(
                 ),
             })?;
         let graph_arguments = join_spec_definition.graph_directive_arguments(graph_application)?;
+        let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
+        if composite_graphs.contains_key(enum_value_name) {
+            FederationSpecDefinition::latest().add_composite_schema_elements(&mut schema)?;
+        }
         let subgraph = FederationSubgraph {
             name: graph_arguments.name.to_owned(),
             url: graph_arguments.url.to_owned(),
-            schema: new_empty_federation_2_subgraph_schema(validate_default_values)?,
+            schema,
             graph_enum_value: enum_value_name.clone(),
         };
         let federation_link = &subgraph
@@ -443,6 +452,7 @@ struct TypeInfos {
     input_object_types: Vec<TypeInfo>,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn extract_subgraphs_from_fed_2_supergraph(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
@@ -451,6 +461,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
     join_spec_definition: &'static JoinSpecDefinition,
     context_spec_definition: Option<&'static ContextSpecDefinition>,
     filtered_types: &Vec<TypeDefinitionPosition>,
+    composite_graphs: &composite::CompositeGraphs,
 ) -> Result<(), FederationError> {
     let TypeInfos {
         object_types,
@@ -467,6 +478,17 @@ fn extract_subgraphs_from_fed_2_supergraph(
         context_spec_definition,
         filtered_types,
     )?;
+
+    for (graph_enum_value, internal_definitions) in composite_graphs {
+        if let Some(internal_definitions) = internal_definitions {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
+            composite::add_internal_types(subgraph, internal_definitions)?;
+        }
+    }
 
     extract_object_type_content(
         supergraph_schema,
@@ -566,12 +588,20 @@ fn extract_subgraphs_from_fed_2_supergraph(
             .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
                 message: "Subgraph unexpectedly does not use federation spec".to_owned(),
             })?;
+        let is_composite = composite_graphs.contains_key(graph_enum_value);
+        if let Some(Some(internal_definitions)) = composite_graphs.get(graph_enum_value) {
+            composite::add_internal_definitions(
+                subgraph,
+                internal_definitions,
+                federation_spec_definition,
+            )?;
+        }
         remove_inactive_requires_and_provides_from_subgraph(
             supergraph_schema,
             &mut subgraph.schema,
             FieldSetValidation::Validate,
         )?;
-        add_federation_operations(subgraph, federation_spec_definition)?;
+        add_federation_operations(subgraph, federation_spec_definition, !is_composite)?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             let pos = DirectiveDefinitionPosition {
@@ -1534,18 +1564,14 @@ fn add_subgraph_field(
     is_shareable: bool,
     field_directive_application: Option<&FieldDirectiveArguments>,
 ) -> Result<(), FederationError> {
-    let field_directive_application =
-        field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
-            graph: None,
-            requires: None,
-            provides: None,
-            type_: None,
-            external: None,
-            override_: None,
-            override_label: None,
-            user_overridden: None,
-            context_arguments: None,
-        });
+    let default_field_directive_application;
+    let field_directive_application = match field_directive_application {
+        Some(application) => application,
+        None => {
+            default_field_directive_application = FieldDirectiveArguments::default();
+            &default_field_directive_application
+        }
+    };
     let subgraph_field_type = match &field_directive_application.type_ {
         Some(t) => decode_type(t)?,
         None => field.ty.clone(),
@@ -1627,6 +1653,13 @@ fn add_subgraph_field(
         &mut subgraph_field.directives,
     )?;
 
+    composite::apply_field_metadata(
+        &mut subgraph_field,
+        field_directive_application,
+        &subgraph.schema,
+        federation_spec_definition,
+    )?;
+
     if let Some(context_arguments) = &field_directive_application.context_arguments {
         for args in context_arguments {
             let ContextArgument {
@@ -1676,18 +1709,14 @@ fn add_subgraph_input_field(
     subgraph: &mut FederationSubgraph,
     field_directive_application: Option<&FieldDirectiveArguments>,
 ) -> Result<(), FederationError> {
-    let field_directive_application =
-        field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
-            graph: None,
-            requires: None,
-            provides: None,
-            type_: None,
-            external: None,
-            override_: None,
-            override_label: None,
-            user_overridden: None,
-            context_arguments: None,
-        });
+    let default_field_directive_application;
+    let field_directive_application = match field_directive_application {
+        Some(application) => application,
+        None => {
+            default_field_directive_application = FieldDirectiveArguments::default();
+            &default_field_directive_application
+        }
+    };
     let subgraph_input_field_type = match &field_directive_application.type_ {
         Some(t) => Node::new(decode_type(t)?),
         None => input_field.ty.clone(),
@@ -1891,9 +1920,14 @@ fn collect_entity_members(
         .collect::<IndexSet<_>>()
 }
 
+/// `with_entities`: whether to add `_Entity` and `Query._entities`. A GraphQL Federation source
+/// schema resolves entities through `@lookup` fields and has no `_entities`: leaving it out makes
+/// any attempt to plan an `_entities` fetch against it fail loudly at planning time instead of as
+/// a subgraph error at runtime.
 fn add_federation_operations(
     subgraph: &mut FederationSubgraph,
     federation_spec_definition: &'static FederationSpecDefinition,
+    with_entities: bool,
 ) -> Result<(), FederationError> {
     // the `_Any` and `_Service` Type
     ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
@@ -1903,7 +1937,7 @@ fn add_federation_operations(
     let key_directive_definition =
         federation_spec_definition.key_directive_definition(&subgraph.schema)?;
     let entity_members = collect_entity_members(&subgraph.schema, key_directive_definition);
-    let has_entity_type = !entity_members.is_empty();
+    let has_entity_type = with_entities && !entity_members.is_empty();
     if has_entity_type {
         UnionTypeSpecification {
             name: FEDERATION_ENTITY_TYPE_NAME,
