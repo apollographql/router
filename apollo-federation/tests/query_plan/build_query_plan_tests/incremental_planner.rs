@@ -1,3 +1,9 @@
+use apollo_compiler::Name;
+use apollo_federation::query_plan::FetchDataPathElement;
+use apollo_federation::query_plan::FetchDataRewrite;
+use apollo_federation::query_plan::PlanNode;
+use apollo_federation::query_plan::QueryPlan;
+use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::query_plan::query_planner::IncrementalPlannerConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
@@ -1237,14 +1243,13 @@ fn inc_diamond_shaped_compound_key_dependency() {
 }
 
 // ---------------------------------------------------------------------------
-// Defer fallback and statistics
+// Defer across subgraphs and statistics
 // ---------------------------------------------------------------------------
 
-/// The incremental planner has no defer support yet; a deferred operation
-/// must fall back to the legacy planner and keep its DeferNode rather than
-/// silently planning every field eagerly.
+/// Cross-subgraph @defer: the deferred field's entity fetch lands in the
+/// Deferred block, and the deferred selection stays out of the primary.
 #[test]
-fn inc_defer_falls_back_to_legacy_planner() {
+fn inc_defer_cross_subgraph_produces_deferred_entity_fetch() {
     let mut config = incremental_config();
     config.incremental_delivery.enable_defer = true;
     let planner = planner!(
@@ -1266,20 +1271,62 @@ fn inc_defer_falls_back_to_legacy_planner() {
           }
         "#,
     );
-    let api_schema = planner.api_schema();
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        api_schema.schema(),
+    assert_plan!(
+        &planner,
         r#"{ t { v1 ... @defer { v2 } } }"#,
-        "test.graphql",
-    )
-    .expect("valid graphql document");
-    let plan = planner
-        .build_query_plan(&document, None, Default::default())
-        .expect("deferred operation plans via the legacy planner");
-    let plan_str = format!("{plan}");
-    assert!(
-        plan_str.contains("Defer"),
-        "deferred operations must keep their DeferNode, got: {plan_str}",
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v1 } }:
+          Sequence {
+            Fetch(service: "a", id: 0) {
+              {
+                t {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { v2 }:
+            Flatten(path: "t") {
+              Fetch(service: "b") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v2
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
     );
 }
 
@@ -2044,6 +2091,100 @@ fn inc_user_field_argument_conflict_with_requires_condition() {
     );
 }
 
+/// Two @requires on the same entity type need different arguments on a
+/// shared condition field `f`. The planner detects the argument conflict,
+/// aliases both condition invocations, and splits into separate entity
+/// fetches so each gets its own input.
+#[test]
+fn inc_requires_conflicting_arguments_splits_group() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            f(arg: Int!): Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            f(arg: Int!): Int @external
+            a: Int! @requires(fields: "f(arg: 1)")
+            b: Int! @requires(fields: "f(arg: 2)")
+          }
+        "#
+    );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+          {
+            t {
+              a
+              b
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_f: f(arg: 1)
+              __require_1_f: f(arg: 2)
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_1_f: f
+                }
+              } =>
+              {
+                ... on T {
+                  b
+                }
+              }
+            },
+          },
+          Flatten(path: "t") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_0_f: f
+                }
+              } =>
+              {
+                ... on T {
+                  a
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 /// A field satisfied by an ancestor's @provides is preferred over hopping
 /// to another subgraph for the same field.
 #[test]
@@ -2201,13 +2342,135 @@ fn inc_interface_object_fake_downcast_fetches_typename() {
     );
 }
 
+/// @interfaceObject fake downcast where the best-effort `__typename` pushed by
+/// `push_interface_object_typename` cannot route: the subgraph owning the real
+/// interface has a non-resolvable key, so no key hop reaches it from the
+/// @interfaceObject subgraph. The planner silently drops the `__typename`
+/// (exercising the `best_effort` branch in `drop_unresolvable` and the
+/// `recover_doomed` short-circuit) without failing the overall plan.
+///
+/// Hand-crafted supergraph SDL because `rover supergraph compose` rejects
+/// schemas where no subgraph can resolve implementation types of an
+/// @interfaceObject interface (SATISFIABILITY_ERROR), yet the incremental
+/// planner must handle the topology gracefully at runtime.
+#[test]
+fn inc_interface_object_best_effort_typename_dropped() {
+    let supergraph_sdl = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+interface I
+  @join__type(graph: SUBGRAPHA, key: "id", resolvable: false)
+  @join__type(graph: SUBGRAPHB, key: "id", isInterfaceObject: true)
+{
+  id: ID!
+  data: String @join__field(graph: SUBGRAPHB)
+}
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+scalar join__FieldSet
+scalar join__FieldValue
+
+enum join__Graph {
+  SUBGRAPHA @join__graph(name: "SubgraphA", url: "none")
+  SUBGRAPHB @join__graph(name: "SubgraphB", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPHB)
+{
+  stuff: [I] @join__field(graph: SUBGRAPHB)
+}
+
+type X implements I
+  @join__implements(graph: SUBGRAPHA, interface: "I")
+  @join__type(graph: SUBGRAPHA, key: "id", resolvable: false)
+{
+  id: ID!
+  data: String @join__field(graph: SUBGRAPHA, external: true)
+}
+
+type Y implements I
+  @join__implements(graph: SUBGRAPHA, interface: "I")
+  @join__type(graph: SUBGRAPHA, key: "id", resolvable: false)
+{
+  id: ID!
+  data: String @join__field(graph: SUBGRAPHA, external: true)
+}
+"#;
+    let supergraph = apollo_federation::Supergraph::new(supergraph_sdl).expect("valid supergraph");
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        incremental_config(),
+    )
+    .expect("can create query planner");
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        "{ stuff { ... on X { data } } }",
+        "test.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("planning should succeed even when best-effort __typename cannot route");
+    let plan_str = plan.to_string();
+    // Single fetch to SubgraphB; the best-effort __typename was silently
+    // dropped, so there is no key hop to SubgraphA.
+    assert!(
+        !plan_str.contains("SubgraphA"),
+        "Plan must not key-hop to SubgraphA (non-resolvable): {plan_str}"
+    );
+    insta::assert_snapshot!(plan, @r###"
+    QueryPlan {
+      Fetch(service: "SubgraphB") {
+        {
+          stuff {
+            __typename
+            data
+          }
+        }
+      },
+    }
+    "###);
+}
+
 // ---------------------------------------------------------------------------
 // Type explosion: abstract type conditions decomposed into concrete fragments
 // ---------------------------------------------------------------------------
 
-/// Union member implements an interface in the supergraph but not in the
-/// subgraph that owns the root field. The planner must type-explode the
-/// interface condition into concrete-type fragments so no member is excluded.
+/// Union U = {A, B, C} with `... on I` where I's supergraph runtime types
+/// cover all of U (A implements I only in Subgraph2). The condition is
+/// vacuous (try_vacuous_type_condition), then the child field `v` on the
+/// union has no direct edge, triggering try_explode_interface_field to
+/// decompose into per-concrete-type fragments.
 #[test]
 fn inc_type_explosion_union_interface_interaction() {
     let planner = planner!(
@@ -2279,9 +2542,10 @@ fn inc_type_explosion_union_interface_interaction() {
     );
 }
 
-/// Vacuous type condition: all runtime types of the parent position satisfy
-/// the condition, so the fragment is treated as pass-through rather than
-/// exploded. Here U = B | C and both implement I, so `... on I` is vacuous.
+/// Union U = {B, C} where both implement I locally, so `... on I` has a
+/// normal query graph edge (downcast). The fragment routes directly without
+/// entering the type-condition fallback path. The plan retains the type
+/// condition since it gates different runtime behavior for each member.
 #[test]
 fn inc_all_members_implement_interface_routes_directly() {
     let planner = planner!(
@@ -2394,15 +2658,129 @@ fn inc_conditionless_fragment_skip_preserved() {
     );
 }
 
+/// Union U = {A, B, C} with `... on I` where only B and C implement I, and
+/// the interface lives in a different subgraph from U. Because Subgraph1 has
+/// no knowledge of I, there is no downcast edge from U to I in its query
+/// graph. The supergraph runtime types of I are {B, C}, which partially
+/// overlap U's runtime types {A, B, C}. This triggers
+/// `try_explode_abstract_type` to decompose the fragment into per-concrete-type
+/// fragments for only the intersection {B, C}, excluding A.
+#[test]
+fn inc_partial_overlap_explodes_abstract_type() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+          type Query {
+            u: U
+          }
+
+          union U = A | B | C
+
+          type A {
+            w: Int
+          }
+
+          type B @key(fields: "id") {
+            id: ID!
+          }
+
+          type C @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph2: r#"
+          interface I {
+            v: Int
+          }
+
+          type B implements I @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+
+          type C implements I @key(fields: "id") {
+            id: ID!
+            v: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u {
+              ... on I {
+                v
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            u {
+              __typename
+              ... on B {
+                __typename
+                id
+              }
+              ... on C {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "u|[C]") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on C {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on C {
+                  v
+                }
+              }
+            },
+          },
+          Flatten(path: "u|[B]") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on B {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on B {
+                  v
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 // ---------------------------------------------------------------------------
-// @defer: cross-subgraph deferred fragment falls back to the legacy planner,
-// which produces a Defer plan node with primary and deferred blocks. The
+// @defer: a deferred named fragment spread whose fields live in another
+// subgraph. The primary block stays a single root fetch, the deferred block
+// gets its own entity fetch, and the fragment's __typename rides along. The
 // @defer directive is stripped from subgraph operations since subgraph schemas
 // do not define it.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn inc_defer_cross_subgraph_falls_back_to_legacy_plan() {
+fn inc_defer_named_fragment_spread_across_subgraphs() {
     let planner = planner!(
         config = incremental_defer_config(),
         Subgraph1: r#"
@@ -2479,6 +2857,919 @@ fn inc_defer_cross_subgraph_falls_back_to_legacy_plan() {
     );
 }
 
+/// Nested @defer: the outer deferred block itself contains a @defer,
+/// exercising DeferBlockInfo::parent_label, children_of, the recursive
+/// branch of build_deferred_blocks, and nested DeferNode wrapping.
+#[test]
+fn inc_nested_defer_produces_nested_defer_nodes() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            z: Int
+          }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              x
+              ... @defer {
+                y
+                ... @defer {
+                  z
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { x } }:
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              t {
+                __typename
+                x
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            Defer {
+              Primary {
+                { y }:
+                Flatten(path: "t") {
+                  Fetch(service: "Subgraph2") {
+                    {
+                      ... on T {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        y
+                      }
+                    }
+                  },
+                },
+              }, [
+                Deferred(depends: [0], path: "t") {
+                  { z }:
+                  Flatten(path: "t") {
+                    Fetch(service: "Subgraph3") {
+                      {
+                        ... on T {
+                          __typename
+                          id
+                        }
+                      } =>
+                      {
+                        ... on T {
+                          z
+                        }
+                      }
+                    },
+                  },
+                },
+              ]
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+// ---------------------------------------------------------------------------
+// @fromContext: context rewrite path includes TypenameEquals guard
+// Based on: context.rs::set_context_one_subgraph
+// ---------------------------------------------------------------------------
+
+fn parse_fetch_data_path_element(value: &str) -> FetchDataPathElement {
+    if value == ".." {
+        FetchDataPathElement::Parent
+    } else if let Some(("", ty)) = value.split_once("... on ") {
+        FetchDataPathElement::TypenameEquals(Name::new(ty).unwrap())
+    } else {
+        FetchDataPathElement::Key(Name::new(value).unwrap(), Default::default())
+    }
+}
+
+#[test]
+fn context_rewrite_path_includes_typename_equals() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          t: T!
+        }
+        type T @key(fields: "id") @context(name: "context") {
+          id: ID!
+          u: U!
+          prop: String!
+        }
+        type U @key(fields: "id") {
+          id: ID!
+          b: String!
+          field(a: String @fromContext(field: "$context { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          randomId: ID!
+        }
+        "#,
+    );
+
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        r#"
+        {
+          t {
+            u {
+              field
+            }
+          }
+        }
+        "#,
+        "operation.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan generated");
+
+    // Extract the context rewrite from the second node (the flatten/fetch).
+    let Some(TopLevelPlanNode::Sequence(node)) = &plan.node else {
+        panic!("expected sequence node");
+    };
+    let Some(PlanNode::Flatten(node)) = node.nodes.get(1) else {
+        panic!("expected flatten node at index 1");
+    };
+    let PlanNode::Fetch(fetch) = &*node.node else {
+        panic!("expected fetch node inside flatten");
+    };
+
+    // The rewrite path must include the TypenameEquals guard:
+    // [Parent, TypenameEquals("T"), Key("prop")], not [Parent, Key("prop")].
+    assert_eq!(fetch.context_rewrites.len(), 1);
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+        panic!("expected KeyRenamer");
+    };
+    assert_eq!(renamer.rename_key_to.as_str(), "contextualArgument_1_0");
+
+    let expected_path: Vec<FetchDataPathElement> = ["..", "... on T", "prop"]
+        .into_iter()
+        .map(parse_fetch_data_path_element)
+        .collect();
+    assert_eq!(
+        renamer.path, expected_path,
+        "context rewrite path should include TypenameEquals(\"T\")"
+    );
+}
+
+/// Multi-hop ancestor walking: @context is defined on a grandparent type
+/// (A), the @fromContext field lives on type C which is two entity hops
+/// below A. The planner must walk parent_types past B to find A, and the
+/// rewrite path needs Parent elements for each level of nesting.
+#[test]
+fn inc_from_context_multi_hop_ancestor() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          a: A!
+        }
+        type A @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          b: B!
+          prop: String!
+        }
+        type B @key(fields: "id") {
+          id: ID!
+          c: C!
+        }
+        type C @key(fields: "id") {
+          id: ID!
+          value(arg: String @fromContext(field: "$ctx { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          dummy: ID!
+        }
+        "#,
+    );
+
+    // Verify the full plan: A's fetch includes `prop` for context data,
+    // and C's entity fetch references $contextualArgument_1_0.
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          a {
+            b {
+              c {
+                value
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            a {
+              b {
+                c {
+                  __typename
+                  id
+                }
+              }
+              prop
+            }
+          }
+        },
+        Flatten(path: "a.b.c") {
+          Fetch(service: "Subgraph1") {
+            {
+              ... on C {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on C {
+                value(arg: $contextualArgument_1_0)
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    let api_schema = planner.api_schema();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        r#"
+        {
+          a {
+            b {
+              c {
+                value
+              }
+            }
+          }
+        }
+        "#,
+        "operation.graphql",
+    )
+    .expect("valid graphql document");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan generated");
+
+    let Some(TopLevelPlanNode::Sequence(seq)) = &plan.node else {
+        panic!("expected sequence node");
+    };
+
+    // Find the deepest flatten/fetch (C's entity fetch with the context
+    // rewrite).
+    let last_flatten = seq.nodes.iter().rev().find_map(|n| {
+        if let PlanNode::Flatten(f) = n {
+            Some(f)
+        } else {
+            None
+        }
+    });
+    let Some(flatten) = last_flatten else {
+        panic!("expected at least one flatten node");
+    };
+    let PlanNode::Fetch(fetch) = &*flatten.node else {
+        panic!("expected fetch node inside flatten");
+    };
+
+    // The rewrite path should walk 2+ Parent elements back to the
+    // grandparent A, with a TypenameEquals guard for A.
+    assert!(
+        !fetch.context_rewrites.is_empty(),
+        "context rewrites must be present on the deepest fetch"
+    );
+    let FetchDataRewrite::KeyRenamer(renamer) = &*fetch.context_rewrites[0] else {
+        panic!("expected KeyRenamer");
+    };
+
+    let parent_count = renamer
+        .path
+        .iter()
+        .filter(|e| matches!(e, FetchDataPathElement::Parent))
+        .count();
+    assert!(
+        parent_count >= 2,
+        "multi-hop context should have at least 2 Parent elements in the rewrite path, got {parent_count}"
+    );
+
+    assert!(
+        renamer
+            .rename_key_to
+            .as_str()
+            .starts_with("contextualArgument_"),
+        "rename key should be a contextualArgument, got {:?}",
+        renamer.rename_key_to
+    );
+}
+
+/// Context rewrites of every fetch in the plan, as (rename_key_to, path).
+fn context_rewrite_paths(plan: &QueryPlan) -> Vec<(String, Vec<FetchDataPathElement>)> {
+    fn walk(node: &PlanNode, out: &mut Vec<(String, Vec<FetchDataPathElement>)>) {
+        match node {
+            PlanNode::Fetch(fetch) => {
+                for rewrite in &fetch.context_rewrites {
+                    if let FetchDataRewrite::KeyRenamer(renamer) = &**rewrite {
+                        out.push((renamer.rename_key_to.to_string(), renamer.path.clone()));
+                    }
+                }
+            }
+            PlanNode::Flatten(flatten) => walk(&flatten.node, out),
+            PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
+            PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
+            other => panic!("unexpected plan node in context test: {other:?}"),
+        }
+    }
+    let mut out = Vec::new();
+    match &plan.node {
+        Some(TopLevelPlanNode::Fetch(fetch)) => walk(&PlanNode::Fetch(fetch.clone()), &mut out),
+        Some(TopLevelPlanNode::Sequence(seq)) => seq.nodes.iter().for_each(|n| walk(n, &mut out)),
+        Some(TopLevelPlanNode::Parallel(par)) => par.nodes.iter().for_each(|n| walk(n, &mut out)),
+        other => panic!("unexpected top-level plan node: {other:?}"),
+    }
+    out
+}
+
+fn rewrite_path(elements: &[&str]) -> Vec<FetchDataPathElement> {
+    elements
+        .iter()
+        .copied()
+        .map(parse_fetch_data_path_element)
+        .collect()
+}
+
+/// A context field that is @external in the @context subgraph must be
+/// fetched from the subgraph that resolves it, not selected where it is
+/// external. The search has to back out of the direct append and take the
+/// Subgraph2 hop instead.
+#[test]
+fn inc_from_context_external_field_fetched_from_resolving_subgraph() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          t: T!
+        }
+        type T @key(fields: "id") @context(name: "context") {
+          id: ID!
+          u: U!
+          prop: String! @external
+        }
+        type U @key(fields: "id") {
+          id: ID!
+          field(a: String @fromContext(field: "$context { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          a: Int!
+        }
+        type T @key(fields: "id") {
+          id: ID!
+          prop: String!
+        }
+        type U @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          t {
+            u {
+              id
+              field
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       t {
+                         __typename
+                         u {
+                           __typename
+                           id
+                         }
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "t") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on T {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on T {
+                           prop
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "t.u") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on U {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on U {
+                           field(a: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_1_0".to_string(),
+            rewrite_path(&["..", "... on T", "prop"])
+        )]
+    );
+}
+
+/// A type carrying the same @context as its @fromContext field must read the
+/// context from its nearest ancestor, not from itself: `value` on `child`
+/// takes `tree.prop`, so the rewrite needs a Parent step.
+#[test]
+fn inc_from_context_self_context_reads_from_ancestor() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          start: Wrapper!
+        }
+        type Wrapper @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          tree: Tree!
+        }
+        type Tree @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          child: Tree!
+          value(arg: String @fromContext(field: "$ctx { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          dummy: ID!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          start {
+            tree {
+              child {
+                value
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       start {
+                         tree {
+                           child {
+                             __typename
+                             id
+                           }
+                           prop
+                         }
+                       }
+                     }
+                   },
+                   Flatten(path: "start.tree.child") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Tree {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Tree {
+                           value(arg: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_1_0".to_string(),
+            rewrite_path(&["..", "... on Tree", "prop"])
+        )]
+    );
+}
+
+/// Type-conditioned context selections name types other than the ancestor
+/// actually found, which FieldSet validation rejects. They must still plan,
+/// with the rewrite unwrapped to the matching runtime type.
+#[test]
+fn inc_from_context_type_conditioned_selection_plans() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Query {
+          a: A!
+        }
+        type A @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+        Subgraph2: r#"
+        type A @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String! @shareable
+          child: C!
+        }
+        type B @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String! @shareable
+          child: C!
+        }
+        type C @key(fields: "id") {
+          id: ID!
+          value(arg: String @fromContext(field: "$ctx ... on A { prop } ... on B { prop }")): Int!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          a {
+            child {
+              value
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph1") {
+                     {
+                       a {
+                         __typename
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "a") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on A {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on A {
+                           child {
+                             __typename
+                             id
+                           }
+                           prop
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "a.child") {
+                     Fetch(service: "Subgraph2") {
+                       {
+                         ... on C {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on C {
+                           value(arg: $contextualArgument_2_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_2_0".to_string(),
+            rewrite_path(&["..", "... on A", "prop"])
+        )]
+    );
+}
+
+/// A key hop into Subgraph1 lands on `tree`, whose type carries the same
+/// @context as `value`. `value` on `child` must read `tree.prop` from the
+/// hop's own fetch, not treat the boundary type as already providing it.
+#[test]
+fn inc_from_context_boundary_entity_with_self_context_reads_from_ancestor() {
+    let planner = planner!(
+        config = incremental_config(),
+        Subgraph1: r#"
+        type Wrapper @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          tree: Tree!
+        }
+        type Tree @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          prop: String!
+          child: Tree!
+          value(arg: String @fromContext(field: "$ctx { prop }")): Int!
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          start: Wrapper!
+        }
+        type Wrapper @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          start {
+            tree {
+              child {
+                value
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+               QueryPlan {
+                 Sequence {
+                   Fetch(service: "Subgraph2") {
+                     {
+                       start {
+                         __typename
+                         id
+                       }
+                     }
+                   },
+                   Flatten(path: "start") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Wrapper {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Wrapper {
+                           tree {
+                             child {
+                               __typename
+                               id
+                             }
+                             prop
+                           }
+                         }
+                       }
+                     },
+                   },
+                   Flatten(path: "start.tree.child") {
+                     Fetch(service: "Subgraph1") {
+                       {
+                         ... on Tree {
+                           __typename
+                           id
+                         }
+                       } =>
+                       {
+                         ... on Tree {
+                           value(arg: $contextualArgument_1_0)
+                         }
+                       }
+                     },
+                   },
+                 },
+               }
+               "###
+    );
+    assert_eq!(
+        context_rewrite_paths(&plan),
+        vec![(
+            "contextualArgument_1_0".to_string(),
+            rewrite_path(&["..", "... on Tree", "prop"])
+        )]
+    );
+}
+
+/// Reaching Z takes a key-hop chain. Every intermediate subgraph starts a
+/// candidate chain, and BULB must pick the shortest one, S1 -> Y1 -> Z as
+/// legacy does, not a detour through S2 that adds a no-op fetch.
+#[test]
+fn inc_interface_object_type_preserving_transitions_skip_noop_hop() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+
+            type Query {
+                test: A
+            }
+        "#,
+        S2: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S3: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S4: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        Y1: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Y2: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Z: r#"
+            type I @interfaceObject @key(fields: "alt_id { id }") {
+                alt_id: AltID!
+                data: String!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            {
+                test {
+                    data
+                }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            test {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Y1") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Z") {
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on I {
+                data
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
 #[test]
 fn inc_interface_type_explosion_routes_value_type_field() {
     let planner = planner!(
@@ -2487,16 +3778,13 @@ fn inc_interface_type_explosion_routes_value_type_field() {
           type Query {
             i: I
           }
-
           interface I {
             s: S
           }
-
           type T implements I @key(fields: "id") {
             id: ID!
             s: S @shareable
           }
-
           type S @shareable {
             x: Int
           }
@@ -2506,14 +3794,12 @@ fn inc_interface_type_explosion_routes_value_type_field() {
             id: ID!
             s: S @shareable
           }
-
           type S @shareable {
             x: Int
             y: Int
           }
         "#,
     );
-
     assert_plan!(
         &planner,
         r#"
@@ -2862,6 +4148,1065 @@ fn inc_plain_requires_after_aliased_requires_does_not_overwrite() {
             }
           },
         },
+      },
+    }
+    "###
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Same-subgraph @defer: deferred field must get its own entity fetch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inc_defer_same_subgraph_produces_entity_fetch() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v0: String
+            v1: String
+          }
+        "#,
+    );
+
+    // v1 is deferred, so the primary fetch must NOT include v1.
+    // The Deferred block must contain its own entity fetch for v1.
+    assert_plan!(planner,
+        r#"
+          {
+            t {
+              v0
+              ... @defer {
+                v1
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v0 } }:
+          Fetch(service: "Subgraph1", id: 0) {
+            {
+              t {
+                __typename
+                v0
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "t") {
+            { v1 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+/// Mutation with same-subgraph @defer: BULB plans each top-level mutation
+/// field independently and sequences the resulting Defer nodes. Each
+/// deferred field must get its own entity fetch rather than riding the
+/// primary mutation fetch.
+#[test]
+fn inc_defer_on_mutation_in_same_subgraph() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type Mutation {
+            update1: T
+            update2: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v0: String
+            v1: String
+          }
+        "#,
+    );
+
+    assert_plan!(planner,
+        r#"
+          mutation mut {
+            update1 {
+              v0
+              ... @defer {
+                v1
+              }
+            }
+            update2 {
+              v1
+              ... @defer {
+                v0
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Defer {
+          Primary {
+            { update1 { v0 } }:
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                update1 {
+                  __typename
+                  v0
+                  id
+                }
+              }
+            },
+          }, [
+            Deferred(depends: [0], path: "update1") {
+              { v1 }:
+              Flatten(path: "update1") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v1
+                    }
+                  }
+                },
+              },
+            },
+          ]
+        },
+        Defer {
+          Primary {
+            { update2 { v1 } }:
+            Fetch(service: "Subgraph1", id: 1) {
+              {
+                update2 {
+                  __typename
+                  v1
+                  id
+                }
+              }
+            },
+          }, [
+            Deferred(depends: [1], path: "update2") {
+              { v0 }:
+              Flatten(path: "update2") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v0
+                    }
+                  }
+                },
+              },
+            },
+          ]
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Multi-dependency deferred section: the deferred field's key (id1 id2)
+/// is only resolvable via fetches to intermediate subgraphs.
+#[test]
+fn inc_defer_multi_dependency_deferred_section() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id0") {
+            id0: ID!
+            v1: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id0") @key(fields: "id1") {
+            id0: ID!
+            id1: ID!
+            v2: Int
+          }
+        "#,
+        Subgraph3: r#"
+          type T @key(fields: "id0") @key(fields: "id2") {
+            id0: ID!
+            id2: ID!
+            v3: Int
+          }
+        "#,
+        Subgraph4: r#"
+          type T @key(fields: "id1 id2") {
+            id1: ID!
+            id2: ID!
+            v4: Int
+          }
+        "#,
+    );
+
+    assert_plan!(&planner,
+        r#"
+          {
+            t {
+              v1
+              v2
+              v3
+              ... @defer {
+                v4
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v1 v2 v3 } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  v1
+                  id0
+                }
+              }
+            },
+            Parallel {
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph3", id: 1) {
+                  {
+                    ... on T {
+                      __typename
+                      id0
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v3
+                      id2
+                    }
+                  }
+                },
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2", id: 2) {
+                  {
+                    ... on T {
+                      __typename
+                      id0
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v2
+                      id1
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [1, 2, 0], path: "t") {
+            { v4 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph4") {
+                {
+                  ... on T {
+                    __typename
+                    id1
+                    id2
+                  }
+                } =>
+                {
+                  ... on T {
+                    v4
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###
+    );
+}
+
+/// Ordering pair for aliased/plain @requires inputs on one entity edge:
+/// b's condition (a { x }) must be staged and aliased, c's (a { y }) is
+/// resolvable in place and stays plain. Whichever arrives second must not
+/// share a representation with the other, since the KeyRenamer's
+/// remove-then-insert would overwrite the plain `a` at runtime.
+#[test]
+fn inc_requires_aliased_then_plain_input_does_not_collide() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            a: A
+          }
+
+          type A @key(fields: "id") {
+            id: ID!
+            y: Int
+          }
+        "#,
+        S2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: A @external
+            b: Int @requires(fields: "a { x }")
+            c: Int @requires(fields: "a { y }")
+          }
+
+          type A @key(fields: "id") {
+            id: ID! @external
+            x: Int @external
+            y: Int @external
+          }
+        "#,
+        S3: r#"
+          type A @key(fields: "id") {
+            id: ID!
+            x: Int
+          }
+        "#,
+    );
+
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"{ t { b c } }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_a: a {
+                __typename
+                id
+              }
+              __require_1_a: a {
+                y
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t") {
+            Fetch(service: "S2") {
+              {
+                ... on T {
+                  __typename
+                  id
+                  __require_1_a: a {
+                    y
+                  }
+                }
+              } =>
+              {
+                ... on T {
+                  c
+                }
+              }
+            },
+          },
+          Flatten(path: "t.__require_0_a") {
+            Fetch(service: "S3") {
+              {
+                ... on A {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on A {
+                  x
+                }
+              }
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_a: a {
+                  x
+                }
+              }
+            } =>
+            {
+              ... on T {
+                b
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+
+    assert_plan!(&planner,
+        r#"{ t { c b } }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+              a {
+                __typename
+                y
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "t.a") {
+          Fetch(service: "S3") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                x
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                a {
+                  y
+                  x
+                }
+              }
+            } =>
+            {
+              ... on T {
+                c
+                b
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Identical @requires conditions intern to one alias so their consumers
+/// share a single entity fetch; the rewrite-conflict check must compare
+/// aliases, not just originals, or the second consumer splits needlessly.
+#[test]
+fn inc_requires_identical_conditions_share_one_fetch() {
+    let planner = planner!(
+        config = incremental_config(),
+        S1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        S2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: Int @external
+            b: Int @requires(fields: "a")
+            c: Int @requires(fields: "a")
+          }
+        "#,
+        S3: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+        "#,
+    );
+
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"{ t { b c } }"#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S3") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                __require_0_a: a
+              }
+            }
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "S2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_a: a
+              }
+            } =>
+            {
+              ... on T {
+                b
+                c
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Overlapping @requires conditions (foo needs a subset of bar's) share
+/// one alias via containment interning, so the common `v { y { isY } }`
+/// chain is staged once instead of once per consumer. Legacy plans this
+/// with 6 fetches; BULB currently uses 7.
+#[test]
+fn inc_requires_overlapping_conditions_fetch_count() {
+    let planner = planner!(
+        config = incremental_config(),
+        s1: r#"
+            type Query {
+              t: T
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @shareable
+              x: X @shareable
+              v: V @shareable
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+            }
+
+            type V @key(fields: "id") @key(fields: "internalID") {
+              id: ID!
+              internalID: ID!
+            }
+
+            type X @key(fields: "t { id }") {
+              t: T!
+              isX: Boolean!
+            }
+        "#,
+        s2: r#"
+            type V @key(fields: "id") {
+              id: ID!
+              internalID: ID! @shareable
+              y: Y! @shareable
+              zz: [Z!] @external
+            }
+
+            type Z {
+              u: U! @external
+            }
+
+            type Y @key(fields: "id") {
+              id: ID!
+              isY: Boolean! @external
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+              x: X @external
+              v: V @external
+              foo: [String!]! @requires(fields: "x { isX }\nv { y { isY } }")
+              bar: [I!]! @requires(fields: "x { isX }\nv { y { isY } zz { u { id } } }")
+            }
+
+            type X {
+              isX: Boolean! @external
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @external
+            }
+        "#,
+        s3: r#"
+            type V @key(fields: "internalID") {
+              internalID: ID!
+              y: Y! @shareable
+            }
+
+            type Y @key(fields: "id") {
+              id: ID!
+              isY: Boolean!
+            }
+        "#,
+        s4: r#"
+            type V @key(fields: "id") @key(fields: "internalID") {
+              id: ID!
+              internalID: ID!
+              zz: [Z!] @override(from: "s1")
+            }
+
+            type Z {
+              free: Boolean
+              u: U!
+              v: V!
+            }
+
+            interface I {
+              id: ID!
+              name: String!
+            }
+
+            type T implements I @key(fields: "id") {
+              id: ID!
+              name: String! @shareable
+              x: X @shareable
+              v: V @shareable
+            }
+
+            type X @key(fields: "t { id }", resolvable: false) {
+              t: T! @external
+            }
+
+            type U implements I @key(fields: "id") {
+              id: ID!
+              name: String! @override(from: "s1")
+            }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker rejects input
+    // KeyRenamer rewrites, which this plan uses to rename an aliased
+    // @requires condition back to its field name.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        r#"
+        {
+            t {
+                foo
+                bar {
+                    name
+                }
+            }
+        }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "s1") {
+          {
+            t {
+              __typename
+              id
+              __require_0_x: x {
+                isX
+              }
+              __require_1_v: v {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "t.__require_1_v") {
+            Fetch(service: "s4") {
+              {
+                ... on V {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on V {
+                  zz {
+                    u {
+                      id
+                    }
+                  }
+                }
+              }
+            },
+          },
+          Sequence {
+            Flatten(path: "t.__require_1_v") {
+              Fetch(service: "s2") {
+                {
+                  ... on V {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on V {
+                    y {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.__require_1_v.y") {
+              Fetch(service: "s3") {
+                {
+                  ... on Y {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Y {
+                    isY
+                  }
+                }
+              },
+            },
+          },
+        },
+        Flatten(path: "t") {
+          Fetch(service: "s2") {
+            {
+              ... on T {
+                __typename
+                id
+                __require_0_x: x {
+                  isX
+                }
+                __require_1_v: v {
+                  y {
+                    isY
+                  }
+                  zz {
+                    u {
+                      id
+                    }
+                  }
+                }
+              }
+            } =>
+            {
+              ... on T {
+                foo
+                bar {
+                  __typename
+                  ... on U {
+                    __typename
+                    id
+                  }
+                  ... on T {
+                    __typename
+                    id
+                  }
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Flatten(path: "t.bar.@|[T]") {
+            Fetch(service: "s1") {
+              {
+                ... on T {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T {
+                  name
+                }
+              }
+            },
+          },
+          Flatten(path: "t.bar.@|[U]") {
+            Fetch(service: "s4") {
+              {
+                ... on U {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on U {
+                  name
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+/// Multiple non-nested @defer labels: sibling entity merging must not
+/// combine fetches from different defer scopes; primary data must stay in
+/// the primary and each label's data in its own Deferred block.
+#[test]
+fn inc_defer_multiple_labels_keep_scopes_separate() {
+    let planner = planner!(
+        config = incremental_defer_config(),
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v0: String
+            v1: String
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            v2: String
+            v3: U
+          }
+
+          type U @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        Subgraph3: r#"
+          type U @key(fields: "id") {
+            id: ID!
+            x: Int
+            y: Int
+          }
+        "#,
+    );
+
+    assert_plan!(planner,
+        r#"
+          {
+            t {
+              v0
+              ... @defer(label: "defer_v1") {
+                v1
+              }
+              ... @defer {
+                v2
+              }
+              v3 {
+                x
+                ... @defer(label: "defer_in_v3") {
+                  y
+                }
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { t { v0 v3 { x } } }:
+          Sequence {
+            Fetch(service: "Subgraph1", id: 0) {
+              {
+                t {
+                  __typename
+                  v0
+                  id
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2", id: 1) {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v3 {
+                      __typename
+                      id
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "t.v3") {
+              Fetch(service: "Subgraph3") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    x
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [1], path: "t/v3", label: "defer_in_v3") {
+            { y }:
+            Flatten(path: "t.v3") {
+              Fetch(service: "Subgraph3") {
+                {
+                  ... on U {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on U {
+                    y
+                  }
+                }
+              },
+            },
+          },
+          Deferred(depends: [0], path: "t") {
+            { v2 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v2
+                  }
+                }
+              },
+            },
+          },
+          Deferred(depends: [0], path: "t", label: "defer_v1") {
+            { v1 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph1") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on T {
+                    v1
+                  }
+                }
+              },
+            },
+          },
+        ]
       },
     }
     "###

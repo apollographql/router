@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use petgraph::Direction;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
@@ -22,6 +23,7 @@ use super::shared_path::SharedPath;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::operation::OpPathElement;
+use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -154,6 +156,11 @@ pub(crate) struct FetchNode {
     /// (non-deferred) response. Fetch nodes with a defer_ref are partitioned
     /// into deferred blocks during plan generation.
     pub(crate) defer_ref: Option<String>,
+    /// @fromContext rewrite paths that rename entity data keys to
+    /// `$contextualArgument_N_M` variable names.
+    pub(crate) context_rewrites: Vec<FetchDataKeyRenamer>,
+    /// @fromContext variable definitions added to the subgraph operation.
+    pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
 }
 
 impl FetchNode {
@@ -163,11 +170,12 @@ impl FetchNode {
             kind,
             selection_builder: SelectionBuilder::default(),
             defer_ref: None,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
         }
     }
 
     /// Get the root type if this is a root fetch group.
-    #[allow(dead_code)]
     pub(crate) fn root_type(&self) -> Option<&CompositeTypeDefinitionPosition> {
         match &self.kind {
             FetchGroupKind::Root { root_type } | FetchGroupKind::RootHop { root_type, .. } => {
@@ -207,6 +215,13 @@ enum FetchGraphOp {
     ModifySelection {
         node_index: NodeIndex,
         prev_head: SelectionCheckpoint,
+    },
+    /// @fromContext rewrites/variables were appended to a node. Undo:
+    /// truncate both vecs to their prior lengths.
+    AddContext {
+        node_index: NodeIndex,
+        prev_rewrites: usize,
+        prev_variables: usize,
     },
 }
 
@@ -313,6 +328,15 @@ impl FetchGraph {
                         .selection_builder
                         .restore_head(prev_head);
                 }
+                FetchGraphOp::AddContext {
+                    node_index,
+                    prev_rewrites,
+                    prev_variables,
+                } => {
+                    let fetch_node = &mut self.graph[node_index];
+                    fetch_node.context_rewrites.truncate(prev_rewrites);
+                    fetch_node.context_variables.truncate(prev_variables);
+                }
             }
         }
     }
@@ -368,6 +392,8 @@ impl FetchGraph {
             kind: FetchGroupKind::Root { root_type },
             selection_builder: SelectionBuilder::default(),
             defer_ref,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
         })
     }
 
@@ -383,6 +409,8 @@ impl FetchGraph {
             kind: FetchGroupKind::Entity { merge_at },
             selection_builder: SelectionBuilder::default(),
             defer_ref,
+            context_rewrites: Vec::new(),
+            context_variables: Vec::new(),
         })
     }
 
@@ -452,16 +480,6 @@ impl FetchGraph {
             return id;
         }
         self.add_entity_group_with_defer(subgraph, merge_at, defer_ref)
-    }
-
-    /// Get or create the entity fetch group for (subgraph, merge_at).
-    #[cfg(test)]
-    pub(crate) fn get_or_create_entity_group(
-        &mut self,
-        subgraph: &Arc<str>,
-        merge_at: Vec<FetchDataPathElement>,
-    ) -> NodeIndex {
-        self.get_or_create_entity_group_with_defer(subgraph, merge_at, None)
     }
 
     /// Whether a directed edge from `parent` to `child` exists.
@@ -605,6 +623,41 @@ impl FetchGraph {
             prev_head,
         });
         self.graph[node].selection_builder.insert(path, selections);
+    }
+
+    /// Append a @fromContext rewrite and variable definition to a node,
+    /// deduplicating by renamer identity / variable name.
+    pub(crate) fn add_context(
+        &mut self,
+        node: NodeIndex,
+        renamer: FetchDataKeyRenamer,
+        context_id: Name,
+        context_type: Node<apollo_compiler::ast::Type>,
+    ) {
+        let fetch_node = &mut self.graph[node];
+        let prev_rewrites = fetch_node.context_rewrites.len();
+        let prev_variables = fetch_node.context_variables.len();
+        if !fetch_node.context_rewrites.contains(&renamer) {
+            fetch_node.context_rewrites.push(renamer);
+        }
+        if !fetch_node
+            .context_variables
+            .iter()
+            .any(|(n, _)| *n == context_id)
+        {
+            fetch_node
+                .context_variables
+                .push((context_id, context_type));
+        }
+        if fetch_node.context_rewrites.len() != prev_rewrites
+            || fetch_node.context_variables.len() != prev_variables
+        {
+            self.undo_log.push(FetchGraphOp::AddContext {
+                node_index: node,
+                prev_rewrites,
+                prev_variables,
+            });
+        }
     }
 
     /// Get a reference to the node weight.
@@ -1123,7 +1176,7 @@ mod tests {
         let mut g = FetchGraph::new();
         let sg: Arc<str> = Arc::from("sg");
         let cp = g.checkpoint();
-        let original = g.get_or_create_entity_group(&sg, user_path(None));
+        let original = g.get_or_create_entity_group_with_defer(&sg, user_path(None), None);
         g.rollback(cp);
 
         // Reuse the freed index for an unrelated group (different merge_at).
@@ -1134,7 +1187,7 @@ mod tests {
             "test setup requires StableDiGraph to reuse the freed index",
         );
 
-        let looked_up = g.get_or_create_entity_group(&sg, user_path(None));
+        let looked_up = g.get_or_create_entity_group_with_defer(&sg, user_path(None), None);
         assert_ne!(
             looked_up, unrelated,
             "stale groups slot resolved to an unrelated node",

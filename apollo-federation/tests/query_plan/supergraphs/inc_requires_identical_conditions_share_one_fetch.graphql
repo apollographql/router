@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 1c4a0073aec09c227ea313ae18ead79bd7575a62
+# Composed from subgraphs with hash: cc2fbc447b3dfcb221c2456337b0ec41b23e77e4
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
@@ -22,12 +22,6 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface I
-  @join__type(graph: SUBGRAPH1)
-{
-  s: S
-}
-
 input join__ContextArgument {
   name: String!
   type: String!
@@ -42,8 +36,9 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
-  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  S1 @join__graph(name: "S1", url: "none")
+  S2 @join__graph(name: "S2", url: "none")
+  S3 @join__graph(name: "S3", url: "none")
 }
 
 scalar link__Import
@@ -61,25 +56,20 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+  @join__type(graph: S3)
 {
-  i: I @join__field(graph: SUBGRAPH1)
+  t: T @join__field(graph: S1)
 }
 
-type S
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
-{
-  x: Int
-  y: Int @join__field(graph: SUBGRAPH2)
-}
-
-type T implements I
-  @join__implements(graph: SUBGRAPH1, interface: "I")
-  @join__type(graph: SUBGRAPH1, key: "id")
-  @join__type(graph: SUBGRAPH2, key: "id")
+type T
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id")
+  @join__type(graph: S3, key: "id")
 {
   id: ID!
-  s: S
+  a: Int @join__field(graph: S2, external: true) @join__field(graph: S3)
+  b: Int @join__field(graph: S2, requires: "a")
+  c: Int @join__field(graph: S2, requires: "a")
 }

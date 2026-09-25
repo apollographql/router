@@ -63,6 +63,9 @@ pub(crate) struct PlanBuildContext<'a> {
     pub(crate) operation_compression: &'a mut SubgraphOperationCompression,
     /// Numbers generated subgraph operations (`{name}__{subgraph}__{n}`).
     pub(crate) operation_counter: u32,
+    /// Numbers fetch nodes referenced by deferred blocks' `depends`; spans
+    /// the whole plan so per-field mutation planning cannot collide ids.
+    pub(crate) fetch_id_counter: u64,
 }
 
 /// The slice of the graph one plan covers (the whole graph, the primary
@@ -274,8 +277,6 @@ impl FetchGraph {
             }
         }
 
-        let mut fetch_id_counter = 0u64;
-
         // Assign fetch IDs to nodes that parent a node with a different
         // defer_ref (None->Some and Some->Some alike), covering
         // primary-to-deferred and deferred-to-nested-deferred edges.
@@ -286,8 +287,8 @@ impl FetchGraph {
                 let child_defer = self.graph[edge.target()].defer_ref.as_deref();
                 if child_defer != this_defer {
                     node_fetch_ids.entry(node_idx).or_insert_with(|| {
-                        let id = fetch_id_counter;
-                        fetch_id_counter += 1;
+                        let id = ctx.fetch_id_counter;
+                        ctx.fetch_id_counter += 1;
                         id
                     });
                     break;
@@ -501,12 +502,14 @@ impl FetchGraph {
                     depth,
                 )?;
 
-                // The outer block's sub_selection describes the whole chunk;
-                // the nested DeferNode's primary carries none (its deferred
-                // children re-select their pieces via their blocks).
+                // The nested DeferNode's primary carries the block's own
+                // (non-deferred) content; the deferred children re-select
+                // their pieces via their blocks.
                 let nested_defer = PlanNode::Defer(DeferNode {
                     primary: PrimaryDeferBlock {
-                        sub_selection: None,
+                        sub_selection: block_info
+                            .and_then(|bi| bi.sub_selection.as_deref())
+                            .map(|s| s.to_owned()),
                         node: inner_plan.map(Box::new),
                     },
                     deferred: inner_deferred,
@@ -745,6 +748,7 @@ impl FetchGraph {
 
         // 4. Collect variable definitions narrowed to those actually used.
         let (variable_definitions, variable_usages) = Self::collect_used_variable_definitions(
+            &node.context_variables,
             ctx.variable_definitions,
             ctx.operation_directives,
             &finalized_selection,
@@ -801,7 +805,12 @@ impl FetchGraph {
             operation_kind: node_root_kind.into(),
             input_rewrites: Arc::new(input_rewrites),
             output_rewrites,
-            context_rewrites: Default::default(),
+            context_rewrites: node
+                .context_rewrites
+                .iter()
+                .cloned()
+                .map(|r| Arc::new(r.into()))
+                .collect(),
         }));
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
@@ -970,16 +979,34 @@ impl FetchGraph {
     /// Filter the operation's variable definitions to those actually
     /// referenced by the finalized selection and operation directives.
     fn collect_used_variable_definitions(
+        context_variables: &[(Name, Node<apollo_compiler::ast::Type>)],
         operation_variable_definitions: &[Node<VariableDefinition>],
         operation_directives: &DirectiveList,
         finalized_selection: &SelectionSet,
     ) -> (Vec<Node<VariableDefinition>>, Vec<Name>) {
+        let context_var_defs: Vec<Node<VariableDefinition>> = context_variables
+            .iter()
+            .map(|(name, ty)| {
+                Node::new(VariableDefinition {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    default_value: None,
+                    directives: Default::default(),
+                    description: None,
+                })
+            })
+            .collect();
+        let all_var_defs: Vec<Node<VariableDefinition>> = operation_variable_definitions
+            .iter()
+            .cloned()
+            .chain(context_var_defs)
+            .collect();
         let variable_definitions = {
             let mut collector = VariableCollector::new();
             collector.visit_directive_list(operation_directives);
             collector.visit_selection_set(finalized_selection);
             let used = collector.into_inner();
-            operation_variable_definitions
+            all_var_defs
                 .iter()
                 .filter(|v| used.contains(&v.name))
                 .cloned()
@@ -1106,6 +1133,7 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
         };
 
         let err = graph
@@ -1163,6 +1191,7 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
         };
         assert!(
             graph.to_query_plan_with_defer(&mut ctx, None).is_err(),
@@ -1230,6 +1259,7 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
         };
 
         let (plan, cost) = graph
@@ -1286,6 +1316,7 @@ mod tests {
             operation_name: &None,
             operation_compression: compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
         }
     }
 

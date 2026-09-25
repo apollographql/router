@@ -1,7 +1,6 @@
 //! Mutable BULB search state: the pending-selection stack, the fetch graph
 //! under construction, and O(1) checkpoint/rollback over both.
 
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -14,6 +13,7 @@ use super::super::shared_path::SharedPath;
 use crate::operation::Selection;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 /// Cap on condition-resolution nesting, checked before each increment of
 /// [`ConditionScope::depth`].
@@ -30,6 +30,13 @@ pub(crate) struct ConditionScope {
     /// Condition-resolution nesting level. Bounds requires-of-requires
     /// chains: mutually recursive @requires would otherwise spiral forever.
     pub(crate) depth: usize,
+}
+
+/// Anchor information for @fromContext across entity boundaries.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ContextAnchor {
+    pub(crate) fetch: Option<NodeIndex>,
+    pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
 }
 
 #[derive(Clone, Debug)]
@@ -49,12 +56,12 @@ pub(crate) struct PendingSelection {
     pub(crate) condition: Option<ConditionScope>,
     /// @provides provenance across downcasts: the provides-copy query graph
     /// node this position descended from via inline fragments, when the
-    /// current node itself is NOT a copy. An ancestor's `@provides` on an
+    /// current node itself is not a copy. An ancestor's `@provides` on an
     /// interface-typed field applies to every runtime type, but the query
     /// graph only copies the nodes named in the provides field set. A
     /// downcast out of the copy layer lands on the original node, where the
     /// provided fields have no edges. The anchor keeps the copy node (whose
-    /// edges ARE the provided fields) visible to key-hop enumeration, so
+    /// edges are the provided fields) visible to key-hop enumeration, so
     /// "are these key conditions provided here?" stays an exact graph check
     /// instead of a schema-level guess. `None` whenever the current node's
     /// own edges carry the provenance (inside a copy layer) or no @provides
@@ -65,13 +72,19 @@ pub(crate) struct PendingSelection {
     /// The @defer label this selection is inside, if any. Propagated to
     /// fetch nodes so they can be partitioned into primary vs deferred.
     pub(crate) defer_ref: Option<String>,
+    /// Type spine from the operation root through parents of this selection,
+    /// for @fromContext ancestor resolution.
+    pub(crate) parent_types: SharedPath<CompositeTypeDefinitionPosition>,
+    /// @fromContext anchor: the parent fetch feeding this selection's
+    /// entity fetch, when the selection lives inside one.
+    pub(crate) context_anchor: ContextAnchor,
     /// Best-effort selection: dropping it (zero routing options, or a failed
     /// commit) is tolerated silently instead of counting toward
     /// `dropped_fields` and failing the plan. Inherited by forks, so
     /// condition data pushed on a best-effort selection's behalf is equally
     /// tolerant. The only producer is the @interfaceObject
-    /// concrete-`__typename` recovery, whose fused predecessor silently did
-    /// nothing when no candidate subgraph existed.
+    /// concrete-`__typename` recovery, where no subgraph may be able to
+    /// supply the concrete typename.
     pub(crate) best_effort: bool,
 }
 
@@ -114,6 +127,8 @@ impl PendingSelection {
             provides_anchor: self.provides_anchor,
             narrowing: self.narrowing.clone(),
             defer_ref: self.defer_ref.clone(),
+            parent_types: self.parent_types.clone(),
+            context_anchor: self.context_anchor.clone(),
             best_effort: self.best_effort,
         }
     }
@@ -149,6 +164,19 @@ impl PendingSelection {
 
     pub(super) fn with_defer(mut self, defer_ref: Option<String>) -> Self {
         self.defer_ref = defer_ref;
+        self
+    }
+
+    pub(super) fn with_parent_types(
+        mut self,
+        parent_types: SharedPath<CompositeTypeDefinitionPosition>,
+    ) -> Self {
+        self.parent_types = parent_types;
+        self
+    }
+
+    pub(super) fn with_context_anchor(mut self, context_anchor: ContextAnchor) -> Self {
+        self.context_anchor = context_anchor;
         self
     }
 
@@ -232,12 +260,16 @@ pub(crate) struct PlanState {
     /// operation the legacy planner handles. Loop detection in the condition
     /// resolution rework should replace it.
     pub(crate) forced_backtracks: u64,
-    /// Interned ids for @requires condition-field aliases, keyed by the
-    /// serialized condition selection: identical conditions share an alias
-    /// so sibling entity fetches staging the same @requires can merge;
-    /// distinct conditions get distinct aliases. Append-only; NOT restored
-    /// on rollback (aliases only need to be stable, not predictable).
-    pub(crate) condition_alias_ids: BTreeMap<String, usize>,
+    /// Interned @requires condition-field aliases: index is the alias id,
+    /// the entry is the widest (unaliased) selection interned so far under
+    /// that alias. A condition shares an alias with any entry it contains
+    /// or is contained by, so overlapping conditions stage their shared
+    /// prefix once instead of duplicating the fetch chain per alias.
+    /// Sharing stays correct because every consumer routes its own
+    /// conditions under the alias path and the fetch graph dedupes them.
+    /// Append-only; not restored on rollback (aliases only need to be
+    /// stable, not predictable).
+    pub(crate) condition_alias_ids: Vec<Selection>,
 }
 
 #[derive(Clone, Debug)]
@@ -262,7 +294,7 @@ impl PlanState {
             type_explosions: 0,
             effort: 0,
             forced_backtracks: 0,
-            condition_alias_ids: BTreeMap::new(),
+            condition_alias_ids: Vec::new(),
         }
     }
 
@@ -374,6 +406,8 @@ mod tests {
             narrowing: Default::default(),
             best_effort: false,
             defer_ref: None,
+            context_anchor: Default::default(),
+            parent_types: SharedPath::new(),
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state
