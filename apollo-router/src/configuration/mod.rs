@@ -424,6 +424,26 @@ impl Configuration {
         self.plugin_configs.get(full_name)
     }
 
+    /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
+    /// when the configuration has none, and retains its settings as parsing would have.
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
+    pub(crate) fn add_apollo_plugin_if_absent(
+        &mut self,
+        name: &str,
+        settings: impl FnOnce() -> Value,
+    ) {
+        if self.apollo_plugins.plugins.contains_key(name) {
+            return;
+        }
+        self.apollo_plugins
+            .plugins
+            .insert(name.to_string(), settings());
+        self.plugin_configs = Arc::new(PluginConfigs::parse(
+            &self.apollo_plugins.plugins,
+            self.plugins.plugins.as_ref().unwrap_or(&Map::new()),
+        ));
+    }
+
     fn notify(
         plugin_configs: &PluginConfigs,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
