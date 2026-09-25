@@ -311,14 +311,6 @@ fn build_connector_services(
     }
 }
 
-/// Returns the subscription plugin if enabled.
-fn subscription_plugin(plugins: &Plugins) -> Option<&Subscription> {
-    plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-}
-
 /// The subscription plugin's configuration, when the plugin is installed.
 fn subscription_plugin_config(plugins: &Plugins) -> Option<SubscriptionConfig> {
     plugins

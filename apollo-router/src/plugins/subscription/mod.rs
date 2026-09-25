@@ -55,7 +55,7 @@ static HEARTBEAT_TIMEOUT_DURATION_SECONDS: u64 = 15;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Subscription {
-    notify: Notify<String, graphql::Response>,
+    pub(crate) notify: Notify<String, graphql::Response>,
     callback_hmac_key: Option<String>,
     pub(crate) config: SubscriptionConfig,
 }

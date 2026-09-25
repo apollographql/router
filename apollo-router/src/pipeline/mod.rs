@@ -340,6 +340,10 @@ impl RouterFactory for Pipeline {
     fn pipeline_handle(&self) -> Arc<PipelineHandle> {
         self.pipeline_handle.clone()
     }
+
+    fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
+    }
 }
 
 impl Pipeline {
