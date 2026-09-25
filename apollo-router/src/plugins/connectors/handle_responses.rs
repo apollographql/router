@@ -9,7 +9,6 @@ use apollo_federation::connectors::runtime::debug::SelectionData;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::mapping::Problem;
 use apollo_federation::connectors::runtime::responses::HandleResponseError;
@@ -46,6 +45,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::fetch::AddSubgraphNameExt;
 
 // --- ERRORS ------------------------------------------------------------------
@@ -92,7 +92,7 @@ where
     T: HttpBody,
     T::Error: Into<tower::BoxError>,
 {
-    let (mut mapped_response, result) = match result {
+    let (mut mapped_response, outcome) = match result {
         // This occurs when we short-circuit the request when over the limit
         Err(error) => {
             Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
@@ -102,15 +102,15 @@ where
                     key: response_key,
                     problems: Vec::new(),
                 },
-                Err(error),
+                TransportOutcome::Error(error),
             )
         }
         Ok(response) => {
             let (parts, body) = response.into_parts();
 
-            let result = Ok(TransportResponse::Http(HttpResponse {
+            let outcome = TransportOutcome::Response(HttpResponse {
                 inner: parts.clone(),
-            }));
+            });
 
             let make_err = |message: String, code: &str| -> Box<RuntimeError> {
                 let mut err = RuntimeError::new(message, &response_key);
@@ -244,7 +244,7 @@ where
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
             }
 
-            (mapped, result)
+            (mapped, outcome)
         }
     };
 
@@ -260,7 +260,7 @@ where
     connector::request_service::Response {
         context: context.clone(),
         subgraph_name: connector.id.subgraph_name.to_string(),
-        transport_result: result,
+        transport_outcome: outcome,
         mapped_response,
     }
 }
@@ -446,9 +446,9 @@ fn log_connectors_event(
             let response = connector::request_service::Response {
                 context: context.clone(),
                 subgraph_name: connector.id.subgraph_name.to_string(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                transport_outcome: TransportOutcome::Response(HttpResponse {
                     inner: parts.clone(),
-                })),
+                }),
                 mapped_response: MappedResponse::Data {
                     data: Value::Null,
                     key: response_key,
@@ -1644,6 +1644,124 @@ mod tests {
                 incremental: [],
             },
         }
+        "#);
+    }
+
+    /// Batch responses are aligned to representations by key value, never by
+    /// position. One response exercises all three ways the array can differ
+    /// from the request: reordered, an unrequested extra object, and a
+    /// requested object that is missing (which becomes Null).
+    #[tokio::test]
+    async fn test_handle_responses_batch_reordered_extra_and_missing() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            id: ConnectId::new_on_object("subgraph_name".into(), None, name!(User), None, 0),
+            schema_subtypes_map: Default::default(),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Post,
+                body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data { id name }").unwrap(),
+            entity_resolver: Some(EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        });
+
+        let keys = connector
+            .resolvable_key(
+                &Schema::parse_and_validate("type Query { _: ID } type User { id: ID! }", "")
+                    .unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+
+        let response1: http::Response<RouterBody> = http::Response::builder()
+            // Requested [1, 2, 3]; returned 2 then 1, plus an unrequested 99,
+            // and no 3 at all.
+            .body(router::body::from_bytes(
+                r#"{"data":[{"id": "2","name":"B"},{"id": "99","name":"unrequested"},{"id": "1","name":"A"}]}"#,
+            ))
+            .unwrap();
+
+        let mut inputs: RequestInputs = RequestInputs::default();
+        let representations = serde_json_bytes::json!([
+            {"__typename": "User", "id": "1"},
+            {"__typename": "User", "id": "2"},
+            {"__typename": "User", "id": "3"},
+        ]);
+        inputs.batch = representations
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_object().unwrap().clone())
+            .collect_vec();
+
+        let response_key1 = ResponseKey::BatchEntity {
+            selection: Arc::new(JSONSelection::parse("$.data { id name }").unwrap()),
+            keys,
+            inputs,
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let res = super::aggregate_responses(
+            vec![
+                process_response(
+                    Ok(response1),
+                    response_key1,
+                    connector.clone(),
+                    &Context::default(),
+                    (None, Default::default()),
+                    None,
+                    supergraph_request,
+                    Default::default(),
+                )
+                .await
+                .mapped_response,
+            ],
+            Context::new(),
+        )
+        .unwrap();
+
+        assert_debug_snapshot!(res.response.body().data, @r#"
+        Some(
+            Object({
+                "_entities": Array([
+                    Object({
+                        "id": String(
+                            "1",
+                        ),
+                        "name": String(
+                            "A",
+                        ),
+                    }),
+                    Object({
+                        "id": String(
+                            "2",
+                        ),
+                        "name": String(
+                            "B",
+                        ),
+                    }),
+                    Null,
+                ]),
+            }),
+        )
         "#);
     }
 

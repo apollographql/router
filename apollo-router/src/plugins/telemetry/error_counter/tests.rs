@@ -5,7 +5,6 @@ use std::sync::Arc;
 use apollo_federation::connectors::JSONSelection;
 use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_federation::connectors::runtime::key::ResponseKey;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
 use http::Method;
@@ -47,6 +46,7 @@ use crate::services::RouterResponse;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphResponse;
 use crate::services::connector;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
@@ -151,14 +151,14 @@ async fn test_count_connector_errors_counts_declared_errors() {
             &connector::request_service::Response {
                 context,
                 subgraph_name: "accounts".to_string(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                transport_outcome: TransportOutcome::Response(HttpResponse {
                     inner: http::Response::builder()
                         .status(200)
                         .body(())
                         .unwrap()
                         .into_parts()
                         .0,
-                })),
+                }),
                 mapped_response: MappedResponse::Data {
                     data: json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
@@ -251,14 +251,14 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
             &connector::request_service::Response {
                 context: context.clone(),
                 subgraph_name: "accounts".to_string(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                transport_outcome: TransportOutcome::Response(HttpResponse {
                     inner: http::Response::builder()
                         .status(200)
                         .body(())
                         .unwrap()
                         .into_parts()
                         .0,
-                })),
+                }),
                 mapped_response: MappedResponse::Data {
                     data: json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
@@ -337,14 +337,14 @@ async fn test_count_connector_errors_ignores_failed_responses() {
             &connector::request_service::Response {
                 context: Context::default(),
                 subgraph_name: "accounts".to_string(),
-                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                transport_outcome: TransportOutcome::Response(HttpResponse {
                     inner: http::Response::builder()
                         .status(500)
                         .body(())
                         .unwrap()
                         .into_parts()
                         .0,
-                })),
+                }),
                 mapped_response: MappedResponse::Error {
                     error,
                     key,
