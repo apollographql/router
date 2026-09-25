@@ -357,3 +357,70 @@ fn lookup_fetch_authorization_metadata_covers_entity_fields() {
     );
     assert_eq!(fetch.authorization.scopes, ["read:reviews"]);
 }
+
+/// The same holds for `_entities` fetches: `_entities` is not part of the supergraph, so the
+/// metadata must come from the entity selections.
+#[test]
+fn entities_fetch_authorization_metadata_covers_entity_fields() {
+    use apollo_federation::query_plan::PlanNode as NextPlanNode;
+    use apollo_federation::query_plan::TopLevelPlanNode;
+
+    use crate::plugins::authorization::CacheKeyMetadata;
+    use crate::query_planner::PlanNode;
+
+    let link = r#"extend schema @link(url: "https://specs.apollo.dev/federation/v2.9", import: ["@key", "@authenticated", "@requiresScopes"])"#;
+    let schema = compose(&[
+        (
+            "products",
+            &format!(
+                "{link}\ntype Query {{ topProducts: [Product!]! }} type Product @key(fields: \"id\") {{ id: ID! name: String! }}"
+            ),
+        ),
+        (
+            "reviews",
+            &format!(
+                "{link}\ntype Product @key(fields: \"id\") {{ id: ID! reviewCount: Int! @authenticated @requiresScopes(scopes: [[\"read:reviews\"]]) }}"
+            ),
+        ),
+    ]);
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&schema).unwrap();
+    let planner = apollo_federation::query_plan::query_planner::QueryPlanner::new(
+        &supergraph,
+        Default::default(),
+    )
+    .unwrap();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ topProducts { reviewCount } }",
+        "op.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
+    let Some(TopLevelPlanNode::Sequence(sequence)) = &plan.node else {
+        panic!("unexpected plan: {plan}")
+    };
+    let NextPlanNode::Flatten(flatten) = &sequence.nodes[1] else {
+        panic!("unexpected plan: {plan}")
+    };
+    let NextPlanNode::Fetch(fetch) = &*flatten.node else {
+        panic!("unexpected plan: {plan}")
+    };
+    let PlanNode::Fetch(mut fetch) = PlanNode::from(fetch) else {
+        unreachable!()
+    };
+    let router_schema = crate::spec::Schema::parse(&schema, &Default::default()).unwrap();
+    let client_key = CacheKeyMetadata {
+        is_authenticated: true,
+        scopes: vec!["read:reviews".to_string()],
+        policies: vec![],
+    };
+    fetch.extract_authorization_metadata(router_schema.supergraph_schema(), &client_key);
+    assert!(
+        fetch.authorization.is_authenticated,
+        "{:?}",
+        fetch.authorization
+    );
+    assert_eq!(fetch.authorization.scopes, ["read:reviews"]);
+}
