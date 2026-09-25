@@ -40,6 +40,98 @@ const SUBGRAPH2: &str = r#"
   }
 "#;
 
+const SUBGRAPH1_WITH_INTERSECTING_INTERFACE: &str = r#"
+  type Query {
+    iFromS1: I
+  }
+
+  interface I @key(fields: "id") {
+    id: ID!
+    x: Int
+  }
+
+  interface J {
+    z: Int
+  }
+
+  union Matching = A
+
+  type A implements I & J @key(fields: "id") {
+    id: ID!
+    x: Int
+    z: Int
+  }
+
+  type B implements I @key(fields: "id") {
+    id: ID!
+    x: Int
+  }
+"#;
+
+#[rstest::rstest]
+#[case::one_matching_type("")]
+#[case::two_matching_types(
+    "type C implements I & J @key(fields: \"id\") { id: ID! x: Int z: Int }"
+)]
+fn plans_intersecting_interface_from_an_interface_object(#[case] extra_type: &str) {
+    use apollo_federation::query_plan::query_planner::QueryPlanner;
+
+    use crate::composition::test_helpers::ServiceDefinition;
+    use crate::composition::test_helpers::compose_as_fed2_subgraphs;
+
+    let s1 = format!("{SUBGRAPH1_WITH_INTERSECTING_INTERFACE} {extra_type}");
+    let composed = compose_as_fed2_subgraphs(&[
+        ServiceDefinition {
+            name: "S1",
+            type_defs: &s1,
+        },
+        ServiceDefinition {
+            name: "S2",
+            type_defs: SUBGRAPH2,
+        },
+    ])
+    .unwrap();
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(
+        &composed.schema().schema().to_string(),
+    )
+    .unwrap();
+    let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+    for operation in [
+        "{ iFromS2 { ... on J { z } } }",
+        "query($include: Boolean!) { iFromS2 { ... on J @include(if: $include) { z } } }",
+        "{ iFromS2 { ... on A { ... on J { z } } } }",
+        "{ iFromS2 { __typename ... on J { z } } }",
+        "{ iFromS2 { ... on Matching { ... on A { z } } } }",
+    ] {
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            operation,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
+        // Success alone could hide an incorrectly discarded fragment. Verify the response
+        // shape for every runtime type, including B, which does not implement J.
+        apollo_federation::correctness::check_plan(
+            planner.api_schema(),
+            planner.supergraph_schema(),
+            planner.subgraph_schemas(),
+            &document,
+            &plan,
+        )
+        .unwrap();
+        assert!(
+            find_fetch_nodes_for_subgraph("S1", &plan)
+                .iter()
+                .any(|fetch| fetch.operation_document.to_string().contains("z")),
+            "the matching fragment's field must be fetched: {plan}"
+        );
+    }
+}
+
 #[test]
 fn can_use_a_key_on_an_interface_object_type() {
     let planner = planner!(
