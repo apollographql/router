@@ -184,6 +184,13 @@ impl OciError {
             _ => false,
         }
     }
+
+    /// A manifest that exists but carries no entitlement JWT layer is malformed, not
+    /// "not yet present": it won't fix itself on the next poll, so the router boots
+    /// unlicensed instead of retrying.
+    pub(crate) fn is_missing_entitlement_layer(&self) -> bool {
+        matches!(self, OciError::LayerNotFound(media_type) if media_type == ENTITLEMENT_MEDIA_TYPE)
+    }
 }
 
 /// Determine whether a resolved registry hostname belongs to Apollo's own registry.
@@ -453,7 +460,7 @@ async fn fetch_manifest_digest_from_reference(
     let duration = before_request.elapsed().as_secs_f64();
 
     u64_counter_with_unit!(
-        "apollo.router.oci.manifest", // should this be updated to entitlement manifest instead of graph?
+        "apollo.router.oci.manifest",
         "Number of requests to get graph artifact manifest",
         "{request}",
         1u64,
@@ -462,7 +469,7 @@ async fn fetch_manifest_digest_from_reference(
         status = status
     );
     f64_histogram_with_unit!(
-        "apollo.router.oci.manifest.duration", // should this be updated to entitlement manifest?
+        "apollo.router.oci.manifest.duration",
         "Duration of request to get graph artifact manifest",
         "s",
         duration,
@@ -808,9 +815,19 @@ fn stream_license_from_oci(
                                             );
                                             break;
                                         } else {
-                                            // Only update the digest if the license fetch was successful
+                                            // Update the digest if the license fetch was successful
                                             last_entitlement_digest = Some(current_digest);
                                         }
+                                    }
+                                    Err(err) if err.is_missing_entitlement_layer() => {
+                                        tracing::warn!("{err}; the router will run unlicensed");
+                                        if let Err(e) = sender.send(Err(err)).await {
+                                            tracing::debug!("failed to send error to oci stream, router is likely shutting down: {e}");
+                                            break;
+                                        }
+                                        // Update the digest so that if the entitlement layer gets added later, 
+                                        // this can trigger a new fetch 
+                                        last_entitlement_digest = Some(current_digest);
                                     }
                                     Err(err) => {
                                         tracing::debug!("failed to fetch license");
@@ -884,7 +901,7 @@ async fn fetch_license_from_reference(
             // A manifest with no entitlement layer is malformed, not "not yet
             // present but could be in the future" — surface it as an error
             // rather than silently retrying forever or defaulting.
-            tracing::warn!("no entitlement layer found in oci manifest");
+            tracing::warn!("no entitlement layer found in oci manifest, unable to fetch an entitlement");
             return Err(OciError::LayerNotFound(ENTITLEMENT_MEDIA_TYPE.to_string()));
         }
     };

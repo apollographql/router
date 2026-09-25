@@ -8,6 +8,7 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::registry::OciConfig;
+use crate::registry::OciError;
 use crate::registry::create_oci_license_stream;
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
@@ -166,6 +167,13 @@ impl LicenseSource {
                             future::ready(match res {
                                 Ok(Some(license)) => Some(license),
                                 Ok(None) => Some(License::default()),
+                                Err(e) if e.is_missing_entitlement_layer() => {
+                                    tracing::error!(
+                                        code = APOLLO_ROUTER_LICENSE_INVALID,
+                                        "{e}; the router will run unlicensed"
+                                    );
+                                    Some(License::default())
+                                }
                                 Err(e) => {
                                     // A genuine "no entitlement" (`OciError::is_not_found()`)
                                     // is already converted to `Ok(License::default())` inside
