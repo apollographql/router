@@ -2,8 +2,10 @@
 //! groups, wiring dependency edges and entity inputs, and dispatching
 //! sub-selections back onto the pending stack.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use tracing::trace;
@@ -13,6 +15,7 @@ use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
 use super::FieldRoutingSearchSpace;
 use super::NodeSource;
+use super::RoutingCacheKey;
 use super::requires::trailing_condition_fragments;
 use super::requires::unconditioned_input_path;
 use super::routing::RoutingChoice;
@@ -20,6 +23,7 @@ use super::selection_label;
 use super::state::CONDITION_DEPTH_LIMIT;
 use super::state::PendingSelection;
 use super::state::PlanState;
+use super::state::TypeNarrowing;
 use crate::error::FederationError;
 use crate::operation::Field;
 use crate::operation::FieldSelection;
@@ -28,6 +32,11 @@ use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
+
+/// (narrowed, before-narrowing) possible runtime types for a child position.
+type PossibleTypePair = (Option<Arc<Vec<Name>>>, Option<Arc<Vec<Name>>>);
+/// Cross-subgraph intersection filter for fragment conditions.
+type IntersectionFilter = Option<Arc<HashSet<Name>>>;
 use crate::query_plan::FetchDataPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
@@ -63,22 +72,32 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
         choice: &RoutingChoice,
     ) -> Result<(), FederationError> {
-        let qg = &self.query_graph;
-
-        // Non-edge choices are implemented in later branches.
-        match choice {
-            RoutingChoice::TypeExplosion => {
-                return Err(FederationError::internal(
-                    "type explosion dispatch is not yet implemented",
-                ));
-            }
-            RoutingChoice::StripFragment => {
-                return Err(FederationError::internal(
-                    "fragment restructuring dispatch is not yet implemented",
-                ));
-            }
-            _ => {}
+        if matches!(choice, RoutingChoice::TypeExplosion) {
+            return if self.try_explode_interface_field(state, pending)?
+                || self.try_explode_abstract_type(state, pending)?
+            {
+                Ok(())
+            } else {
+                Err(FederationError::internal(
+                    "type explosion chosen but inapplicable at this position",
+                ))
+            };
         }
+
+        if matches!(choice, RoutingChoice::StripFragment) {
+            return if self.try_pass_through_fragment(state, pending)?
+                || self.try_vacuous_type_condition(state, pending)?
+                || self.try_explode_abstract_type(state, pending)?
+            {
+                Ok(())
+            } else {
+                Err(FederationError::internal(
+                    "fragment restructure chosen but inapplicable at this position",
+                ))
+            };
+        }
+
+        let qg = &self.query_graph;
 
         let edge_index = choice
             .edge_index()
@@ -139,17 +158,6 @@ impl FieldRoutingSearchSpace {
         }
 
         self.dispatch_sub_selections(state, pending, target_qg_node, &target)
-    }
-
-    /// Record a dropped selection that could not be routed.
-    pub(super) fn drop_unresolvable(&self, state: &mut PlanState, pending: &PendingSelection) {
-        tracing::debug!(
-            selection = %selection_label(&pending.selection),
-            "dropping unresolvable selection",
-        );
-        if !pending.best_effort {
-            state.dropped_fields += 1;
-        }
     }
 
     /// Commit a root-type-resolution hop: creates a root-hop group in the
@@ -771,9 +779,12 @@ impl FieldRoutingSearchSpace {
 
         // Hops restart the response path at the new fetch node's root.
         // Only direct choices continue from the pending's current position.
+        // Type conditions do not extend it, so entity fetches triggered by
+        // different type conditions at one response-tree level share
+        // identical merge_at paths.
         let response_path = {
             let mut rp = if is_direct {
-                pending.path_in_fetch.clone()
+                self.conditioned_path_in_fetch(pending)
             } else {
                 SharedPath::new()
             };
@@ -799,8 +810,238 @@ impl FieldRoutingSearchSpace {
         pending: &PendingSelection,
     ) -> Vec<FetchDataPathElement> {
         let mut merge_at = state.graph.merge_at(pending.fetch_node).to_vec();
-        merge_at.extend(pending.path_in_fetch.iter().cloned());
+        merge_at.extend(self.conditioned_path_in_fetch(pending).iter().cloned());
         merge_at
+    }
+
+    /// Sorted possible runtime type names of a composite type in the
+    /// supergraph schema.
+    fn possible_type_names(
+        &self,
+        ty: &CompositeTypeDefinitionPosition,
+    ) -> Result<Arc<Vec<Name>>, FederationError> {
+        let mut names: Vec<Name> = self
+            .supergraph_schema
+            .possible_runtime_types(ty.clone())?
+            .into_iter()
+            .map(|pos| pos.type_name)
+            .collect();
+        names.sort();
+        Ok(Arc::new(names))
+    }
+
+    /// Possible-types tracking for a committed selection's children: a field
+    /// resets both sets to its output type's runtime types; a typed inline
+    /// fragment narrows the current set; a condition-only fragment inherits.
+    fn child_possible_types(
+        &self,
+        pending: &PendingSelection,
+    ) -> Result<PossibleTypePair, FederationError> {
+        match &pending.selection {
+            Selection::Field(field_sel) => {
+                let field_def = field_sel
+                    .field
+                    .field_position
+                    .get(field_sel.field.schema.schema())?;
+                let Ok(ty) = self
+                    .supergraph_schema
+                    .get_type(field_def.ty.inner_named_type())
+                else {
+                    return Ok((None, None));
+                };
+                let Ok(pos) = CompositeTypeDefinitionPosition::try_from(ty) else {
+                    return Ok((None, None));
+                };
+                let names = self.possible_type_names(&pos)?;
+                Ok((Some(names.clone()), Some(names)))
+            }
+            Selection::InlineFragment(frag_sel) => {
+                let Some(cond) = &frag_sel.inline_fragment.type_condition_position else {
+                    return Ok((
+                        pending.narrowing.possible_types.clone(),
+                        pending.narrowing.possible_types_after_last_field.clone(),
+                    ));
+                };
+                let cond_names = self.possible_type_names(cond)?;
+                let narrowed = match &pending.narrowing.possible_types {
+                    Some(parent) => Arc::new(
+                        parent
+                            .iter()
+                            .filter(|n| cond_names.contains(n))
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    ),
+                    None => cond_names,
+                };
+                Ok((
+                    Some(narrowed),
+                    pending.narrowing.possible_types_after_last_field.clone(),
+                ))
+            }
+        }
+    }
+
+    /// `pending.path_in_fetch`, with the narrowed possible-type set attached
+    /// to its last element when fragments since the nearest enclosing field
+    /// narrowed that field's output types, so fetches under different
+    /// abstract branches merge at distinct, discriminated paths.
+    fn conditioned_path_in_fetch(
+        &self,
+        pending: &PendingSelection,
+    ) -> SharedPath<FetchDataPathElement> {
+        let (Some(possible), Some(after_field)) = (
+            &pending.narrowing.possible_types,
+            &pending.narrowing.possible_types_after_last_field,
+        ) else {
+            return pending.path_in_fetch.clone();
+        };
+        if possible.len() == after_field.len() {
+            return pending.path_in_fetch.clone();
+        }
+        let mut elements: Vec<FetchDataPathElement> =
+            pending.path_in_fetch.iter().cloned().collect();
+        let conditioned = match elements.pop() {
+            Some(FetchDataPathElement::Key(name, _)) => {
+                FetchDataPathElement::Key(name, Some(possible.as_ref().clone()))
+            }
+            Some(FetchDataPathElement::AnyIndex(_)) => {
+                FetchDataPathElement::AnyIndex(Some(possible.as_ref().clone()))
+            }
+            Some(other) => other,
+            None => return pending.path_in_fetch.clone(),
+        };
+        elements.push(conditioned);
+        SharedPath::from_vec(elements)
+    }
+
+    /// When the committed field returns an inconsistent abstract type (its
+    /// runtime members differ per subgraph) and the routing path here
+    /// includes a shareable fork (the field or an ancestor had routing
+    /// options in multiple subgraphs), child fragments must be restricted to
+    /// the cross-subgraph type intersection.
+    fn intersection_filter_for_field(
+        &self,
+        pending: &PendingSelection,
+        target_node: NodeIndex,
+    ) -> Result<IntersectionFilter, FederationError> {
+        if !pending.narrowing.shareable_path {
+            return Ok(None);
+        }
+        let target_data = self.query_graph.node_weight(target_node)?;
+        let Ok(target_pos) = CompositeTypeDefinitionPosition::try_from(target_data.type_.clone())
+        else {
+            return Ok(None);
+        };
+        let target_subgraph = &target_data.source;
+        Ok(self.allowed_inconsistent_members(target_pos.type_name(), target_subgraph))
+    }
+
+    /// True when this field has routing options in more than one subgraph
+    /// from the current position (direct edge plus key hops, or key hops to
+    /// multiple distinct subgraphs). Only called for non-root nodes:
+    /// `child_shareability` resolves FederatedRootType positions to
+    /// non-shareable before reaching here.
+    fn field_is_shareable_here(
+        &self,
+        field_sel: &FieldSelection,
+        source_node: NodeIndex,
+    ) -> Result<bool, FederationError> {
+        let field = &field_sel.field;
+        let has_direct = self.edge_for_field(source_node, field).is_some();
+        let field_name = field.field_position.field_name();
+        let hops = self.key_hops_guarded(
+            source_node,
+            RoutingCacheKey::Field(field_name.clone()),
+            |target| self.edge_for_field(target, field),
+        )?;
+        if has_direct && !hops.is_empty() {
+            return Ok(true);
+        }
+        if hops.len() > 1 {
+            let mut subgraphs = HashSet::new();
+            for hop in hops.iter() {
+                subgraphs.insert(hop.target_subgraph().clone());
+            }
+            return Ok(subgraphs.len() > 1);
+        }
+        Ok(false)
+    }
+
+    /// Whether this field is defined in the parent type in more than one
+    /// subgraph schema (ignoring routing reachability). @external does not
+    /// count as availability: the subgraph cannot resolve the field, so it
+    /// creates no fork.
+    fn field_in_multiple_subgraphs(
+        &self,
+        field_sel: &FieldSelection,
+        source_node: NodeIndex,
+    ) -> Result<bool, FederationError> {
+        let source_data = self.query_graph.node_weight(source_node)?;
+        let Ok(source_pos) = CompositeTypeDefinitionPosition::try_from(source_data.type_.clone())
+        else {
+            return Ok(false);
+        };
+        let parent_type_name = source_pos.type_name();
+        let field_name = field_sel.field.field_position.field_name();
+        let mut count = 0u32;
+        for (_source, schema) in self.query_graph.subgraph_schemas() {
+            let Ok(parent_type) = schema.get_type(parent_type_name) else {
+                continue;
+            };
+            let Ok(composite): Result<CompositeTypeDefinitionPosition, _> = parent_type.try_into()
+            else {
+                continue;
+            };
+            let Ok(field_pos) = composite.field(field_name.clone()) else {
+                continue;
+            };
+            if field_pos.get(schema.schema()).is_err() {
+                continue;
+            }
+            if schema
+                .subgraph_metadata()
+                .is_some_and(|meta| meta.is_field_external(&field_pos))
+            {
+                continue;
+            }
+            count += 1;
+            if count > 1 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Shareable-fork propagation for children: whether some field on this
+    /// pending's path had routing options in multiple subgraphs, and the
+    /// intersection filter that follows.
+    fn child_shareability(
+        &self,
+        pending: &PendingSelection,
+        target_qg_node: NodeIndex,
+    ) -> Result<(bool, IntersectionFilter), FederationError> {
+        let shareable = if let Selection::Field(field_sel) = &pending.selection {
+            let source_data = self.query_graph.node_weight(pending.query_graph_node)?;
+            if matches!(source_data.type_, QueryGraphNodeType::FederatedRootType(_)) {
+                // Root-level shareability is resolved when BULB commits to a
+                // subgraph; only key-hop-based shareability creates
+                // unresolved forks needing the intersection filter.
+                false
+            } else {
+                self.field_is_shareable_here(field_sel, pending.query_graph_node)?
+                    || (pending.narrowing.shareable_path
+                        && self.field_in_multiple_subgraphs(field_sel, pending.query_graph_node)?)
+            }
+        } else {
+            pending.narrowing.shareable_path
+        };
+
+        let filter = if shareable && matches!(&pending.selection, Selection::Field(_)) {
+            self.intersection_filter_for_field(pending, target_qg_node)?
+        } else {
+            None
+        };
+        Ok((shareable, filter))
     }
 
     /// Select entity-representation inputs (key fields when given, plus
@@ -885,6 +1126,8 @@ impl FieldRoutingSearchSpace {
     ) -> Result<(), FederationError> {
         let fetch_node = target.fetch_node;
 
+        let (child_shareable_path, child_intersection_filter) =
+            self.child_shareability(pending, target_qg_node)?;
         self.ensure_abstract_typename(state, pending, target_qg_node, fetch_node, &target.op_path)?;
 
         let Some(sub_ss) = pending
@@ -903,6 +1146,23 @@ impl FieldRoutingSearchSpace {
         let child_provides_anchor =
             self.child_provides_anchor(pending, target_qg_node, target.entity_root)?;
 
+        let (child_possible, child_after_field) = self.child_possible_types(pending)?;
+        // A typed fragment whose runtime-type intersection with its position
+        // is empty matches no objects — dead code (e.g. a shared interface
+        // fragment under sibling unions with disjoint members). Route
+        // nothing under it.
+        if matches!(&pending.selection, Selection::InlineFragment(_))
+            && child_possible.as_ref().is_some_and(|p| p.is_empty())
+        {
+            return Ok(());
+        }
+        let child_narrowing = TypeNarrowing {
+            shareable_path: child_shareable_path,
+            intersection_filter: child_intersection_filter,
+            possible_types: child_possible,
+            possible_types_after_last_field: child_after_field,
+        };
+
         for sub_sel in sub_ss.selections.values().rev().cloned() {
             state.push_pending(
                 pending
@@ -910,7 +1170,8 @@ impl FieldRoutingSearchSpace {
                     .at(target_qg_node, fetch_node)
                     .with_op_path(target.op_path.clone())
                     .with_response_path(target.response_path.clone())
-                    .with_provides_anchor(child_provides_anchor),
+                    .with_provides_anchor(child_provides_anchor)
+                    .with_narrowing(child_narrowing.clone()),
             );
         }
         Ok(())

@@ -75,7 +75,7 @@ fn cross_subgraph_key_hop_produces_two_fetches() {
 
 /// Explicit __typename next to another field is stripped by
 /// optimize_sibling_typenames during normalization (an old-planner
-/// performance workaround) and restored once at bulb entry -- it must
+/// performance workaround) and restored once at bulb entry. It must
 /// appear in the fetch.
 #[test]
 fn explicit_sibling_typename_is_preserved() {
@@ -198,7 +198,7 @@ fn shareable_local_dead_end_reroutes_through_key_hop() {
 /// A forced condition commit whose greedy choice strands a descendant on a
 /// circular key must backtrack to the ancestor's alternative. `target` lives
 /// only in T, keyed on `c { cid cm }`. Routing that key: `c` commits
-/// greedily to A (direct), but A cannot resolve `cm` -- its only hop from C
+/// greedily to A (direct), but A cannot resolve `cm`. Its only hop from C
 /// is T's circular `{cid cm}` key, so the commit fails. The condition `c`
 /// was forced (never a BULB decision), so recovery must come from the
 /// fast-forward trail: rewind `c` to its key hop into B, where the whole
@@ -225,7 +225,7 @@ fn circular_key_drop_backtracks_to_ancestor_condition_alternative() {
 #[test]
 fn incomplete_plan_is_an_error_not_a_partial_plan() {
     // Same schema as the dead-end test, but with fuel=1 the search cannot
-    // backtrack into the key-hop alternative -- the greedy pass strands
+    // backtrack into the key-hop alternative, so the greedy pass strands
     // `detail`. The planner must error rather than emit a partial plan.
     let config = QueryPlannerConfig {
         incremental_planner: IncrementalPlannerConfig {
@@ -247,7 +247,7 @@ fn incomplete_plan_is_an_error_not_a_partial_plan() {
         Err(_) => {}
         Ok(plan) => {
             // If fuel=1 still finds the complete plan (greedy happens to
-            // pick the hop), the plan must contain the field -- silence
+            // pick the hop), the plan must contain the field; silence
             // plus a missing field is the failure mode under test.
             let plan_str = format!("{plan}");
             assert!(
@@ -295,7 +295,7 @@ fn cooperative_cancellation_stops_planning() {
 /// A key hop launched from INSIDE an entity fetch (`extra` hops B->C while
 /// its pending lives in B's entity fetch for P): the shallowest-anchor
 /// dominance check (`parent_key_anchor`) runs against the fetch feeding the
-/// entity fetch -- here it declines (A has no D), so C's group chains behind
+/// entity fetch. Here it declines (A has no D), so C's group chains behind
 /// B's.
 /// Targets commit.rs parent_key_anchor's context-anchor and walk-failure
 /// arms.
@@ -457,7 +457,7 @@ fn try_plan_query(schema: &str, query: &str) -> Result<String, FederationError> 
 const CIRCULAR_REQUIRES_SCHEMA: &str = include_str!("../fixtures/circular_requires.graphql");
 
 /// Circular @requires (B: f requires g, C: g requires f) must terminate
-/// with a planning error -- not recurse until stack overflow, and not
+/// with a planning error, not recurse until stack overflow, and not
 /// silently return an incomplete plan.
 #[test_log::test]
 fn circular_requires_errors_instead_of_recursing() {
@@ -486,7 +486,7 @@ fn requires_fields_added_to_fetch() {
 /// @external: the query enters through B (which owns `shippingCost`
 /// requiring `weight`), but `weight` is only resolvable in A. The field
 /// must move into a second B fetch whose entity representation carries
-/// `weight` fetched from A -- B's root fetch must NOT select the
+/// `weight` fetched from A. B's root fetch must not select the
 /// @external `weight` itself.
 #[test_log::test]
 fn requires_unresolvable_locally_hops_through_owning_subgraph() {
@@ -542,8 +542,8 @@ fn requires_unresolvable_locally_hops_through_owning_subgraph() {
 /// (`a`) into nested selections owned by other subgraphs (`s.status` in
 /// s1, `j.m` in s2). The planner must resolve the local prefix in place
 /// and hop from A's key edges for the nested parts, at the merge path of
-/// C's `a` -- not from C's (nonexistent) key edges, and not at some other
-/// A's path.
+/// C's `a`, not from C's (nonexistent) key edges, and not at some other
+/// path from A.
 #[test_log::test]
 fn requires_through_local_field_resolves_nested_parts() {
     let plan_str = plan_query(REQUIRES_SCHEMA, "{ a { c { elig } } }");
@@ -555,7 +555,7 @@ fn requires_through_local_field_resolves_nested_parts() {
         );
     }
     // The nested hops must merge at C's `a` (aliased as a @requires
-    // condition), i.e. path a.c.__require_0_a -- not at the top-level `a`.
+    // condition), i.e. path a.c.__require_0_a, not at the top-level `a`.
     assert!(
         plan_str.contains("a.c.__require_0_a"),
         "Nested requires parts should merge under a.c.__require_0_a: {plan_str}"
@@ -584,14 +584,14 @@ fn static_override_routes_field_to_overriding_subgraph() {
 /// from A to either B or C, and both hops score identically at the
 /// one-step scoring pass (same fetch shape), so the greedy tiebreak
 /// (declaration order) commits to B. Only once `profile` lands on B do
-/// we discover `detail` isn't there and needs a second hop to C -- a cost
+/// we discover `detail` isn't there and needs a second hop to C, a cost
 /// the one-step score for the `profile` decision couldn't see.
 ///
 /// With fuel=1 (greedy pass only, discrepancies never explored), BULB
 /// returns that suboptimal 3-fetch plan (A -> B -> C). With enough fuel
 /// to run a discrepancy iteration, it explores the C branch to
 /// completion, finds the cheaper 2-fetch plan (A -> C), and replaces the
-/// greedy result -- the same "record_completion only if improved"
+/// greedy result. The same "record_completion only if improved"
 /// mechanism the toy `discrepancy_finds_better_alternative_slice` test
 /// exercises, but on a real routing decision.
 #[test_log::test]
@@ -732,7 +732,7 @@ fn progressive_override_routes_to_original_when_label_inactive() {
 // own @requires, the nested @requires resolution can append selections to
 // the wrong entity group. The `last_node` variable drifts as each external
 // part resolves, but the query_graph_node and source_schema stay pinned to
-// the original intermediate -- so the fast-path check validates against the
+// the original intermediate, so the fast-path check validates against the
 // wrong subgraph and appends to whatever entity group `last_node` reached.
 #[test_log::test]
 fn requires_with_multiple_external_parts_and_nested_requires() {
@@ -1044,7 +1044,7 @@ type Query
 
 /// Two sibling fields sharing the same locally-resolvable @requires: the
 /// second commit checks its conditions against the edge's existing condition
-/// input (same field, same arguments -- no conflict) and rides the same
+/// input (same field, same arguments, no conflict) and rides the same
 /// entity representation.
 /// Targets requires.rs has_conflicting_requires_inputs' comparison loops.
 #[test]
@@ -1163,6 +1163,7 @@ fn t_pending(
             depth: 1,
         }),
         provides_anchor: None,
+        narrowing: Default::default(),
         best_effort: false,
     }
 }
@@ -1346,9 +1347,9 @@ type Query
 /// @interfaceObject fake downcast (`... on X` on the io node in B, where X
 /// does not exist): the concrete-type condition is dropped from B's
 /// operation, and `push_interface_object_typename` pushes a best-effort
-/// `__typename` pending that routes generically -- the io node has no
+/// `__typename` pending that routes generically. The io node has no
 /// `__typename` edge, so its only options are key hops to subgraphs where I
-/// is the REAL interface (here A) -- so execution learns each object's
+/// is the real interface (here A), so execution learns each object's
 /// concrete `__typename` to test the condition.
 /// Targets commit.rs push_interface_object_typename + the fake-downcast
 /// op-path arm of target_paths, and routing.rs fragment_options' fake
@@ -1413,7 +1414,7 @@ fn interface_object_key_hop_from_concrete_type() {
             }
           }
         },
-        Flatten(path: "items.@") {
+        Flatten(path: "items.@|[X]") {
           Fetch(service: "b") {
             {
               ... on X {
@@ -1523,4 +1524,528 @@ fn interface_object_fake_downcast_preserves_include_condition() {
       },
     }
     "###);
+}
+
+/// Interface field resolved only on some concrete types: A has the field for
+/// Dog but not Cat; Cat must key-hop to B. The plan explodes the abstract
+/// `animals` into per-concrete-type fragments so each follows its own path.
+/// Targets type_conditions.rs try_explode_interface_field and the
+/// per-concrete-type routing that follows.
+#[test]
+fn interface_field_without_local_edge_explodes_per_concrete_type() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+interface Animal
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  name: String @join__field(graph: B)
+}
+
+type Cat implements Animal
+  @join__implements(graph: A, interface: "Animal")
+  @join__implements(graph: B, interface: "Animal")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: B)
+}
+
+type Dog implements Animal
+  @join__implements(graph: A, interface: "Animal")
+  @join__type(graph: A, key: "id")
+{
+  id: ID!
+  name: String @join__field(graph: A)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  animals: [Animal] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ animals { name } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "a") {
+          {
+            animals {
+              __typename
+              ... on Cat {
+                __typename
+                id
+              }
+              ... on Dog {
+                name
+              }
+            }
+          }
+        },
+        Flatten(path: "animals.@|[Cat]") {
+          Fetch(service: "b") {
+            {
+              ... on Cat {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Cat {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A fragment conditioned on an interface applied to a union with partial
+/// overlap (`... on N` where only member X implements N) has no downcast
+/// edge and explodes into the intersection's concrete-type fragments.
+/// Targets type_conditions.rs try_explode_abstract_type's non-empty
+/// partial-intersection path.
+#[test]
+fn union_fragment_on_interface_explodes_to_members() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+ = X | Y
+
+interface N
+  @join__type(graph: A)
+{
+  n: String
+}
+
+type X implements N
+  @join__implements(graph: A, interface: "N")
+  @join__type(graph: A)
+{
+  n: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+{
+  search: [U] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { ... on N { n } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+            ... on X {
+              n
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A fragment on a union member that does not exist in the resolving
+/// subgraph (Y is only a member of U in B, but `search` only resolves in A)
+/// has an empty local runtime intersection. The fragment is dropped and the
+/// plan completes without fabricating Y data.
+/// Targets the empty-intersection/satisfiable-elsewhere arm of
+/// type_conditions.rs try_explode_abstract_type.
+#[test]
+fn union_member_missing_locally_drops_fragment_and_commits_typename() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: B, member: "Y")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: B)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+{
+  search: [U] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { __typename ... on Y { y } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// Fragment-path narrowing: `es` returns E (members X, Y), and `... on L`
+/// (members X, Y, Z) explodes at L's node where Z is locally possible — but
+/// no Z can ever appear under an E-typed field. The Z branch must be routed
+/// as dead code, not key-hopped into an entity fetch whose inputs demand a
+/// Z key the response state can never satisfy.
+/// Targets TypeNarrowing.possible_types and the dead-fragment early return
+/// in dispatch_sub_selections.
+#[test]
+fn narrowing_drops_exploded_member_outside_enclosing_context() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+interface E
+  @join__type(graph: A)
+{
+  id: ID!
+}
+
+interface L
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type X implements E & L
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__implements(graph: A, interface: "E")
+  @join__implements(graph: A, interface: "L")
+  @join__implements(graph: B, interface: "L")
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type Y implements E & L
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__implements(graph: A, interface: "E")
+  @join__implements(graph: A, interface: "L")
+  @join__implements(graph: B, interface: "L")
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type Z implements L
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__implements(graph: A, interface: "L")
+  @join__implements(graph: B, interface: "L")
+{
+  id: ID!
+  url: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+{
+  es: [E] @join__field(graph: A)
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ es { ... on L { url } } }");
+    assert!(
+        !plan_str.contains("... on Z"),
+        "no Z can appear under an E-typed field, but the plan references it:\n{plan_str}"
+    );
+}
+
+/// Shareable parent returning an abstract type whose runtime members differ
+/// per subgraph (U is X|Y in A but only X in B): fragments committed under
+/// the B route must be filtered to B's member set, dropping `... on Y`
+/// there without a penalty, while the A route keeps both.
+/// Targets routing.rs fragment_options' intersection filter, and
+/// type_conditions.rs dropped-by-intersection-filter arm.
+#[test]
+fn inconsistent_union_members_filtered_per_subgraph() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+  @join__unionMember(graph: B, member: "X")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  search: [U]
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ search { ... on X { x } ... on Y { y } } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          search {
+            __typename
+            ... on X {
+              x
+            }
+            ... on Y {
+              y
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+fn entity_inconsistent_union_schema() -> String {
+    wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type T
+  @join__type(graph: A, key: "tid")
+  @join__type(graph: B, key: "tid")
+{
+  tid: ID!
+  e: E
+}
+
+type E
+  @join__type(graph: A, key: "eid")
+  @join__type(graph: B, key: "eid")
+{
+  eid: ID!
+  search: [U]
+}
+
+union U
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__unionMember(graph: A, member: "X")
+  @join__unionMember(graph: A, member: "Y")
+  @join__unionMember(graph: B, member: "X")
+ = X | Y
+
+type X
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  x: String
+}
+
+type Y
+  @join__type(graph: A)
+{
+  y: String
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  top: T @join__field(graph: A)
+}
+"#,
+    )
+}
+
+/// A shareable entity field (`e` resolvable in A directly and in B via T's
+/// key) puts its descendants on a shareable path; `search` below it returns
+/// a union whose members differ per subgraph, so its child fragments get an
+/// intersection filter from the committed subgraph's own member set.
+/// Targets commit.rs intersection_filter_for_field /
+/// field_is_shareable_here / field_in_multiple_subgraphs.
+#[test]
+fn entity_shareable_field_filters_inconsistent_union_members() {
+    let plan_str = plan_query(
+        &entity_inconsistent_union_schema(),
+        "{ top { e { search { ... on X { x } ... on Y { y } } } } }",
+    );
+    assert!(
+        plan_str.contains("... on Y"),
+        "Winning route must keep the Y fragment: {plan_str}"
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "a") {
+        {
+          top {
+            e {
+              search {
+                __typename
+                ... on X {
+                  x
+                }
+                ... on Y {
+                  y
+                }
+              }
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A field with locally-unresolvable @requires reached through an
+/// @include-gated fragment: the same-subgraph entity re-fetch must carry the
+/// gating fragment into its op path (or the hopped selection loses its
+/// condition), and boolean conditions on the path disable condition-field
+/// sharing.
+/// Targets requires.rs trailing_condition_fragments on the self-key-hop
+/// commit path (routing.rs self_key_hop -> commit.rs target_paths) and
+/// path_has_boolean_conditions in shareable_condition_fields.
+#[test]
+fn requires_under_include_fragment_keeps_condition_on_entity_fetch() {
+    let plan_str = plan_query(
+        REQUIRES_SCHEMA,
+        "query($v: Boolean!) { productInB { ... on Product @include(if: $v) { shippingCost } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            productInB {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "productInB") {
+          Fetch(service: "a") {
+            {
+              ... on Product {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Product {
+                __require_0_weight: weight
+              }
+            }
+          },
+        },
+        Include(if: $v) {
+          Flatten(path: "productInB") {
+            Fetch(service: "b") {
+              {
+                ... on Product {
+                  __typename
+                  id
+                  __require_0_weight: weight
+                }
+              } =>
+              {
+                ... on Product {
+                  shippingCost
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A key-hop @requires reached through an @include-gated fragment: boolean
+/// conditions on the anchor path make condition-field sharing unprovable, so
+/// the condition is aliased instead of deduped with any user selection.
+/// Targets requires.rs path_has_boolean_conditions in
+/// shareable_condition_fields.
+#[test]
+fn key_hop_requires_under_include_fragment_uses_alias() {
+    let plan_str = plan_query(
+        &requires_key_hop_schema(),
+        "query($v: Boolean!) { product { ... on Product @include(if: $v) { shippingEstimate } } }",
+    );
+    assert!(
+        plan_str.contains("shippingEstimate"),
+        "Plan should fetch shippingEstimate: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("__require"),
+        "Gated condition must be aliased, not shared: {plan_str}"
+    );
+}
+
+/// Statically constant @skip(if: true) should eliminate the fragment entirely;
+/// a type condition on the root Query type is vacuous and passes through.
+/// Targets type_conditions.rs try_pass_through_fragment's Boolean(false)
+/// arm and try_vacuous_type_condition's federated-root arm.
+#[test]
+fn constant_skip_and_root_type_condition_fragments() {
+    let skipped = plan_query(SCHEMA, "{ user { name ... @skip(if: true) { email } } }");
+    assert!(
+        !skipped.contains("email"),
+        "Statically skipped fragment must not be fetched: {skipped}"
+    );
+
+    let rooted = plan_query(
+        SCHEMA,
+        "query($v: Boolean!) { ... on Query @skip(if: $v) { user { name } } }",
+    );
+    assert!(
+        rooted.contains("name"),
+        "Root type condition should pass through: {rooted}"
+    );
 }

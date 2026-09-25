@@ -114,6 +114,9 @@ pub(crate) fn build_bulb_plan(
         query_graph: query_graph.clone(),
         supergraph_schema: supergraph_schema.clone(),
         override_conditions: parameters.override_conditions.clone(),
+        inconsistent_abstract_types: parameters
+            .abstract_types_with_inconsistent_runtime_types
+            .clone(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
         key_hops_in_flight: Default::default(),
     };
@@ -276,6 +279,7 @@ fn root_pending_selections(
             path_in_fetch: Default::default(),
             condition: None,
             provides_anchor: None,
+            narrowing: Default::default(),
             best_effort: false,
         })
         .collect()

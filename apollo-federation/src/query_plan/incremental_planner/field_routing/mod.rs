@@ -17,6 +17,7 @@ mod routing;
 pub(super) mod state;
 #[cfg(test)]
 mod test_support;
+mod type_conditions;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -29,7 +30,6 @@ use petgraph::graph::NodeIndex;
 #[allow(unused_imports)]
 use petgraph::visit::EdgeRef;
 use routing::RoutingChoice;
-#[allow(unused_imports)]
 pub(crate) use state::PendingSelection;
 use state::PlanCheckpoint;
 pub(crate) use state::PlanState;
@@ -63,6 +63,10 @@ pub(crate) struct FieldRoutingSearchSpace {
     pub(crate) query_graph: Arc<QueryGraph>,
     pub(crate) supergraph_schema: ValidFederationSchema,
     pub(crate) override_conditions: OverrideConditions,
+    /// Abstract types whose runtime members differ between subgraphs, from
+    /// supergraph analysis. Drives the cross-subgraph intersection filter
+    /// (see [`state::TypeNarrowing`]).
+    pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
     /// In-flight guard for breaking the mutual recursion between
@@ -149,6 +153,23 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Find the outgoing edge for a field at a query graph node.
+    /// For an inconsistent abstract type, the runtime-type names present in
+    /// the given subgraph's schema. `None` for consistent types.
+    pub(super) fn allowed_inconsistent_members(
+        &self,
+        type_name: &Name,
+        subgraph: &Arc<str>,
+    ) -> Option<Arc<HashSet<Name>>> {
+        if !self.inconsistent_abstract_types.contains(type_name) {
+            return None;
+        }
+        let schema = self.query_graph.schema_by_source(subgraph).ok()?;
+        let ty = schema.get_type(type_name).ok()?;
+        let pos = CompositeTypeDefinitionPosition::try_from(ty).ok()?;
+        let types = schema.possible_runtime_types(pos).ok()?;
+        Some(Arc::new(types.into_iter().map(|t| t.type_name).collect()))
+    }
+
     pub(super) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
         self.query_graph
             .edge_for_field(node, field, &self.override_conditions)
@@ -456,6 +477,12 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         // children (leaf fields); otherwise flat operations register no
         // effort and the search's fuel budget never binds.
         candidate.effort += 1;
+        if matches!(
+            choice,
+            RoutingChoice::TypeExplosion | RoutingChoice::StripFragment
+        ) {
+            candidate.type_explosions += 1;
+        }
         let Some(pending) = candidate.pop_pending() else {
             return;
         };
@@ -514,7 +541,14 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
     /// with no completion when all successors have drops).
     fn cost(&self, candidate: &PlanState) -> QueryPlanCost {
         let base = candidate.graph.cost();
-        let cost = base + candidate.dropped_fields as f64 * 1e18;
+        // Dropped fields are hard failures (requested data omitted),
+        // penalized so heavily that any complete plan beats them.
+        // Type explosions defer their real fetch cost to child fragments,
+        // so the probe (apply → cost → rollback) sees them as free;
+        // the penalty ranks them above any structural cost but below
+        // drops so BULB treats them as a last resort.
+        let cost =
+            base + candidate.type_explosions as f64 * 5e17 + candidate.dropped_fields as f64 * 1e18;
         trace!(cost, "candidate cost");
         cost
     }
