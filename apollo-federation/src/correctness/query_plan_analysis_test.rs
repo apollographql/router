@@ -7,7 +7,7 @@ use super::*;
 use crate::query_plan::query_planner;
 
 // The schema used in these tests.
-pub(crate) const SCHEMA_STR: &str = r#"
+const SCHEMA_STR: &str = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)

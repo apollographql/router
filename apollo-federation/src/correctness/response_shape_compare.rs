@@ -180,11 +180,6 @@ fn compare_possible_definitions<T: PathConstraint>(
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
 ) -> Result<(), ComparisonError> {
-    if super::check_deadline_exceeded() {
-        return Err(ComparisonError::new(
-            super::DEADLINE_EXCEEDED_MESSAGE.to_string(),
-        ));
-    }
     this.iter().try_for_each(|(this_cond, this_def)| {
         if !path_constraint_allows_type_condition(path_constraint, this_cond) {
             // Skip `this_cond` since it's not satisfiable under the path constraint.
