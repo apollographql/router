@@ -261,6 +261,22 @@ impl FetchService {
             .get(&service_name.clone())
             .expect("we already checked that the service exists during planning; qed");
 
+        if let Some(entity_lookup) = fetch_node.entity_lookup.clone() {
+            return Self::fetch_with_lookups(
+                schema,
+                service,
+                fetch_node,
+                entity_lookup,
+                uri,
+                supergraph_request,
+                variables,
+                current_dir,
+                context,
+                is_deferred,
+                hoist_orphan_errors,
+            );
+        }
+
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(supergraph_request.clone())
             .subgraph_request(
@@ -301,6 +317,95 @@ impl FetchService {
                     hoist_orphan_errors,
                 )
                 .await)
+        })
+    }
+
+    /// Execute a lookup fetch (GraphQL Federation): one subgraph request per entity, each calling
+    /// the lookup field with that entity's variables. Every request goes through the subgraph
+    /// service (and so through plugins, coprocessors and telemetry) on its own; results are placed
+    /// by entity index.
+    #[allow(clippy::too_many_arguments)]
+    fn fetch_with_lookups(
+        schema: Arc<Schema>,
+        service: crate::services::subgraph::BoxCloneService,
+        fetch_node: FetchNode,
+        entity_lookup: Arc<apollo_federation::query_plan::entity_lookup::EntityLookup>,
+        uri: http::Uri,
+        supergraph_request: Arc<http::Request<GraphQLRequest>>,
+        variables: crate::query_planner::fetch::Variables,
+        current_dir: crate::json_ext::Path,
+        context: crate::Context,
+        is_deferred: bool,
+        hoist_orphan_errors: bool,
+    ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
+        use crate::query_planner::lookup::LookupResults;
+        use crate::query_planner::lookup::lookup_variable_sets;
+
+        let inverted_paths = variables.inverted_paths;
+        let sets = lookup_variable_sets(&entity_lookup, variables.variables);
+        let service_name = fetch_node.service_name.to_string();
+        let requests: Vec<SubgraphRequest> = sets
+            .variable_sets
+            .into_iter()
+            .map(|variable_set| {
+                let mut subgraph_request = SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request.clone())
+                    .subgraph_request(
+                        http_ext::Request::builder()
+                            .method(http::Method::POST)
+                            .uri(uri.clone())
+                            .body(
+                                GraphQLRequest::builder()
+                                    .query(fetch_node.operation.as_serialized())
+                                    .and_operation_name(
+                                        fetch_node.operation_name.as_ref().map(|n| n.to_string()),
+                                    )
+                                    .variables(variable_set)
+                                    .build(),
+                            )
+                            .build()
+                            .expect(
+                                "it won't fail because the url is correct and already checked; qed",
+                            ),
+                    )
+                    .subgraph_name(service_name.clone())
+                    .operation_kind(fetch_node.operation_kind)
+                    .and_executable_document(fetch_node.operation.as_parsed().ok().cloned())
+                    .context(context.clone())
+                    .build();
+                subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
+                subgraph_request.authorization = fetch_node.authorization.clone();
+                subgraph_request.is_deferred_fetch = is_deferred;
+                subgraph_request
+            })
+            .collect();
+        let entity_indexes = sets.entity_indexes;
+
+        Box::pin(async move {
+            let responses = futures::future::join_all(
+                requests
+                    .into_iter()
+                    .map(|request| service.clone().oneshot(request)),
+            )
+            .await;
+            let mut results = LookupResults::new(
+                &fetch_node,
+                &entity_lookup,
+                &schema,
+                &inverted_paths,
+                &current_dir,
+                hoist_orphan_errors,
+            );
+            for (entity_index, response) in entity_indexes.into_iter().zip(responses) {
+                match response.map_to_graphql_error(service_name.clone(), &current_dir) {
+                    Ok(response) => {
+                        let (_parts, response) = response.response.into_parts();
+                        results.add_response(entity_index, response);
+                    }
+                    Err(error) => results.add_error(entity_index, error),
+                }
+            }
+            Ok(results.finish())
         })
     }
 }
