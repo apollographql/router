@@ -122,9 +122,40 @@ impl Field {
             return Ok(updated_field);
         }
 
+        self.rebase_on_inner(parent_type, schema, false)
+    }
+
+    /// Like `rebase_on`, but allows rebasing a concrete type's field onto
+    /// an interface or @interfaceObject target. Used by the incremental
+    /// planner's plan builder where entity fetch paths cross the
+    /// concrete-to-interface boundary in @interfaceObject schemas.
+    pub(crate) fn rebase_on_for_incremental_planner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<Field, FederationError> {
+        let field_parent = self.field_position.parent();
+        if self.schema == *schema && field_parent == *parent_type {
+            return Ok(self.clone());
+        }
+        if self.name() == &TYPENAME_FIELD {
+            let mut updated_field = self.clone();
+            updated_field.schema = schema.clone();
+            updated_field.field_position = parent_type.introspection_typename_field();
+            return Ok(updated_field);
+        }
+        self.rebase_on_inner(parent_type, schema, true)
+    }
+
+    fn rebase_on_inner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        allow_interface_target: bool,
+    ) -> Result<Field, FederationError> {
         let field_from_parent = parent_type.field(self.name().clone())?;
         if field_from_parent.try_get(schema.schema()).is_some()
-            && self.can_rebase_on(parent_type)?
+            && self.can_rebase_on_inner(parent_type, schema, allow_interface_target)?
         {
             let mut updated_field = self.clone();
             updated_field.schema = schema.clone();
@@ -139,30 +170,54 @@ impl Field {
         }
     }
 
-    /// Verifies whether given field can be rebase on following parent type.
+    /// Verifies whether given field can be rebased on the following parent type.
     ///
-    /// There are 2 valid cases we want to allow:
-    /// 1. either `parent_type` and `field_parent_type` are the same underlying type (same name) but from different underlying schema. Typically,
-    ///    happens when we're building subgraph queries but using selections from the original query which is against the supergraph API schema.
-    /// 2. or they are not the same underlying type, but the field parent type is from an interface (or an interface object, which is the same
-    ///    here), in which case we may be rebasing an interface field on one of the implementation type, which is ok. Note that we don't verify
-    ///    that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
-    ///    in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
-    ///    if the field name simply does not exist in `parent_type`.
+    /// There are 2 valid cases:
+    /// 1. `parent_type` and `field_parent_type` are the same underlying type
+    ///    (same name) but from different schemas. Typical when building
+    ///    subgraph queries from supergraph-schema selections.
+    /// 2. The field's parent is an interface (or interface object), so we may
+    ///    be rebasing an interface field onto an implementing type. We don't
+    ///    verify the implementation relationship because it may exist only in
+    ///    the supergraph. `rebase_on` will fail if the field doesn't exist.
     fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
+        target_schema: &ValidFederationSchema,
+    ) -> Result<bool, FederationError> {
+        self.can_rebase_on_inner(parent_type, target_schema, false)
+    }
+
+    /// `allow_interface_target` adds a third case: a concrete type's field on
+    /// an interface target, the reverse of case 2. An @interfaceObject source
+    /// declares the type as a plain object while the target subgraph has the
+    /// interface. `rebase_on` still fails if the interface lacks the field.
+    fn can_rebase_on_inner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        target_schema: &ValidFederationSchema,
+        allow_interface_target: bool,
     ) -> Result<bool, FederationError> {
         let field_parent_type = self.field_position.parent();
-        // case 1
+        // case 1: same type name across schemas
         if field_parent_type.type_name() == parent_type.type_name() {
             return Ok(true);
         }
-        // case 2
-        let is_interface_object_type = self
+        // case 2: field parent is an interface or @interfaceObject
+        let field_parent_is_iface_obj = self
             .schema
             .is_interface_object_type(field_parent_type.clone().into())?;
-        Ok(field_parent_type.is_interface_type() || is_interface_object_type)
+        if field_parent_type.is_interface_type() || field_parent_is_iface_obj {
+            return Ok(true);
+        }
+        // case 3: target is an interface or @interfaceObject (incremental
+        // planner only, gated by allow_interface_target)
+        if allow_interface_target {
+            let target_is_iface_obj =
+                target_schema.is_interface_object_type(parent_type.clone().into())?;
+            return Ok(parent_type.is_interface_type() || target_is_iface_obj);
+        }
+        Ok(false)
     }
 
     fn type_if_added_to(
@@ -189,7 +244,7 @@ impl Field {
             };
             return Ok(Some(schema.get_type(type_name)?.try_into()?));
         }
-        if !self.can_rebase_on(parent_type)? {
+        if !self.can_rebase_on(parent_type, schema)? {
             return Ok(None);
         }
         let Some(field_definition) = parent_type
@@ -496,5 +551,114 @@ impl SelectionSet {
         self.selections
             .values()
             .fallible_all(|selection| selection.can_add_to(parent_type, schema))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Field;
+    use crate::schema::ValidFederationSchema;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
+    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::InterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::subgraph::test_utils::build_and_validate;
+
+    const INTERFACE_SUBGRAPH: &str = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+        type Query { i: I }
+        interface I @key(fields: "id") { id: ID! x: Int }
+        type A implements I @key(fields: "id") { id: ID! x: Int }
+    "#;
+
+    const INTERFACE_OBJECT_SUBGRAPH: &str = r#"
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@interfaceObject"])
+        type Query { is1: [I] }
+        type I @interfaceObject @key(fields: "id") { id: ID! x: Int }
+    "#;
+
+    fn schema(sdl: &str) -> ValidFederationSchema {
+        build_and_validate(sdl).validated_schema().clone()
+    }
+
+    /// A concrete `A.x` field, the source side of case 3.
+    fn concrete_field(schema: &ValidFederationSchema) -> Field {
+        let position = ObjectFieldDefinitionPosition {
+            type_name: apollo_compiler::name!("A"),
+            field_name: apollo_compiler::name!("x"),
+        };
+        Field::from_position(schema, FieldDefinitionPosition::Object(position))
+    }
+
+    fn assert_cannot_rebase(result: Result<Field, crate::error::FederationError>) {
+        let error = result.expect_err("legacy rebase should reject a concrete-to-interface hop");
+        assert!(
+            error
+                .to_string()
+                .contains("Cannot add selection of field `A.x`"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn case_3_interface_target_rejected_on_legacy_path() {
+        let schema = schema(INTERFACE_SUBGRAPH);
+        let field = concrete_field(&schema);
+        let target = CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(!field.can_rebase_on(&target, &schema).unwrap());
+        assert_cannot_rebase(field.rebase_on(&target, &schema));
+    }
+
+    #[test]
+    fn case_3_interface_target_accepted_on_incremental_planner_path() {
+        let schema = schema(INTERFACE_SUBGRAPH);
+        let field = concrete_field(&schema);
+        let target = CompositeTypeDefinitionPosition::Interface(InterfaceTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(field.can_rebase_on_inner(&target, &schema, true).unwrap());
+        let rebased = field
+            .rebase_on_for_incremental_planner(&target, &schema)
+            .expect("incremental planner rebase onto interface");
+        assert_eq!(rebased.field_position.parent(), target);
+    }
+
+    #[test]
+    fn case_3_interface_object_target_rejected_on_legacy_path() {
+        let source_schema = schema(INTERFACE_SUBGRAPH);
+        let target_schema = schema(INTERFACE_OBJECT_SUBGRAPH);
+        let field = concrete_field(&source_schema);
+        let target = CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(!field.can_rebase_on(&target, &target_schema).unwrap());
+        assert_cannot_rebase(field.rebase_on(&target, &target_schema));
+    }
+
+    #[test]
+    fn case_3_interface_object_target_accepted_on_incremental_planner_path() {
+        let source_schema = schema(INTERFACE_SUBGRAPH);
+        let target_schema = schema(INTERFACE_OBJECT_SUBGRAPH);
+        let field = concrete_field(&source_schema);
+        let target = CompositeTypeDefinitionPosition::Object(ObjectTypeDefinitionPosition {
+            type_name: apollo_compiler::name!("I"),
+        });
+
+        assert!(
+            field
+                .can_rebase_on_inner(&target, &target_schema, true)
+                .unwrap()
+        );
+        let rebased = field
+            .rebase_on_for_incremental_planner(&target, &target_schema)
+            .expect("incremental planner rebase onto @interfaceObject");
+        assert_eq!(rebased.field_position.parent(), target);
+        assert_eq!(rebased.schema, target_schema);
     }
 }

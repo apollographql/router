@@ -274,10 +274,10 @@ impl FieldRoutingSearchSpace {
                 next_option: 1,
                 checkpoint,
             });
-        } else if failed {
+        } else if failed && !pending.best_effort {
             trail.doomed.insert(pending_site(&pending));
         }
-        if failed && !self.backtrack_forced(state, trail) {
+        if failed && !self.backtrack_forced(state, trail) && !pending.best_effort {
             state.dropped_fields += 1;
         }
     }

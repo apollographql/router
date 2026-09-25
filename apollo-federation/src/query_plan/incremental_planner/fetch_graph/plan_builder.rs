@@ -382,7 +382,7 @@ impl FetchGraph {
         let mut selection_set = SelectionSet::empty(subgraph_schema.clone(), parent_type.clone());
         for entry in node.selection_builder.entries() {
             let path_vec = entry.path().to_vec();
-            selection_set.add_at_path(&path_vec, entry.selections())?;
+            selection_set.add_at_path_for_incremental_planner(&path_vec, entry.selections())?;
         }
 
         if selection_set.selections.is_empty() {
