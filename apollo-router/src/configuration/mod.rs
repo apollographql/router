@@ -261,6 +261,11 @@ impl PartialEq for Configuration {
     }
 }
 
+/// Deserializes each plugin's section into `plugin_configs` while the configuration itself is
+/// deserialized. Invalid plugin config is kept as errors rather than failing here, so
+/// configuration parsing can report every one of them at its section alongside the schema errors
+/// (see the `apollo_configuration::Validate` impl). A derived impl could not do this, nor copy
+/// `limits` and `health_check` into their plugin sections.
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
