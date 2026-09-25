@@ -43,6 +43,9 @@ pub(crate) struct FetchRequest {
     /// plan. Propagated to `subgraph::Request` so telemetry selectors can split
     /// primary vs deferred fetches.
     pub(crate) is_deferred: bool,
+    /// For a lookup fetch sharing a request batch with other fetches running at the same time
+    /// (GraphQL Federation), its ticket into that batch.
+    pub(crate) lookup_batch_ticket: Option<crate::batching::LookupBatchTicket>,
 }
 
 #[buildstructor::buildstructor]
@@ -58,6 +61,7 @@ impl FetchRequest {
         variables: Variables,
         current_dir: Path,
         is_deferred: bool,
+        lookup_batch_ticket: Option<crate::batching::LookupBatchTicket>,
     ) -> Self {
         Self {
             context,
@@ -66,6 +70,7 @@ impl FetchRequest {
             variables,
             current_dir,
             is_deferred,
+            lookup_batch_ticket,
         }
     }
 }

@@ -187,15 +187,29 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
                     async {
+                        // Lookup fetches to the same request-batching subgraph share one batch.
+                        let tickets = lookup_batch_tickets(nodes, parameters);
                         let mut stream: stream::FuturesUnordered<_> = nodes
                             .iter()
                             .map(|plan| {
+                                let fetch_address = immediate_lookup_fetch(plan, parameters)
+                                    .map(|fetch| fetch as *const FetchNode as usize);
+                                let tickets = tickets.clone();
                                 plan.execute_recursively(
                                     parameters,
                                     current_dir,
                                     parent_value,
                                     sender.clone(),
                                 )
+                                .map(move |result| {
+                                    // A child that did not use its ticket releases it now.
+                                    if let (Some(tickets), Some(address)) =
+                                        (&tickets, fetch_address)
+                                    {
+                                        drop(tickets.take(address));
+                                    }
+                                    result
+                                })
                                 .in_current_span()
                             })
                             .collect();
@@ -313,6 +327,16 @@ impl PlanNode {
                             Some(variables) => {
                                 let paths = variables.inverted_paths.clone();
                                 let service = parameters.service.clone();
+                                let lookup_batch_ticket = parameters
+                                    .context
+                                    .extensions()
+                                    .with_lock(|lock| {
+                                        lock.get::<Arc<crate::batching::LookupBatchTickets>>()
+                                            .cloned()
+                                    })
+                                    .and_then(|tickets| {
+                                        tickets.take(fetch_node as *const FetchNode as usize)
+                                    });
                                 let request = fetch::Request::Fetch(
                                     FetchRequest::builder()
                                         .context(parameters.context.clone())
@@ -321,6 +345,7 @@ impl PlanNode {
                                         .variables(variables)
                                         .current_dir(current_dir.clone())
                                         .is_deferred(parameters.is_deferred)
+                                        .and_lookup_batch_ticket(lookup_batch_ticket)
                                         .build(),
                                 );
                                 let raw_errors;
@@ -681,4 +706,91 @@ impl DeferredNode {
             };
         }
     }
+}
+
+/// The lookup fetch a `Parallel` child runs first, if any: the child itself, or under a `Flatten`,
+/// or in the branch its `Condition` takes.
+fn immediate_lookup_fetch<'a>(
+    node: &'a PlanNode,
+    parameters: &ExecutionParameters<'_>,
+) -> Option<&'a FetchNode> {
+    match node {
+        PlanNode::Fetch(fetch) if fetch.entity_lookup.is_some() => Some(fetch),
+        PlanNode::Flatten(FlattenNode { node, .. }) => immediate_lookup_fetch(node, parameters),
+        PlanNode::Condition {
+            condition,
+            if_clause,
+            else_clause,
+        } => {
+            let taken = parameters
+                .query
+                .variable_value(
+                    condition.as_str(),
+                    &parameters.supergraph_request.body().variables,
+                )
+                .unwrap_or(&Value::Bool(true));
+            let branch = if let &Value::Bool(true) = taken {
+                if_clause
+            } else {
+                else_clause
+            };
+            branch
+                .as_deref()
+                .and_then(|node| immediate_lookup_fetch(node, parameters))
+        }
+        _ => None,
+    }
+}
+
+/// Create a shared request batch for each subgraph with request batching that two or more
+/// children of a `Parallel` node send lookups to, and register one ticket per fetch in the request
+/// context.
+fn lookup_batch_tickets(
+    nodes: &[PlanNode],
+    parameters: &ExecutionParameters<'_>,
+) -> Option<Arc<crate::batching::LookupBatchTickets>> {
+    let mut by_subgraph: HashMap<&str, Vec<&FetchNode>> = HashMap::new();
+    for node in nodes {
+        if let Some(fetch) = immediate_lookup_fetch(node, parameters) {
+            by_subgraph
+                .entry(fetch.service_name.as_ref())
+                .or_default()
+                .push(fetch);
+        }
+    }
+    let mut created = Vec::new();
+    for (subgraph, fetches) in by_subgraph {
+        let batching = parameters.service.lookup_batching.get(subgraph);
+        if !batching.request_batching || fetches.len() < 2 {
+            continue;
+        }
+        let batch = crate::batching::LookupBatch::new(
+            crate::batching::LookupBatchMode {
+                variable_batching: batching.variable_batching,
+                request_batching: true,
+                maximum_size: batching.maximum_size,
+            },
+            fetches.len(),
+        );
+        for fetch in fetches {
+            created.push((
+                fetch as *const FetchNode as usize,
+                crate::batching::LookupBatchTicket::new(batch.clone()),
+            ));
+        }
+    }
+    if created.is_empty() {
+        return None;
+    }
+    let tickets = parameters.context.extensions().with_lock(|lock| {
+        lock.get::<Arc<crate::batching::LookupBatchTickets>>()
+            .cloned()
+            .unwrap_or_else(|| {
+                let tickets = Arc::new(crate::batching::LookupBatchTickets::default());
+                lock.insert(tickets.clone());
+                tickets
+            })
+    });
+    tickets.0.lock().extend(created);
+    Some(tickets)
 }

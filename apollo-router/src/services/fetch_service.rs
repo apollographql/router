@@ -227,6 +227,7 @@ impl FetchService {
             current_dir,
             context,
             is_deferred,
+            lookup_batch_ticket,
         } = request;
 
         let FetchNode {
@@ -291,6 +292,7 @@ impl FetchService {
                 is_deferred,
                 hoist_orphan_errors,
                 lookup_batching,
+                lookup_batch_ticket,
             );
         }
 
@@ -355,6 +357,7 @@ impl FetchService {
         is_deferred: bool,
         hoist_orphan_errors: bool,
         lookup_batching: crate::configuration::graphql_federation::LookupBatching,
+        lookup_batch_ticket: Option<crate::batching::LookupBatchTicket>,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         use crate::query_planner::lookup::LookupResults;
         use crate::query_planner::lookup::lookup_variable_sets;
@@ -364,7 +367,14 @@ impl FetchService {
         let service_name = fetch_node.service_name.to_string();
         // Batched transport: each request carries its place in the batch down to the HTTP client,
         // where the batch is joined (see `crate::batching::JoinLookupBatchesLayer`).
-        let mut slots = if (lookup_batching.variable_batching || lookup_batching.request_batching)
+        let mut slots = if let Some(ticket) = lookup_batch_ticket {
+            // Shared with the other fetches of the same `Parallel` node.
+            ticket
+                .join(sets.variable_sets.len())
+                .into_iter()
+                .map(Some)
+                .collect()
+        } else if (lookup_batching.variable_batching || lookup_batching.request_batching)
             && sets.variable_sets.len() > 1
         {
             crate::batching::LookupBatch::new(

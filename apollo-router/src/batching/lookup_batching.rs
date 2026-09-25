@@ -207,6 +207,46 @@ impl LookupBatch {
     }
 }
 
+/// A fetch's place in a batch shared with other fetches running at the same time (request
+/// batching across fetches). Joining uses it; dropping it unused (the fetch had nothing to fetch,
+/// or ended early) releases the batch so the others are not held back.
+pub(crate) struct LookupBatchTicket {
+    batch: Arc<LookupBatch>,
+    used: bool,
+}
+
+impl LookupBatchTicket {
+    pub(crate) fn new(batch: Arc<LookupBatch>) -> Self {
+        Self { batch, used: false }
+    }
+
+    pub(crate) fn join(mut self, members: usize) -> Vec<LookupBatchSlot> {
+        self.used = true;
+        self.batch.join(members)
+    }
+}
+
+impl Drop for LookupBatchTicket {
+    fn drop(&mut self) {
+        if !self.used {
+            self.batch.release();
+        }
+    }
+}
+
+/// Tickets of the fetches of the current `Parallel` nodes, by fetch node address. Kept in the
+/// request context.
+#[derive(Default)]
+pub(crate) struct LookupBatchTickets(
+    pub(crate) Mutex<std::collections::HashMap<usize, LookupBatchTicket>>,
+);
+
+impl LookupBatchTickets {
+    pub(crate) fn take(&self, fetch_node_address: usize) -> Option<LookupBatchTicket> {
+        self.0.lock().remove(&fetch_node_address)
+    }
+}
+
 /// A request's place in a batch. Carried in the request's HTTP extensions; dropping it without
 /// submitting (the request never reached the network) releases its place.
 pub(crate) struct LookupBatchSlot {
@@ -251,8 +291,21 @@ struct HttpBatch {
     request_list: bool,
 }
 
-fn plan_http_requests(mode: LookupBatchMode, fetches: Vec<Vec<Member>>) -> Vec<HttpBatch> {
+fn plan_http_requests(mode: LookupBatchMode, mut fetches: Vec<Vec<Member>>) -> Vec<HttpBatch> {
     let maximum = mode.maximum_size.filter(|m| *m > 0).unwrap_or(usize::MAX);
+    // Fetches join in whatever order they run; order them by operation so that the batch does
+    // not depend on scheduling.
+    fetches.sort_by(|a, b| {
+        let query = |members: &Vec<Member>| {
+            members
+                .first()
+                .and_then(|m| m.body.get("query"))
+                .and_then(|q| q.as_str())
+                .map(str::to_owned)
+                .unwrap_or_default()
+        };
+        query(a).cmp(&query(b))
+    });
     // Request objects: per fetch, one with all variable sets (variable batching), or one per
     // member.
     let mut objects: Vec<RequestObject> = Vec::new();
@@ -615,7 +668,6 @@ mod tests {
     use parking_lot::Mutex;
     use serde_json::json;
     use tower::Service as _;
-    use tower::ServiceExt as _;
 
     use super::*;
 
