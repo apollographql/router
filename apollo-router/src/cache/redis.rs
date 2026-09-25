@@ -1552,15 +1552,38 @@ mod test {
             Uuid::new_v4().to_string()
         }
 
-        fn redis_config(clustered: bool) -> crate::configuration::RedisCache {
-            let url = if clustered {
-                "redis-cluster://localhost:7000"
-            } else {
-                "redis://localhost:6379"
-            };
+        /// The Redis deployments started by `docker-compose.yml` (and the CI test executor).
+        #[derive(Clone, Copy, Debug)]
+        enum Deployment {
+            Standalone,
+            /// A primary with a replica, which the client discovers with `ROLE`.
+            PrimaryWithReplica,
+            /// A sentinel monitoring the `PrimaryWithReplica` primary.
+            Sentinel,
+            Cluster,
+        }
+        use Deployment::*;
 
+        impl Deployment {
+            fn url(self) -> &'static str {
+                match self {
+                    Standalone => "redis://localhost:6379",
+                    PrimaryWithReplica => "redis://localhost:6380",
+                    Sentinel => {
+                        "redis-sentinel://localhost:26379?sentinelServiceName=redis-primary"
+                    }
+                    Cluster => "redis-cluster://localhost:7000",
+                }
+            }
+
+            fn is_cluster(self) -> bool {
+                matches!(self, Cluster)
+            }
+        }
+
+        fn redis_config(deployment: Deployment) -> crate::configuration::RedisCache {
             let config_json = json!({
-                "urls": [url],
+                "urls": [deployment.url()],
                 "namespace": random_namespace(),
                 "required_to_start": true,
                 "ttl": "60s"
@@ -1582,10 +1605,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn new_starts_empty_and_create_client_pool_populates(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             assert!(storage.inner.read().is_none());
 
             storage.create_client_pool().await?;
@@ -1596,11 +1619,11 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn accessor_recreates_when_inner_is_none(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
             #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             storage.inner.write().take();
             assert!(storage.inner.read().is_none());
@@ -1626,10 +1649,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn client_works_after_recreation(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
 
             let key = RedisKey("recreation_test_key".to_string());
@@ -1653,11 +1676,11 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn recreation_stops_old_tasks_and_starts_new_ones(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
             #[values("client", "pipeline")] method: &str,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
 
             let (old_heartbeat, old_metrics) = {
@@ -1700,15 +1723,15 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn replica_heartbeat_present_only_when_clustered(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
 
             let guard = storage.inner.read();
             let inner = guard.as_ref().unwrap();
-            if clustered {
+            if deployment.is_cluster() {
                 let handle = inner
                     .replica_heartbeat_abort_handle
                     .as_ref()
@@ -1728,7 +1751,7 @@ mod test {
         #[tokio::test]
         async fn recreation_restarts_replica_heartbeat() -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(true), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(Cluster), "test").await?;
             storage.create_client_pool().await?;
 
             let old_replica_heartbeat = storage
@@ -1766,10 +1789,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn create_client_pool_starts_metrics(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
 
             // before create_client_pool() there is no pool and no metrics collector
             assert!(storage.inner.read().as_ref().is_none());
@@ -1792,10 +1815,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn pipeline_operations_work_after_recreation(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
 
             storage.inner.write().take();
@@ -1826,10 +1849,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn clones_share_recreated_client(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             let clone = storage.clone();
 
@@ -1849,10 +1872,10 @@ mod test {
         #[tokio::test(flavor = "multi_thread")]
         #[rstest::rstest]
         async fn concurrent_recreation_does_not_panic_or_deadlock(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             storage.inner.write().take();
 
@@ -1874,10 +1897,10 @@ mod test {
         #[tokio::test(flavor = "multi_thread")]
         #[rstest::rstest]
         async fn recreation_lock_held_during_spawned_task(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             storage.inner.write().take();
 
@@ -1907,13 +1930,13 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn scan_works_after_recreation(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
             use fred::types::scan::Scanner;
             use futures::StreamExt;
 
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             let key = RedisKey("scan_test_key".to_string());
             storage
@@ -1948,9 +1971,8 @@ mod test {
         #[tokio::test(flavor = "multi_thread")]
         async fn test_redis_storage_avoids_common_cross_slot_errors() -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let clustered = true;
             let storage =
-                RedisCacheStorage::new(redis_config(clustered), "test_redis_storage").await?;
+                RedisCacheStorage::new(redis_config(Cluster), "test_redis_storage").await?;
             storage.create_client_pool().await?;
 
             // insert values which reflect different cluster slots
@@ -2001,10 +2023,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn create_client_pool_replaces_existing_inner(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
 
             let (old_heartbeat, old_watcher) = {
@@ -2034,10 +2056,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn independent_storages_simulate_config_reload(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let old_storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let old_storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             old_storage.create_client_pool().await?;
             let (old_heartbeat, old_watcher) = {
                 let guard = old_storage.inner.read();
@@ -2048,7 +2070,7 @@ mod test {
                 )
             };
 
-            let new_storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let new_storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             new_storage.create_client_pool().await?;
 
             // drop the old storage, simulating the router swapping to a new config
@@ -2068,10 +2090,10 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn pool_shutdown_marks_inner_for_recreation(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             assert!(storage.inner.read().is_some());
 
@@ -2100,11 +2122,11 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn test_get_multiple_is_ordered(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
             let storage =
-                RedisCacheStorage::new(redis_config(clustered), "test_get_multiple_is_ordered")
+                RedisCacheStorage::new(redis_config(deployment), "test_get_multiple_is_ordered")
                     .await?;
             storage.create_client_pool().await?;
 
@@ -2146,12 +2168,12 @@ mod test {
         #[tokio::test]
         #[rstest::rstest]
         async fn active_client_count_is_balanced_after_drop(
-            #[values(true, false)] clustered: bool,
+            #[values(Standalone, PrimaryWithReplica, Sentinel, Cluster)] deployment: Deployment,
         ) -> Result<(), BoxError> {
             let _guard = lock_for_static().lock().await;
             let before = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
 
-            let storage = RedisCacheStorage::new(redis_config(clustered), "test").await?;
+            let storage = RedisCacheStorage::new(redis_config(deployment), "test").await?;
             storage.create_client_pool().await?;
             let after_create = ACTIVE_CLIENT_COUNT.load(Ordering::Relaxed);
 
