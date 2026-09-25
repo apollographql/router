@@ -6,6 +6,7 @@
 //!
 //!     cargo run --release --example check_bench -- <schema.graphql> <operation.graphql> \
 //!         [--reps N] [--new-only] [--loop-secs S]
+//!         [--check-empty-flatten-path] [--check-requires-conflict]
 
 use std::time::Duration;
 use std::time::Instant;
@@ -20,7 +21,8 @@ fn main() {
     let (Some(schema_path), Some(operation_path)) = (args.next(), args.next()) else {
         eprintln!(
             "usage: check_bench <schema.graphql> <operation.graphql> \
-             [--reps N] [--new-only] [--loop-secs S]"
+             [--reps N] [--new-only] [--loop-secs S] \
+             [--check-empty-flatten-path] [--check-requires-conflict]"
         );
         std::process::exit(2);
     };
@@ -114,13 +116,20 @@ fn main() {
         return;
     }
 
+    // The optional checks report planner defects that are real but not currently fixable, so
+    // they are off unless asked for; see `CheckerOptions`.
+    let options = correctness::CheckerOptions {
+        check_empty_flatten_path_type_condition: flag("--check-empty-flatten-path").is_some(),
+        check_requires_conflict: flag("--check-requires-conflict").is_some(),
+    };
     let check_new = || {
-        correctness::check_plan(
+        correctness::check_plan_with_options(
             planner.api_schema(),
             planner.supergraph_schema(),
             &subgraphs,
             &document,
             &plan,
+            options,
         )
     };
     let check_legacy = || {
@@ -147,6 +156,10 @@ fn main() {
         }
         println!("runs: {runs}");
         return;
+    }
+
+    if let Err(error) = check_new() {
+        println!("new checker rejects:\n{error}");
     }
 
     let mut new_times = Vec::new();
