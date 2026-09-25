@@ -3,11 +3,15 @@ use nom::Input;
 use nom::character::complete::multispace0;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
+use shape::Shape;
+use shape::ShapeCase;
 
 use super::ParseResult;
+use super::ShapeContext;
 use super::is_identifier;
 use super::location::Span;
 use super::location::WithRange;
+use crate::connectors::ConnectSpec;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
@@ -165,6 +169,35 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
         (None, Some(b)) => (Some(b.clone()), Vec::new()),
         (Some(a), None) => (Some(a.clone()), Vec::new()),
         (None, None) => (None, Vec::new()),
+    }
+}
+
+/// Replaces `None` (no value) in `shape`, or in its union members, with `Null`.
+///
+/// At runtime, `->map` and array literals like `[$.a, $.b]` put `null` in the
+/// output array wherever an element produced no value, so their element
+/// shapes can be `Null` but never `None`.
+///
+/// This changes the result shape of expressions that were already valid, so it
+/// only applies from `connect/v0.5`.
+pub(crate) fn missing_as_null(context: &ShapeContext, shape: Shape) -> Shape {
+    if context.spec() < ConnectSpec::V0_5 {
+        return shape;
+    }
+    let locations = shape.locations().cloned();
+    match shape.case() {
+        ShapeCase::None => Shape::null(locations),
+        ShapeCase::One(members) if members.iter().any(Shape::is_none) => Shape::one(
+            members.iter().map(|member| {
+                if member.is_none() {
+                    Shape::null(member.locations().cloned())
+                } else {
+                    member.clone()
+                }
+            }),
+            locations,
+        ),
+        _ => shape.clone(),
     }
 }
 

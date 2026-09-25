@@ -9,6 +9,10 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::may_be_missing;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -104,8 +108,8 @@ fn and_shape(
         );
     };
 
-    // We will accept anything bool-like OR unknown/named
-    if !(Shape::bool([]).accepts(&input_shape) || input_shape.accepts(&Shape::unknown([]))) {
+    // Accept anything that could be a boolean at runtime.
+    if !could_satisfy(&Shape::bool([]), &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} can only be applied to boolean values. Got {input_shape}.",
@@ -115,13 +119,19 @@ fn and_shape(
         );
     }
 
+    let mut maybe_missing = false;
     if let Some(MethodArgs { args, .. }) = method_args {
         for (i, arg) in args.iter().enumerate() {
             let arg_shape =
                 arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
+            maybe_missing |= may_be_missing(&arg_shape);
+            let Some(arg_shape) = present_part(&arg_shape) else {
+                // The method produces no value when an argument has none.
+                return Shape::none();
+            };
 
-            // We will accept anything bool-like OR unknown/named
-            if !(Shape::bool([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
+            // Accept anything that could be a boolean at runtime.
+            if !could_satisfy(&Shape::bool([]), &arg_shape) {
                 return Shape::error(
                     format!(
                         "Method ->{} can only accept boolean arguments. Got {arg_shape} at position {i}.",
@@ -133,7 +143,11 @@ fn and_shape(
         }
     }
 
-    Shape::bool(method_name.shape_location(context.source_id()))
+    or_missing(
+        context,
+        Shape::bool(method_name.shape_location(context.source_id())),
+        maybe_missing,
+    )
 }
 
 #[cfg(test)]
@@ -359,7 +373,7 @@ mod shape_tests {
     }
 
     #[test]
-    fn and_shape_should_error_on_args_that_compute_as_none() {
+    fn and_shape_should_return_none_on_args_that_compute_as_none() {
         let path = LitExpr::Path(PathSelection {
             path: PathList::Key(
                 Key::field("a").into_with_range(),
@@ -379,11 +393,8 @@ mod shape_tests {
                 Shape::bool([]),
                 Shape::none(),
             ),
-            Shape::error(
-                "Method ->and can only accept boolean arguments. Got None at position 0."
-                    .to_string(),
-                [get_location()]
-            )
+            // Like the runtime, which returns no value for an argument with none.
+            Shape::none()
         );
     }
 }

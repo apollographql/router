@@ -733,6 +733,7 @@ mod tests {
             customScalar: CustomScalar
             object: InputObject
             array: [InputObject]
+            strings: [String!]!
             multiLevel: MultiLevelInput
             recursive: RecursiveInput
             mutualA: MutualA
@@ -964,6 +965,15 @@ mod tests {
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
+    #[case::eq_string_int(r#"$("a")->eq(1)"#)]
+    #[case::add_union_non_numeric(r#"$(1)->add($args.string->match(["a", true], [@, "x"]))"#)]
+    #[case::and_union_non_boolean(r#"$(true)->and($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::eq_union_other_types(r#"$(1)->eq($args.string->match(["a", true], [@, "x"]))"#)]
+    #[case::in_string_ints(r#"$("a")->in([1, 2])"#)]
+    #[case::contains_ints_string(r#"$([1, 2])->contains("a")"#)]
+    #[case::join_not_null_objects(r#"$([{"a": 1}])->joinNotNull(",")"#)]
+    #[case::join_not_null_nested_arrays(r#"$([[1, 2]])->joinNotNull(",")"#)]
+    #[case::join_not_null_mapped_to_objects(r#"$args.strings->map({ s: @ })->joinNotNull(",")"#)]
     fn invalid_expressions_with_method_shape_checking(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should probably be tested here in addition to v0.3/v0.4/v0.5.
@@ -997,6 +1007,146 @@ mod tests {
             validate_with_context(selection, scalars(), spec)
                 .expect("expression is valid for this spec version");
         }
+    }
+
+    // `$args.strings` is still an unresolved named shape when method shapes are
+    // computed, so array methods wrap it as `List<Name>`. These must not be
+    // rejected just because the element shape is not yet known to be scalar.
+    #[rstest]
+    #[case::bare(r#"$args.strings->joinNotNull(",")"#)]
+    #[case::after_map_identity(r#"$args.strings->map(@)->joinNotNull(",")"#)]
+    #[case::after_map_slice(r#"$args.strings->map(@->slice(0, 3))->joinNotNull(",")"#)]
+    #[case::after_map_split_first(r#"$args.strings->map(@->split("x")->first)->joinNotNull(",")"#)]
+    #[case::after_map_trim(r#"$args.strings->map(@->trim)->joinNotNull(",")"#)]
+    #[case::after_filter(r#"$args.strings->filter(@->ne("x"))->joinNotNull(",")"#)]
+    #[case::after_slice(r#"$args.strings->slice(0, 2)->joinNotNull(",")"#)]
+    #[case::literal_with_nulls(r#"$(["a", null, 1])->joinNotNull(",")"#)]
+    fn valid_join_not_null_inputs(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, scalars(), spec)
+                .expect("expression is valid for this spec version");
+        }
+    }
+
+    // Comparing two different literals of the same type is valid, and returns
+    // false at runtime.
+    #[rstest]
+    #[case::eq_strings(r#"$("b")->eq("a")"#)]
+    #[case::ne_strings(r#"$("b")->ne("a")"#)]
+    #[case::eq_ints("$(1)->eq(2)")]
+    #[case::eq_int_float("$(1)->eq(1.5)")]
+    #[case::eq_bools("$(true)->eq(false)")]
+    #[case::in_strings(r#"$("b")->in(["a", "c"])"#)]
+    #[case::in_ints("$(1)->in([2, 3])")]
+    #[case::contains_strings(r#"$(["b", "c"])->contains("a")"#)]
+    #[case::eq_after_match(r#"$args.string->match(["a", "x"], [@, "y"])->eq("x")"#)]
+    #[case::in_after_match(r#"$args.string->match(["a", "x"], [@, "y"])->in(["x"])"#)]
+    fn valid_same_type_literal_comparisons(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, scalars(), spec)
+                .expect("expression is valid for this spec version");
+        }
+    }
+
+    // Most methods produce no value, without an error, when an argument has no
+    // value, and their shapes must not report an error for an argument that
+    // may be missing. `$([])->first` has no value at runtime, and the shape
+    // `None`.
+    #[rstest]
+    #[case::eq("$(1)->eq($([])->first)", true)]
+    #[case::ne("$(1)->ne($([])->first)", true)]
+    #[case::gt("$(1)->gt($([])->first)", true)]
+    #[case::gte("$(1)->gte($([])->first)", true)]
+    #[case::lt("$(1)->lt($([])->first)", true)]
+    #[case::lte("$(1)->lte($([])->first)", true)]
+    #[case::in_array("$(1)->in($([])->first)", true)]
+    #[case::contains("$([1])->contains($([])->first)", true)]
+    #[case::and("$(true)->and($([])->first)", true)]
+    #[case::or("$(false)->or($([])->first)", true)]
+    #[case::get_string(r#"$("abc")->get($([])->first)"#, true)]
+    #[case::get_array("$([1])->get($([])->first)", true)]
+    #[case::get_object("$->echo({ a: 1 })->get($([])->first)", true)]
+    #[case::parse_int_base(r#"$("10")->parseInt($([])->first)"#, true)]
+    #[case::split_limit(r#"$("a,b")->split(",", $([])->first)"#, true)]
+    #[case::slice_end(r#"$("abc")->slice(0, $([])->first)"#, true)]
+    #[case::echo("$->echo($([])->first)", true)]
+    // These report an error at runtime, so their shapes should too.
+    #[case::add("$(1)->add($([])->first)", false)]
+    #[case::split_separator(r#"$("a,b")->split($([])->first)"#, false)]
+    #[case::join_not_null_separator(r#"$(["a"])->joinNotNull($([])->first)"#, false)]
+    #[case::filter_condition("$([1])->filter($([])->first)", false)]
+    #[case::find_condition("$([1])->find($([])->first)", false)]
+    fn missing_argument_shapes_match_runtime(#[case] selection: &str, #[case] valid: bool) {
+        let (_, runtime_errors) = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_4)
+            .expect("selection parses")
+            .apply_to(&serde_json_bytes::json!({}));
+        assert_eq!(
+            runtime_errors.is_empty(),
+            valid,
+            "runtime errors: {runtime_errors:?}"
+        );
+
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            let result = validate_with_context(selection, Shape::unknown([]), spec);
+            assert_eq!(result.is_ok(), valid, "{result:?}");
+        }
+    }
+
+    // Arguments that may be missing, like the result of `->first`, are fine
+    // wherever a missing argument makes the method produce no value.
+    #[rstest]
+    #[case::eq(r#"$("a")->eq($args.strings->map(@)->first)"#)]
+    #[case::eq_split_first(r#"$("a")->eq($("a,b")->split(",")->first)"#)]
+    #[case::gt(r#"$("a")->gt($("a,b")->split(",")->first)"#)]
+    #[case::lt("$(1)->lt($args.strings->map(@->size)->first)")]
+    #[case::and(r#"$(true)->and($args.strings->map(@->eq("a"))->first)"#)]
+    #[case::get_array("$([1, 2])->get($args.strings->map(@->size)->first)")]
+    #[case::get_object(r#"$->echo({ a: 1 })->get($("a,b")->split(",")->first)"#)]
+    #[case::parse_int_base(r#"$("10")->parseInt($args.strings->map(@->size)->first)"#)]
+    #[case::split_limit(r#"$("a,b")->split(",", $args.strings->map(@->size)->first)"#)]
+    #[case::array_literal_join(r#"$([$args.strings->map(@)->first])->joinNotNull(",")"#)]
+    // These methods report an error when an argument has no value, but the
+    // call can still succeed when it has one.
+    #[case::add("$(1)->add($args.strings->map(@->size)->first)")]
+    #[case::split_separator(r#"$("a,b")->split($("a,b")->split(",")->first)"#)]
+    #[case::join_not_null_separator(r#"$args.strings->joinNotNull($("a,b")->split(",")->first)"#)]
+    #[case::filter_condition(r#"$args.strings->filter(@->split(",")->first->eq("a"))"#)]
+    // Union arguments are fine if any member could make the call succeed.
+    #[case::and_union(r#"$(true)->and($args.string->match(["a", true], [@, "x"]))"#)]
+    #[case::add_union(r#"$(1)->add($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::eq_union(r#"$(1)->eq($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::gt_union(r#"$("b")->gt($args.string->match(["a", 1], [@, "x"]))"#)]
+    #[case::split_union(r#"$("a,b")->split($args.string->match(["a", 1], [@, ","]))"#)]
+    #[case::get_union(r#"$([1, 2])->get($args.string->match(["a", 1], [@, "x"]))"#)]
+    fn valid_maybe_missing_arguments(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, Shape::unknown([]), spec)
+                .expect("expression is valid for this spec version");
+        }
+    }
+
+    // Before connect/v0.5, result shapes of expressions that were already valid
+    // must not change, even where the runtime-accurate shape differs: an
+    // argument that may be missing does not add `None` to a method's result,
+    // and missing `->map` or array literal elements stay `None` rather than
+    // becoming `Null`.
+    #[rstest]
+    #[case::maybe_missing_argument_in_bool_context(
+        "$(1)->eq($args.strings->map(@)->first)",
+        Shape::bool([])
+    )]
+    #[case::maybe_missing_boolean_argument(
+        r#"$(true)->and($args.strings->map(@->eq("a"))->first)"#,
+        Shape::bool([])
+    )]
+    #[case::missing_array_literal_element("$([$([])->first])->first->eq(1)", Shape::unknown([]))]
+    fn result_shapes_change_only_from_v0_5(#[case] selection: &str, #[case] expected: Shape) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
+            validate_with_context(selection, expected.clone(), spec)
+                .expect("result shape is unchanged before connect/v0.5");
+        }
+        validate_with_context(selection, expected, ConnectSpec::V0_5)
+            .expect_err("result shape mirrors the runtime from connect/v0.5");
     }
 
     #[rstest]

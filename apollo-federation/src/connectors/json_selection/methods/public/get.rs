@@ -15,6 +15,10 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::may_be_missing;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -348,8 +352,13 @@ fn get_shape(
 
     let index_shape =
         index_literal.compute_output_shape(context, input_shape.clone(), dollar_shape);
+    let maybe_missing = may_be_missing(&index_shape);
+    let Some(index_shape) = present_part(&index_shape) else {
+        // The method produces no value when its index argument has none.
+        return Shape::none();
+    };
 
-    if Shape::string([]).accepts(&input_shape) {
+    let result = if Shape::string([]).accepts(&input_shape) {
         handle_string_shape(method_name, &input_shape, &index_shape, context.source_id())
     } else if Shape::tuple([], []).accepts(&input_shape) {
         handle_array_shape(method_name, &input_shape, &index_shape, context.source_id())
@@ -366,7 +375,8 @@ fn get_shape(
             .as_str(),
             method_name.shape_location(context.source_id()),
         )
-    }
+    };
+    or_missing(context, result, maybe_missing)
 }
 
 fn handle_string_shape(
@@ -381,7 +391,7 @@ fn handle_string_shape(
             return Shape::string(method_name.shape_location(source_id));
         };
         index_value
-    } else if index_shape.accepts(&Shape::unknown([])) {
+    } else if could_satisfy(&Shape::int([]), index_shape) {
         return Shape::string(method_name.shape_location(source_id));
     } else {
         return Shape::error(
@@ -429,7 +439,7 @@ fn handle_array_shape(
             return input_shape.any_item(method_name.shape_location(source_id));
         };
         index_value
-    } else if index_shape.accepts(&Shape::unknown([])) {
+    } else if could_satisfy(&Shape::int([]), index_shape) {
         return input_shape.any_item(method_name.shape_location(source_id));
     } else {
         return Shape::error(
@@ -481,7 +491,7 @@ fn handle_object_shape(
             return input_shape.any_field(method_name.shape_location(source_id));
         };
         index_value
-    } else if index_shape.accepts(&Shape::unknown([])) {
+    } else if could_satisfy(&Shape::string([]), index_shape) {
         return input_shape.any_field(method_name.shape_location(source_id));
     } else {
         return Shape::error(
@@ -521,9 +531,7 @@ fn handle_unknown_shape(
     index_shape: &Shape,
     source_id: &SourceId,
 ) -> Shape {
-    if Shape::int([]).accepts(index_shape)
-        || index_shape.accepts(&Shape::unknown([]))
-        || Shape::string([]).accepts(index_shape)
+    if could_satisfy(&Shape::int([]), index_shape) || could_satisfy(&Shape::string([]), index_shape)
     {
         Shape::unknown(method_name.shape_location(source_id))
     } else {

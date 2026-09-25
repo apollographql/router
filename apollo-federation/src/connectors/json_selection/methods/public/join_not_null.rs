@@ -1,6 +1,5 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -11,6 +10,7 @@ use crate::connectors::json_selection::helpers::json_to_string;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -150,18 +150,14 @@ fn join_not_null_method_shape(
         [],
     );
 
-    // allow unknown input
-    if !(input_shape.is_unknown() || matches!(input_shape.case(), ShapeCase::Name(_, _))) {
-        let mismatches = input_shape_contract.validate(&input_shape);
-        if mismatches.is_some() {
-            return Shape::error(
-                format!(
-                    "Method ->{} requires an array of scalar values as input",
-                    method_name.as_ref()
-                ),
-                [],
-            );
-        }
+    if !could_satisfy(&input_shape_contract, &input_shape) {
+        return Shape::error(
+            format!(
+                "Method ->{} requires an array of scalar values as input",
+                method_name.as_ref()
+            ),
+            [],
+        );
     }
 
     let Some(selection_shape) = method_args
@@ -186,18 +182,14 @@ fn join_not_null_method_shape(
         );
     }
 
-    // allow unknown separator
-    if !(selection_shape.is_unknown() || matches!(selection_shape.case(), ShapeCase::Name(_, _))) {
-        let mismatches = Shape::string([]).validate(&selection_shape);
-        if mismatches.is_some() {
-            return Shape::error(
-                format!(
-                    "Method ->{} requires a string argument",
-                    method_name.as_ref()
-                ),
-                vec![],
-            );
-        }
+    if !could_satisfy(&Shape::string([]), &selection_shape) {
+        return Shape::error(
+            format!(
+                "Method ->{} requires a string argument",
+                method_name.as_ref()
+            ),
+            vec![],
+        );
     }
 
     Shape::string(method_name.shape_location(context.source_id()))
@@ -361,6 +353,51 @@ mod tests {
         assert_eq!(
             output_shape,
             Shape::string([SourceId::new("test".to_string()).location(0..7)])
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::list_of_named(Shape::list(Shape::name("$args.ids.*", []), []))]
+    #[case::list_of_unknown(Shape::list(Shape::unknown([]), []))]
+    #[case::list_of_nullable(Shape::list(
+        Shape::one([Shape::string([]), Shape::null([])], []),
+        []
+    ))]
+    #[case::list_of_named_or_string(Shape::list(
+        Shape::one([Shape::name("$args.id", []), Shape::string([])], []),
+        []
+    ))]
+    #[case::list_of_named_or_object_could_be_scalar(Shape::list(
+        Shape::one(
+            [Shape::name("$args.id", []), Shape::dict(Shape::string([]), [])],
+            []
+        ),
+        []
+    ))]
+    fn test_join_not_null_shape_unresolved_elements(#[case] input: Shape) {
+        let output_shape = get_shape(
+            vec![WithRange::new(LitExpr::String(",".to_string()), None)],
+            input,
+        );
+        assert_eq!(
+            output_shape,
+            Shape::string([SourceId::new("test".to_string()).location(0..7)])
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::list_of_objects(Shape::list(Shape::dict(Shape::string([]), []), []))]
+    fn test_join_not_null_shape_known_non_scalar_elements(#[case] input: Shape) {
+        let output_shape = get_shape(
+            vec![WithRange::new(LitExpr::String(",".to_string()), None)],
+            input,
+        );
+        assert_eq!(
+            output_shape,
+            Shape::error(
+                "Method ->joinNotNull requires an array of scalar values as input".to_string(),
+                vec![]
+            )
         );
     }
 
