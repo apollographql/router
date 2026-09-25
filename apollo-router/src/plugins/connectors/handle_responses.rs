@@ -430,6 +430,30 @@ mod tests {
         );
     }
 
+    /// Like `->withError` above, `->encode` and `->decode` must pass the live
+    /// `is_public()` gate to be usable from connector schemas.
+    #[test]
+    fn encode_and_decode_are_available_to_connector_schemas() {
+        let selection = JSONSelection::parse(
+            "token: creds->encode('base64') body: data->decode('base64url')->decode('json')",
+        )
+        .unwrap();
+
+        let (value, errors) = selection.apply_to(&json!({
+            "creds": "user:pass",
+            "data": "eyJvayI6dHJ1ZX0",
+        }));
+
+        assert_eq!(
+            errors.iter().map(|error| error.message()).collect_vec(),
+            Vec::<&str>::new()
+        );
+        assert_eq!(
+            value,
+            Some(json!({ "token": "dXNlcjpwYXNz", "body": { "ok": true } }))
+        );
+    }
+
     #[test]
     fn from_runtime_error_transfers_span_event_emitted_flag() {
         let response_key = ResponseKey::RootField {
