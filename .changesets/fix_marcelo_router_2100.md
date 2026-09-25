@@ -1,6 +1,6 @@
-### Restore structured JSON logging for `valuable` fields ([PR #10195](https://github.com/apollographql/router/pull/10195))
+### Restore structured JSON for `valuable` event fields in JSON logs ([PR #10195](https://github.com/apollographql/router/pull/10195))
 
-Fields recorded with `tracing::field::valuable` are serialized as nested JSON objects again, instead of flat `Debug` strings.
+Event fields recorded with `tracing::field::valuable` are written as nested JSON objects again by the JSON log formatter, instead of flat `Debug` strings.
 
 A router built with `--cfg tracing_unstable` — for example alongside a native Rust plugin that logs a `#[derive(Valuable)]` struct — used to render such a field as structured JSON:
 
@@ -14,7 +14,9 @@ Since the JSON formatter's event visitor was replaced to deduplicate the empty `
 "log": "AccessLog { client_id: \"abc\", entitlements: Entitlements { bypass: true } }"
 ```
 
-The replacement visitor did not override `record_value`, so it inherited the trait's default implementation, which forwards to the `Debug` rendering. It now converts `valuable` values directly, and the deduplication behavior is unchanged. A value that has no JSON representation, such as a map with non-string keys, still falls back to its `Debug` string, and the rest of the log line is unaffected.
+The replacement visitor did not override `record_value`, so it inherited the trait's default implementation, which forwards to the `Debug` rendering. It now converts `valuable` values directly, and the deduplication behavior is unchanged. A value that has no JSON representation, such as a map with non-string keys, still falls back to its `Debug` string, with a sibling `<field>_serialization_error` field giving the reason, and the rest of the log line is unaffected.
+
+This applies only to event fields in JSON logs. Span attributes (including the `span` and `spans` entries in JSON logs), the text formatter and exported OpenTelemetry span events still render `valuable` values as `Debug` strings, as they did in 2.15.
 
 Builds that do not set `--cfg tracing_unstable` are unaffected: the supporting crates are declared under that cfg and are neither resolved nor compiled without it.
 
