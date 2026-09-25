@@ -2476,7 +2476,8 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
-    /// Merges `merged_id` into `node_id`, without knowing the dependencies between those two nodes.
+    /// Merges `merged_id` into `node_id` unless doing so would discard intermediate ordering.
+    /// In that case, leaves both fetches unchanged.
     /// - Both `node_id` and `merged_id` must be in the same subgraph and have the same `merge_at`.
     // Note that it is up to the caller to know if such merging is desirable. In particular, if
     // both nodes have completely different inputs, merging them, which also merges their
@@ -2491,6 +2492,15 @@ impl FetchDependencyGraph {
         node_id: NodeIndex,
         merged_id: NodeIndex,
     ) -> Result<(), FederationError> {
+        // Such a parent cannot be relocated onto node_id without creating a cycle. Dropping
+        // it is not safe either: after transitive reduction, it may be the only ordering path
+        // from an intermediate field provider to one of merged_id's children. Keep both fetches.
+        if self
+            .parents_of(merged_id)
+            .any(|parent| parent != node_id && self.is_descendant_of(parent, node_id))
+        {
+            return Ok(());
+        }
         self.copy_inputs(node_id, merged_id)?;
         self.merge_in_internal(
             node_id,
@@ -5365,6 +5375,7 @@ fn path_for_parent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::field_set::parse_field_set;
 
     #[test]
     fn type_condition_fetching_disabled() {
@@ -5618,6 +5629,255 @@ mod tests {
                 defer_ref.map(String::from),
             )
             .unwrap()
+    }
+
+    fn add_entity_test_root(graph: &mut FetchDependencyGraph, selected: &str) -> NodeIndex {
+        let source: Arc<str> = Arc::from("Subgraph1");
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source(&source)
+            .unwrap();
+        let parent_type = schema
+            .get_type(&name!("Query"))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let root = graph
+            .get_or_create_root_node(&source, SchemaRootDefinitionKind::Query, parent_type)
+            .unwrap();
+        let before = &graph.graph[root].selection_set.selection_set;
+        let selection = SelectionSet::parse(
+            before.schema.clone(),
+            before.type_position.clone(),
+            selected,
+        )
+        .unwrap();
+        Arc::make_mut(graph.graph.node_weight_mut(root).unwrap())
+            .selection_set_mut()
+            .add_selections(&Arc::new(selection))
+            .unwrap();
+        root
+    }
+
+    fn add_entity_test_fetch(
+        graph: &mut FetchDependencyGraph,
+        source: &str,
+        response_name: &str,
+        selected: &str,
+        required: &str,
+    ) -> NodeIndex {
+        let source: Arc<str> = Arc::from(source);
+        let node = graph
+            .new_key_node(
+                &source,
+                vec![FetchDataPathElement::Key(
+                    Name::new(response_name).unwrap(),
+                    None,
+                )],
+                None,
+            )
+            .unwrap();
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source(&source)
+            .unwrap()
+            .clone();
+        let selection = SelectionSet::parse(
+            schema.clone(),
+            schema
+                .get_type(&name!("_Entity"))
+                .unwrap()
+                .try_into()
+                .unwrap(),
+            &format!("... on T {{ {selected} }}"),
+        )
+        .unwrap();
+        let inputs = parse_field_set(&graph.supergraph_schema, name!("T"), required, true).unwrap();
+        // Match normal key-fetch construction, including the type-condition wrapper. A bare T
+        // field set is accepted by add_inputs, but bypasses the optimizer's usual input shape.
+        let inputs = wrap_input_selections(
+            &graph.supergraph_schema,
+            &inputs.type_position.clone(),
+            inputs,
+            &OpGraphPathContext::default(),
+        );
+        let mutable = Arc::make_mut(graph.graph.node_weight_mut(node).unwrap());
+        mutable
+            .selection_set_mut()
+            .add_selections(&Arc::new(selection))
+            .unwrap();
+        mutable.add_inputs(&inputs, iter::empty()).unwrap();
+        node
+    }
+
+    fn entity_test_root_path(graph: &FetchDependencyGraph, response_name: &str) -> OpPath {
+        let schema = graph
+            .federated_query_graph
+            .schema_by_source("Subgraph1")
+            .unwrap();
+        let OpPathElement::Field(mut field) =
+            object_field_element(schema, name!("Query"), name!("t"))
+        else {
+            unreachable!()
+        };
+        if response_name != "t" {
+            field.alias = Some(Name::new(response_name).unwrap());
+        }
+        OpPath(vec![Arc::new(OpPathElement::Field(field))])
+    }
+
+    fn dag_add_parent_with_path(
+        graph: &mut FetchDependencyGraph,
+        parent: NodeIndex,
+        child: NodeIndex,
+        path: OpPath,
+    ) {
+        graph.add_parent(
+            child,
+            ParentRelation {
+                parent_node_id: parent,
+                path_in_parent: Some(Arc::new(path)),
+            },
+        );
+    }
+
+    #[test]
+    fn reduce_and_optimize_preserves_an_input_dependency_through_a_late_merge() {
+        let mut graph = make_test_dep_graph();
+        let root = add_entity_test_root(&mut graph, "t { __typename id }");
+        let earlier = add_entity_test_fetch(&mut graph, "Subgraph2", "t", "id v1", "__typename id");
+        let provider =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "t", "id v2", "__typename id v1");
+        let later = add_entity_test_fetch(&mut graph, "Subgraph2", "t", "id v1", "__typename id");
+        let consumer =
+            add_entity_test_fetch(&mut graph, "Subgraph2", "t", "v1", "__typename id v2");
+        let root_path = entity_test_root_path(&graph, "t");
+        dag_add_parent_with_path(&mut graph, root, earlier, root_path);
+        // Root supplies id; earlier supplies v1; provider supplies v2.
+        // R -> earlier -> provider -> later -> consumer, plus provider -> consumer.
+        for (parent, child) in [
+            (earlier, provider),
+            (provider, later),
+            (later, consumer),
+            (provider, consumer),
+        ] {
+            dag_add_parent_with_path(&mut graph, parent, child, OpPath::default());
+        }
+        graph.reduce();
+        assert!(
+            !graph.is_parent_of(provider, consumer),
+            "the shortcut should be redundant"
+        );
+        assert!(petgraph::algo::has_path_connecting(
+            &graph.graph,
+            provider,
+            consumer,
+            None
+        ));
+
+        graph.reduce_and_optimize().unwrap();
+
+        // Inspect the current work, rather than demanding that particular NodeIndices survive
+        // a future valid rewrite. Whichever fetch still requires v2 must have a provider.
+        let v2_inputs = parse_field_set(&graph.supergraph_schema, name!("T"), "v2", true).unwrap();
+        let consumers: Vec<_> = graph.graph.node_indices().filter(|node| {
+            graph.graph[*node].inputs.as_ref().is_some_and(|inputs| {
+                inputs.selection_sets_per_parent_type.values().any(|selection| {
+                    selection.contains(&v2_inputs) || selection.selections.values().any(|part| {
+                        matches!(part, Selection::InlineFragment(fragment) if fragment.selection_set.contains(&v2_inputs))
+                    })
+                })
+            })
+        }).collect();
+        assert!(
+            !consumers.is_empty(),
+            "fixture must retain the v2-consuming work"
+        );
+        for consumer in consumers {
+            let selection = &graph.graph[consumer].selection_set.selection_set;
+            let v2_output = SelectionSet::parse(
+                selection.schema.clone(),
+                selection.type_position.clone(),
+                "... on T { v2 }",
+            )
+            .unwrap();
+            let providers: Vec<_> = graph
+                .graph
+                .node_indices()
+                .filter(|node| {
+                    graph.graph[*node].merge_at == graph.graph[consumer].merge_at
+                        && graph.graph[*node]
+                            .selection_set
+                            .selection_set
+                            .contains(&v2_output)
+                })
+                .collect();
+            assert!(
+                !providers.is_empty(),
+                "the v2 output must remain in the graph"
+            );
+            assert!(
+                providers.into_iter().any(|provider| {
+                    provider != consumer
+                        && petgraph::algo::has_path_connecting(
+                            &graph.graph,
+                            provider,
+                            consumer,
+                            None,
+                        )
+                }),
+                "a fetch still requiring v2 has lost its provider ordering"
+            );
+        }
+    }
+
+    #[test]
+    fn equal_input_merges_preserve_safe_sibling_and_direct_child_optimizations() {
+        for direct_child in [false, true] {
+            let mut graph = make_test_dep_graph();
+            let root = add_entity_test_root(&mut graph, "t { __typename id }");
+            let first = add_entity_test_fetch(
+                &mut graph,
+                "Subgraph2",
+                "t",
+                "first: __typename",
+                "__typename id",
+            );
+            let second = add_entity_test_fetch(
+                &mut graph,
+                "Subgraph2",
+                "t",
+                "second: __typename",
+                "__typename id",
+            );
+            let root_path = entity_test_root_path(&graph, "t");
+            dag_add_parent_with_path(&mut graph, root, first, root_path.clone());
+            if direct_child {
+                dag_add_parent_with_path(&mut graph, first, second, OpPath::default());
+            } else {
+                dag_add_parent_with_path(&mut graph, root, second, root_path);
+            }
+
+            graph
+                .merge_fetches_to_same_subgraph_and_same_inputs()
+                .unwrap();
+
+            assert_eq!(graph.graph.node_count(), 2);
+            let fetch = graph
+                .graph
+                .node_weights()
+                .find(|node| node.subgraph_name.as_ref() == "Subgraph2")
+                .unwrap();
+            let selections = &fetch.selection_set.selection_set;
+            let expected = SelectionSet::parse(
+                selections.schema.clone(),
+                selections.type_position.clone(),
+                "... on T { first: __typename second: __typename }",
+            )
+            .unwrap();
+            assert!(selections.contains(&expected));
+            assert!(petgraph::algo::toposort(&graph.graph, None).is_ok());
+        }
     }
 
     fn add_test_edge(graph: &mut FetchDependencyGraph, from: NodeIndex, to: NodeIndex) {
