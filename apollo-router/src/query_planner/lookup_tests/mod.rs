@@ -290,3 +290,70 @@ async fn passes_requirements_and_nested_lookups() {
     }
     "#);
 }
+
+/// The authorization metadata of a lookup fetch (part of the subgraph cache key, e.g. for response
+/// caching) must reflect the requirements of the entity fields it selects, as for `_entities`.
+#[test]
+fn lookup_fetch_authorization_metadata_covers_entity_fields() {
+    use apollo_federation::query_plan::PlanNode as NextPlanNode;
+    use apollo_federation::query_plan::TopLevelPlanNode;
+
+    use crate::plugins::authorization::CacheKeyMetadata;
+    use crate::query_planner::PlanNode;
+
+    let schema = compose(&[
+        ("products", PRODUCTS),
+        (
+            "reviews",
+            r#"
+            type Query { productById(id: ID!): Product @lookup @internal }
+            type Product @key(fields: "id") {
+              id: ID!
+              reviewCount: Int! @authenticated @requiresScopes(scopes: [["read:reviews"]])
+            }
+            "#,
+        ),
+    ]);
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&schema).unwrap();
+    let mut config = apollo_federation::query_plan::query_planner::QueryPlannerConfig::default();
+    config.incremental_planner.enabled = true;
+    let planner =
+        apollo_federation::query_plan::query_planner::QueryPlanner::new(&supergraph, config)
+            .unwrap();
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ topProducts { reviewCount } }",
+        "op.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .unwrap();
+    let Some(TopLevelPlanNode::Sequence(sequence)) = &plan.node else {
+        panic!("unexpected plan: {plan}")
+    };
+    let NextPlanNode::Flatten(flatten) = &sequence.nodes[1] else {
+        panic!("unexpected plan: {plan}")
+    };
+    let NextPlanNode::Fetch(fetch) = &*flatten.node else {
+        panic!("unexpected plan: {plan}")
+    };
+    assert!(fetch.entity_lookup.is_some(), "{plan}");
+    let PlanNode::Fetch(mut fetch) = PlanNode::from(fetch) else {
+        unreachable!()
+    };
+
+    let router_schema = crate::spec::Schema::parse(&schema, &Default::default()).unwrap();
+    let client_key = CacheKeyMetadata {
+        is_authenticated: true,
+        scopes: vec!["read:reviews".to_string()],
+        policies: vec![],
+    };
+    fetch.extract_authorization_metadata(router_schema.supergraph_schema(), &client_key);
+    assert!(
+        fetch.authorization.is_authenticated,
+        "{:?}",
+        fetch.authorization
+    );
+    assert_eq!(fetch.authorization.scopes, ["read:reviews"]);
+}
