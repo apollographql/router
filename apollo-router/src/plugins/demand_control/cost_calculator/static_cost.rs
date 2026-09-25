@@ -519,11 +519,27 @@ impl StaticCostCalculator {
             PlanNode::Defer { primary, deferred } => {
                 self.summed_score_of_deferred_nodes(primary, deferred, variables)
             }
-            PlanNode::Fetch(fetch_node) => self.estimated_cost_of_operation(
-                &fetch_node.service_name,
-                &fetch_node.operation,
-                variables,
-            ),
+            PlanNode::Fetch(fetch_node) => {
+                let cost = self.estimated_cost_of_operation(
+                    &fetch_node.service_name,
+                    &fetch_node.operation,
+                    variables,
+                )?;
+                if fetch_node.entity_lookup.is_some() {
+                    // A lookup operation (GraphQL Federation) resolves one entity and runs once
+                    // per entity; scale it like the list an `_entities` fetch returns.
+                    let entities = self
+                        .subgraph_list_size(&fetch_node.service_name)
+                        .unwrap_or(self.list_size);
+                    let single = cost.total();
+                    Ok(CostBySubgraph::new(
+                        &fetch_node.service_name,
+                        single * f64::from(entities),
+                    ))
+                } else {
+                    Ok(cost)
+                }
+            }
             PlanNode::Subscription { primary, rest: _ } => self.estimated_cost_of_operation(
                 &primary.service_name,
                 &primary.operation,
@@ -1022,6 +1038,77 @@ mod tests {
         )
         .actual(&query, &response, &variables)
         .unwrap()
+    }
+
+    /// A lookup fetch (GraphQL Federation) runs once per entity, so its planned cost scales with the
+    /// list size assumption like the `_entities` list of an equivalent federation fetch.
+    #[test]
+    fn lookup_fetch_cost_scales_like_entities() {
+        fn planned(sources: &[(&str, &str)], list_size: u32) -> f64 {
+            use apollo_federation::subgraph::typestate::Subgraph;
+            let subgraphs = sources
+                .iter()
+                .map(|(name, sdl)| Subgraph::parse(name, &format!("http://{name}"), sdl).unwrap())
+                .collect();
+            let supergraph = apollo_federation::composition::compose(subgraphs, Default::default())
+                .unwrap()
+                .schema()
+                .schema()
+                .to_string();
+            let supergraph =
+                apollo_federation::Supergraph::new_with_router_specs(&supergraph).unwrap();
+            let mut config =
+                apollo_federation::query_plan::query_planner::QueryPlannerConfig::default();
+            config.incremental_planner.enabled = true;
+            let planner = QueryPlanner::new(&supergraph, config).unwrap();
+            let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+                planner.api_schema().schema(),
+                "{ topProduct { reviewCount } }",
+                "op.graphql",
+            )
+            .unwrap();
+            let plan = planner
+                .build_query_plan(&document, None, Default::default())
+                .unwrap();
+            let schema =
+                DemandControlledSchema::new(Arc::new(planner.supergraph_schema().schema().clone()))
+                    .unwrap();
+            let subgraph_schemas = planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(name, schema)| {
+                    (
+                        name.to_string(),
+                        DemandControlledSchema::new(Arc::new(schema.schema().clone())).unwrap(),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+            StaticCostCalculator::new(
+                Arc::new(schema),
+                Arc::new(subgraph_schemas),
+                Default::default(),
+                list_size,
+            )
+            .rust_planned(&plan, &Default::default())
+            .unwrap()
+        }
+        let sources = [
+            (
+                "products",
+                "type Query { topProduct: Product productById(id: ID!): Product @lookup } \
+                 type Product @key(fields: \"id\") { id: ID! }",
+            ),
+            (
+                "reviews",
+                "type Query { productById(id: ID!): Product @lookup @internal } \
+                 type Product @key(fields: \"id\") { id: ID! reviewCount: Int! }",
+            ),
+        ];
+        // The root fetch selects a single product, so only the lookup fetch depends on the list
+        // size assumption.
+        let small = planned(&sources, 10);
+        let large = planned(&sources, 100);
+        assert!(large - small >= 90.0, "{small} -> {large}");
     }
 
     #[test]
