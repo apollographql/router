@@ -164,7 +164,8 @@ impl LicenseSource {
                     Ok(stream) => stream
                         .filter_map(|res| {
                             future::ready(match res {
-                                Ok(license) => Some(license),
+                                Ok(Some(license)) => Some(license),
+                                Ok(None) => Some(License::default()),
                                 Err(e) => {
                                     // A genuine "no entitlement" (`OciError::is_not_found()`)
                                     // is already converted to `Ok(License::default())` inside
