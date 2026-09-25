@@ -455,7 +455,7 @@ async fn fetch_manifest_digest_from_reference(
 ) -> Result<String, OciError> {
     let before_request = Instant::now();
     let registry = reference.registry().to_string();
-    let result = client.fetch_manifest_digest(&reference, &auth).await;
+    let result = client.fetch_manifest_digest(reference, auth).await;
     let status = if result.is_ok() { "success" } else { "failure" };
     let duration = before_request.elapsed().as_secs_f64();
 
@@ -724,34 +724,31 @@ fn stream_license_from_oci(
                 // This value will not change once discovered
                 GraphManifestState::Unread | GraphManifestState::MissingAnnotation => {
                     match fetch_entitlement_id(&mut client, &auth, &graph_reference).await {
-                        Ok(id_fetch_result) => {
-                            if id_fetch_result.is_none() {
-                                // There is no annotation on the graph manifest
-                                // Let the router retry, but running in an unlicensed state
-                                tracing::info!(
-                                    "graph artifact manifest has no entitlement identifier annotation; the router runs unlicensed until the graph is republished"
-                                );
+                        // Entitlement ID was discovered
+                        Ok(Some(id)) => {
+                            entitlement_id = id;
+                            graph_manifest_state = GraphManifestState::HasAnnotation;
+                        }
+                        // There is no annotation on the graph manifest
+                        // Let the router retry, but running in an unlicensed state
+                        Ok(None) => {
+                            tracing::info!(
+                                "graph artifact manifest has no entitlement identifier annotation; the router runs unlicensed until the graph is republished"
+                            );
 
-                                // If we haven't already seen the graph manifest have no annotation, then announce this
-                                // by sending a None to signal that the Router should start unlicensed
-                                // Only announce the first time
-                                if !(graph_manifest_state == GraphManifestState::MissingAnnotation
-                                    && entitlement_id.is_empty())
-                                {
-                                    if let Err(e) = sender.send(Ok(None)).await {
-                                        tracing::debug!(
-                                            "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
-                                        );
-                                        break;
-                                    }
+                            // If we haven't already seen the graph manifest have no annotation, then announce this
+                            // by sending a None to signal that the Router should start unlicensed
+                            // Only announce the first time
+                            if !(graph_manifest_state == GraphManifestState::MissingAnnotation
+                                && entitlement_id.is_empty())
+                                // Send the signal, and if `send()` returns an error, log it
+                                && let Err(e) = sender.send(Ok(None)).await {
+                                    tracing::debug!(
+                                        "failed to send error to oci stream. This is likely to be because the router is shutting down: {e}"
+                                    );
+                                    break;
                                 }
-                                graph_manifest_state = GraphManifestState::MissingAnnotation;
-                            } else {
-                                // We know id_fetch_result must be Some in this branch
-                                // Entitlement ID was discovered
-                                entitlement_id = id_fetch_result.unwrap();
-                                graph_manifest_state = GraphManifestState::HasAnnotation;
-                            }
+                            graph_manifest_state = GraphManifestState::MissingAnnotation;
                         }
                         // Error fetching the entitlement id: transient (network, auth, 5xx),
                         // so surface it and retry discovery next tick rather than silently
