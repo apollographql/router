@@ -509,3 +509,118 @@ async fn variable_batched_lookups_over_http() {
     }
     "#);
 }
+
+/// Two lookup fetches running in parallel against a subgraph configured for request and variable
+/// batching reach it as one HTTP request with two request objects, each with its variable sets.
+#[tokio::test(flavor = "multi_thread")]
+async fn parallel_lookups_share_one_request_batch() {
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers;
+
+    let schema = compose(&[
+        (
+            "catalog",
+            r#"
+            type Query { featured: [Media!]! }
+            union Media = Book | Movie
+            type Book @key(fields: "isbn") { isbn: String! title: String! }
+            type Movie @key(fields: "upc") { upc: String! title: String! }
+            "#,
+        ),
+        (
+            "ratings",
+            r#"
+            type Query {
+              bookByIsbn(isbn: String!): Book @lookup @internal
+              movieByUpc(upc: String!): Movie @lookup @internal
+            }
+            type Book @key(fields: "isbn") { isbn: String! rating: Int! }
+            type Movie @key(fields: "upc") { upc: String! rating: Int! }
+            "#,
+        ),
+    ]);
+    let server = MockServer::start().await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/catalog"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": {"featured": [
+                {"__typename": "Book", "isbn": "b1"},
+                {"__typename": "Movie", "upc": "m1"},
+                {"__typename": "Book", "isbn": "b2"},
+            ]}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(matchers::method("POST"))
+        .and(matchers::path("/ratings"))
+        .and(matchers::body_json(serde_json::json!([
+            {
+                "query": "query($lookupArgument_0: String!) { bookByIsbn(isbn: $lookupArgument_0) { rating } }",
+                "variables": [{"lookupArgument_0": "b1"}, {"lookupArgument_0": "b2"}],
+            },
+            {
+                "query": "query($lookupArgument_0: String!) { movieByUpc(upc: $lookupArgument_0) { rating } }",
+                "variables": [{"lookupArgument_0": "m1"}],
+            },
+        ])))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            [
+                r#"{"requestIndex":1,"variableIndex":0,"data":{"movieByUpc":{"rating":3}}}"#,
+                r#"{"requestIndex":0,"variableIndex":1,"data":{"bookByIsbn":{"rating":2}}}"#,
+                r#"{"requestIndex":0,"variableIndex":0,"data":{"bookByIsbn":{"rating":1}}}"#,
+            ]
+            .join("\n"),
+            "application/jsonl",
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut config = configuration();
+    config["override_subgraph_url"] = serde_json::json!({
+        "catalog": format!("{}/catalog", server.uri()),
+        "ratings": format!("{}/ratings", server.uri()),
+    });
+    config["preview_graphql_federation"]["subgraph"] = serde_json::json!({
+        "subgraphs": {"ratings": {"variable_batching": true, "request_batching": true}},
+    });
+    let service = TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .schema(&schema)
+        .with_subgraph_network_requests()
+        .build_supergraph()
+        .await
+        .unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query("{ featured { ... on Book { rating } ... on Movie { rating } } }")
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "featured": [
+          {
+            "rating": 1
+          },
+          {
+            "rating": 3
+          },
+          {
+            "rating": 2
+          }
+        ]
+      }
+    }
+    "#);
+}
