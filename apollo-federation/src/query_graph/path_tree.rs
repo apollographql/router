@@ -368,7 +368,9 @@ where
     /// May have false negatives (see comment about `Arc::ptr_eq`)
     fn equals_same_root(self: &Arc<Self>, other: &Arc<Self>) -> bool {
         Arc::ptr_eq(self, other)
-            || self.childs.iter().zip(&other.childs).all(|(a, b)| {
+            || self.local_selection_sets == other.local_selection_sets
+                && self.childs.len() == other.childs.len()
+                && self.childs.iter().zip(&other.childs).all(|(a, b)| {
                 a.edge == b.edge
                     // `Arc::ptr_eq` instead of `==` is faster and good enough.
                     // This method is all about avoid unnecessary merging
@@ -395,7 +397,8 @@ where
             })
     }
 
-    /// Appends the children of the other `OpTree` onto the children of this tree.
+    /// Appends the other's children and local selections without merging or reordering them.
+    /// In particular, repeated children must remain separate for serial mutation execution.
     ///
     /// ## Panics
     /// Like `Self::merge`, this method will panic if the graphs of the two `OpTree`s below to
@@ -410,16 +413,6 @@ where
             self.node, other.node,
             "Cannot merge path trees rooted different nodes"
         );
-        if self == other {
-            return;
-        }
-        if other.childs.is_empty() {
-            return;
-        }
-        if self.childs.is_empty() {
-            self.clone_from(other);
-            return;
-        }
         self.childs.extend_from_slice(&other.childs);
         self.local_selection_sets
             .extend_from_slice(&other.local_selection_sets);
@@ -440,10 +433,11 @@ where
             self.node, other.node,
             "Cannot merge path trees rooted different nodes"
         );
-        if other.childs.is_empty() {
+        // A leaf can still carry fully-local work; only a payload-free leaf is an identity.
+        if other.childs.is_empty() && other.local_selection_sets.is_empty() {
             return self.clone();
         }
-        if self.childs.is_empty() {
+        if self.childs.is_empty() && self.local_selection_sets.is_empty() {
             return other.clone();
         }
 
@@ -591,6 +585,303 @@ mod tests {
     use crate::query_graph::path_tree::OpPathTree;
     use crate::schema::ValidFederationSchema;
     use crate::schema::position::SchemaRootDefinitionKind;
+
+    use crate::Supergraph;
+    use crate::operation::{Selection, SelectionSet};
+    use crate::query_graph::graph_path::operation::OpGraphPathContext;
+    use crate::query_graph::{QueryGraphNodeType, build_federated_query_graph};
+    use crate::schema::position::OutputTypeDefinitionPosition;
+    use apollo_compiler::Schema;
+    use petgraph::graph::EdgeIndex;
+    use std::collections::BTreeSet;
+
+    fn path_tree_repro_fixture() -> (Arc<QueryGraph>, NodeIndex) {
+        let schema = Schema::parse_and_validate(
+            "type Query { node: Node } type Node { id: ID!, child: Node }",
+            "path-tree-repro.graphql",
+        )
+        .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        let graph =
+            Arc::new(build_query_graph("repro".into(), schema, Default::default()).unwrap());
+        let root = graph.root_kinds_to_nodes().unwrap()[&SchemaRootDefinitionKind::Query];
+        (graph, root)
+    }
+
+    fn path_tree_with_local_selection(
+        graph: &Arc<QueryGraph>,
+        root: NodeIndex,
+        path: &OpGraphPath,
+        selection: &str,
+    ) -> Arc<OpPathTree> {
+        let tail = &graph.graph[path.tail()];
+        let QueryGraphNodeType::SchemaType(type_position) = &tail.type_ else {
+            panic!("local selections require a schema-type path tail")
+        };
+        let schema = graph.schema_by_source(&tail.source).unwrap().clone();
+        let selection = Arc::new(
+            SelectionSet::parse(schema, type_position.clone().try_into().unwrap(), selection)
+                .unwrap(),
+        );
+        Arc::new(
+            OpPathTree::from_op_paths(graph.clone(), root, &[(path, Some(&selection))]).unwrap(),
+        )
+    }
+
+    fn one_edge_path_tree_with_condition(
+        graph: &Arc<QueryGraph>,
+        root: NodeIndex,
+        edge: EdgeIndex,
+        trigger: OpGraphPathTrigger,
+        condition: Arc<OpPathTree>,
+    ) -> Arc<OpPathTree> {
+        let path = OpGraphPath::new(graph.clone(), root)
+            .unwrap()
+            .add(
+                trigger,
+                Some(edge),
+                ConditionResolution::Satisfied {
+                    cost: 1.0,
+                    path_tree: Some(condition),
+                    context_map: None,
+                },
+                None,
+            )
+            .unwrap();
+        Arc::new(OpPathTree::from_op_paths(graph.clone(), root, &[(&path, None)]).unwrap())
+    }
+
+    fn condition_key_repro_fixture() -> (Arc<QueryGraph>, NodeIndex, EdgeIndex) {
+        let supergraph = Supergraph::new_with_router_specs(include_str!(
+            "../../tests/query_plan/supergraphs/can_use_a_key_on_an_interface_object_type.graphql"
+        ))
+        .unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let graph = Arc::new(
+            build_federated_query_graph(supergraph.schema, api_schema, None, Some(true)).unwrap(),
+        );
+        let key_edge = graph
+            .graph
+            .edge_references()
+            .find(|edge| {
+                if !matches!(
+                    edge.weight().transition,
+                    QueryGraphEdgeTransition::KeyResolution
+                ) {
+                    return false;
+                }
+                let head = &graph.graph[edge.source()];
+                let tail = &graph.graph[edge.target()];
+                head.source.as_ref() == "S1"
+                    && tail.source.as_ref() == "S2"
+                    && matches!(
+                        &head.type_,
+                        QueryGraphNodeType::SchemaType(
+                            OutputTypeDefinitionPosition::Interface(position)
+                        ) if position.type_name == "I"
+                    )
+            })
+            .expect("fixture must contain the condition-bearing S1.I -> S2.I key")
+            .id();
+        let root = graph.graph.edge_endpoints(key_edge).unwrap().0;
+        assert!(graph.graph[key_edge].conditions.is_some());
+        (graph, root, key_edge)
+    }
+
+    fn flat_local_fields(selection: &SelectionSet) -> BTreeSet<String> {
+        selection
+            .selections
+            .values()
+            .map(|selection| {
+                let Selection::Field(field) = selection else {
+                    panic!("fixture expects scalar fields")
+                };
+                assert!(
+                    field.selection_set.is_none(),
+                    "local-payload oracle expects scalar fields"
+                );
+                selection.to_string()
+            })
+            .collect()
+    }
+
+    fn local_selection_texts(tree: &OpPathTree) -> Vec<String> {
+        tree.local_selection_sets
+            .iter()
+            .flat_map(|selection| flat_local_fields(selection))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn merge_preserves_distinct_trailing_selections_on_the_same_path() {
+        let (graph, root) = path_tree_repro_fixture();
+        let path = build_graph_path(&graph, SchemaRootDefinitionKind::Query, &["node"])
+            .expect("fixture must contain Query.node");
+        let left = path_tree_with_local_selection(&graph, root, &path, "left: __typename");
+        let right = path_tree_with_local_selection(&graph, root, &path, "right: __typename");
+        let merged = left.merge(&right);
+
+        assert_eq!(
+            merged.childs.len(),
+            1,
+            "the shared Query.node path must merge"
+        );
+        assert_eq!(
+            local_selection_texts(&merged.childs[0].tree),
+            vec!["left: __typename", "right: __typename"],
+            "the shared path must retain both trailing selections",
+        );
+    }
+
+    #[test]
+    fn merge_preserves_leaf_local_selection_when_other_tree_has_children() {
+        let (graph, root) = path_tree_repro_fixture();
+        let leaf_path = build_graph_path(&graph, SchemaRootDefinitionKind::Query, &["node"])
+            .expect("fixture must contain Query.node");
+        let child_path =
+            build_graph_path(&graph, SchemaRootDefinitionKind::Query, &["node", "child"])
+                .expect("fixture must contain Query.node.child");
+        let leaf =
+            path_tree_with_local_selection(&graph, root, &leaf_path, "under_node: __typename");
+        let nonleaf =
+            path_tree_with_local_selection(&graph, root, &child_path, "under_child: __typename");
+        for merged in [leaf.merge(&nonleaf), nonleaf.merge(&leaf)] {
+            assert_eq!(
+                merged.childs.len(),
+                1,
+                "the shared Query.node path must merge"
+            );
+            let node_tree = &merged.childs[0].tree;
+            assert_eq!(
+                local_selection_texts(node_tree),
+                vec!["under_node: __typename"],
+                "merging a leaf into a branch must retain the leaf's local selection",
+            );
+            assert_eq!(node_tree.childs.len(), 1, "the longer path must remain");
+            assert_eq!(
+                local_selection_texts(&node_tree.childs[0].tree),
+                vec!["under_child: __typename"],
+                "the longer path's trailing selection must remain at Query.node.child",
+            );
+        }
+    }
+
+    #[test]
+    fn equals_same_root_distinguishes_different_local_selections() {
+        let (graph, root) = path_tree_repro_fixture();
+        let path = build_graph_path(&graph, SchemaRootDefinitionKind::Query, &["node"])
+            .expect("fixture must contain Query.node");
+        let left = path_tree_with_local_selection(&graph, root, &path, "left: __typename");
+        let right = path_tree_with_local_selection(&graph, root, &path, "right: __typename");
+
+        assert_eq!(
+            local_selection_texts(&left.childs[0].tree),
+            vec!["left: __typename"]
+        );
+        assert_eq!(
+            local_selection_texts(&right.childs[0].tree),
+            vec!["right: __typename"]
+        );
+        assert!(
+            !left.equals_same_root(&right),
+            "trees with different trailing local selections must not compare equal",
+        );
+    }
+
+    #[test]
+    fn extend_preserves_local_selections_and_child_order() {
+        let (graph, root) = path_tree_repro_fixture();
+        let root_path = OpGraphPath::new(graph.clone(), root).unwrap();
+        let child_path =
+            build_graph_path(&graph, SchemaRootDefinitionKind::Query, &["node"]).unwrap();
+        let leaf = path_tree_with_local_selection(&graph, root, &root_path, "at_root: __typename");
+        let branch =
+            path_tree_with_local_selection(&graph, root, &child_path, "under_node: __typename");
+
+        for (left, right) in [(&leaf, &branch), (&branch, &leaf)] {
+            let mut extended = left.as_ref().clone();
+            extended.extend(right);
+            assert_eq!(
+                local_selection_texts(&extended),
+                vec!["at_root: __typename"]
+            );
+            assert_eq!(extended.childs.len(), 1);
+            assert_eq!(
+                local_selection_texts(&extended.childs[0].tree),
+                vec!["under_node: __typename"]
+            );
+        }
+        let second =
+            path_tree_with_local_selection(&graph, root, &child_path, "second: __typename");
+        let mut serial = branch.as_ref().clone();
+        serial.extend(&second);
+        serial.extend(&branch);
+        assert_eq!(serial.childs.len(), 3);
+        for (child, expected) in serial.childs.iter().zip([
+            "under_node: __typename",
+            "second: __typename",
+            "under_node: __typename",
+        ]) {
+            assert_eq!(local_selection_texts(&child.tree), vec![expected]);
+        }
+        assert!(Arc::ptr_eq(&branch.merge(&branch), &branch));
+        let mut repeated = branch.as_ref().clone();
+        repeated.extend(&branch);
+        assert_eq!(repeated.childs.len(), 2);
+        assert!(!branch.equals_same_root(&Arc::new(repeated)));
+        let empty = Arc::new(OpPathTree::new(graph, root));
+        assert!(!empty.equals_same_root(&branch));
+        assert!(!branch.equals_same_root(&empty));
+    }
+
+    #[test]
+    fn merge_preserves_local_selections_from_both_child_condition_trees() {
+        let (graph, root, key_edge) = condition_key_repro_fixture();
+        let condition_path = OpGraphPath::new(graph.clone(), root).unwrap();
+        let left_condition = path_tree_with_local_selection(
+            &graph,
+            root,
+            &condition_path,
+            "id left_condition: __typename",
+        );
+        let right_condition = path_tree_with_local_selection(
+            &graph,
+            root,
+            &condition_path,
+            "id right_condition: __typename",
+        );
+        let left = one_edge_path_tree_with_condition(
+            &graph,
+            root,
+            key_edge,
+            OpGraphPathContext::default().into(),
+            left_condition,
+        );
+        let right = one_edge_path_tree_with_condition(
+            &graph,
+            root,
+            key_edge,
+            OpGraphPathContext::default().into(),
+            right_condition,
+        );
+
+        let merged = left.merge(&right);
+        let condition = merged.childs[0]
+            .conditions
+            .as_ref()
+            .expect("shared child lost its condition tree");
+        assert_eq!(
+            local_selection_texts(condition),
+            vec![
+                "id",
+                "left_condition: __typename",
+                "right_condition: __typename",
+            ],
+            "merging equal-looking condition trees must retain local selections from both",
+        );
+    }
 
     // NB: stole from operation.rs
     fn parse_schema_and_operation(
