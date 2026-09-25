@@ -1742,6 +1742,99 @@ impl SelectionSet {
         Ok(())
     }
 
+    /// Like `add_at_path`, but uses the incremental planner's broader
+    /// rebase rules that allow concrete-to-interface rebasing for
+    /// @interfaceObject schemas.
+    pub(crate) fn add_at_path_for_incremental_planner(
+        &mut self,
+        path: &[Arc<OpPathElement>],
+        selection_set: Option<&Arc<SelectionSet>>,
+    ) -> Result<(), FederationError> {
+        match path.split_first() {
+            Some((ele, path @ &[_, ..])) => {
+                let element =
+                    ele.rebase_on_for_incremental_planner(&self.type_position, &self.schema)?;
+                let Some(sub_selection_type) = element.sub_selection_type_position()? else {
+                    return Err(FederationError::internal(
+                        "add_at_path encountered a non-composite field type",
+                    ));
+                };
+                let element_key = element.key().to_owned_key();
+                let mut selection = Arc::make_mut(&mut self.selections)
+                    .entry(element_key.as_borrowed_key())
+                    .or_insert(|| {
+                        Selection::from_element(
+                            element,
+                            Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
+                        )
+                    })?;
+                match &mut selection {
+                    SelectionValue::Field(field) => match field.get_selection_set_mut() {
+                        Some(sub) => {
+                            sub.add_at_path_for_incremental_planner(path, selection_set)?
+                        }
+                        None => {
+                            return Err(FederationError::internal(
+                                "add_at_path: field without subselection",
+                            ));
+                        }
+                    },
+                    SelectionValue::InlineFragment(fragment) => fragment
+                        .get_selection_set_mut()
+                        .add_at_path_for_incremental_planner(path, selection_set)?,
+                };
+            }
+            Some((ele, &[])) => {
+                let element =
+                    ele.rebase_on_for_incremental_planner(&self.type_position, &self.schema)?;
+                if selection_set.is_none() || selection_set.is_some_and(|s| s.is_empty()) {
+                    if !ele.is_terminal()? {
+                        return Ok(());
+                    } else {
+                        let selection = Selection::from_element(element, None)?;
+                        self.add_local_selection(&selection)?
+                    }
+                } else {
+                    let sub_selection_type_pos =
+                        element.sub_selection_type_position()?.ok_or_else(|| {
+                            FederationError::internal(
+                                "Element has a selection set with non-composite base type",
+                            )
+                        })?;
+                    let selection_set = selection_set
+                        .map(|selection_set| {
+                            let selections = selection_set.without_unnecessary_fragments(
+                                &sub_selection_type_pos,
+                                &self.schema,
+                            );
+                            let mut rebased = SelectionSet::empty(
+                                self.schema.clone(),
+                                sub_selection_type_pos.clone(),
+                            );
+                            for selection in selections.iter() {
+                                rebased.add_local_selection(
+                                    &selection.rebase_on_for_incremental_planner(
+                                        &sub_selection_type_pos,
+                                        &self.schema,
+                                    )?,
+                                )?;
+                            }
+                            Ok::<_, FederationError>(rebased)
+                        })
+                        .transpose()?;
+                    let selection = Selection::from_element(element, selection_set)?;
+                    self.add_local_selection(&selection)?
+                }
+            }
+            None => {
+                if let Some(sel) = selection_set {
+                    self.add_selection_set(sel)?
+                }
+            }
+        }
+        Ok(())
+    }
+
     // - `self` must be fragment-spread-free.
     pub(crate) fn add_aliases_for_non_merging_fields(
         &self,
@@ -2960,6 +3053,47 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     }
 }
 
+impl Operation {
+    /// Build an executable document without validation. The caller is
+    /// responsible for ensuring correctness (e.g. structurally-constructed
+    /// operations from the query planner). Debug builds still validate to
+    /// catch construction bugs early.
+    pub(crate) fn into_document_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        let operation = executable::Operation::try_from(&self)?;
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        coerce_executable_values(self.schema.schema(), &mut document);
+        assume_generated_document_valid(
+            document,
+            self.schema.schema(),
+            VALIDATE_GENERATED_DOCUMENTS,
+            "into_document_unchecked",
+        )
+    }
+}
+
+/// Debug builds validate generated subgraph documents; release builds trust
+/// structural construction and skip the O(n) pass.
+pub(crate) const VALIDATE_GENERATED_DOCUMENTS: bool = cfg!(debug_assertions);
+
+/// Wraps a planner-generated document as valid, checking it first only when
+/// `validate` is set. A failed check is a planning error, not a panic.
+pub(crate) fn assume_generated_document_valid(
+    document: executable::ExecutableDocument,
+    schema: &Valid<apollo_compiler::Schema>,
+    validate: bool,
+    producer: &str,
+) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+    if validate && let Err(err) = document.clone().validate(schema) {
+        return Err(FederationError::internal(format!(
+            "{producer} produced invalid document: {err}"
+        )));
+    }
+    Ok(Valid::assume_valid(document))
+}
+
 // Display implementations for the operation types.
 
 impl Display for Operation {
@@ -3184,6 +3318,7 @@ pub(crate) fn normalize_operation(
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
     check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    strip_sibling_typenames: bool,
 ) -> Result<Operation, FederationError> {
     let fragment_cache = FragmentSpreadCache::init(fragments, schema, check_cancellation);
     let mut normalized_selection_set = SelectionSet::from_selection_set(
@@ -3199,7 +3334,15 @@ pub(crate) fn normalize_operation(
     normalized_selection_set = normalized_selection_set
         .flatten_unnecessary_fragments(&normalized_selection_set.type_position, schema)?;
     remove_introspection(&mut normalized_selection_set);
-    normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    // The strip is an exhaustive-planner optimization whose fetch
+    // construction restores the attachments; the incremental planner routes
+    // __typename like any other field and would immediately rebuild the
+    // stripped branches, retaining a rewritten copy of the operation for the
+    // whole planning session.
+    if strip_sibling_typenames {
+        normalized_selection_set
+            .optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    }
 
     let normalized_operation = Operation {
         schema: schema.clone(),

@@ -1,16 +1,20 @@
 //! Mutable BULB search state: the pending-selection stack, the fetch graph
 //! under construction, and O(1) checkpoint/rollback over both.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use petgraph::graph::NodeIndex;
 
 use super::super::fetch_graph::FetchGraph;
 use super::super::fetch_graph::FetchGraphCheckpoint;
 use super::super::shared_path::SharedPath;
+use super::routing::RoutingChoice;
 use crate::operation::Selection;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataPathElement;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 /// Cap on condition-resolution nesting, checked before each increment of
 /// [`ConditionScope::depth`].
@@ -29,6 +33,18 @@ pub(crate) struct ConditionScope {
     pub(crate) depth: usize,
 }
 
+/// Anchor information for @fromContext across entity boundaries.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ContextAnchor {
+    /// The *parent* fetch feeding this selection's entity fetch, when the
+    /// selection lives inside one. When the ancestor with @context is at or
+    /// above the entity boundary, the context selection must be added here,
+    /// not to the entity fetch.
+    pub(crate) fetch: Option<NodeIndex>,
+    /// Op path at the entity boundary in the parent fetch.
+    pub(crate) op_path: SharedPath<Arc<OpPathElement>>,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct PendingSelection {
     /// The field or inline fragment to resolve.
@@ -44,6 +60,74 @@ pub(crate) struct PendingSelection {
     /// Set when this selection is a condition (@requires / @key field set);
     /// `None` for ordinary query selections.
     pub(crate) condition: Option<ConditionScope>,
+    /// @provides provenance across downcasts: the provides-copy query graph
+    /// node this position descended from via inline fragments, when the
+    /// current node itself is not a copy. An ancestor's `@provides` on an
+    /// interface-typed field applies to every runtime type, but the query
+    /// graph only copies the nodes named in the provides field set. A
+    /// downcast out of the copy layer lands on the original node, where the
+    /// provided fields have no edges. The anchor keeps the copy node (whose
+    /// edges are the provided fields) visible to key-hop enumeration, so
+    /// "are these key conditions provided here?" stays an exact graph check
+    /// instead of a schema-level guess. `None` whenever the current node's
+    /// own edges carry the provenance (inside a copy layer) or no @provides
+    /// is in scope.
+    pub(crate) provides_anchor: Option<NodeIndex>,
+    /// Cross-subgraph type-narrowing state (see [`TypeNarrowing`]).
+    pub(crate) narrowing: TypeNarrowing,
+    /// The @defer label this selection is inside, if any. Propagated to
+    /// fetch nodes so they can be partitioned into primary vs deferred.
+    pub(crate) defer_ref: Option<String>,
+    /// Type spine from the operation root through parents of this selection,
+    /// for @fromContext ancestor resolution.
+    pub(crate) parent_types: SharedPath<CompositeTypeDefinitionPosition>,
+    /// @fromContext anchor: the parent fetch feeding this selection's
+    /// entity fetch, when the selection lives inside one.
+    pub(crate) context_anchor: ContextAnchor,
+    /// Best-effort selection: dropping it (zero routing options, or a failed
+    /// commit) is tolerated silently instead of counting toward
+    /// `dropped_fields` and failing the plan. Inherited by forks, so
+    /// condition data pushed on a best-effort selection's behalf is equally
+    /// tolerant. The only producer is the @interfaceObject
+    /// concrete-`__typename` recovery, where no subgraph may be able to
+    /// supply the concrete typename.
+    pub(crate) best_effort: bool,
+    /// Set on fork remainders: the subgraph chosen to serve this part of a
+    /// forked field. Routing options into any other subgraph are filtered
+    /// out, so the remainder commits as a forced hop instead of reopening
+    /// the decision the fork already made.
+    pub(crate) restrict_to: Option<Arc<str>>,
+    /// Lazily computed routing options for this exact pending (see
+    /// `cached_routing_options`). Options are a pure function of the pending
+    /// and the immutable query graph, and pendings are only queried once
+    /// frozen behind an `Arc`, so first-query-wins memoization is sound.
+    /// Reset by `fork` since forks change the selection or position.
+    pub(crate) routing_options_memo: std::sync::OnceLock<Arc<Vec<RoutingChoice>>>,
+}
+
+/// Type-narrowing state a pending selection carries down the operation,
+/// propagated as a unit from parent to child in `dispatch_sub_selections`.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TypeNarrowing {
+    /// True when some ancestor field had routing options in multiple
+    /// subgraphs (a shareable fork); inconsistent abstract types downstream
+    /// must then restrict fragment conditions to the cross-subgraph
+    /// intersection.
+    pub(crate) shareable_path: bool,
+    /// When the parent field returns an inconsistent abstract type reachable
+    /// from multiple subgraphs, fragment conditions are restricted to the
+    /// cross-subgraph intersection (matching the exhaustive planner's
+    /// simultaneous-paths behavior). `None` means no restriction.
+    pub(crate) intersection_filter: Option<Arc<HashSet<Name>>>,
+    /// Sorted possible runtime type names at this selection's position,
+    /// narrowed by the inline fragments crossed since the nearest enclosing
+    /// field. `None` when the position is not under a composite-typed field.
+    pub(crate) possible_types: Option<Arc<Vec<Name>>>,
+    /// The possible runtime types of the nearest enclosing field's output
+    /// type, before fragment narrowing. When `possible_types` is a proper
+    /// subset, the enclosing response-path element carries the narrowed set
+    /// as type conditions.
+    pub(crate) possible_types_after_last_field: Option<Arc<Vec<Name>>>,
 }
 
 impl PendingSelection {
@@ -57,6 +141,18 @@ impl PendingSelection {
             op_path: self.op_path.clone(),
             path_in_fetch: self.path_in_fetch.clone(),
             condition: self.condition,
+            provides_anchor: self.provides_anchor,
+            narrowing: self.narrowing.clone(),
+            defer_ref: self.defer_ref.clone(),
+            parent_types: self.parent_types.clone(),
+            context_anchor: self.context_anchor.clone(),
+            best_effort: self.best_effort,
+            routing_options_memo: std::sync::OnceLock::new(),
+            // The restriction belongs to one fork remainder only; a fork is
+            // a different selection (a child, a condition, a restructured
+            // shape) that may legitimately need another subgraph.
+            // `commit_fork` sets it explicitly on the remainders it pushes.
+            restrict_to: None,
         }
     }
 
@@ -76,6 +172,46 @@ impl PendingSelection {
         path_in_fetch: SharedPath<FetchDataPathElement>,
     ) -> Self {
         self.path_in_fetch = path_in_fetch;
+        self
+    }
+
+    pub(super) fn with_provides_anchor(mut self, provides_anchor: Option<NodeIndex>) -> Self {
+        self.provides_anchor = provides_anchor;
+        self
+    }
+
+    pub(super) fn with_narrowing(mut self, narrowing: TypeNarrowing) -> Self {
+        self.narrowing = narrowing;
+        self
+    }
+
+    pub(super) fn with_defer(mut self, defer_ref: Option<String>) -> Self {
+        self.defer_ref = defer_ref;
+        self
+    }
+
+    pub(super) fn with_parent_types(
+        mut self,
+        parent_types: SharedPath<CompositeTypeDefinitionPosition>,
+    ) -> Self {
+        self.parent_types = parent_types;
+        self
+    }
+
+    pub(super) fn with_context_anchor(mut self, context_anchor: ContextAnchor) -> Self {
+        self.context_anchor = context_anchor;
+        self
+    }
+
+    pub(super) fn with_restrict_to(mut self, restrict_to: Option<Arc<str>>) -> Self {
+        self.restrict_to = restrict_to;
+        self
+    }
+
+    /// Mark this selection best-effort: a drop is tolerated silently (see
+    /// [`Self::best_effort`]).
+    pub(super) fn into_best_effort(mut self) -> Self {
+        self.best_effort = true;
         self
     }
 
@@ -102,6 +238,7 @@ impl PendingSelection {
 }
 
 /// Undo-log entry for one pending-stack mutation.
+#[derive(Clone)]
 enum PendingOp {
     /// An entry was pushed. Undo: pop and drop it.
     Pushed,
@@ -118,6 +255,7 @@ enum PendingOp {
 /// A single `PlanState` is mutated during search; trial branches are
 /// applied, scored, and undone via `checkpoint()` / `rollback()` without
 /// cloning. `snapshot()` saves the best complete candidate.
+#[derive(Clone)]
 pub(crate) struct PlanState {
     /// Lightweight fetch graph tracking groups, dependencies, and selections.
     pub(crate) graph: FetchGraph,
@@ -130,12 +268,38 @@ pub(crate) struct PlanState {
     /// Fields dropped for lack of routing options. Heavily penalized in
     /// `cost()` so BULB backtracks to explore alternatives.
     pub(crate) dropped_fields: usize,
+    /// Type-explosion or fragment-restructuring commits applied. These
+    /// decompose abstract types into per-concrete-type fragments, deferring
+    /// real fetch cost to later decisions. The probe (apply → cost →
+    /// rollback) sees them as free, so without a penalty BULB chases them
+    /// eagerly, creating combinatorial blowup on wide interfaces. Penalized
+    /// in `cost()` above any structural cost but below drops.
+    pub(crate) type_explosions: usize,
     /// Monotonic count of pending-stack pushes over the whole search,
     /// including rolled-back work. Every unit of planning effort flows
     /// through `push_pending`, so this tracks wall time far more tightly
     /// than decision counts. Used by the search's effort budget;
     /// deliberately not restored by `rollback`.
     pub(crate) effort: u64,
+    /// Monotonic count of forced-backtracking attempts across the whole
+    /// search. Capped by `FORCED_BACKTRACK_CAP` so unplannable operations
+    /// with no BULB alternatives stop retrying within the budget-free
+    /// greedy pass. Not restored by `rollback`.
+    ///
+    /// FIXME: like the condition depth limit, a fixed cap can fail an
+    /// operation the legacy planner handles. Loop detection in the condition
+    /// resolution rework should replace it.
+    pub(crate) forced_backtracks: u64,
+    /// Interned @requires condition-field aliases: index is the alias id,
+    /// the entry is the widest (unaliased) selection interned so far under
+    /// that alias. A condition shares an alias with any entry it contains
+    /// or is contained by, so overlapping conditions stage their shared
+    /// prefix once instead of duplicating the fetch chain per alias.
+    /// Sharing stays correct because every consumer routes its own
+    /// conditions under the alias path and the fetch graph dedupes them.
+    /// Append-only; not restored on rollback (aliases only need to be
+    /// stable, not predictable).
+    pub(crate) condition_alias_ids: Vec<Selection>,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +307,7 @@ pub(crate) struct PlanCheckpoint {
     graph_cp: FetchGraphCheckpoint,
     pending_cp: usize,
     dropped_fields: usize,
+    type_explosions: usize,
 }
 
 impl PlanState {
@@ -156,7 +321,10 @@ impl PlanState {
             pending: pending.into_iter().map(Arc::new).collect(),
             pending_undo: Vec::new(),
             dropped_fields: 0,
+            type_explosions: 0,
             effort: 0,
+            forced_backtracks: 0,
+            condition_alias_ids: Vec::new(),
         }
     }
 
@@ -192,7 +360,10 @@ impl PlanState {
             pending: self.pending.clone(),
             pending_undo: Vec::new(),
             dropped_fields: self.dropped_fields,
+            condition_alias_ids: self.condition_alias_ids.clone(),
             effort: self.effort,
+            forced_backtracks: self.forced_backtracks,
+            type_explosions: self.type_explosions,
         }
     }
 
@@ -202,6 +373,7 @@ impl PlanState {
             graph_cp: self.graph.checkpoint(),
             pending_cp: self.pending_undo.len(),
             dropped_fields: self.dropped_fields,
+            type_explosions: self.type_explosions,
         }
     }
 
@@ -223,6 +395,7 @@ impl PlanState {
             }
         }
         self.dropped_fields = cp.dropped_fields;
+        self.type_explosions = cp.type_explosions;
     }
 }
 
@@ -259,6 +432,14 @@ mod tests {
             op_path: SharedPath::new(),
             path_in_fetch: SharedPath::new(),
             condition: None,
+            provides_anchor: None,
+            narrowing: Default::default(),
+            routing_options_memo: Default::default(),
+            best_effort: false,
+            defer_ref: None,
+            context_anchor: Default::default(),
+            parent_types: SharedPath::new(),
+            restrict_to: None,
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state

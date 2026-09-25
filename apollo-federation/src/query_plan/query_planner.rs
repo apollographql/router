@@ -114,6 +114,14 @@ impl Default for QueryPlannerConfig {
     }
 }
 
+impl QueryPlannerConfig {
+    /// Whether operations are planned by the incremental planner. It does not
+    /// implement type_conditioned_fetching, so that flag falls back to legacy.
+    pub(crate) fn uses_incremental_planner(&self) -> bool {
+        self.incremental_planner.enabled && !self.type_conditioned_fetching
+    }
+}
+
 impl std::hash::Hash for QueryPlannerConfig {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // Destructured so adding a field is a compile error until it is
@@ -481,6 +489,7 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
+            !self.config.uses_incremental_planner(),
         )?;
 
         let NormalizedDefer {
@@ -523,12 +532,13 @@ impl QueryPlanner {
         } else {
             SubgraphOperationCompression::Disabled
         };
+        let client_labels = Arc::new(client_labels);
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            client_labels,
+            client_labels.as_ref().clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -561,6 +571,7 @@ impl QueryPlanner {
                     }
                 })
                 .collect(),
+            client_labels: client_labels.clone(),
         };
 
         let mut non_local_selection_state = options
@@ -929,11 +940,7 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    // The BULB planner has no defer support yet: it would plan every field
-    // eagerly and silently drop the DeferNodes, so deferred operations
-    // (including the defer-conditionals path, which always plans with
-    // has_defers) fall back to the legacy planner.
-    let use_incremental = parameters.config.incremental_planner.enabled && !has_defers;
+    let use_incremental = parameters.config.uses_incremental_planner();
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
         && use_incremental
@@ -956,6 +963,7 @@ fn compute_plan_internal(
                 &field_selection,
                 root_kind,
                 &mut naming,
+                has_defers,
             )?;
             plans.push(bulb.plan);
         }
@@ -1008,6 +1016,7 @@ fn compute_plan_internal(
             &selection_set,
             root_kind,
             &mut naming,
+            has_defers,
         )?;
         (bulb.plan, vec![], None, bulb.cost)
     } else {
@@ -1106,7 +1115,11 @@ impl SubgraphOperationCompression {
     pub(crate) fn compress(
         &mut self,
         operation: Operation,
+        skip_validation: bool,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        if skip_validation {
+            return self.compress_unchecked(operation);
+        }
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
@@ -1121,6 +1134,16 @@ impl SubgraphOperationCompression {
                 })?;
                 Ok(operation_document)
             }
+        }
+    }
+
+    fn compress_unchecked(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        match self {
+            Self::GenerateFragments => Ok(operation.generate_fragments_unchecked()?),
+            Self::Disabled => operation.into_document_unchecked(),
         }
     }
 }

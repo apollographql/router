@@ -1,7 +1,10 @@
 //! Materializing the winning fetch graph into a query plan: dependency
 //! wavefronts of nested Sequence/Parallel nodes, one subgraph operation per
-//! fetch group, and entity representations from edge inputs.
+//! fetch group, entity representations from edge inputs, and @defer
+//! partitioning.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
@@ -10,9 +13,11 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use indexmap::IndexMap;
 use petgraph::Direction;
+use petgraph::algo::toposort;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 
+use super::super::defer::DeferInfo;
 use super::FETCH_COST;
 use super::FetchGraph;
 use super::FetchGroupKind;
@@ -24,8 +29,13 @@ use crate::operation::SelectionSet;
 use crate::operation::VariableCollector;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::graph_path::operation::OpGraphPathContext;
+use crate::query_plan::DeferNode;
+use crate::query_plan::DeferredDeferBlock;
+use crate::query_plan::DeferredDependency;
+use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::PlanNode;
+use crate::query_plan::PrimaryDeferBlock;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::conditions::ConditionKind;
 use crate::query_plan::conditions::Conditions;
@@ -53,6 +63,44 @@ pub(crate) struct PlanBuildContext<'a> {
     pub(crate) operation_compression: &'a mut SubgraphOperationCompression,
     /// Numbers generated subgraph operations (`{name}__{subgraph}__{n}`).
     pub(crate) operation_counter: u32,
+    /// Numbers fetch nodes referenced by deferred blocks' `depends`; spans
+    /// the whole plan so per-field mutation planning cannot collide ids.
+    pub(crate) fetch_id_counter: u64,
+    /// When true, generated subgraph operations skip document validation
+    /// and selection-set validation (valid by construction).
+    pub(crate) skip_validation: bool,
+}
+
+/// The slice of the graph one plan covers (the whole graph, the primary
+/// part, or one deferred block) plus per-node metadata for materialization.
+struct PlanScope<'a> {
+    members: &'a HashSet<NodeIndex>,
+    /// Pipeline depth per node over the whole graph, for cost scaling.
+    depth: &'a [u32],
+    /// Fetch IDs for defer dependency tracking.
+    fetch_ids: Option<&'a HashMap<NodeIndex, u64>>,
+}
+
+/// Stamp a fetch ID on the innermost FetchNode: bare, Flatten-wrapped, or
+/// gated behind variable @skip/@include Condition wrappers.
+fn stamp_fetch_id(plan_node: &mut PlanNode, id: u64) {
+    match plan_node {
+        PlanNode::Fetch(fetch) => {
+            fetch.id = Some(id);
+        }
+        PlanNode::Flatten(flatten) => {
+            stamp_fetch_id(&mut flatten.node, id);
+        }
+        PlanNode::Condition(condition) => {
+            if let Some(node) = condition.if_clause.as_deref_mut() {
+                stamp_fetch_id(node, id);
+            }
+            if let Some(node) = condition.else_clause.as_deref_mut() {
+                stamp_fetch_id(node, id);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A node that cannot be materialized yet because some parents are still
@@ -183,29 +231,160 @@ fn reduce_parallel(mut nodes: Vec<PlanNode>) -> Option<PlanNode> {
 }
 
 impl FetchGraph {
-    /// Generate a PlanNode tree from the winning fetch graph. Nodes are
-    /// materialized in dependency wavefronts: sole-parented descendants nest
-    /// in a Sequence under their parent, independent branches run in
-    /// Parallel, and a node with parents in several branches is sequenced at
-    /// the level where its last parent's branch completes. This keeps a
-    /// fetch from waiting on unrelated fetches that merely share its depth.
-    pub(crate) fn to_query_plan(
+    /// Generate a PlanNode tree from the winning fetch graph, wrapped in a
+    /// DeferNode when defer info is provided. Nodes are materialized in
+    /// dependency wavefronts: sole-parented descendants nest in a Sequence
+    /// under their parent, independent branches run in Parallel, and a node
+    /// with parents in several branches is sequenced at the level where its
+    /// last parent's branch completes. This keeps a fetch from waiting on
+    /// unrelated fetches that merely share its depth.
+    pub(crate) fn to_query_plan_with_defer(
         &self,
         ctx: &mut PlanBuildContext<'_>,
+        defer_info: Option<&DeferInfo>,
     ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
         let depth = self.pipeline_depths()?;
 
-        let roots: Vec<NodeIndex> = self
-            .graph
-            .node_indices()
-            .filter(|node| {
-                self.graph
-                    .edges_directed(*node, Direction::Incoming)
-                    .next()
+        // Deterministic (dependency-order) node listing; acyclicity was
+        // already checked by pipeline_depths.
+        let sorted = toposort(&self.graph, None)
+            .map_err(|_| FederationError::internal("cycle in FetchGraph"))?;
+        if sorted.is_empty() {
+            return Ok((None, 0.0));
+        }
+
+        // A Defer wrapper is needed whenever the operation has @defer
+        // blocks, even if no fetch node carries a defer_ref: a deferred
+        // selection whose data rides the primary fetches still needs a
+        // data-only block so the router delivers it as a separate chunk.
+        let has_defer_blocks = defer_info.is_some_and(|di| !di.blocks.is_empty());
+
+        if !has_defer_blocks {
+            return self.plan_for_nodes(ctx, &sorted, &depth, None);
+        }
+
+        let defer_info = defer_info.unwrap();
+
+        // Partition nodes by defer_ref.
+        let mut primary_nodes: Vec<NodeIndex> = Vec::new();
+        let mut deferred_nodes: IndexMap<String, Vec<NodeIndex>> = IndexMap::new();
+        for &node_idx in &sorted {
+            match &self.graph[node_idx].defer_ref {
+                None => primary_nodes.push(node_idx),
+                Some(label) => {
+                    deferred_nodes
+                        .entry(label.clone())
+                        .or_default()
+                        .push(node_idx);
+                }
+            }
+        }
+
+        // Assign fetch IDs to nodes that parent a node with a different
+        // defer_ref (None->Some and Some->Some alike), covering
+        // primary-to-deferred and deferred-to-nested-deferred edges.
+        let mut node_fetch_ids: HashMap<NodeIndex, u64> = HashMap::new();
+        for &node_idx in &sorted {
+            let this_defer = self.graph[node_idx].defer_ref.as_deref();
+            for edge in self.graph.edges_directed(node_idx, Direction::Outgoing) {
+                let child_defer = self.graph[edge.target()].defer_ref.as_deref();
+                if child_defer != this_defer {
+                    node_fetch_ids.entry(node_idx).or_insert_with(|| {
+                        let id = ctx.fetch_id_counter;
+                        ctx.fetch_id_counter += 1;
+                        id
+                    });
+                    break;
+                }
+            }
+        }
+
+        // Every label in the operation gets a block, even with no fetch
+        // nodes of its own: data riding an enclosing fetch still needs a
+        // data-only block (node: None). Labels with fetch nodes keep their
+        // deterministic (commit-order) position; node-less labels are
+        // appended in sorted order.
+        let all_labels: Vec<String> = {
+            let mut labels: Vec<String> = deferred_nodes.keys().cloned().collect();
+            let mut node_less: Vec<&String> = defer_info
+                .blocks
+                .keys()
+                .filter(|label| !deferred_nodes.contains_key(*label))
+                .collect();
+            node_less.sort();
+            labels.extend(node_less.into_iter().cloned());
+            labels
+        };
+        let top_level_labels: Vec<String> = all_labels
+            .iter()
+            .filter(|label| {
+                defer_info
+                    .blocks
+                    .get(label.as_str())
+                    .and_then(|bi| bi.parent_label.as_ref())
                     .is_none()
             })
+            .cloned()
             .collect();
-        if roots.is_empty() {
+
+        // Build child label index: parent_label -> [child_labels]
+        let mut children_of: HashMap<String, Vec<String>> = HashMap::new();
+        for label in &all_labels {
+            if let Some(parent) = defer_info
+                .blocks
+                .get(label.as_str())
+                .and_then(|bi| bi.parent_label.as_ref())
+            {
+                children_of
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(label.clone());
+            }
+        }
+
+        // Build primary plan.
+        let (primary_plan, total_cost) =
+            self.plan_for_nodes(ctx, &primary_nodes, &depth, Some(&node_fetch_ids))?;
+
+        // Recursively build deferred blocks.
+        let deferred_blocks = self.build_deferred_blocks(
+            ctx,
+            &top_level_labels,
+            &deferred_nodes,
+            defer_info,
+            &node_fetch_ids,
+            &children_of,
+            &depth,
+        )?;
+
+        let primary_sub_selection = defer_info
+            .primary_sub_selection
+            .as_deref()
+            .map(|s| s.to_owned());
+
+        let defer_node = PlanNode::Defer(DeferNode {
+            primary: PrimaryDeferBlock {
+                sub_selection: primary_sub_selection,
+                node: primary_plan.map(Box::new),
+            },
+            deferred: deferred_blocks,
+        });
+
+        Ok((Some(defer_node), total_cost))
+    }
+
+    /// Build a plan for a subset of nodes (the whole graph, the primary
+    /// part, or one deferred block's nodes). Parents outside the subset are
+    /// treated as already satisfied; they execute in an enclosing or
+    /// earlier defer block.
+    fn plan_for_nodes(
+        &self,
+        ctx: &mut PlanBuildContext<'_>,
+        nodes: &[NodeIndex],
+        depth: &[u32],
+        fetch_ids: Option<&HashMap<NodeIndex, u64>>,
+    ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
+        if nodes.is_empty() {
             return Ok((None, 0.0));
         }
 
@@ -214,19 +393,38 @@ impl FetchGraph {
         // representable. The entry point plans one top-level field per
         // search, which keeps this to a single root group; fail loudly
         // rather than parallelize if that assumption is ever violated.
-        if ctx.root_kind != SchemaRootDefinitionKind::Query && roots.len() > 1 {
-            return Err(FederationError::internal(format!(
-                "cannot order {} root fetch groups under a {} operation",
-                roots.len(),
-                ctx.root_kind,
-            )));
+        if ctx.root_kind != SchemaRootDefinitionKind::Query {
+            let root_groups = nodes.iter().filter(|n| depth[n.index()] == 0).count();
+            if root_groups > 1 {
+                return Err(FederationError::internal(format!(
+                    "cannot order {} root fetch groups under a {} operation",
+                    root_groups, ctx.root_kind,
+                )));
+            }
         }
+
+        let members: HashSet<NodeIndex> = nodes.iter().copied().collect();
+        let roots: Vec<NodeIndex> = nodes
+            .iter()
+            .copied()
+            .filter(|node| {
+                !self
+                    .graph
+                    .edges_directed(*node, Direction::Incoming)
+                    .any(|e| members.contains(&e.source()))
+            })
+            .collect();
+        let scope = PlanScope {
+            members: &members,
+            depth,
+            fetch_ids,
+        };
 
         let mut cost: QueryPlanCost = 0.0;
         let (sequence, state) = self.process_wavefronts(
             ctx,
             ProcessingState::of_ready_nodes(roots),
-            &depth,
+            &scope,
             &mut cost,
         )?;
         // pipeline_depths already rejected cycles, so leftovers mean the
@@ -240,6 +438,118 @@ impl FetchGraph {
         Ok((reduce_sequence(sequence), cost))
     }
 
+    /// Recursively build `DeferredDeferBlock`s for a set of labels; a label
+    /// with children (nested @defer) wraps its fetch nodes and child blocks
+    /// in a nested `DeferNode`.
+    #[allow(clippy::too_many_arguments)]
+    fn build_deferred_blocks(
+        &self,
+        ctx: &mut PlanBuildContext<'_>,
+        labels: &[String],
+        deferred_nodes: &IndexMap<String, Vec<NodeIndex>>,
+        defer_info: &DeferInfo,
+        node_fetch_ids: &HashMap<NodeIndex, u64>,
+        children_of: &HashMap<String, Vec<String>>,
+        depth: &[u32],
+    ) -> Result<Vec<DeferredDeferBlock>, FederationError> {
+        let mut blocks: Vec<DeferredDeferBlock> = Vec::new();
+
+        for label in labels {
+            // A label with no fetch nodes (data rides an enclosing fetch)
+            // is emitted with node: None; the router delivers the chunk
+            // from already-fetched data via the block's sub_selection.
+            let nodes = deferred_nodes.get(label).map(Vec::as_slice).unwrap_or(&[]);
+            let block_info = defer_info.blocks.get(label.as_str());
+            let child_labels = children_of.get(label);
+
+            // Dependencies: parent-scope nodes feeding this label's nodes.
+            let mut depends: Vec<DeferredDependency> = Vec::new();
+            for &deferred_idx in nodes {
+                for edge in self.graph.edges_directed(deferred_idx, Direction::Incoming) {
+                    let parent_idx = edge.source();
+                    if let Some(&fetch_id) = node_fetch_ids.get(&parent_idx)
+                        && !depends.iter().any(|d| d.id == fetch_id.to_string())
+                    {
+                        depends.push(DeferredDependency {
+                            id: fetch_id.to_string(),
+                        });
+                    }
+                }
+            }
+
+            let query_path = block_info
+                .map(|bi| bi.query_path.clone())
+                .unwrap_or_default();
+
+            // Planning labels are normalization-synthesized; emit the
+            // client-visible label they stand for (None when the client
+            // left the @defer unlabeled).
+            let visible_label = defer_info
+                .client_labels
+                .get(label.as_str())
+                .cloned()
+                .flatten();
+
+            let node_plan = if let Some(child_labels) = child_labels
+                && !child_labels.is_empty()
+            {
+                let (inner_plan, _cost) =
+                    self.plan_for_nodes(ctx, nodes, depth, Some(node_fetch_ids))?;
+                let inner_deferred = self.build_deferred_blocks(
+                    ctx,
+                    child_labels,
+                    deferred_nodes,
+                    defer_info,
+                    node_fetch_ids,
+                    children_of,
+                    depth,
+                )?;
+
+                // The nested DeferNode's primary carries the block's own
+                // (non-deferred) content; the deferred children re-select
+                // their pieces via their blocks.
+                let nested_defer = PlanNode::Defer(DeferNode {
+                    primary: PrimaryDeferBlock {
+                        sub_selection: block_info
+                            .and_then(|bi| bi.sub_selection.as_deref())
+                            .map(|s| s.to_owned()),
+                        node: inner_plan.map(Box::new),
+                    },
+                    deferred: inner_deferred,
+                });
+                Some(Box::new(nested_defer))
+            } else if nodes.is_empty() {
+                None
+            } else {
+                // Leaf blocks still stamp assigned ids: a sibling block can
+                // depend on a fetch planned here.
+                let (deferred_plan, _cost) =
+                    self.plan_for_nodes(ctx, nodes, depth, Some(node_fetch_ids))?;
+                deferred_plan.map(Box::new)
+            };
+
+            // For nested DeferNodes, sub_selection was consumed above;
+            // leaf blocks use it directly.
+            let sub_selection = if child_labels.is_some_and(|c| !c.is_empty()) {
+                None
+            } else {
+                block_info
+                    .and_then(|bi| bi.sub_selection.as_deref())
+                    .map(|s| s.to_owned())
+            };
+
+            blocks.push(DeferredDeferBlock {
+                depends,
+                label: visible_label,
+                query_path,
+                sub_selection,
+                node: node_plan,
+            });
+        }
+
+        Ok(blocks)
+    }
+
     /// Sequence of parallel wavefronts: materialize every ready node, then
     /// whatever those unblocked, until nothing is ready. Nodes still waiting
     /// on parents in other branches are handed back in the returned state.
@@ -247,12 +557,12 @@ impl FetchGraph {
         &self,
         ctx: &mut PlanBuildContext<'_>,
         mut state: ProcessingState,
-        depth: &[u32],
+        scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
     ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
         let mut sequence: Vec<PlanNode> = Vec::new();
         while !state.next.is_empty() {
-            let (parallel, new_state) = self.process_ready_nodes(ctx, state, depth, cost)?;
+            let (parallel, new_state) = self.process_ready_nodes(ctx, state, scope, cost)?;
             if let Some(plan_node) = reduce_parallel(parallel) {
                 push_into_sequence(&mut sequence, plan_node);
             }
@@ -267,7 +577,7 @@ impl FetchGraph {
         &self,
         ctx: &mut PlanBuildContext<'_>,
         state: ProcessingState,
-        depth: &[u32],
+        scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
     ) -> Result<(Vec<PlanNode>, ProcessingState), FederationError> {
         let mut parallel: Vec<PlanNode> = Vec::new();
@@ -280,7 +590,7 @@ impl FetchGraph {
             unhandled: state.unhandled,
         };
         for &node_idx in &state.next {
-            let (plan_node, node_state) = self.process_node(ctx, node_idx, depth, cost)?;
+            let (plan_node, node_state) = self.process_node(ctx, node_idx, scope, cost)?;
             if let Some(plan_node) = plan_node {
                 push_into_parallel(&mut parallel, plan_node);
             }
@@ -296,38 +606,46 @@ impl FetchGraph {
         &self,
         ctx: &mut PlanBuildContext<'_>,
         node_idx: NodeIndex,
-        depth: &[u32],
+        scope: &PlanScope<'_>,
         cost: &mut QueryPlanCost,
     ) -> Result<(Option<PlanNode>, ProcessingState), FederationError> {
         let plan_node = self
             .node_to_plan_node(ctx, node_idx)?
-            .map(|(plan_node, node_cost)| {
-                *cost += node_cost * pipelining_factor(depth[node_idx.index()]);
+            .map(|(mut plan_node, node_cost)| {
+                *cost += node_cost * pipelining_factor(scope.depth[node_idx.index()]);
+                // Fetch IDs are used for defer dependency tracking.
+                if let Some(&fetch_id) = scope.fetch_ids.and_then(|ids| ids.get(&node_idx)) {
+                    stamp_fetch_id(&mut plan_node, fetch_id);
+                }
                 plan_node
             });
 
-        let state = self.state_for_children(node_idx);
+        let state = self.state_for_children(node_idx, scope);
         if state.next.is_empty() {
             return Ok((plan_node, state));
         }
 
-        let (descendants, new_state) = self.process_wavefronts(ctx, state, depth, cost)?;
+        let (descendants, new_state) = self.process_wavefronts(ctx, state, scope, cost)?;
         let mut sequence = Vec::from_iter(plan_node);
         sequence.extend(descendants);
         Ok((reduce_sequence(sequence), new_state))
     }
 
     /// Classify a just-processed node's children: sole-parented children are
-    /// ready; the rest wait on their remaining parents.
-    fn state_for_children(&self, processed: NodeIndex) -> ProcessingState {
+    /// ready; the rest wait on their remaining parents. Children and parents
+    /// outside the scope are ignored; they belong to a different defer block.
+    fn state_for_children(&self, processed: NodeIndex, scope: &PlanScope<'_>) -> ProcessingState {
         let mut state = ProcessingState::empty();
         for edge in self.graph.edges_directed(processed, Direction::Outgoing) {
             let child = edge.target();
+            if !scope.members.contains(&child) {
+                continue;
+            }
             let remaining: Vec<NodeIndex> = self
                 .graph
                 .edges_directed(child, Direction::Incoming)
                 .map(|e| e.source())
-                .filter(|parent| *parent != processed)
+                .filter(|parent| *parent != processed && scope.members.contains(parent))
                 .collect();
             if remaining.is_empty() {
                 state.next.push(child);
@@ -381,7 +699,7 @@ impl FetchGraph {
         let mut selection_set = SelectionSet::empty(subgraph_schema.clone(), parent_type.clone());
         for entry in node.selection_builder.entries() {
             let path_vec = entry.path().to_vec();
-            selection_set.add_at_path(&path_vec, entry.selections())?;
+            selection_set.add_at_path_for_incremental_planner(&path_vec, entry.selections())?;
         }
 
         if selection_set.selections.is_empty() {
@@ -412,6 +730,7 @@ impl FetchGraph {
             &parent_type,
             subgraph_schema,
             ctx.variable_definitions,
+            ctx.skip_validation,
         )?;
 
         // 3. Materialize entity inputs from incoming edges.
@@ -433,6 +752,7 @@ impl FetchGraph {
 
         // 4. Collect variable definitions narrowed to those actually used.
         let (variable_definitions, variable_usages) = Self::collect_used_variable_definitions(
+            &node.context_variables,
             ctx.variable_definitions,
             ctx.operation_directives,
             &finalized_selection,
@@ -468,7 +788,9 @@ impl FetchGraph {
                 &op_name,
             )?
         };
-        let operation_document = ctx.operation_compression.compress(operation)?;
+        let operation_document = ctx
+            .operation_compression
+            .compress(operation, ctx.skip_validation)?;
 
         // 6. Build requires (trim to the router-expected format).
         let requires = requires_selection
@@ -489,7 +811,12 @@ impl FetchGraph {
             operation_kind: node_root_kind.into(),
             input_rewrites: Arc::new(input_rewrites),
             output_rewrites,
-            context_rewrites: Default::default(),
+            context_rewrites: node
+                .context_rewrites
+                .iter()
+                .cloned()
+                .map(|r| Arc::new(r.into()))
+                .collect(),
         }));
 
         // 8. Wrap entity/root-hop fetches in FlattenNode.
@@ -539,6 +866,7 @@ impl FetchGraph {
         parent_type: &CompositeTypeDefinitionPosition,
         subgraph_schema: &ValidFederationSchema,
         variable_definitions: &[Node<VariableDefinition>],
+        skip_validation: bool,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         let stripped = remove_conditions_from_selection_set(selection_set, group_conditions)?;
         let selection_without_conditions = if is_entity {
@@ -574,7 +902,9 @@ impl FetchGraph {
             selection_without_conditions.add_typename_field_for_abstract_types(None)?;
         let (finalized_selection, output_rewrites) =
             selection_with_typenames.add_aliases_for_non_merging_fields()?;
-        finalized_selection.validate(variable_definitions)?;
+        if !skip_validation {
+            finalized_selection.validate(variable_definitions)?;
+        }
         Ok((finalized_selection, output_rewrites))
     }
 
@@ -628,12 +958,25 @@ impl FetchGraph {
                         rewrites.extend(r);
                     }
                 }
+                for (alias, original_name) in input.condition_alias_rewrites() {
+                    rewrites.push(Arc::new(FetchDataRewrite::KeyRenamer(
+                        crate::query_plan::FetchDataKeyRenamer {
+                            path: vec![FetchDataPathElement::Key(
+                                alias.clone(),
+                                Default::default(),
+                            )],
+                            rename_key_to: original_name.clone(),
+                        },
+                    )));
+                }
             }
         }
 
         let mut merged_selections = SelectionMap::new();
         for selection_set in per_type.values() {
-            selection_set.validate(ctx.variable_definitions)?;
+            if !ctx.skip_validation {
+                selection_set.validate(ctx.variable_definitions)?;
+            }
             merged_selections.extend_ref(&selection_set.selections);
         }
         let result = SelectionSet {
@@ -647,16 +990,34 @@ impl FetchGraph {
     /// Filter the operation's variable definitions to those actually
     /// referenced by the finalized selection and operation directives.
     fn collect_used_variable_definitions(
+        context_variables: &[(Name, Node<apollo_compiler::ast::Type>)],
         operation_variable_definitions: &[Node<VariableDefinition>],
         operation_directives: &DirectiveList,
         finalized_selection: &SelectionSet,
     ) -> (Vec<Node<VariableDefinition>>, Vec<Name>) {
+        let context_var_defs: Vec<Node<VariableDefinition>> = context_variables
+            .iter()
+            .map(|(name, ty)| {
+                Node::new(VariableDefinition {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    default_value: None,
+                    directives: Default::default(),
+                    description: None,
+                })
+            })
+            .collect();
+        let all_var_defs: Vec<Node<VariableDefinition>> = operation_variable_definitions
+            .iter()
+            .cloned()
+            .chain(context_var_defs)
+            .collect();
         let variable_definitions = {
             let mut collector = VariableCollector::new();
             collector.visit_directive_list(operation_directives);
             collector.visit_selection_set(finalized_selection);
             let used = collector.into_inner();
-            operation_variable_definitions
+            all_var_defs
                 .iter()
                 .filter(|v| used.contains(&v.name))
                 .cloned()
@@ -783,10 +1144,12 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
+            skip_validation: false,
         };
 
         let err = graph
-            .to_query_plan(&mut ctx)
+            .to_query_plan_with_defer(&mut ctx, None)
             .expect_err("two mutation root groups cannot be ordered");
         assert!(
             err.to_string().contains("cannot order"),
@@ -840,9 +1203,11 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
+            skip_validation: false,
         };
         assert!(
-            graph.to_query_plan(&mut ctx).is_err(),
+            graph.to_query_plan_with_defer(&mut ctx, None).is_err(),
             "an entity fetch without representations must not materialize",
         );
     }
@@ -892,6 +1257,7 @@ mod tests {
             vec![InputContribution::Requires {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
+                condition_alias_rewrites: Vec::new(),
             }],
         );
 
@@ -906,9 +1272,13 @@ mod tests {
             operation_name: &None,
             operation_compression: &mut compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
+            skip_validation: false,
         };
 
-        let (plan, cost) = graph.to_query_plan(&mut ctx).expect("plan builds");
+        let (plan, cost) = graph
+            .to_query_plan_with_defer(&mut ctx, None)
+            .expect("plan builds");
         assert!(cost > 0.0);
         let PlanNode::Sequence(seq) = plan.expect("non-empty plan") else {
             panic!("expected a two-stage Sequence");
@@ -960,6 +1330,8 @@ mod tests {
             operation_name: &None,
             operation_compression: compression,
             operation_counter: 0,
+            fetch_id_counter: 0,
+            skip_validation: false,
         }
     }
 
@@ -983,6 +1355,7 @@ mod tests {
             vec![InputContribution::Requires {
                 source_type_name: name!("T"),
                 conditions: key_conditions,
+                condition_alias_rewrites: Vec::new(),
             }],
         );
     }
@@ -1026,7 +1399,9 @@ mod tests {
         let directives = DirectiveList::default();
         let mut ctx = query_ctx(&supergraph_schema, &qg, &mut compression, &directives);
 
-        let (plan, _cost) = graph.to_query_plan(&mut ctx).expect("plan builds");
+        let (plan, _cost) = graph
+            .to_query_plan_with_defer(&mut ctx, None)
+            .expect("plan builds");
         let PlanNode::Parallel(par) = plan.expect("non-empty plan") else {
             panic!("expected top-level Parallel of independent branches");
         };
@@ -1087,7 +1462,9 @@ mod tests {
         let directives = DirectiveList::default();
         let mut ctx = query_ctx(&supergraph_schema, &qg, &mut compression, &directives);
 
-        let (plan, _cost) = graph.to_query_plan(&mut ctx).expect("plan builds");
+        let (plan, _cost) = graph
+            .to_query_plan_with_defer(&mut ctx, None)
+            .expect("plan builds");
         let PlanNode::Sequence(seq) = plan.expect("non-empty plan") else {
             panic!("expected Sequence of parents then join node");
         };

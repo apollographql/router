@@ -32,6 +32,7 @@
 //!
 
 pub mod bulb_search;
+pub(crate) mod defer;
 pub(crate) mod fetch_graph;
 pub(crate) mod field_routing;
 pub mod shared_path;
@@ -66,10 +67,12 @@ pub(crate) struct BulbPlan {
 /// Subgraph operation naming state spanning one whole query plan. Mutation
 /// planning runs one BULB search per top-level field; sharing this across
 /// those searches keeps generated operation names (`{name}__{subgraph}__{n}`)
-/// unique per plan instead of restarting the counter per field.
+/// and fetch ids (referenced by deferred blocks' `depends`) unique per plan
+/// instead of restarting the counters per field.
 pub(crate) struct OperationNaming {
     compression: SubgraphOperationCompression,
     counter: u32,
+    fetch_id_counter: u64,
 }
 
 impl OperationNaming {
@@ -81,6 +84,7 @@ impl OperationNaming {
                 SubgraphOperationCompression::Disabled
             },
             counter: 0,
+            fetch_id_counter: 0,
         }
     }
 }
@@ -93,6 +97,7 @@ pub(crate) fn build_bulb_plan(
     selection_set: &SelectionSet,
     root_kind: SchemaRootDefinitionKind,
     naming: &mut OperationNaming,
+    has_defers: bool,
 ) -> Result<BulbPlan, FederationError> {
     debug!(
         selections = selection_set.selections.len(),
@@ -103,17 +108,19 @@ pub(crate) fn build_bulb_plan(
     let query_graph = &parameters.federated_query_graph;
     let supergraph_schema = &parameters.supergraph_schema;
 
-    // Normalization strips __typename selections and tags a sibling instead
-    // (`optimize_sibling_typenames`). BULB never branches on __typename, so
-    // restore the stripped selections up front and route them like any other
-    // field.
-    let selection_set = selection_set.add_back_typename_in_attachments()?;
-    let selection_set = &selection_set;
-
+    // Normalization skips the sibling-typename strip for the incremental
+    // planner (see `normalize_operation`), so __typename selections arrive
+    // inline and route like any other field.
     let search_space = FieldRoutingSearchSpace {
-        query_graph: query_graph.clone(),
+        cached_query_graph: field_routing::cached_query_graph::CachedQueryGraph::new(
+            query_graph.clone(),
+            parameters.override_conditions.clone(),
+        ),
         supergraph_schema: supergraph_schema.clone(),
-        override_conditions: parameters.override_conditions.clone(),
+        inconsistent_abstract_types: parameters
+            .abstract_types_with_inconsistent_runtime_types
+            .clone(),
+        caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };
 
@@ -127,7 +134,15 @@ pub(crate) fn build_bulb_plan(
             let fetch_node = graph.get_or_create_root_group(&root_node_data.source, root_type);
             let pending = root_pending_selections(selection_set, root_qg_node, fetch_node);
             let initial = PlanState::with_graph(graph, pending);
-            run_bulb_and_finalize(&search_space, parameters, initial, root_kind, naming)
+            run_bulb_and_finalize(
+                &search_space,
+                parameters,
+                selection_set,
+                initial,
+                root_kind,
+                naming,
+                has_defers,
+            )
         }
         QueryGraphNodeType::FederatedRootType(_) => build_bulb_plan_from_federated_root(
             &search_space,
@@ -135,6 +150,7 @@ pub(crate) fn build_bulb_plan(
             selection_set,
             root_kind,
             naming,
+            has_defers,
         ),
     }
 }
@@ -148,6 +164,7 @@ fn build_bulb_plan_from_federated_root(
     selection_set: &SelectionSet,
     root_kind: SchemaRootDefinitionKind,
     naming: &mut OperationNaming,
+    has_defers: bool,
 ) -> Result<BulbPlan, FederationError> {
     let root_qg_node = parameters.head;
 
@@ -155,7 +172,15 @@ fn build_bulb_plan_from_federated_root(
     // actual root fetch group from the chosen subgraph.
     let pending = root_pending_selections(selection_set, root_qg_node, NodeIndex::end());
     let initial = PlanState::new(pending);
-    run_bulb_and_finalize(search_space, parameters, initial, root_kind, naming)
+    run_bulb_and_finalize(
+        search_space,
+        parameters,
+        selection_set,
+        initial,
+        root_kind,
+        naming,
+        has_defers,
+    )
 }
 
 /// Run BULB search on the initial state and finalize into a `BulbPlan`.
@@ -163,9 +188,11 @@ fn build_bulb_plan_from_federated_root(
 fn run_bulb_and_finalize(
     search_space: &FieldRoutingSearchSpace,
     parameters: &QueryPlanningParameters,
+    selection_set: &SelectionSet,
     initial: PlanState,
     root_kind: SchemaRootDefinitionKind,
     naming: &mut OperationNaming,
+    has_defers: bool,
 ) -> Result<BulbPlan, FederationError> {
     let config = BulbConfig {
         beam_width: parameters.config.incremental_planner.beam_width,
@@ -196,19 +223,8 @@ fn run_bulb_and_finalize(
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
     }
 
-    let result = match result {
-        Some(r) => r,
-        None => {
-            if !parameters.disabled_subgraphs.is_empty() {
-                return Err(
-                    crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into(),
-                );
-            }
-            return Err(FederationError::internal(
-                "BULB planner could not find any complete plan",
-            ));
-        }
-    };
+    let (mut result, stats) =
+        unwrap_plan(result, stats, !parameters.disabled_subgraphs.is_empty())?;
 
     debug!(
         pending_remaining = result.pending.len(),
@@ -240,6 +256,16 @@ fn run_bulb_and_finalize(
         )));
     }
 
+    result.graph.merge_sibling_entities();
+
+    // Build DeferInfo from the selection set actually being planned (already
+    // typename-restored): for mutations that is a single top-level field
+    // split from the operation, so each sequential step only sees its own
+    // defer blocks.
+    let defer_info = has_defers
+        .then(|| defer::build_defer_info(selection_set, parameters.client_labels.clone()))
+        .transpose()?;
+
     let mut build_ctx = fetch_graph::plan_builder::PlanBuildContext {
         supergraph_schema: &parameters.supergraph_schema,
         query_graph: &parameters.federated_query_graph,
@@ -249,11 +275,42 @@ fn run_bulb_and_finalize(
         operation_name: &parameters.operation.name,
         operation_compression: &mut naming.compression,
         operation_counter: naming.counter,
+        fetch_id_counter: naming.fetch_id_counter,
+        // Generated subgraph operations are valid by construction, so
+        // production always skips the O(n) re-validation. Debug builds
+        // still assert validity in into_document_unchecked /
+        // generate_fragments_unchecked; unit tests flip this flag to
+        // exercise the validating path.
+        skip_validation: true,
     };
-    let (plan, cost) = result.graph.to_query_plan(&mut build_ctx)?;
+    let (plan, cost) = result
+        .graph
+        .to_query_plan_with_defer(&mut build_ctx, defer_info.as_ref())?;
     naming.counter = build_ctx.operation_counter;
+    naming.fetch_id_counter = build_ctx.fetch_id_counter;
 
     Ok(BulbPlan { plan, cost })
+}
+
+/// Unwrap an `Option<PlanState>`, returning an appropriate error when
+/// no plan was found.
+fn unwrap_plan(
+    result: Option<PlanState>,
+    stats: bulb_search::BulbStats,
+    has_disabled_subgraphs: bool,
+) -> Result<(PlanState, bulb_search::BulbStats), FederationError> {
+    match result {
+        Some(r) => Ok((r, stats)),
+        None => {
+            if has_disabled_subgraphs {
+                Err(crate::error::SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+            } else {
+                Err(FederationError::internal(
+                    "BULB planner could not find any complete plan",
+                ))
+            }
+        }
+    }
 }
 
 /// One pending entry per top-level selection, anchored at the operation
@@ -274,6 +331,14 @@ fn root_pending_selections(
             op_path: Default::default(),
             path_in_fetch: Default::default(),
             condition: None,
+            defer_ref: None,
+            provides_anchor: None,
+            narrowing: Default::default(),
+            routing_options_memo: Default::default(),
+            parent_types: Default::default(),
+            context_anchor: Default::default(),
+            best_effort: false,
+            restrict_to: None,
         })
         .collect()
 }
