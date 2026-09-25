@@ -682,7 +682,7 @@ fn stream_license_from_oci(oci_config: OciConfig) -> impl Stream<Item = Result<L
                                 }
                             }
                             Err(err) => {
-                                tracing::debug!("failed to fetch license");
+                                tracing::debug!(error = %err, "failed to fetch license");
                                 if let Some(retry_after) = parse_rate_limit_error(&err) {
                                     polling_time = retry_after.max(Duration::from_secs(10));
                                 }
