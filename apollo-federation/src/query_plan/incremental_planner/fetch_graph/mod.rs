@@ -186,6 +186,16 @@ impl FetchNode {
         }
     }
 
+    fn with_defer(mut self, defer_ref: Option<String>) -> Self {
+        self.defer_ref = defer_ref;
+        self
+    }
+
+    fn with_connector(mut self, connector: Arc<crate::connectors::Connector>) -> Self {
+        self.connector = Some(connector);
+        self
+    }
+
     /// Get the root type if this is a root fetch group.
     pub(crate) fn root_type(&self) -> Option<&CompositeTypeDefinitionPosition> {
         match &self.kind {
@@ -429,16 +439,10 @@ impl FetchGraph {
         {
             return id;
         }
-        self.insert_node(FetchNode {
-            subgraph: subgraph.clone(),
-            kind: FetchGroupKind::Root { root_type },
-            selection_builder: SelectionBuilder::default(),
-            defer_ref,
-            context_rewrites: Vec::new(),
-            context_variables: Vec::new(),
-            connector: None,
-            pipeline_depth: 0,
-        })
+        self.insert_node(
+            FetchNode::new(subgraph.clone(), FetchGroupKind::Root { root_type })
+                .with_defer(defer_ref),
+        )
     }
 
     /// Create a new entity fetch group with an explicit defer scope.
@@ -448,16 +452,10 @@ impl FetchGraph {
         merge_at: Vec<FetchDataPathElement>,
         defer_ref: Option<String>,
     ) -> NodeIndex {
-        self.insert_node(FetchNode {
-            subgraph: subgraph.clone(),
-            kind: FetchGroupKind::Entity { merge_at },
-            selection_builder: SelectionBuilder::default(),
-            defer_ref,
-            context_rewrites: Vec::new(),
-            context_variables: Vec::new(),
-            connector: None,
-            pipeline_depth: 0,
-        })
+        self.insert_node(
+            FetchNode::new(subgraph.clone(), FetchGroupKind::Entity { merge_at })
+                .with_defer(defer_ref),
+        )
     }
 
     /// Test convenience: a new entity fetch group with no defer scope.
@@ -480,16 +478,17 @@ impl FetchGraph {
         merge_at: Vec<FetchDataPathElement>,
         defer_ref: Option<String>,
     ) -> NodeIndex {
-        let mut node = FetchNode::new(
-            subgraph.clone(),
-            FetchGroupKind::RootHop {
-                root_type,
-                root_kind,
-                merge_at,
-            },
-        );
-        node.defer_ref = defer_ref;
-        self.insert_node(node)
+        self.insert_node(
+            FetchNode::new(
+                subgraph.clone(),
+                FetchGroupKind::RootHop {
+                    root_type,
+                    root_kind,
+                    merge_at,
+                },
+            )
+            .with_defer(defer_ref),
+        )
     }
 
     /// Get or create the root hop group for
@@ -522,16 +521,11 @@ impl FetchGraph {
         connector: Arc<crate::connectors::Connector>,
         defer_ref: Option<String>,
     ) -> NodeIndex {
-        self.insert_node(FetchNode {
-            subgraph: subgraph.clone(),
-            kind: FetchGroupKind::Root { root_type },
-            selection_builder: SelectionBuilder::default(),
-            defer_ref,
-            context_rewrites: Vec::new(),
-            context_variables: Vec::new(),
-            connector: Some(connector),
-            pipeline_depth: 0,
-        })
+        self.insert_node(
+            FetchNode::new(subgraph.clone(), FetchGroupKind::Root { root_type })
+                .with_defer(defer_ref)
+                .with_connector(connector),
+        )
     }
 
     /// Create an entity fetch group backed by a connector. Never reused —
@@ -543,16 +537,11 @@ impl FetchGraph {
         connector: Arc<crate::connectors::Connector>,
         defer_ref: Option<String>,
     ) -> NodeIndex {
-        self.insert_node(FetchNode {
-            subgraph: subgraph.clone(),
-            kind: FetchGroupKind::Entity { merge_at },
-            selection_builder: SelectionBuilder::default(),
-            defer_ref,
-            context_rewrites: Vec::new(),
-            context_variables: Vec::new(),
-            connector: Some(connector),
-            pipeline_depth: 0,
-        })
+        self.insert_node(
+            FetchNode::new(subgraph.clone(), FetchGroupKind::Entity { merge_at })
+                .with_defer(defer_ref)
+                .with_connector(connector),
+        )
     }
 
     /// Get or create the entity fetch group for (subgraph, merge_at, defer_ref).

@@ -1075,19 +1075,7 @@ impl FieldRoutingSearchSpace {
                 // resolve at least one non-__typename field under it. A
                 // downcast to a subgraph that owns none of the requested
                 // fields would produce an empty fetch.
-                let has_local_sub_sel =
-                    fragment_selection
-                        .selection_set
-                        .selections
-                        .values()
-                        .any(|sel| match sel {
-                            Selection::Field(f) if *f.field.name() != TYPENAME_FIELD => self
-                                .cached_query_graph
-                                .edge_for_field(target, &f.field)
-                                .is_some(),
-                            _ => false,
-                        });
-                if has_local_sub_sel {
+                if self.count_local_sub_selections(target, &fragment_selection.selection_set) > 0 {
                     options.push(RoutingChoice::Local(EdgeInfo {
                         edge_index: edge_idx,
                         target_subgraph: target_node.source.clone(),
@@ -1144,7 +1132,7 @@ impl FieldRoutingSearchSpace {
 
     /// Whether the type condition is vacuous at the given node, meaning every
     /// runtime type at that position satisfies the condition.
-    fn is_vacuous_type_condition(
+    pub(super) fn is_vacuous_type_condition(
         &self,
         node: NodeIndex,
         type_cond: &CompositeTypeDefinitionPosition,
