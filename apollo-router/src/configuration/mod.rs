@@ -445,6 +445,12 @@ impl Configuration {
             .map(|parsed| &parsed.config)
     }
 
+    /// The config of the built-in plugin named `full_name` as its plugin's `Config` type, when
+    /// the configuration has a section for it.
+    pub(crate) fn typed_plugin_config<C: 'static>(&self, full_name: &str) -> Option<&C> {
+        self.plugin_config(full_name)?.downcast_ref()
+    }
+
     /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
     /// when the configuration has none, and retains its settings as parsing would have.
     #[cfg(any(test, feature = "mock_subgraphs_testing"))]

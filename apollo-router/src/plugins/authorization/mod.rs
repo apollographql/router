@@ -225,10 +225,8 @@ impl AuthorizationPlugin {
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
         configuration
-            .apollo_plugins
-            .plugins
-            .get("authorization")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .typed_plugin_config::<Conf>("apollo.authorization")
+            .cloned()
             .unwrap_or_default()
     }
 

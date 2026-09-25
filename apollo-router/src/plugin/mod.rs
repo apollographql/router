@@ -75,10 +75,14 @@ impl fmt::Debug for PluginConfig {
 
 impl PluginConfig {
     pub(crate) fn typed<C: Clone + 'static>(&self) -> Result<C, BoxError> {
-        self.0
-            .downcast_ref::<C>()
+        self.downcast_ref::<C>()
             .cloned()
             .ok_or_else(|| "retained plugin configuration has an unexpected type".into())
+    }
+
+    /// The config, when it is a `C`.
+    pub(crate) fn downcast_ref<C: 'static>(&self) -> Option<&C> {
+        self.0.downcast_ref::<C>()
     }
 }
 
