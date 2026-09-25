@@ -90,7 +90,7 @@ fn oci_error_reason(e: &OciError) -> &'static str {
         OciError::LayerNotFound(_) => "not_found",
         OciError::Distribution(_) => "http_error",
         OciError::Parse(_) | OciError::LayerParse(_) => "parse_error",
-        OciError::LicenseParse(_) => "invalid_license",
+        OciError::LicenseParse(e) => parse_error_reason(e.is_version_incompatible()),
     }
 }
 
@@ -255,20 +255,33 @@ impl LicenseSource {
                             future::ready(match res {
                                 Ok(license) => Some(license),
                                 Err(e) => {
-                                    // A genuine "no entitlement" (`OciError::is_not_found()`)
-                                    // is already converted to `Ok(License::default())` inside
-                                    // `fetch_license_from_reference`, so any `Err` reaching
-                                    // here is a transient failure (auth, 5xx, network) that
-                                    // should be retried on the next poll, not treated as an
-                                    // invalid license.
+                                    // A "no entitlement" case (missing manifest, missing
+                                    // entitlement blob, or a manifest with no entitlement
+                                    // layer) is semantically "unlicensed," not a fetch
+                                    // failure, and must not be recorded or warned on —
+                                    // `OciError::is_not_found()` is the source of truth for
+                                    // that classification (only the "no entitlement layer on
+                                    // an otherwise-fetched manifest" shape is pre-converted to
+                                    // `Ok(License::default())` inside
+                                    // `fetch_license_from_reference`; missing manifest/blob
+                                    // still surface here as `Err`).
                                     let reason = oci_error_reason(&e);
-                                    tracing::warn!(
-                                        source = "oci",
-                                        reason,
-                                        "transient error fetching license from oci registry, will retry: {}",
-                                        e
-                                    );
-                                    record_license_fetch_failure("oci", reason);
+                                    if e.is_not_found() {
+                                        tracing::debug!(
+                                            source = "oci",
+                                            reason,
+                                            "no license found for this graph in oci registry, will retry: {}",
+                                            e
+                                        );
+                                    } else {
+                                        tracing::warn!(
+                                            source = "oci",
+                                            reason,
+                                            "transient error fetching license from oci registry, will retry: {}",
+                                            e
+                                        );
+                                        record_license_fetch_failure("oci", reason);
+                                    }
                                     None
                                 }
                             })
@@ -310,6 +323,8 @@ impl LicenseSource {
 
 #[cfg(test)]
 mod tests {
+    use oci_client::errors::OciDistributionError;
+
     use super::*;
     use crate::metrics::FutureMetricsExt;
     use crate::test_harness::tracing_test;
@@ -347,13 +362,21 @@ mod tests {
     }
 
     #[test]
-    fn oci_error_reason_treats_distribution_errors_as_transient() {
-        let err = OciError::LicenseParse(
+    fn oci_error_reason_treats_distribution_errors_as_http_error() {
+        let err = OciError::Distribution(OciDistributionError::ImageManifestNotFoundError(
+            "no matching platform".to_string(),
+        ));
+        assert_eq!(oci_error_reason(&err), "http_error");
+    }
+
+    #[test]
+    fn oci_error_reason_classifies_license_parse_errors_like_other_sources() {
+        let invalid = OciError::LicenseParse(
             "invalid"
                 .parse::<License>()
                 .expect_err("must fail to parse"),
         );
-        assert_eq!(oci_error_reason(&err), "invalid_license");
+        assert_eq!(oci_error_reason(&invalid), "invalid_license");
     }
 
     #[tokio::test]
