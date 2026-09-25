@@ -101,6 +101,15 @@ fn compose_subgraphs(
     options: CompositionOptions,
     hints: &mut Vec<CompositionHint>,
 ) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
+    // GraphQL Federation source schemas carry no `@link`, and neither do Fed 1 subgraphs. Once one
+    // subgraph is recognizably a source schema, the unlinked ones are source schemas too.
+    let mut subgraphs = subgraphs;
+    if subgraphs.iter().any(|s| s.is_composite_source_schema()) {
+        for subgraph in &mut subgraphs {
+            subgraph.assume_composite_source_schema_if_unlinked();
+        }
+    }
+
     tracing::debug!("Expanding subgraphs...");
     let expanded_subgraphs = expand_subgraphs(subgraphs)?;
 

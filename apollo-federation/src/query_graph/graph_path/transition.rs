@@ -418,13 +418,23 @@ impl TransitionGraphPath {
                                     subgraph_schema.get_type(
                                         field_definition_position.parent().type_name()
                                     )?.try_into()?;
+                                // In a GraphQL Federation source schema, a field condition
+                                // comes from `@require` on an argument.
+                                let is_source_schema = subgraph_schema
+                                    .subgraph_metadata()
+                                    .is_some_and(|m| m.is_composite_schema());
+                                let requirement = if is_source_schema {
+                                    "@require"
+                                } else {
+                                    "@requires"
+                                };
                                 let details = match reason {
                                     Some(UnsatisfiedConditionReason::NoPostRequireKey) => {
                                         // PORT_NOTE: The original JS codebase was printing
                                         // "@require" in the error message, this has been fixed
                                         // below to "@requires".
                                         format!(
-                                            "@requires condition on field \"{}\" can be satisfied but missing usable key on \"{}\" in subgraph \"{}\" to resume query",
+                                            "{requirement} condition on field \"{}\" can be satisfied but missing usable key on \"{}\" in subgraph \"{}\" to resume query",
                                             field_definition_position,
                                             parent_type_pos_in_subgraph,
                                             head_weight.source,
@@ -443,12 +453,18 @@ impl TransitionGraphPath {
                                         // "@require" in the error message, this has been fixed
                                         // below to "@requires".
                                         format!(
-                                            "cannot satisfy @requires conditions on field \"{}\"{}",
+                                            "cannot satisfy {requirement} conditions on field \"{}\"{}",
                                             field_definition_position,
-                                            Self::warn_on_key_fields_marked_external(
-                                                subgraph_schema,
-                                                &parent_type_pos_in_subgraph,
-                                            )?,
+                                            if is_source_schema {
+                                                // Source schemas legitimately mark key fields
+                                                // they do not resolve as external.
+                                                String::new()
+                                            } else {
+                                                Self::warn_on_key_fields_marked_external(
+                                                    subgraph_schema,
+                                                    &parent_type_pos_in_subgraph,
+                                                )?
+                                            },
                                         )
                                     }
                                 };
@@ -990,7 +1006,13 @@ impl TransitionPathWithLazyIndirectPaths {
                                 } else {
                                     "interface"
                                 };
-                            let explanation = if key_resolvables.is_empty() {
+                            let explanation = if metadata.is_composite_schema() {
+                                // GraphQL Federation: keys are resolvable exactly when a lookup
+                                // recalls the entity by them.
+                                format!(
+                                    "no @lookup field in subgraph \"{subgraph}\" resolves {kind_of_type} \"{tail_type_pos}\"",
+                                )
+                            } else if key_resolvables.is_empty() {
                                 format!(
                                     "{kind_of_type} \"{tail_type_pos}\" has no @key defined in subgraph \"{subgraph}\"",
                                 )

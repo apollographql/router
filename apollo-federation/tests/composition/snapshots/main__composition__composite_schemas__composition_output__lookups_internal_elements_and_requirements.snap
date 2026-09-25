@@ -13,9 +13,10 @@ type Dimension @join__type(graph: PRODUCTS) {
   weight: Int!
 }
 
-type Product @join__type(graph: PRODUCTS, key: "id") @join__type(graph: PRODUCTS, key: "sku", resolvable: false) @join__type(graph: REVIEWS, key: "sku") {
+type Product @join__type(graph: PRODUCTS, key: "id") @join__type(graph: PRODUCTS, key: "sku") @join__type(graph: PRODUCTS, key: "upc", resolvable: false) @join__type(graph: REVIEWS, key: "sku") {
   id: ID! @join__field(graph: PRODUCTS)
-  sku: String! @join__field(graph: PRODUCTS) @join__field(graph: REVIEWS, external: true)
+  sku: String!
+  upc: String! @join__field(graph: PRODUCTS)
   name: String! @join__field(graph: PRODUCTS)
   dimension: Dimension! @join__field(graph: PRODUCTS)
   reviewCount: Int! @join__field(graph: REVIEWS)
@@ -28,7 +29,7 @@ type Query @join__type(graph: PRODUCTS) @join__type(graph: REVIEWS) {
 }
 
 enum join__Graph {
-  PRODUCTS @join__graph(name: "products", url: "http://products")
+  PRODUCTS @join__graph(name: "products", url: "http://products", internalDefinitions: "extend type Query {\n  productBySku(sku: String!): Product @lookup\n}\n")
   REVIEWS @join__graph(name: "reviews", url: "http://reviews", internalDefinitions: "input DimensionInput {\n  size: Int!\n  weight: Int!\n}\n\ntype InternalLookups {\n  productBySku(\n    key: String! @is(field: \"sku\"),\n  ): Product @lookup\n}\n\nextend type Query {\n  lookups: InternalLookups!\n}\n")
 }
 
@@ -42,6 +43,7 @@ type Dimension {
 type Product {
   id: ID!
   sku: String!
+  upc: String!
   name: String!
   dimension: Dimension!
   reviewCount: Int!
@@ -64,9 +66,10 @@ type Dimension {
   weight: Int!
 }
 
-type Product @key(fields: "id") @key(fields: "sku", resolvable: false) {
+type Product @key(fields: "id") @key(fields: "sku") @key(fields: "upc", resolvable: false) {
   id: ID!
-  sku: String!
+  sku: String! @shareable
+  upc: String!
   name: String!
   dimension: Dimension!
 }
@@ -74,6 +77,7 @@ type Product @key(fields: "id") @key(fields: "sku", resolvable: false) {
 type Query {
   productById(id: ID!): Product @federation__lookup
   topProducts: [Product!]!
+  productBySku(sku: String!): Product @federation__lookup
   _service: _Service!
 }
 
@@ -95,7 +99,7 @@ type InternalLookups {
 }
 
 type Product @key(fields: "sku") {
-  sku: String! @external
+  sku: String! @shareable
   reviewCount: Int!
   shippingEstimate(
     zip: String!,
