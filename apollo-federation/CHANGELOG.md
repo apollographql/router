@@ -20,22 +20,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [2.18.x](unreleased) - Unreleased
 
-## 🚀 Features
-
-### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
-
-Composition now automatically upgrades federation 2 subgraph schemas for
-compatibility with the GraphQL September 2025 spec (federation 3). Two
-transformations are applied during the upgrade phase, with composition hints
-emitted for each:
-
-- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
-  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
-- `@deprecated` on an implementing field whose interface field is not
-  deprecated is removed, as this is disallowed by the 2025 spec.
-
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
-
 ## 🐛 Fixes
 
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
@@ -92,6 +76,38 @@ Federation 2 pattern.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
+## 🛠 Maintenance
+
+### Connectors are validated as part of subgraph validation ([PR #10035](https://github.com/apollographql/router/pull/10035))
+
+Connectors validation used to run outside this crate, in `federation-rs`, which
+wrapped the individual composition phases and interleaved connectors work between
+them. It now runs inside `Subgraph::validate`, so `compose` owns the whole
+pipeline and connectors validation cannot be skipped. Diagnostic codes are
+unchanged.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
+
+# [2.16.4](https://crates.io/crates/apollo-federation/2.16.4) - 2026-09-24
+
+## 🚀 Features
+
+### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
+
+Composition now automatically upgrades federation 2 subgraph schemas for
+compatibility with the GraphQL September 2025 spec (federation 3). Two
+transformations are applied during the upgrade phase, with composition hints
+emitted for each:
+
+- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
+  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
+- `@deprecated` on an implementing field whose interface field is not
+  deprecated is removed, as this is disallowed by the 2025 spec.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
+
+## 🐛 Fixes
+
 ### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
 
 During satisfiability validation, advancing subgraph paths across a transition
@@ -106,18 +122,6 @@ subgraph bullets that would have appeared without dedup. The set of schemas that
 pass or fail validation is unchanged.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
-
-## 🛠 Maintenance
-
-### Connectors are validated as part of subgraph validation ([PR #10035](https://github.com/apollographql/router/pull/10035))
-
-Connectors validation used to run outside this crate, in `federation-rs`, which
-wrapped the individual composition phases and interleaved connectors work between
-them. It now runs inside `Subgraph::validate`, so `compose` owns the whole
-pipeline and connectors validation cannot be skipped. Diagnostic codes are
-unchanged.
-
-By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
 
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
