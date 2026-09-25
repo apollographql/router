@@ -13,6 +13,7 @@
 pub(super) mod cached_query_graph;
 mod commit;
 mod conditions;
+mod connect;
 pub(super) mod context;
 mod fork;
 mod requires;
@@ -186,6 +187,7 @@ pub(crate) struct FieldRoutingSearchSpace {
     /// supergraph analysis. Drives the cross-subgraph intersection filter
     /// (see [`state::TypeNarrowing`]).
     pub(crate) inconsistent_abstract_types: Arc<apollo_compiler::collections::IndexSet<Name>>,
+    pub(super) connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     pub(super) caches: PlannerCaches,
     /// Subgraphs the caller disabled: enumeration never routes into them.
     pub(crate) disabled_subgraphs: apollo_compiler::collections::IndexSet<Arc<str>>,
@@ -197,6 +199,20 @@ pub(crate) struct FieldRoutingSearchSpace {
 pub(super) enum RoutingSiteKey {
     Field(Name),
     InlineFragment(Option<Name>),
+}
+
+impl RoutingSiteKey {
+    pub(super) fn of(selection: &Selection) -> Self {
+        match selection {
+            Selection::Field(f) => Self::Field(f.field.name().clone()),
+            Selection::InlineFragment(f) => Self::InlineFragment(
+                f.inline_fragment
+                    .type_condition_position
+                    .as_ref()
+                    .map(|pos| pos.type_name().clone()),
+            ),
+        }
+    }
 }
 
 impl FieldRoutingSearchSpace {
@@ -335,12 +351,7 @@ impl FieldRoutingSearchSpace {
                     self.recover_doomed(state, &mut trail);
                     lift_scan_floor = usize::MAX;
                 }
-                1 => {
-                    if self.commit_forced(state, options, &mut trail) {
-                        lift_scan_floor = usize::MAX;
-                    }
-                }
-                _ if top.condition.is_some() => {
+                count if count == 1 || top.condition.is_some() => {
                     if self.commit_forced(state, options, &mut trail) {
                         lift_scan_floor = usize::MAX;
                     }
@@ -399,15 +410,41 @@ impl FieldRoutingSearchSpace {
         }
     }
 
-    /// Pop the top pending selection and commit its best-ranked option.
-    ///
-    /// A failed commit rolls the whole state back to just after the pop:
+    /// Commit `choice` for `pending`, rolling the whole state back to
+    /// `checkpoint` on failure. The full-state rollback matters:
     /// `commit_choice` pushes pendings mid-flight, and a graph-only rollback
     /// would leak entries whose `ordering_dependent` names a node index the
-    /// rollback freed (StableDiGraph reuses indices). A failure first tries
-    /// the pending's own lower-ranked options and then ancestor frames via
-    /// [`Self::backtrack_forced`]; only when nothing recovers is the drop
-    /// counted and penalized by the cost function.
+    /// rollback freed (StableDiGraph reuses indices). Returns whether the
+    /// commit succeeded.
+    fn try_commit(
+        &self,
+        state: &mut PlanState,
+        pending: &PendingSelection,
+        choice: &RoutingChoice,
+        checkpoint: &PlanCheckpoint,
+        failure: &'static str,
+    ) -> bool {
+        match self.commit_choice(state, pending, choice) {
+            Ok(()) => true,
+            Err(e) => {
+                state.rollback(checkpoint.clone());
+                debug!(
+                    selection = %selection_label(&pending.selection),
+                    subgraph = %choice.target_subgraph(),
+                    direct = choice.is_direct(),
+                    error = ?e,
+                    failure,
+                );
+                false
+            }
+        }
+    }
+
+    /// Pop the top pending selection and commit its best-ranked option.
+    ///
+    /// A failure first tries the pending's own lower-ranked options and then
+    /// ancestor frames via [`Self::backtrack_forced`]; only when nothing
+    /// recovers is the drop counted and penalized by the cost function.
     fn commit_forced(
         &self,
         state: &mut PlanState,
@@ -416,18 +453,13 @@ impl FieldRoutingSearchSpace {
     ) -> bool {
         let pending = state.pop_pending().unwrap();
         let checkpoint = state.checkpoint();
-        let result = self.commit_choice(state, &pending, &options[0]);
-        if let Err(e) = &result {
-            state.rollback(checkpoint.clone());
-            debug!(
-                selection = %selection_label(&pending.selection),
-                subgraph = %options[0].target_subgraph(),
-                direct = options[0].is_direct(),
-                error = ?e,
-                "forced commit failed, backtracking",
-            );
-        }
-        let failed = result.is_err();
+        let failed = !self.try_commit(
+            state,
+            &pending,
+            &options[0],
+            &checkpoint,
+            "forced commit failed, backtracking",
+        );
         let best_effort = pending.best_effort;
         if options.len() > 1 {
             trail.frames.push(ForcedFrame {
@@ -486,9 +518,14 @@ impl FieldRoutingSearchSpace {
                 option_index,
                 "backtracking forced commit to alternative option",
             );
-            match self.commit_choice(state, &pending, &choice) {
-                Ok(_) => return true,
-                Err(_) => state.rollback(checkpoint),
+            if self.try_commit(
+                state,
+                &pending,
+                &choice,
+                &checkpoint,
+                "alternative forced option failed",
+            ) {
+                return true;
             }
         }
         // Re-drive the greedy choice so the caller resumes from a
@@ -498,7 +535,15 @@ impl FieldRoutingSearchSpace {
         // which is correct: if the re-drive fails, the increment happens
         // here; if it succeeds, no field was dropped.
         if let Some((pending, choice)) = parked {
-            if self.commit_choice(state, &pending, &choice).is_err() && !pending.best_effort {
+            let checkpoint = state.checkpoint();
+            if !self.try_commit(
+                state,
+                &pending,
+                &choice,
+                &checkpoint,
+                "greedy re-drive failed",
+            ) && !pending.best_effort
+            {
                 state.dropped_fields += 1;
             }
             return true;
@@ -550,30 +595,15 @@ struct ForcedTrail {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct PendingSite {
     query_graph_node: NodeIndex,
-    selection: SiteSelection,
+    selection: RoutingSiteKey,
     fetch_node: NodeIndex,
     ordering_dependent: Option<NodeIndex>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum SiteSelection {
-    Field(Name),
-    InlineFragment(Option<Name>),
-}
-
 fn pending_site(pending: &PendingSelection) -> PendingSite {
-    let selection = match &pending.selection {
-        Selection::Field(f) => SiteSelection::Field(f.field.name().clone()),
-        Selection::InlineFragment(f) => SiteSelection::InlineFragment(
-            f.inline_fragment
-                .type_condition_position
-                .as_ref()
-                .map(|pos| pos.type_name().clone()),
-        ),
-    };
     PendingSite {
         query_graph_node: pending.query_graph_node,
-        selection,
+        selection: RoutingSiteKey::of(&pending.selection),
         fetch_node: pending.fetch_node,
         ordering_dependent: pending.ordering_dependent(),
     }
@@ -643,20 +673,16 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
             "applying routing choice",
         );
 
-        // Full-state checkpoint: a failed commit_choice may have pushed
-        // pendings that must not leak.
         let cp = candidate.checkpoint();
-        if let Err(e) = self.commit_choice(candidate, &pending, choice) {
-            candidate.rollback(cp);
-            debug!(
-                selection = %selection_label(&pending.selection),
-                subgraph = %choice.target_subgraph(),
-                error = ?e,
-                "commit_choice failed, dropping field",
-            );
-            if !pending.best_effort {
-                candidate.dropped_fields += 1;
-            }
+        if !self.try_commit(
+            candidate,
+            &pending,
+            choice,
+            &cp,
+            "commit_choice failed, dropping field",
+        ) && !pending.best_effort
+        {
+            candidate.dropped_fields += 1;
         }
 
         trace!("partial plan after apply");

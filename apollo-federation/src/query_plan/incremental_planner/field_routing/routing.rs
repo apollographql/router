@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef as _;
@@ -10,6 +11,8 @@ use super::FieldRoutingSearchSpace;
 use super::RoutingSiteKey;
 use super::fork::ForkRemainder;
 use super::state::PendingSelection;
+use crate::connectors::EntityResolver;
+use crate::connectors::index::IndexedConnector;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
 use crate::operation::InlineFragmentSelection;
@@ -88,6 +91,13 @@ pub(crate) enum RoutingChoice {
         key: KeyHopInfo,
         intermediate_hops: Vec<IntermediateKeyHop>,
     },
+    /// Connector resolving the field directly (no key hop).
+    ConnectorDirect { entry: Arc<IndexedConnector> },
+    /// Connector reached through entity resolution.
+    ConnectorEntityResolver {
+        entry: Arc<IndexedConnector>,
+        key_conditions: Arc<SelectionSet>,
+    },
     /// Strip a fragment which provides no routing information.
     StripFragment,
     /// Per-concrete-type explosion at an abstract position.
@@ -117,7 +127,10 @@ impl RoutingChoice {
             | Self::ChainedKeyHop { edge: e, .. }
             | Self::CircularKeyHop { edge: e, .. } => Some(e),
             Self::Fork { primary, .. } => primary.edge(),
-            Self::StripFragment | Self::TypeExplosion => None,
+            Self::ConnectorDirect { .. }
+            | Self::ConnectorEntityResolver { .. }
+            | Self::StripFragment
+            | Self::TypeExplosion => None,
         }
     }
 
@@ -140,6 +153,9 @@ impl RoutingChoice {
             return &e.target_subgraph;
         }
         match self {
+            Self::ConnectorDirect { entry, .. } | Self::ConnectorEntityResolver { entry, .. } => {
+                &entry.source_subgraph
+            }
             Self::TypeExplosion => {
                 static LABEL: std::sync::LazyLock<Arc<str>> =
                     std::sync::LazyLock::new(|| Arc::from("<type-explosion>"));
@@ -173,7 +189,33 @@ impl RoutingChoice {
 
     /// Whether this is a key hop (entity-based, not root-type-resolution).
     pub(crate) fn is_key_hop(&self) -> bool {
-        self.key_opt().is_some()
+        self.key_opt().is_some() || matches!(self, Self::ConnectorEntityResolver { .. })
+    }
+
+    /// Whether this is a connector-based route.
+    pub(crate) fn is_connector(&self) -> bool {
+        matches!(
+            self,
+            Self::ConnectorDirect { .. } | Self::ConnectorEntityResolver { .. }
+        )
+    }
+
+    /// The indexed connector for connector routes, `None` otherwise.
+    pub(crate) fn connector(&self) -> Option<&Arc<IndexedConnector>> {
+        match self {
+            Self::ConnectorDirect { entry, .. } | Self::ConnectorEntityResolver { entry, .. } => {
+                Some(entry)
+            }
+            _ => None,
+        }
+    }
+
+    /// Key conditions for a connector entity resolver route.
+    pub(crate) fn connector_key_conditions(&self) -> Option<&Arc<SelectionSet>> {
+        match self {
+            Self::ConnectorEntityResolver { key_conditions, .. } => Some(key_conditions),
+            _ => None,
+        }
     }
 
     /// Intermediate hops for chained key chains, empty otherwise.
@@ -215,14 +257,16 @@ impl RoutingChoice {
             // Same-subgraph entity re-entry for in-place-unresolvable @requires
             // ranks above regular key hops but below direct local.
             Self::KeyHopWithLocalKey { key, .. } if key.self_entity_reentry => 2,
-            Self::KeyHopWithLocalKey { .. } => 3,
-            Self::KeyHopWithProvidedKey { .. } => 4,
-            Self::KeyHopWithExternalKey { .. } => 5,
-            Self::RootHop(_) => 6,
-            Self::ChainedKeyHop { .. } => 7,
-            Self::CircularKeyHop { .. } => 8,
-            Self::StripFragment => 9,
-            Self::TypeExplosion => 10,
+            Self::ConnectorDirect { .. } => 3,
+            Self::KeyHopWithLocalKey { .. } => 4,
+            Self::KeyHopWithProvidedKey { .. } => 5,
+            Self::KeyHopWithExternalKey { .. } => 6,
+            Self::ConnectorEntityResolver { .. } => 7,
+            Self::RootHop(_) => 8,
+            Self::ChainedKeyHop { .. } => 9,
+            Self::CircularKeyHop { .. } => 10,
+            Self::StripFragment => 11,
+            Self::TypeExplosion => 12,
         };
         let key_size = self
             .key_opt()
@@ -831,6 +875,26 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connectors on root fields (Query/Mutation).
+        let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
+        if let QueryGraphNodeType::FederatedRootType(root_kind) = &current_node_data.type_
+            && let Some(root_type_name) = self
+                .supergraph_schema
+                .schema()
+                .root_operation((*root_kind).into())
+        {
+            self.push_connector_options(
+                &mut options,
+                root_type_name,
+                field_selection.field.name(),
+                true,
+            );
+        }
+
+        // A root edge into a connector-backed subgraph targets a service
+        // with no GraphQL endpoint; only connector options may serve it.
+        self.drop_connector_subgraph_edges(&mut options);
+
         // Prefer root options which can locally satisfy more fields in the selection
         if options.len() > 1
             && let Some(sub_ss) = field_selection.selection_set.as_ref()
@@ -881,6 +945,29 @@ impl FieldRoutingSearchSpace {
             }
         }
 
+        // Connectors resolving this field on this type. Root nodes never
+        // reach here; routing_options dispatches them to
+        // federated_root_options, which owns the root connector block.
+        let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
+        if let Ok(type_pos) =
+            CompositeTypeDefinitionPosition::try_from(current_node_data.type_.clone())
+        {
+            self.push_connector_options(
+                &mut options,
+                type_pos.type_name(),
+                field_selection.field.name(),
+                false,
+            );
+        }
+        // Drop unexecutable connector-subgraph edges before the connector
+        // early return; an edge into another connector's subgraph must not
+        // outrank the connector option that can actually serve the field.
+        self.drop_connector_subgraph_edges(&mut options);
+
+        if options.iter().any(|opt| opt.is_connector()) {
+            return Ok(options);
+        }
+
         let key = RoutingSiteKey::Field(field_selection.field.name().clone());
         let hops = self.cached_key_hops(
             pending.query_graph_node,
@@ -893,12 +980,26 @@ impl FieldRoutingSearchSpace {
         )?;
         options.extend(hops.iter().cloned());
 
+        // Key hops into connector-backed subgraphs are equally
+        // unexecutable; entity-resolver connector hops replace them.
+        self.drop_connector_subgraph_edges(&mut options);
+
+        // Entity-resolver connector hops.
+        if let Ok(type_pos) =
+            CompositeTypeDefinitionPosition::try_from(current_node_data.type_.clone())
+        {
+            self.push_entity_resolver_options(
+                &mut options,
+                type_pos.type_name(),
+                field_selection.field.name(),
+            );
+        }
+
         // Offer type explosion at abstract positions. When other options
         // exist, gate on cross-subgraph keys to avoid unnecessary BULB
         // branching for fully-local interfaces. When no options exist,
         // any abstract type may need explosion (some implementers may
         // define the field while others don't).
-        let current_node_data = self.qg().node_weight(pending.query_graph_node)?;
         let is_abstract = matches!(
             CompositeTypeDefinitionPosition::try_from(current_node_data.type_.clone()),
             Ok(pos) if pos.is_abstract_type()
@@ -974,19 +1075,7 @@ impl FieldRoutingSearchSpace {
                 // resolve at least one non-__typename field under it. A
                 // downcast to a subgraph that owns none of the requested
                 // fields would produce an empty fetch.
-                let has_local_sub_sel =
-                    fragment_selection
-                        .selection_set
-                        .selections
-                        .values()
-                        .any(|sel| match sel {
-                            Selection::Field(f) if *f.field.name() != TYPENAME_FIELD => self
-                                .cached_query_graph
-                                .edge_for_field(target, &f.field)
-                                .is_some(),
-                            _ => false,
-                        });
-                if has_local_sub_sel {
+                if self.count_local_sub_selections(target, &fragment_selection.selection_set) > 0 {
                     options.push(RoutingChoice::Local(EdgeInfo {
                         edge_index: edge_idx,
                         target_subgraph: target_node.source.clone(),
@@ -995,6 +1084,11 @@ impl FieldRoutingSearchSpace {
                 break;
             }
         }
+
+        // Connector-backed subgraphs have no GraphQL endpoint; drop their
+        // edges before enumerating key hops so they don't crowd out real
+        // alternatives.
+        self.drop_connector_subgraph_edges(&mut options);
 
         trace!(
             type_condition = %type_cond.type_name(),
@@ -1011,6 +1105,9 @@ impl FieldRoutingSearchSpace {
             },
         )?;
         options.extend(hops.iter().cloned());
+
+        // Key hops into connector-backed subgraphs are equally unexecutable.
+        self.drop_connector_subgraph_edges(&mut options);
 
         // TypeExplosion decomposes the fragment into per-concrete-type
         // fragments, or drops it if the runtime intersection is empty.
@@ -1035,7 +1132,7 @@ impl FieldRoutingSearchSpace {
 
     /// Whether the type condition is vacuous at the given node, meaning every
     /// runtime type at that position satisfies the condition.
-    fn is_vacuous_type_condition(
+    pub(super) fn is_vacuous_type_condition(
         &self,
         node: NodeIndex,
         type_cond: &CompositeTypeDefinitionPosition,
@@ -1052,6 +1149,109 @@ impl FieldRoutingSearchSpace {
             .supergraph_schema
             .possible_runtime_types(type_cond.clone())?;
         Ok(current_runtime_types.is_subset(&cond_runtime_types))
+    }
+
+    /// Append connector options for `(type_name, field_name)`, superseding
+    /// subgraph-edge options from the same source subgraph.
+    fn push_connector_options(
+        &self,
+        options: &mut Vec<RoutingChoice>,
+        type_name: &Name,
+        field_name: &Name,
+        at_root: bool,
+    ) {
+        let Some(connectors) = self.connector_index.by_field(type_name, field_name) else {
+            return;
+        };
+        for entry in connectors {
+            if !at_root && !self.subgraph_hosts_entity_fetches(&entry.source_subgraph) {
+                continue;
+            }
+            options.retain(|opt| {
+                opt.edge()
+                    .is_none_or(|e| e.target_subgraph != entry.source_subgraph)
+            });
+            let key_conditions = match &entry.connector.entity_resolver {
+                Some(
+                    EntityResolver::Implicit
+                    | EntityResolver::TypeSingle
+                    | EntityResolver::TypeBatch,
+                ) => self
+                    .connector_index
+                    .key_conditions(&entry.coordinate)
+                    .cloned(),
+                _ => None,
+            };
+            match key_conditions {
+                Some(kc) => options.push(RoutingChoice::ConnectorEntityResolver {
+                    entry: entry.clone(),
+                    key_conditions: kc,
+                }),
+                None => options.push(RoutingChoice::ConnectorDirect {
+                    entry: entry.clone(),
+                }),
+            }
+        }
+    }
+
+    /// Whether `subgraph`'s extracted schema defines the `_Entity` union.
+    fn subgraph_hosts_entity_fetches(&self, subgraph: &str) -> bool {
+        self.cached_query_graph
+            .query_graph
+            .schema_by_source(subgraph)
+            .ok()
+            .and_then(|schema| schema.entity_type().ok().flatten())
+            .is_some()
+    }
+
+    /// Append entity-resolver connector hops for a field no connector serves
+    /// directly.
+    fn push_entity_resolver_options(
+        &self,
+        options: &mut Vec<RoutingChoice>,
+        type_name: &Name,
+        field_name: &Name,
+    ) {
+        let Some(resolvers) = self.connector_index.entity_resolvers(type_name) else {
+            return;
+        };
+        for entry in resolvers {
+            if !self
+                .connector_index
+                .resolver_provides(&entry.coordinate, field_name.as_str())
+            {
+                continue;
+            }
+            if !self.subgraph_hosts_entity_fetches(&entry.source_subgraph) {
+                continue;
+            }
+            if options.iter().any(|opt| {
+                opt.connector()
+                    .is_some_and(|existing| Arc::ptr_eq(existing, entry))
+            }) {
+                continue;
+            }
+            let Some(key_conditions) = self.connector_index.key_conditions(&entry.coordinate)
+            else {
+                continue;
+            };
+            options.push(RoutingChoice::ConnectorEntityResolver {
+                entry: entry.clone(),
+                key_conditions: key_conditions.clone(),
+            });
+        }
+    }
+
+    /// Drop subgraph-edge options landing in a connector-backed subgraph.
+    fn drop_connector_subgraph_edges(&self, options: &mut Vec<RoutingChoice>) {
+        options.retain(|opt| {
+            opt.edge().is_none_or(|e| {
+                !self
+                    .connector_index
+                    .is_connector_subgraph(&e.target_subgraph)
+                    || !self.subgraph_hosts_entity_fetches(&e.target_subgraph)
+            })
+        });
     }
 
     /// Cached key hop enumeration with integrated cycle guard. The guard

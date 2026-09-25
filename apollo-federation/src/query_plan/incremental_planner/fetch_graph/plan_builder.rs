@@ -800,9 +800,15 @@ impl FetchGraph {
             .map(|ss| trim_requires(&ss))
             .unwrap_or_default();
 
-        // 7. Construct FetchNode.
+        // 7. Construct FetchNode. Connector fetches carry the connector's
+        // synthetic service name, the same name expansion would have given
+        // its virtual subgraph, because the router dispatches fetches to
+        // connectors by service name.
         let fetch_node = PlanNode::Fetch(Box::new(crate::query_plan::FetchNode {
-            subgraph_name: node.subgraph.clone(),
+            subgraph_name: match &node.connector {
+                Some(c) => Arc::from(c.id.synthetic_name()),
+                None => node.subgraph.clone(),
+            },
             id: None,
             variable_usages,
             requires,

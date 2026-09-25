@@ -136,23 +136,38 @@ impl PendingSelection {
     pub(super) fn fork(&self, selection: Selection) -> Self {
         Self {
             selection,
-            query_graph_node: self.query_graph_node,
-            fetch_node: self.fetch_node,
-            op_path: self.op_path.clone(),
-            path_in_fetch: self.path_in_fetch.clone(),
-            condition: self.condition,
-            provides_anchor: self.provides_anchor,
-            narrowing: self.narrowing.clone(),
-            defer_ref: self.defer_ref.clone(),
-            parent_types: self.parent_types.clone(),
-            context_anchor: self.context_anchor.clone(),
-            best_effort: self.best_effort,
             routing_options_memo: std::sync::OnceLock::new(),
             // The restriction belongs to one fork remainder only; a fork is
             // a different selection (a child, a condition, a restructured
             // shape) that may legitimately need another subgraph.
             // `commit_fork` sets it explicitly on the remainders it pushes.
             restrict_to: None,
+            ..self.clone()
+        }
+    }
+
+    /// A selection at the operation root: no path, no conditions, no
+    /// narrowing. Everything else derives from it through `fork`.
+    pub(crate) fn root(
+        selection: Selection,
+        query_graph_node: NodeIndex,
+        fetch_node: NodeIndex,
+    ) -> Self {
+        Self {
+            selection,
+            query_graph_node,
+            fetch_node,
+            op_path: SharedPath::new(),
+            path_in_fetch: SharedPath::new(),
+            condition: None,
+            provides_anchor: None,
+            narrowing: TypeNarrowing::default(),
+            defer_ref: None,
+            parent_types: SharedPath::new(),
+            context_anchor: ContextAnchor::default(),
+            best_effort: false,
+            restrict_to: None,
+            routing_options_memo: std::sync::OnceLock::new(),
         }
     }
 
@@ -425,21 +440,12 @@ mod tests {
     /// the stack exactly.
     #[test]
     fn pending_log_rolls_back_interleaved_mutations() {
-        let entry = |n: u32| PendingSelection {
-            selection: any_selection(),
-            query_graph_node: NodeIndex::new(n as usize),
-            fetch_node: NodeIndex::new(0),
-            op_path: SharedPath::new(),
-            path_in_fetch: SharedPath::new(),
-            condition: None,
-            provides_anchor: None,
-            narrowing: Default::default(),
-            routing_options_memo: Default::default(),
-            best_effort: false,
-            defer_ref: None,
-            context_anchor: Default::default(),
-            parent_types: SharedPath::new(),
-            restrict_to: None,
+        let entry = |n: u32| {
+            PendingSelection::root(
+                any_selection(),
+                NodeIndex::new(n as usize),
+                NodeIndex::new(0),
+            )
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state

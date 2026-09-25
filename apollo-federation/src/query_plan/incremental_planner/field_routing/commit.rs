@@ -112,6 +112,13 @@ impl FieldRoutingSearchSpace {
             };
         }
 
+        if choice.is_connector() {
+            let entry = choice.connector().ok_or_else(|| {
+                FederationError::internal("connector choice must have a connector")
+            })?;
+            return self.commit_connector_choice(state, pending, entry, choice);
+        }
+
         let qg = &self.qg();
 
         let edge_index = choice
@@ -134,7 +141,8 @@ impl FieldRoutingSearchSpace {
         // Mutating half: commit the hop or resolve the direct fetch group.
         let (fetch_node, key_hop_edge, is_defer_redirect) = match choice {
             RoutingChoice::Provides(_) | RoutingChoice::Local(_) => {
-                self.commit_direct(state, pending, choice)?
+                let (group, redirect_edge) = self.commit_direct(state, pending, choice)?;
+                (group, redirect_edge, redirect_edge.is_some())
             }
             RoutingChoice::RootHop(_) => {
                 let (group, hop_edge) = self.commit_root_hop(state, pending, choice)?;
@@ -229,13 +237,7 @@ impl FieldRoutingSearchSpace {
             pending.defer_ref.clone(),
         );
 
-        let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
-            Some(existing) => existing,
-            None => state
-                .graph
-                .add_dependency(pending.fetch_node, new_group, Vec::new()),
-        };
-
+        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, None);
         Ok((new_group, edge))
     }
 
@@ -465,12 +467,7 @@ impl FieldRoutingSearchSpace {
             );
 
             if let Some(key_conds) = exit_key {
-                let hop_schema = qg.schema_by_source(&hop_node_data.source)?.clone();
-                let hop_source = NodeSource {
-                    subgraph: hop_node_data.source.clone(),
-                    type_pos: hop_type_pos.clone(),
-                    schema: hop_schema,
-                };
+                let hop_source = self.node_source(hop.target_node)?;
                 let hop_path = self.entity_root_path(hop_type_pos.type_name())?;
                 if self.can_resolve_in_place(hop.target_node, key_conds, &hop_source)? {
                     self.append_entity_inputs(
@@ -724,37 +721,16 @@ impl FieldRoutingSearchSpace {
         edge_index: EdgeIndex,
         selection: &Selection,
     ) -> Result<Option<Vec<FetchDataPathElement>>, FederationError> {
-        let qg = &self.qg();
-        let edge = qg.edge_weight(edge_index)?;
-        match &edge.transition {
-            QueryGraphEdgeTransition::FieldCollection {
-                source,
-                field_definition_position,
-                ..
-            } => {
-                let response_key = match selection {
-                    Selection::Field(f) => f.field.response_name().clone(),
-                    _ => field_definition_position.field_name().clone(),
-                };
-                let mut elements =
-                    vec![FetchDataPathElement::Key(response_key, Default::default())];
-                let field_schema = qg.schema_by_source(source)?;
-                let mut type_ = &field_definition_position.get(field_schema.schema())?.ty;
-                loop {
-                    match type_ {
-                        apollo_compiler::ast::Type::Named(_)
-                        | apollo_compiler::ast::Type::NonNullNamed(_) => break,
-                        apollo_compiler::ast::Type::List(inner)
-                        | apollo_compiler::ast::Type::NonNullList(inner) => {
-                            elements.push(FetchDataPathElement::AnyIndex(Default::default()));
-                            type_ = inner;
-                        }
-                    }
-                }
-                Ok(Some(elements))
+        let edge = self.qg().edge_weight(edge_index)?;
+        match (&edge.transition, selection) {
+            (QueryGraphEdgeTransition::FieldCollection { .. }, Selection::Field(f)) => {
+                Ok(Some(field_response_elements(&f.field)?))
             }
-            QueryGraphEdgeTransition::Downcast { .. }
-            | QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. } => Ok(Some(vec![])),
+            (
+                QueryGraphEdgeTransition::Downcast { .. }
+                | QueryGraphEdgeTransition::InterfaceObjectFakeDownCast { .. },
+                _,
+            ) => Ok(Some(vec![])),
             _ => Ok(None),
         }
     }
@@ -855,13 +831,14 @@ impl FieldRoutingSearchSpace {
     }
 
     /// Resolve the fetch group for a direct (same-subgraph) choice. Returns
-    /// the group, the key edge of a defer redirect, and whether one was made.
+    /// the group and, when the field was redirected into its own defer
+    /// group, the edge into it.
     fn commit_direct(
         &self,
         state: &mut PlanState,
         pending: &PendingSelection,
         choice: &RoutingChoice,
-    ) -> Result<(NodeIndex, Option<EdgeIndex>, bool), FederationError> {
+    ) -> Result<(NodeIndex, Option<EdgeIndex>), FederationError> {
         let node = self.direct_fetch_node(state, pending, choice)?;
         // A deferred field whose enclosing group belongs to a
         // different defer scope needs its own entity fetch, even
@@ -871,7 +848,7 @@ impl FieldRoutingSearchSpace {
         // in the enclosing fetch, like the legacy planner: the deferred
         // chunk then has no fetch of its own.
         if pending.defer_ref == state.graph.node(node).defer_ref {
-            return Ok((node, None, false));
+            return Ok((node, None));
         }
         let source = self.node_source(pending.query_graph_node)?;
         let subgraph = self
@@ -882,13 +859,13 @@ impl FieldRoutingSearchSpace {
         if let Some(root_kind) = self.subgraph_root_kind(&subgraph, &source.type_pos)? {
             let (group, edge) =
                 self.commit_root_defer_redirect(state, pending, &subgraph, &source, root_kind);
-            return Ok((group, Some(edge), true));
+            return Ok((group, Some(edge)));
         }
         let Some(key_conditions) = self.self_key_conditions(pending)? else {
-            return Ok((node, None, false));
+            return Ok((node, None));
         };
         let (group, edge) = self.commit_defer_redirect(state, pending, choice, key_conditions)?;
-        Ok((group, Some(edge), true))
+        Ok((group, Some(edge)))
     }
 
     /// Route a deferred field into a separate entity group when it lives
@@ -964,12 +941,7 @@ impl FieldRoutingSearchSpace {
             pending.ordering_dependent(),
             pending.defer_ref.clone(),
         );
-        let edge = match state.graph.find_edge(pending.fetch_node, new_group) {
-            Some(existing) => existing,
-            None => state
-                .graph
-                .add_dependency(pending.fetch_node, new_group, Vec::new()),
-        };
+        let edge = self.wire_key_edge(state, pending.fetch_node, new_group, None);
         (new_group, edge)
     }
 
@@ -1556,4 +1528,29 @@ impl FieldRoutingSearchSpace {
             (false, false) => pending.provides_anchor,
         })
     }
+}
+
+/// The response path elements a field contributes: its response key, plus
+/// an index wildcard per level of list nesting.
+pub(super) fn field_response_elements(
+    field: &Field,
+) -> Result<Vec<FetchDataPathElement>, FederationError> {
+    let mut elements = vec![FetchDataPathElement::Key(
+        field.response_name().clone(),
+        Default::default(),
+    )];
+    let mut ty = &field.field_position.get(field.schema.schema())?.ty;
+    loop {
+        match ty {
+            apollo_compiler::ast::Type::Named(_) | apollo_compiler::ast::Type::NonNullNamed(_) => {
+                break;
+            }
+            apollo_compiler::ast::Type::List(inner)
+            | apollo_compiler::ast::Type::NonNullList(inner) => {
+                elements.push(FetchDataPathElement::AnyIndex(Default::default()));
+                ty = inner;
+            }
+        }
+    }
+    Ok(elements)
 }
