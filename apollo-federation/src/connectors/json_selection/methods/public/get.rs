@@ -15,6 +15,9 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::lit_expr::LitExpr;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::may_be_missing;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -348,8 +351,13 @@ fn get_shape(
 
     let index_shape =
         index_literal.compute_output_shape(context, input_shape.clone(), dollar_shape);
+    let maybe_missing = may_be_missing(&index_shape);
+    let Some(index_shape) = present_part(&index_shape) else {
+        // The method produces no value when its index argument has none.
+        return Shape::none();
+    };
 
-    if Shape::string([]).accepts(&input_shape) {
+    let result = if Shape::string([]).accepts(&input_shape) {
         handle_string_shape(method_name, &input_shape, &index_shape, context.source_id())
     } else if Shape::tuple([], []).accepts(&input_shape) {
         handle_array_shape(method_name, &input_shape, &index_shape, context.source_id())
@@ -366,7 +374,8 @@ fn get_shape(
             .as_str(),
             method_name.shape_location(context.source_id()),
         )
-    }
+    };
+    or_missing(result, maybe_missing)
 }
 
 fn handle_string_shape(

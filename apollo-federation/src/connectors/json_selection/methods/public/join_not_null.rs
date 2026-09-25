@@ -359,8 +359,8 @@ mod tests {
     #[rstest::rstest]
     #[case::list_of_named(Shape::list(Shape::name("$args.ids.*", []), []))]
     #[case::list_of_unknown(Shape::list(Shape::unknown([]), []))]
-    #[case::list_of_maybe_missing(Shape::list(
-        Shape::one([Shape::string([]), Shape::none()], []),
+    #[case::list_of_nullable(Shape::list(
+        Shape::one([Shape::string([]), Shape::null([])], []),
         []
     ))]
     #[case::list_of_named_or_string(Shape::list(

@@ -26,6 +26,7 @@ use super::location::WithRange;
 use super::methods::ArrowMethod;
 use super::parser::*;
 use super::selection_trie::SelectionTrie;
+use crate::connectors::json_selection::helpers::missing_as_null;
 use crate::connectors::spec::ConnectSpec;
 
 pub(super) type VarsWithPathsMap<'a> = IndexMap<KnownVariable, (&'a JSON, InputPath<JSON>)>;
@@ -1280,11 +1281,12 @@ impl ApplyToInternal for WithRange<LitExpr> {
             LitExpr::Array(vec) => {
                 let mut shapes = Vec::with_capacity(vec.len());
                 for value in vec {
-                    shapes.push(value.compute_output_shape(
+                    // Elements with no value become null at runtime.
+                    shapes.push(missing_as_null(value.compute_output_shape(
                         context,
                         input_shape.clone(),
                         dollar_shape.clone(),
-                    ));
+                    )));
                 }
                 Shape::array(shapes, Shape::none(), locations)
             }

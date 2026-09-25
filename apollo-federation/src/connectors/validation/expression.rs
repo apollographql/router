@@ -1045,6 +1045,70 @@ mod tests {
         }
     }
 
+    // Most methods produce no value, without an error, when an argument has no
+    // value, and their shapes must not report an error for an argument that
+    // may be missing. `$([])->first` has no value at runtime, and the shape
+    // `None`.
+    #[rstest]
+    #[case::eq("$(1)->eq($([])->first)", true)]
+    #[case::ne("$(1)->ne($([])->first)", true)]
+    #[case::gt("$(1)->gt($([])->first)", true)]
+    #[case::gte("$(1)->gte($([])->first)", true)]
+    #[case::lt("$(1)->lt($([])->first)", true)]
+    #[case::lte("$(1)->lte($([])->first)", true)]
+    #[case::in_array("$(1)->in($([])->first)", true)]
+    #[case::contains("$([1])->contains($([])->first)", true)]
+    #[case::and("$(true)->and($([])->first)", true)]
+    #[case::or("$(false)->or($([])->first)", true)]
+    #[case::get_string(r#"$("abc")->get($([])->first)"#, true)]
+    #[case::get_array("$([1])->get($([])->first)", true)]
+    #[case::get_object("$->echo({ a: 1 })->get($([])->first)", true)]
+    #[case::parse_int_base(r#"$("10")->parseInt($([])->first)"#, true)]
+    #[case::split_limit(r#"$("a,b")->split(",", $([])->first)"#, true)]
+    #[case::slice_end(r#"$("abc")->slice(0, $([])->first)"#, true)]
+    #[case::echo("$->echo($([])->first)", true)]
+    // These report an error at runtime, so their shapes should too.
+    #[case::add("$(1)->add($([])->first)", false)]
+    #[case::split_separator(r#"$("a,b")->split($([])->first)"#, false)]
+    #[case::join_not_null_separator(r#"$(["a"])->joinNotNull($([])->first)"#, false)]
+    #[case::filter_condition("$([1])->filter($([])->first)", false)]
+    #[case::find_condition("$([1])->find($([])->first)", false)]
+    fn missing_argument_shapes_match_runtime(#[case] selection: &str, #[case] valid: bool) {
+        let (_, runtime_errors) = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_4)
+            .expect("selection parses")
+            .apply_to(&serde_json_bytes::json!({}));
+        assert_eq!(
+            runtime_errors.is_empty(),
+            valid,
+            "runtime errors: {runtime_errors:?}"
+        );
+
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            let result = validate_with_context(selection, Shape::unknown([]), spec);
+            assert_eq!(result.is_ok(), valid, "{result:?}");
+        }
+    }
+
+    // Arguments that may be missing, like the result of `->first`, are fine
+    // wherever a missing argument makes the method produce no value.
+    #[rstest]
+    #[case::eq(r#"$("a")->eq($args.strings->map(@)->first)"#)]
+    #[case::eq_split_first(r#"$("a")->eq($("a,b")->split(",")->first)"#)]
+    #[case::gt(r#"$("a")->gt($("a,b")->split(",")->first)"#)]
+    #[case::lt("$(1)->lt($args.strings->map(@->size)->first)")]
+    #[case::and(r#"$(true)->and($args.strings->map(@->eq("a"))->first)"#)]
+    #[case::get_array("$([1, 2])->get($args.strings->map(@->size)->first)")]
+    #[case::get_object(r#"$->echo({ a: 1 })->get($("a,b")->split(",")->first)"#)]
+    #[case::parse_int_base(r#"$("10")->parseInt($args.strings->map(@->size)->first)"#)]
+    #[case::split_limit(r#"$("a,b")->split(",", $args.strings->map(@->size)->first)"#)]
+    #[case::array_literal_join(r#"$([$args.strings->map(@)->first])->joinNotNull(",")"#)]
+    fn valid_maybe_missing_arguments(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, Shape::unknown([]), spec)
+                .expect("expression is valid for this spec version");
+        }
+    }
+
     #[rstest]
     #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
     #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]

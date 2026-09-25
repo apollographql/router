@@ -29,10 +29,10 @@ pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) ->
 /// Method shapes are computed before variables like `$args` are resolved, so an
 /// input shape can contain unbound named shapes anywhere inside it (for
 /// example `List<$args.ids.*>` after `->map(@)`). `Shape::validate` rejects
-/// those, as well as `Unknown` and `None` (a value that may be missing), even
-/// though they could turn out to be fine. This treats them as satisfying any
-/// contract, and reports a mismatch only when a part of `shape` that is
-/// actually known cannot satisfy the corresponding part of `contract`.
+/// those, as well as `Unknown`, even though they could turn out to be fine.
+/// This treats them as satisfying any contract, and reports a mismatch only
+/// when a part of `shape` that is actually known cannot satisfy the
+/// corresponding part of `contract`.
 pub(crate) fn definitely_mismatches(contract: &Shape, shape: &Shape) -> bool {
     if contract.validate(shape).is_none() {
         return false;
@@ -44,7 +44,7 @@ pub(crate) fn definitely_mismatches(contract: &Shape, shape: &Shape) -> bool {
                 .upgrade(name)
                 .is_some_and(|named| definitely_mismatches(contract, &named));
         }
-        ShapeCase::Unknown | ShapeCase::None => return false,
+        ShapeCase::Unknown => return false,
         // Every member of a union must be able to satisfy the contract.
         ShapeCase::One(members) => {
             return members
@@ -116,6 +116,43 @@ pub(crate) fn definitely_mismatches(contract: &Shape, shape: &Shape) -> bool {
         }
         // `shape` is known here, and `validate` has already rejected it.
         _ => true,
+    }
+}
+
+/// Returns the part of `shape` that is not `None`, or `None` if `shape` is
+/// always `None` (missing).
+///
+/// At runtime, most `->` methods stop and produce no value, without an error,
+/// when one of their arguments produces no value. Shape logic mirrors that by
+/// checking only the present part of an argument shape, and adding `None` to
+/// the result shape (see [`or_missing`]) when the argument may be missing.
+pub(crate) fn present_part(shape: &Shape) -> Option<Shape> {
+    match shape.case() {
+        ShapeCase::None => None,
+        ShapeCase::One(members) if members.iter().any(Shape::is_none) => Some(Shape::one(
+            members.iter().filter(|member| !member.is_none()).cloned(),
+            shape.locations().cloned(),
+        )),
+        _ => Some(shape.clone()),
+    }
+}
+
+/// Returns true if `shape` is `None` or a union that includes `None`.
+pub(crate) fn may_be_missing(shape: &Shape) -> bool {
+    match shape.case() {
+        ShapeCase::None => true,
+        ShapeCase::One(members) => members.iter().any(Shape::is_none),
+        _ => false,
+    }
+}
+
+/// Adds `None` to `result` if `maybe_missing`, for methods that produce no
+/// value when an argument may be missing.
+pub(crate) fn or_missing(result: Shape, maybe_missing: bool) -> Shape {
+    if maybe_missing {
+        Shape::one([result, Shape::none()], [])
+    } else {
+        result
     }
 }
 
@@ -294,11 +331,6 @@ mod tests {
     #[case::exact(Shape::string([]), Shape::string([]))]
     #[case::named(Shape::string([]), Shape::name("$args.s", []))]
     #[case::unknown(Shape::string([]), Shape::unknown([]))]
-    #[case::none(Shape::string([]), Shape::none())]
-    #[case::maybe_missing(
-        Shape::string([]),
-        Shape::one([Shape::string([]), Shape::none()], [])
-    )]
     #[case::named_or_string(
         Shape::string([]),
         Shape::one([Shape::name("$args.s", []), Shape::string([])], [])
@@ -330,6 +362,11 @@ mod tests {
 
     #[rstest::rstest]
     #[case::wrong_scalar(Shape::string([]), Shape::int([]))]
+    #[case::none(Shape::string([]), Shape::none())]
+    #[case::maybe_missing(
+        Shape::string([]),
+        Shape::one([Shape::string([]), Shape::none()], [])
+    )]
     #[case::list_for_string(
         Shape::string([]),
         Shape::list(Shape::name("$args.ids.*", []), [])

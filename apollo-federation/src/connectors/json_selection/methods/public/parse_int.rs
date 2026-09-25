@@ -10,6 +10,9 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::may_be_missing;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::impl_arrow_method;
 
 const DEFAULT_BASE: u32 = 10;
@@ -213,8 +216,14 @@ fn parse_int_shape(
     }
 
     // If we have a base argument, validate its shape
+    let mut maybe_missing = false;
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
         let arg_shape = first_arg.compute_output_shape(context, input_shape, dollar_shape);
+        maybe_missing = may_be_missing(&arg_shape);
+        let Some(arg_shape) = present_part(&arg_shape) else {
+            // The method produces no value when its base argument has none.
+            return Shape::none();
+        };
 
         if !(Shape::int([]).accepts(&arg_shape) || arg_shape.accepts(&Shape::unknown([]))) {
             return Shape::error_with_partial(
@@ -229,7 +238,10 @@ fn parse_int_shape(
         }
     }
 
-    Shape::int(method_name.shape_location(context.source_id()))
+    or_missing(
+        Shape::int(method_name.shape_location(context.source_id())),
+        maybe_missing,
+    )
 }
 
 #[cfg(test)]
