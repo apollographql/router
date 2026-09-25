@@ -7,9 +7,11 @@ use shape::Shape;
 use shape::ShapeCase;
 
 use super::ParseResult;
+use super::ShapeContext;
 use super::is_identifier;
 use super::location::Span;
 use super::location::WithRange;
+use crate::connectors::ConnectSpec;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to
@@ -175,7 +177,13 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
 /// At runtime, `->map` and array literals like `[$.a, $.b]` put `null` in the
 /// output array wherever an element produced no value, so their element
 /// shapes can be `Null` but never `None`.
-pub(crate) fn missing_as_null(shape: Shape) -> Shape {
+///
+/// This changes the result shape of expressions that were already valid, so it
+/// only applies from `connect/v0.5`.
+pub(crate) fn missing_as_null(context: &ShapeContext, shape: Shape) -> Shape {
+    if context.spec() < ConnectSpec::V0_5 {
+        return shape;
+    }
     let locations = shape.locations().cloned();
     match shape.case() {
         ShapeCase::None => Shape::null(locations),

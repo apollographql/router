@@ -131,6 +131,7 @@ fn lt_shape(
 
     if is_comparable_shape_combination(&arg_shape, &input_shape) {
         or_missing(
+            context,
             Shape::bool(method_name.shape_location(context.source_id())),
             maybe_missing,
         )

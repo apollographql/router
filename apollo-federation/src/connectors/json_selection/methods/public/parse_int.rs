@@ -239,6 +239,7 @@ fn parse_int_shape(
     }
 
     or_missing(
+        context,
         Shape::int(method_name.shape_location(context.source_id())),
         maybe_missing,
     )

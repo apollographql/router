@@ -149,6 +149,7 @@ fn contains_shape(
 
     let ShapeCase::Array { prefix, tail } = input_shape.case() else {
         return or_missing(
+            context,
             Shape::bool(method_name.shape_location(context.source_id())),
             maybe_missing,
         );
@@ -182,6 +183,7 @@ fn contains_shape(
     }
 
     or_missing(
+        context,
         Shape::bool(method_name.shape_location(context.source_id())),
         maybe_missing,
     )

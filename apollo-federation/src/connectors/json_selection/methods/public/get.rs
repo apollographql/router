@@ -376,7 +376,7 @@ fn get_shape(
             method_name.shape_location(context.source_id()),
         )
     };
-    or_missing(result, maybe_missing)
+    or_missing(context, result, maybe_missing)
 }
 
 fn handle_string_shape(

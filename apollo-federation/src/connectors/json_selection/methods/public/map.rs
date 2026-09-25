@@ -102,11 +102,14 @@ fn map_shape(
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    missing_as_null(first_arg.compute_output_shape(
+                    missing_as_null(
                         context,
-                        shape.clone(),
-                        dollar_shape.clone(),
-                    ))
+                        first_arg.compute_output_shape(
+                            context,
+                            shape.clone(),
+                            dollar_shape.clone(),
+                        ),
+                    )
                 })
                 .collect::<Vec<_>>();
             // A None tail means there are no more elements, so there is nothing
@@ -114,16 +117,18 @@ fn map_shape(
             let new_tail = if tail.is_none() {
                 tail.clone()
             } else {
-                missing_as_null(first_arg.compute_output_shape(context, tail.clone(), dollar_shape))
+                missing_as_null(
+                    context,
+                    first_arg.compute_output_shape(context, tail.clone(), dollar_shape),
+                )
             };
             Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
         }
         _ => Shape::list(
-            missing_as_null(first_arg.compute_output_shape(
+            missing_as_null(
                 context,
-                input_shape.any_item([]),
-                dollar_shape,
-            )),
+                first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
+            ),
             input_shape.locations().cloned(),
         ),
     }

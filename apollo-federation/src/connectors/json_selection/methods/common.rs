@@ -4,6 +4,7 @@ use shape::Shape;
 use shape::ShapeCase;
 
 use crate::connectors::ApplyToError;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -135,8 +136,12 @@ pub(crate) fn may_be_missing(shape: &Shape) -> bool {
 
 /// Adds `None` to `result` if `maybe_missing`, for methods that produce no
 /// value when an argument may be missing.
-pub(crate) fn or_missing(result: Shape, maybe_missing: bool) -> Shape {
-    if maybe_missing {
+///
+/// This changes the result shape of expressions that were already valid, which
+/// can make them fail where an exact shape is expected (like a `Bool` for
+/// `isSuccess`), so it only applies from `connect/v0.5`.
+pub(crate) fn or_missing(context: &ShapeContext, result: Shape, maybe_missing: bool) -> Shape {
+    if maybe_missing && context.spec() >= ConnectSpec::V0_5 {
         Shape::one([result, Shape::none()], [])
     } else {
         result

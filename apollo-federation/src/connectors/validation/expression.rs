@@ -1125,6 +1125,30 @@ mod tests {
         }
     }
 
+    // Before connect/v0.5, result shapes of expressions that were already valid
+    // must not change, even where the runtime-accurate shape differs: an
+    // argument that may be missing does not add `None` to a method's result,
+    // and missing `->map` or array literal elements stay `None` rather than
+    // becoming `Null`.
+    #[rstest]
+    #[case::maybe_missing_argument_in_bool_context(
+        "$(1)->eq($args.strings->map(@)->first)",
+        Shape::bool([])
+    )]
+    #[case::maybe_missing_boolean_argument(
+        r#"$(true)->and($args.strings->map(@->eq("a"))->first)"#,
+        Shape::bool([])
+    )]
+    #[case::missing_array_literal_element("$([$([])->first])->first->eq(1)", Shape::unknown([]))]
+    fn result_shapes_change_only_from_v0_5(#[case] selection: &str, #[case] expected: Shape) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
+            validate_with_context(selection, expected.clone(), spec)
+                .expect("result shape is unchanged before connect/v0.5");
+        }
+        validate_with_context(selection, expected, ConnectSpec::V0_5)
+            .expect_err("result shape mirrors the runtime from connect/v0.5");
+    }
+
     #[rstest]
     #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
     #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]

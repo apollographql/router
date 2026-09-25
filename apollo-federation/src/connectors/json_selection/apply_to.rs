@@ -1282,11 +1282,14 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 let mut shapes = Vec::with_capacity(vec.len());
                 for value in vec {
                     // Elements with no value become null at runtime.
-                    shapes.push(missing_as_null(value.compute_output_shape(
+                    shapes.push(missing_as_null(
                         context,
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                    )));
+                        value.compute_output_shape(
+                            context,
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                        ),
+                    ));
                 }
                 Shape::array(shapes, Shape::none(), locations)
             }
