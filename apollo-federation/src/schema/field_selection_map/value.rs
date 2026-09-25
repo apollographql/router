@@ -73,6 +73,57 @@ impl SelectionTree {
         }
     }
 
+    /// A copy with fields and fragments sorted, so that equal selections print equally.
+    pub(crate) fn canonical(&self) -> SelectionTree {
+        let mut fields: Vec<_> = self
+            .fields
+            .iter()
+            .map(|(key, (name, arguments, subtree))| {
+                (
+                    key.clone(),
+                    (name.clone(), arguments.clone(), subtree.canonical()),
+                )
+            })
+            .collect();
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut fragments: Vec<_> = self
+            .fragments
+            .iter()
+            .map(|(name, subtree)| (name.clone(), subtree.canonical()))
+            .collect();
+        fragments.sort_by(|a, b| a.0.cmp(&b.0));
+        SelectionTree {
+            fields: fields.into_iter().collect(),
+            fragments: fragments.into_iter().collect(),
+        }
+    }
+
+    /// Build a tree from a parsed field set (`@key(fields:)`).
+    pub(crate) fn from_selection_set(
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) -> Self {
+        use apollo_compiler::executable::Selection;
+        let mut tree = SelectionTree::default();
+        for selection in &selection_set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    let arguments: Vec<Node<ast::Argument>> = field.arguments.clone();
+                    tree.field(&field.name, &arguments)
+                        .merge(&Self::from_selection_set(&field.selection_set));
+                }
+                Selection::InlineFragment(fragment) => {
+                    let subtree = Self::from_selection_set(&fragment.selection_set);
+                    match &fragment.type_condition {
+                        Some(type_condition) => tree.fragment(type_condition).merge(&subtree),
+                        None => tree.merge(&subtree),
+                    }
+                }
+                Selection::FragmentSpread(_) => {}
+            }
+        }
+        tree
+    }
+
     /// The top-level field names, in selection order.
     pub(crate) fn top_level_fields(&self) -> impl Iterator<Item = &Name> {
         self.fields.values().map(|(name, _, _)| name)
@@ -217,7 +268,8 @@ impl Collector<'_> {
 }
 
 /// The output fields `value` reads when the root object has the concrete type `concrete`, one
-/// tree per applicable top-level alternative. Empty when no alternative applies.
+/// tree per applicable top-level alternative (with the alternative's index). Empty when no
+/// alternative applies.
 ///
 /// Each top-level alternative of an argument is a distinct way to recall the entity (for a
 /// `@oneOf` input, a distinct _stable key_), hence one tree each.
@@ -225,14 +277,17 @@ pub(crate) fn selections_for_type(
     value: &SelectedValue,
     schema: &Schema,
     concrete: &Name,
-) -> Vec<SelectionTree> {
+) -> Vec<(usize, SelectionTree)> {
     let collector = Collector { schema, concrete };
     value
         .alternatives
         .iter()
-        .filter_map(|entry| {
+        .enumerate()
+        .filter_map(|(index, entry)| {
             let mut tree = SelectionTree::default();
-            collector.entry(entry, true, &mut tree).then_some(tree)
+            collector
+                .entry(entry, true, &mut tree)
+                .then_some((index, tree))
         })
         .collect()
 }
@@ -246,7 +301,7 @@ pub(crate) fn is_mappable(value: &SelectedValue, schema: &Schema, concrete: &Nam
     };
     selections_for_type(value, schema, concrete)
         .iter()
-        .any(|tree| {
+        .any(|(_, tree)| {
             tree.top_level_fields()
                 .all(|f| object.fields.contains_key(f))
         })

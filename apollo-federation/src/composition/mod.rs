@@ -120,6 +120,9 @@ fn compose_subgraphs(
     // holding on to the result rather than doing both after the merge.
     let override_on_connector = validate_override_on_connector(&validated_subgraphs);
 
+    let validated_subgraphs =
+        crate::composite_schemas::normalize::normalize_source_schemas(validated_subgraphs)?;
+
     tracing::debug!("Merging subgraphs...");
     let supergraph = merge_subgraphs(validated_subgraphs, &options)?;
     tracing::debug!("Post-merge validations...");
