@@ -1,7 +1,4 @@
-//! Parses router configuration through the shared `apollo-configuration` crate.
-//!
-//! Startup, hot reload, `Configuration::from_str` and `router config validate` all load
-//! configuration here.
+//! Parses router configuration with `apollo-configuration`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,7 +19,7 @@ use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 
-/// Reports every plugin whose settings could not be deserialized, at its section of the document.
+/// Reports every plugin whose config could not be deserialized, at its section of the document.
 impl apollo_configuration::Validate for Configuration {
     fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
         for error in self.plugin_configs.errors() {
@@ -92,7 +89,7 @@ impl ExternalValues {
     fn add_to(self, options: ParseYamlOptions) -> ParseYamlOptions {
         let options = options.inject(self.injections);
         if self.variables.is_empty() {
-            // Without providers the shared parser leaves expansion syntax unchanged.
+            // Without providers, apollo-configuration leaves expansion syntax unchanged.
             return options;
         }
         options.add_variables(ProviderSnapshot {
@@ -112,8 +109,8 @@ impl ExternalValues {
     }
 }
 
-/// Consults each provider in order, as the shared parser does with separately added providers,
-/// and remembers each result. Both shared-parser passes then see the same value, even if a file
+/// Consults each provider in order, as apollo-configuration does with separately added providers,
+/// and remembers each result. Both parsing passes then see the same value, even if a file
 /// or environment variable changes between them.
 struct ProviderSnapshot {
     providers: Vec<Box<dyn VariableProvider>>,
@@ -283,7 +280,7 @@ fn collect_paths(diagnostic: &dyn miette::Diagnostic, serialized: &str, paths: &
     }
 }
 
-/// Parses typed settings, then the expanded document, with the same options. The retained
+/// Parses the typed configuration, then the expanded document, with the same options. The retained
 /// document shows `plugins: null` as `{}`, which means the same.
 fn parse_document(text: &str, options: &ParseYamlOptions) -> Result<Configuration, ConfigError> {
     let mut config: Configuration = options.parse(text)?;
@@ -361,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn retained_document_preserves_secret_values_without_serializing_typed_settings() {
+    fn retained_document_preserves_secret_values_without_serializing_the_typed_configuration() {
         let text = "apq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: ${env.ADAPTER_PASSWORD}\n";
         let secret = "adapter-test-password"; // gitleaks:allow
         let config = parse_configuration(text, env("ADAPTER_PASSWORD", secret), Migration::None)
@@ -424,7 +421,7 @@ mod tests {
 
     #[test]
     fn null_plugins_mean_no_user_plugins() {
-        let config = parse("plugins: null\n").expect("null plugin settings are accepted");
+        let config = parse("plugins: null\n").expect("null plugin config is accepted");
 
         assert!(config.plugins.plugins.unwrap_or_default().is_empty());
         assert_eq!(config.validated_yaml, Some(json!({ "plugins": {} })));
@@ -614,13 +611,13 @@ mod tests {
         .unwrap();
     }
 
-    /// Every plugin with invalid settings is reported, each against its own section.
+    /// Every plugin with invalid config is reported, each against its own section.
     #[test]
     fn every_invalid_plugin_is_reported_at_its_section() {
         let text = "# operator comment\ntraffic_shaping:\n  router:\n    timeout: not-a-duration\nsubscription:\n  deduplication:\n    enabled: true\n";
 
         let error = parse_configuration(text, ExternalValues::default(), Migration::None)
-            .expect_err("both plugins' settings are invalid")
+            .expect_err("both plugins' config is invalid")
             .to_string();
 
         assert!(error.contains("apollo.traffic_shaping"), "{error}");

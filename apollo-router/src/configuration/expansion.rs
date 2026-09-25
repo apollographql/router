@@ -16,7 +16,7 @@ use serde_json::Value;
 use super::ConfigurationError;
 use super::apollo_configuration_parse::ExternalValues;
 
-/// The inputs the router supplies to the shared parser alongside the configuration file:
+/// The inputs the router supplies to configuration parsing alongside the configuration file:
 /// providers for `${env.NAME}` and `${file.PATH}` references, and overrides that set values at
 /// fixed paths from environment variables and command-line flags.
 #[derive(buildstructor::Builder, Clone)]
@@ -89,7 +89,7 @@ impl Override {
         })
     }
 
-    /// The override as a shared-parser injection naming its source, when it supplies a value.
+    /// The override as an apollo-configuration injection naming its source, when it supplies a value.
     fn injection(&self) -> Option<Injection> {
         let path: Vec<&str> = self.config_path.split('.').collect();
         if let (Some(value), Some(name)) = (self.env_value(), &self.env_name) {

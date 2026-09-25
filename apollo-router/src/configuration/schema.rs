@@ -23,7 +23,7 @@ pub(crate) fn generate_config_schema() -> Schema {
     schema
 }
 
-/// [`generate_config_schema`] as JSON, as the shared-parser adapter applies it, generated once and
+/// [`generate_config_schema`] as JSON, as configuration parsing applies it, generated once and
 /// shared by the adapter and tests.
 ///
 /// Earlier releases accepted `plugins: null`, meaning no user plugins. The published schema only

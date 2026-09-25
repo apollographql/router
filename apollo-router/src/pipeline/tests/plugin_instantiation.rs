@@ -85,11 +85,10 @@ impl Plugin for AlwaysFailsToStartPlugin {
 
 register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
-// Records the previous settings it is built with
+// Records the previous config it is built with
 
-/// The previous settings the last built `test.records_previous_config` received.
-static PREVIOUS_SETTINGS: parking_lot::Mutex<Option<Option<String>>> =
-    parking_lot::Mutex::new(None);
+/// The previous config the last built `test.records_previous_config` received.
+static PREVIOUS_CONFIG: parking_lot::Mutex<Option<Option<String>>> = parking_lot::Mutex::new(None);
 
 #[derive(Debug)]
 struct RecordsPreviousConfigPlugin {}
@@ -99,7 +98,7 @@ impl Plugin for RecordsPreviousConfigPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        *PREVIOUS_SETTINGS.lock() = Some(init.previous_config.map(|previous| previous.name));
+        *PREVIOUS_CONFIG.lock() = Some(init.previous_config.map(|previous| previous.name));
         Ok(RecordsPreviousConfigPlugin {})
     }
 }
@@ -128,34 +127,35 @@ async fn create_service(config: Configuration) -> Result<(), BoxError> {
     service.map(|_| ())
 }
 
-/// Plugins registered through the public API have their settings typed while the configuration
-/// is parsed, like built-in plugins, so each construction reuses the validated value.
+/// Plugins registered through the public API have their config deserialized when the
+/// configuration is parsed, like built-in plugins, so each construction reuses the validated value.
 #[test]
-fn user_plugin_settings_are_typed_while_parsing() {
+fn user_plugin_config_is_deserialized_when_parsed() {
     let config: Configuration =
         "plugins:\n  test.always_starts_and_stops:\n    name: parsed once\n"
             .parse()
-            .expect("the plugin settings are valid");
+            .expect("the plugin config is valid");
 
-    let settings: Conf = config
+    let plugin_config: Conf = config
         .plugin_configs
         .user("test.always_starts_and_stops")
-        .expect("the plugin's settings are retained")
+        .expect("the plugin's config is kept")
         .config
         .typed()
-        .expect("the settings were deserialized during parsing");
-    assert_eq!(settings.name, "parsed once");
+        .expect("the config was deserialized during parsing");
+    assert_eq!(plugin_config.name, "parsed once");
 }
 
-/// Construction takes user plugins from the settings retained while parsing, in configuration
-/// order, so later edits to the raw sections change nothing. A section naming no registered
-/// plugin is recorded for construction to report.
+/// Construction takes user plugins from their parsed config, in configuration order, so later
+/// edits to the raw sections change nothing. A section naming no registered plugin is recorded
+/// for construction to report.
 #[test]
-fn user_plugins_come_from_the_settings_retained_while_parsing() {
+fn user_plugins_are_built_from_their_parsed_config() {
     let mut config: Configuration = serde_yaml::from_str(
         "plugins:\n  test.always_fails_to_start:\n    name: first\n  acme.unregistered: {}\n  test.always_starts_and_stops:\n    name: second\n",
     )
     .expect("the user plugin sections deserialize");
+    // Construction must not read the raw sections, so removing them changes nothing below.
     config.plugins.plugins = None;
 
     let configs = &config.plugin_configs;
@@ -167,13 +167,13 @@ fn user_plugins_come_from_the_settings_retained_while_parsing() {
     assert_eq!(configs.unknown_plugins(), ["acme.unregistered"]);
 }
 
-/// On a hot reload, each plugin is built with the settings it ran with before.
+/// On a hot reload, each plugin is built with the config it ran with before.
 #[tokio::test]
-async fn plugins_receive_their_previous_settings_on_reload() {
+async fn plugins_receive_their_previous_config_on_reload() {
     let configuration = |name: &str| -> Configuration {
         format!("plugins:\n  test.records_previous_config:\n    name: {name}\n")
             .parse()
-            .expect("the plugin settings are valid")
+            .expect("the plugin config is valid")
     };
     let previous = configuration("before");
     let current = configuration("after");
@@ -192,7 +192,7 @@ async fn plugins_receive_their_previous_settings_on_reload() {
     .await
     .expect("the plugins build");
 
-    assert_eq!(*PREVIOUS_SETTINGS.lock(), Some(Some("before".to_string())));
+    assert_eq!(*PREVIOUS_CONFIG.lock(), Some(Some("before".to_string())));
 }
 
 #[tokio::test]

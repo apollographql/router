@@ -498,9 +498,10 @@ fn parse_anchored_expansion(text: &str) -> String {
         .to_string()
 }
 
-/// Pins a known limitation: the shared parser redacts `password`, but the error about the
-/// anchoring `timeout` quotes the value its expansion reference resolved to. When the shared
-/// parser redacts values reached through an anchor, this should assert that the value is hidden.
+/// Pins a known limitation: apollo-configuration redacts `password`, but the error about the
+/// anchoring `timeout` quotes the value its expansion reference resolved to. When
+/// apollo-configuration redacts values reached through an anchor, this should assert that the
+/// value is hidden.
 #[test]
 fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_field() {
     let error = parse_anchored_expansion(ANCHORED_EXPANSION);

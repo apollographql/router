@@ -226,7 +226,7 @@ pub struct Configuration {
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
 
-    /// Each configured plugin's settings, prepared for construction while parsing.
+    /// Each configured plugin's config, deserialized when the configuration is parsed.
     #[serde(skip)]
     pub(crate) plugin_configs: Arc<PluginConfigs>,
 
@@ -452,19 +452,19 @@ impl Configuration {
     }
 
     /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
-    /// when the configuration has none, and retains its settings as parsing would have.
+    /// when the configuration has none, and deserializes its config as parsing would have.
     #[cfg(any(test, feature = "mock_subgraphs_testing"))]
     pub(crate) fn add_apollo_plugin_if_absent(
         &mut self,
         name: &str,
-        settings: impl FnOnce() -> Value,
+        config: impl FnOnce() -> Value,
     ) {
         if self.apollo_plugins.plugins.contains_key(name) {
             return;
         }
         self.apollo_plugins
             .plugins
-            .insert(name.to_string(), settings());
+            .insert(name.to_string(), config());
         self.reparse_plugin_configs();
     }
 

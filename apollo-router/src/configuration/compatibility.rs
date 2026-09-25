@@ -1,4 +1,4 @@
-//! Regression corpus for configuration loading through the shared parser.
+//! Regression corpus for configuration loading with apollo-configuration.
 //!
 //! These fixtures were compared against the router's previous loader before it was removed, and
 //! both produced the same effective settings. The snapshots record what each fixture changes
@@ -332,25 +332,25 @@ fn mandatory_plugin_defaults_are_present_without_being_configured() {
         );
         assert!(
             config.plugin_config(&format!("apollo.{plugin}")).is_some(),
-            "the mandatory `{plugin}` plugin settings must be retained"
+            "the mandatory `{plugin}` plugin config must be kept"
         );
     }
 }
 
-/// Parsing retains typed plugin settings that match the document, and plugins are constructed
-/// from those retained values.
+/// Parsing keeps typed plugin config that matches the document, and plugins are constructed
+/// from it.
 #[tokio::test]
 async fn typed_plugin_configs_are_retained_and_construct_plugins() {
     let config = load(&FEATUREFUL_CASE).expect("the featureful fixture is valid");
 
     let subscription: SubscriptionConfig = config
         .plugin_config("apollo.subscription")
-        .expect("subscription settings are retained")
+        .expect("subscription config is kept")
         .typed()
         .unwrap();
     let health_check: HealthCheck = config
         .plugin_config("apollo.health_check")
-        .expect("health check settings are retained")
+        .expect("health check config is kept")
         .typed()
         .unwrap();
     let document: SubscriptionConfig =
@@ -412,12 +412,12 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 }
 
 /// Intentional difference from the previous loader, which fell back to the original document
-/// only when the migrated one failed the schema check. The shared parser validates in one call,
+/// only when the migrated one failed the schema check. apollo-configuration validates in one call,
 /// so a migrated document rejected by deserialization or cross-field validation falls back too.
 /// Here startup migration 2045 fixes the flat deduplication settings, the migrated copy then
-/// fails cross-field validation, and the file as written is reported instead. Its cross-field
-/// conflict is reported first, because invalid plugin settings are reported after the rest of
-/// the configuration deserializes.
+/// fails cross-field validation, and so does the file as written. The file's cross-field conflict
+/// is reported first, because invalid plugin config is reported after the rest of the
+/// configuration deserializes, and the migrated copy's errors follow it.
 #[test]
 fn migrated_document_failing_cross_field_validation_falls_back_to_the_file() {
     let _guard = tracing_test::dispatcher_guard();

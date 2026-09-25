@@ -159,7 +159,7 @@ pub(crate) async fn create_plugins(
 ///
 /// [`add_mandatory`](Self::add_mandatory), [`add_optional`](Self::add_optional) and
 /// [`add_user_plugins`](Self::add_user_plugins) each claim their factory out of `factories`,
-/// construct the plugin from the configuration retained while parsing, and record the built
+/// construct the plugin from its config deserialized at parse time, and record the built
 /// instance or the construction error. Bundling the state into one struct lets the methods
 /// borrow it mutably as a unit.
 struct PluginRegistrar<'a> {
@@ -210,7 +210,7 @@ impl PluginRegistrar<'_> {
             let factory = self.take_factory(&full_name);
             let plugin_config = match self.configuration.plugin_config(&full_name) {
                 Some(config) => config.clone(),
-                // Without a section, the plugin runs with its default settings.
+                // Without a section, the plugin runs with its default config.
                 None => match factory.parse_config(Value::Object(Map::new())) {
                     Ok(config) => config,
                     Err(error) => {

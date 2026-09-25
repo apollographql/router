@@ -62,13 +62,13 @@ type InstanceFactory =
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
 
-/// A plugin's configuration as retained by the parsed router configuration.
+/// A plugin's config, deserialized when the router configuration is parsed.
 #[derive(Clone)]
 pub(crate) struct PluginConfig(Arc<dyn std::any::Any + Send + Sync>);
 
 impl fmt::Debug for PluginConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Typed settings may hold secrets and have no common `Debug` bound.
+        // Typed config may hold secrets and has no common `Debug` bound.
         f.write_str("PluginConfig")
     }
 }
@@ -370,16 +370,13 @@ impl PluginFactory {
         }
     }
 
-    /// Deserializes a plugin's validated settings for construction, so invalid settings are
-    /// reported while the configuration is parsed.
-    pub(crate) fn parse_config(
-        &self,
-        settings: serde_json::Value,
-    ) -> Result<PluginConfig, BoxError> {
-        (self.config_factory)(settings)
+    /// Deserializes a plugin's validated config for construction, so invalid config is reported
+    /// when the configuration is parsed.
+    pub(crate) fn parse_config(&self, config: serde_json::Value) -> Result<PluginConfig, BoxError> {
+        (self.config_factory)(config)
     }
 
-    /// Constructs the plugin from configuration retained by [`Self::parse_config`].
+    /// Constructs the plugin from config deserialized by [`Self::parse_config`].
     pub(crate) async fn create_from_config(
         &self,
         init: PluginInit<PluginConfig>,
@@ -387,13 +384,13 @@ impl PluginFactory {
         (self.instance_factory)(init).await
     }
 
-    /// Parses `init`'s settings and constructs the plugin from them.
+    /// Deserializes `init`'s config and constructs the plugin from it.
     #[cfg(test)]
     pub(crate) async fn create_instance(
         &self,
         init: PluginInit<serde_json::Value>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        let init = init.try_map_config(|settings| self.parse_config(settings))?;
+        let init = init.try_map_config(|config| self.parse_config(config))?;
         self.create_from_config(init).await
     }
 

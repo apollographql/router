@@ -209,7 +209,7 @@ async fn it_does_not_allow_both_allow_and_deny_list_in_global_config() {
             "deny_extensions_keys": []
         }
     });
-    // Settings that fail the plugin's own validation are rejected while parsing.
+    // Config that fails the plugin's own validation is rejected when it is parsed.
     let error = build_harness(&config_json)
         .await
         .expect_err("expected error")
@@ -237,7 +237,7 @@ async fn it_does_not_allow_both_allow_and_deny_list_in_a_subgraph_config() {
             }
         }
     });
-    // Settings that fail the plugin's own validation are rejected while parsing.
+    // Config that fails the plugin's own validation is rejected when it is parsed.
     let error = build_harness(&config_json)
         .await
         .expect_err("expected error")
