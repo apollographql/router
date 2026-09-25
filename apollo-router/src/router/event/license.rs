@@ -190,14 +190,23 @@ impl LicenseSource {
                     Ok(stream) => stream
                         .filter_map(|res| {
                             future::ready(match res {
-                                Ok(license) => Some(license),
+                                Ok(Some(license)) => Some(license),
+                                Ok(None) => Some(License::default()),
+                                Err(e) if e.is_missing_entitlement_layer() => {
+                                    tracing::error!(
+                                        code = APOLLO_ROUTER_LICENSE_INVALID,
+                                        "{e}; the router will run unlicensed"
+                                    );
+                                    Some(License::default())
+                                }
                                 Err(e) => {
-                                    // A genuine "no entitlement" (`OciError::is_not_found()`)
-                                    // is already converted to `Ok(License::default())` inside
-                                    // `fetch_license_from_reference`, so any `Err` reaching
-                                    // here is a transient failure (auth, 5xx, network) that
-                                    // should be retried on the next poll, not treated as an
-                                    // invalid license.
+                                    // Missing annotation is already converted to `Ok(None)`
+                                    // upstream, and a missing entitlement layer is handled by
+                                    // the `is_missing_entitlement_layer` arm above, so any
+                                    // `Err` reaching here is a transient failure (auth, 5xx,
+                                    // network, entitlement not yet backfilled) that should be
+                                    // retried on the next poll, not treated as an invalid
+                                    // license.
                                     tracing::warn!(
                                         "transient error fetching license from oci registry, will retry: {}",
                                         e
