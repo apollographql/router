@@ -484,11 +484,12 @@ impl Executable {
                 command: ConfigSubcommand::Validate { config_path },
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
-                // Validate what startup would load, including automatic migration.
+                // Validate what startup would load, including automatic migration. The note below
+                // reports migrations, so the parse does not log them as errors.
                 parse_configuration(
                     &config_string,
                     Expansion::default()?,
-                    Migration::WithinMajor,
+                    Migration::WithinMajorQuietly,
                 )?;
 
                 println!("Configuration at path {config_path:?} is valid!");

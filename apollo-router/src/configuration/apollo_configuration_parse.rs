@@ -52,6 +52,9 @@ const UPGRADE_GUIDE: &str =
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Migration {
     WithinMajor,
+    /// Applies the same migrations without logging them, for callers that report them
+    /// themselves.
+    WithinMajorQuietly,
     #[cfg(test)]
     None,
 }
@@ -173,6 +176,9 @@ pub(crate) fn parse_configuration(
     };
     let migrated = match migration {
         Migration::WithinMajor => upgrade_configuration(&file, true, UpgradeMode::current_minor())?,
+        Migration::WithinMajorQuietly => {
+            upgrade_configuration(&file, false, UpgradeMode::current_minor())?
+        }
         #[cfg(test)]
         Migration::None => file.clone(),
     };
@@ -547,6 +553,30 @@ mod tests {
                     "the adapter must report applied migrations like the production loader"
                         .to_string()
                 })
+        })
+        .unwrap();
+    }
+
+    /// `router config validate` reports migrations itself, so its parse logs nothing about them.
+    #[test]
+    fn quiet_migration_logs_nothing_about_what_it_changed() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        parse_configuration(
+            include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
+            ExternalValues::default(),
+            Migration::WithinMajorQuietly,
+        )
+        .expect("the adapter migrates legacy CORS settings");
+
+        tracing_test::logs_assert(|lines| {
+            match lines
+                .iter()
+                .find(|line| line.contains("needs to be upgraded"))
+            {
+                Some(line) => Err(format!("unexpected migration log: {line}")),
+                None => Ok(()),
+            }
         })
         .unwrap();
     }
