@@ -19,6 +19,8 @@ use super::manifest::FullPersistedQueryOperationId;
 use super::manifest::PersistedQueryManifest;
 use super::manifest::SignedUrlChunk;
 use crate::Configuration;
+use crate::registry::OciConfig;
+use crate::registry::create_oci_pq_chunk_stream;
 use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;
@@ -239,6 +241,7 @@ pub(crate) enum ManifestPollResultOnStartup {
 enum ManifestSource {
     LocalStatic(Vec<String>),
     LocalHotReload(Vec<String>),
+    Oci(OciConfig),
     Uplink(UplinkConfig),
 }
 
@@ -252,6 +255,10 @@ impl ManifestSource {
             }
         } else if let Some(paths) = &config.persisted_queries.local_manifests {
             ManifestSource::LocalStatic(paths.clone())
+        } else if let Some(oci_config) = config.oci.as_ref() {
+            // Same precedence as the schema and license sources: a configured graph artifact
+            // reference means the OCI image is the source of truth, not Uplink.
+            ManifestSource::Oci(oci_config.clone())
         } else if let Some(uplink_config) = config.uplink.as_ref() {
             ManifestSource::Uplink(uplink_config.clone())
         } else {
@@ -274,6 +281,17 @@ async fn create_manifest_stream(
     match source {
         ManifestSource::LocalStatic(paths) => Ok(stream::once(load_local_manifests(paths)).boxed()),
         ManifestSource::LocalHotReload(paths) => Ok(create_hot_reload_stream(paths).boxed()),
+        ManifestSource::Oci(oci_config) => {
+            let chunk_stream =
+                create_oci_pq_chunk_stream(oci_config).map_err(|e| -> BoxError { e.into() })?;
+            Ok(chunk_stream
+                .map(|result| {
+                    result
+                        .map_err(|e| -> BoxError { Box::new(e) })
+                        .and_then(manifest_from_oci_chunks)
+                })
+                .boxed())
+        }
         ManifestSource::Uplink(uplink_config) => {
             let client = Client::builder()
                 .timeout(uplink_config.timeout)
@@ -282,6 +300,24 @@ async fn create_manifest_stream(
             Ok(create_uplink_stream(uplink_config, client).boxed())
         }
     }
+}
+
+/// Parse the chunk JSON documents read off a graph artifact image (already in manifest layer
+/// order) into a [`PersistedQueryManifest`]. Each document is the same format as an Uplink /
+/// local-file chunk, so it goes through the same validation.
+fn manifest_from_oci_chunks(raw_chunks: Vec<String>) -> Result<PersistedQueryManifest, BoxError> {
+    let mut manifest = PersistedQueryManifest::default();
+    for raw_chunk in &raw_chunks {
+        let chunk = SignedUrlChunk::parse_and_validate(raw_chunk)?;
+        manifest.add_chunk(&chunk);
+    }
+
+    tracing::info!(
+        "Loaded {} persisted queries from the graph artifact image.",
+        manifest.len()
+    );
+
+    Ok(manifest)
 }
 
 async fn poll_manifest_stream(
@@ -425,12 +461,27 @@ fn create_hot_reload_stream(
 mod tests {
     use tokio::io::AsyncWriteExt;
     use url::Url;
+    use wiremock::MockServer;
 
     use super::*;
     use crate::configuration::Apq;
     use crate::configuration::PersistedQueries;
+    use crate::registry::test_helpers::mock_oci_config_with_reference;
+    use crate::registry::test_helpers::pq_chunk_layer;
+    use crate::registry::test_helpers::setup_mocks;
     use crate::test_harness::mocks::persisted_queries::*;
     use crate::uplink::Endpoints;
+
+    /// An OciConfig for the hot-reloading tag flow, which is how a real graph artifact reference
+    /// is consumed.
+    fn oci_config_for(reference: String) -> OciConfig {
+        OciConfig {
+            hot_reload: true,
+            ..mock_oci_config_with_reference(reference)
+        }
+    }
+
+    const OCI_CHUNK_JSON: &str = r#"{"format":"apollo-persisted-query-manifest","version":1,"operations":[{"id":"oci-op-id","body":"query { fromOci }"}]}"#;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn poller_can_get_operation_bodies() {
@@ -474,6 +525,82 @@ mod tests {
                 .uplink(UplinkConfig::for_tests(Endpoints::fallback(vec![
                     url1, url2,
                 ])))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oci_source_serves_operations_from_graph_artifact_image() {
+        let mock_server = MockServer::start().await;
+        let image_reference =
+            setup_mocks(&mock_server, vec![pq_chunk_layer(OCI_CHUNK_JSON)], None).await;
+
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(PersistedQueries::builder().enabled(true).build())
+                .oci(oci_config_for(image_reference.to_string()))
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            manifest_manager.get_operation_body("oci-op-id", None),
+            Some("query { fromOci }".to_string())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oci_source_takes_precedence_over_uplink() {
+        let mock_server = MockServer::start().await;
+        let image_reference =
+            setup_mocks(&mock_server, vec![pq_chunk_layer(OCI_CHUNK_JSON)], None).await;
+
+        // The uplink endpoint is unreachable, so startup only succeeds if the OCI source wins.
+        let unreachable_uplink = UplinkConfig::for_tests(Endpoints::fallback(vec![
+            Url::parse("https://definitely.not.uplink").unwrap(),
+        ]));
+
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(PersistedQueries::builder().enabled(true).build())
+                .oci(oci_config_for(image_reference.to_string()))
+                .uplink(unreachable_uplink)
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            manifest_manager.get_operation_body("oci-op-id", None),
+            Some("query { fromOci }".to_string())
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn local_manifests_take_precedence_over_oci() {
+        let (_, body, _) = fake_manifest();
+        let id = "5678".to_string();
+
+        // The OCI registry is unreachable, so startup only succeeds if the local source wins.
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        ])
+                        .build(),
+                )
+                .oci(oci_config_for("localhost:1/unreachable:latest".to_string()))
                 .build()
                 .unwrap(),
         )
