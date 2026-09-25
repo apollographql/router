@@ -326,6 +326,23 @@ impl Subgraph<Initial> {
         )
     }
 
+    /// Whether this is a GraphQL Federation source schema by itself (see
+    /// [`crate::composite_schemas::detection::is_composite_source_schema`]).
+    pub(crate) fn is_composite_source_schema(&self) -> bool {
+        crate::composite_schemas::detection::is_composite_source_schema(&self.state.schema)
+    }
+
+    /// Treat this subgraph as a GraphQL Federation source schema if it has no federation `@link`,
+    /// even if it applies none of the dialect's directives. Used when another subgraph of the same
+    /// composition is a source schema: a source schema that only contributes fields and keys looks
+    /// exactly like a Fed 1 subgraph, and reading it as one would make its keys resolvable through
+    /// an `_entities` field it does not implement.
+    pub(crate) fn assume_composite_source_schema_if_unlinked(&mut self) {
+        if !has_federation_spec_link(&self.state.schema) {
+            crate::composite_schemas::detection::stamp_federation_link(&mut self.state.schema);
+        }
+    }
+
     pub fn assume_expanded(self) -> Result<Subgraph<Expanded>, SubgraphError> {
         let mut schema = FederationSchema::new(self.state.schema)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;

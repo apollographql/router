@@ -658,11 +658,13 @@ mod composition_output {
                 r#"
                 type Query {
                   productById(id: ID!): Product @lookup
+                  productBySku(sku: String!): Product @lookup @internal
                   topProducts: [Product!]!
                 }
-                type Product @key(fields: "id") @key(fields: "sku") {
+                type Product @key(fields: "id") @key(fields: "sku") @key(fields: "upc") {
                   id: ID!
                   sku: String!
+                  upc: String!
                   name: String!
                   dimension: Dimension!
                 }
@@ -679,7 +681,7 @@ mod composition_output {
                   productBySku(key: String! @is(field: "sku")): Product @lookup
                 }
                 type Product @key(fields: "sku") {
-                  sku: String! @external
+                  sku: String!
                   reviewCount: Int!
                   shippingEstimate(
                     zip: String!
@@ -800,5 +802,182 @@ mod composition_output {
             ],
             &["REQUIRED_ARGUMENT_MISSING_IN_SOME_SUBGRAPH"],
         );
+    }
+}
+
+mod satisfiability {
+    use super::*;
+
+    #[test]
+    fn entity_without_lookup_is_not_reachable() {
+        // `reviews` declares `@key(fields: "id")` but no lookup recalls `Product` there, so the key is
+        // identity only and `reviewCount` cannot be reached.
+        let errors = errors(&[
+            ("products", PRODUCTS),
+            (
+                "reviews",
+                r#"
+                type Query { review(id: ID!): Review @lookup }
+                type Review @key(fields: "id") { id: ID! }
+                type Product @key(fields: "id") { id: ID! reviewCount: Int! }
+                "#,
+            ),
+        ]);
+        let codes: Vec<&str> = errors.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(codes, ["SATISFIABILITY_ERROR"], "{errors:#?}");
+        assert!(errors[0].1.contains("reviewCount"), "{errors:#?}");
+        assert!(
+            errors[0]
+                .1
+                .contains("no @lookup field in subgraph \"reviews\" resolves type \"Product\""),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn entity_with_lookup_is_reachable() {
+        compose_sources(&[
+            ("products", PRODUCTS),
+            (
+                "reviews",
+                r#"
+                type Query { productById(id: ID!): Product @lookup @internal }
+                type Product @key(fields: "id") { id: ID! reviewCount: Int! }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+
+    #[test]
+    fn unsatisfiable_requirement() {
+        // `weight` lives in `inventory`, which no lookup can enter.
+        let errors = errors(&[
+            ("products", PRODUCTS),
+            (
+                "shipping",
+                r#"
+                type Query { productById(id: ID!): Product @lookup @internal }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  cost(weight: Int @require(field: "weight")): Int
+                }
+                "#,
+            ),
+            (
+                "inventory",
+                r#"
+                type Query { stock(id: ID!): Stock @lookup }
+                type Stock @key(fields: "id") { id: ID! }
+                type Product @key(fields: "id") { id: ID! weight: Int }
+                "#,
+            ),
+        ]);
+        let codes: Vec<&str> = errors.iter().map(|(c, _)| c.as_str()).collect();
+        assert!(
+            codes.iter().all(|c| *c == "SATISFIABILITY_ERROR"),
+            "{errors:#?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|(_, m)| m
+                    .contains("cannot satisfy @require conditions on field \"Product.cost\"")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn satisfiable_requirement() {
+        compose_sources(&[
+            ("products", PRODUCTS),
+            (
+                "shipping",
+                r#"
+                type Query { productById(id: ID!): Product @lookup @internal }
+                type Product @key(fields: "id") {
+                  id: ID!
+                  cost(weight: Int @require(field: "weight")): Int
+                }
+                "#,
+            ),
+            (
+                "inventory",
+                r#"
+                type Query { productById(id: ID!): Product @lookup @internal }
+                type Product @key(fields: "id") { id: ID! weight: Int }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+
+    #[test]
+    fn provides_is_not_a_requirement_for_source_schemas() {
+        // `Review.author.name` is only reachable through the `@provides`: `users` has no lookup.
+        let errors = errors(&[
+            (
+                "reviews",
+                r#"
+                type Query { reviews: [Review!]! reviewById(id: ID!): Review @lookup }
+                type Review @key(fields: "id") { id: ID! author: User! @provides(fields: "name") }
+                type User @key(fields: "id") { id: ID! name: String! @external }
+                "#,
+            ),
+            (
+                "users",
+                r#"
+                type Query { thing(id: ID!): Thing @lookup }
+                type Thing @key(fields: "id") { id: ID! }
+                type User @key(fields: "id") { id: ID! name: String! @shareable }
+                "#,
+            ),
+        ]);
+        let codes: Vec<&str> = errors.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(codes, ["SATISFIABILITY_ERROR"], "{errors:#?}");
+        assert!(errors[0].1.contains("name"), "{errors:#?}");
+
+        // Control: once `users` can recall `User`, the same graph composes.
+        compose_sources(&[
+            (
+                "reviews",
+                r#"
+                type Query { reviews: [Review!]! reviewById(id: ID!): Review @lookup }
+                type Review @key(fields: "id") { id: ID! author: User! @provides(fields: "name") }
+                type User @key(fields: "id") { id: ID! name: String! @external }
+                "#,
+            ),
+            (
+                "users",
+                r#"
+                type Query { userById(id: ID!): User @lookup }
+                type User @key(fields: "id") { id: ID! name: String! @shareable }
+                "#,
+            ),
+        ])
+        .expect("composes");
+    }
+}
+
+mod mixed_dialect_detection {
+    use super::*;
+
+    #[test]
+    fn unlinked_subgraph_without_lookups_is_a_source_schema_when_another_is() {
+        // `reviews` has no GraphQL Federation directive. Read as Fed 1 its key would be resolvable
+        // through `_entities`; as a source schema it has no lookup, so `reviewCount` is unreachable.
+        let errors = errors(&[
+            ("products", PRODUCTS),
+            (
+                "reviews",
+                r#"
+                type Query { reviewsVersion: Int }
+                type Product @key(fields: "id") { id: ID! reviewCount: Int! }
+                "#,
+            ),
+        ]);
+        let codes: Vec<&str> = errors.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(codes, ["SATISFIABILITY_ERROR"], "{errors:#?}");
+        assert!(errors[0].1.contains("reviewCount"), "{errors:#?}");
     }
 }

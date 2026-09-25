@@ -40,7 +40,8 @@ pub(crate) fn composite_directive_names(
 }
 
 /// Whether an (expanded) subgraph schema is a GraphQL Federation source schema: it links a
-/// federation version defining the dialect's directives and applies at least one of them.
+/// federation version defining the dialect's directives, and applies one of them or was detected
+/// as a source schema (its implicit link imports `FieldSelectionMap`).
 ///
 /// This is the one dialect signal composition consumes. It drives the dialect-only validation
 /// rules and the derivation of `@key` resolvability from lookups; a federation subgraph that
@@ -52,6 +53,18 @@ pub(crate) fn is_composite_schema(
     let Some(names) = composite_directive_names(schema, federation_spec) else {
         return false;
     };
+    // The implicit link stamped onto detected source schemas imports the `FieldSelectionMap`
+    // type, which marks the schema as a source schema even if it declares no lookup. (Importing
+    // `@lookup` would not do: tooling commonly imports every federation directive.)
+    if federation_spec.link_in_schema(schema).is_some_and(|link| {
+        link.imports.iter().any(|import| {
+            !import.is_directive
+                && import.element
+                    == crate::link::federation_spec_definition::FEDERATION_FIELD_SELECTION_MAP_TYPE_NAME_IN_SPEC
+        })
+    }) {
+        return true;
+    }
     let applied = |directives: &apollo_compiler::ast::DirectiveList| {
         directives.iter().any(|d| names.contains(&d.name))
     };

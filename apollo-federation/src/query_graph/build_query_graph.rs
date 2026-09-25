@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use crate::link::federation_spec_definition::FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec_definition::SpecDefinition;
+use crate::schema::field_selection_map::value::SelectionTree;
+use crate::schema::field_selection_map::value::selections_for_type;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
@@ -94,7 +98,10 @@ pub fn build_federated_query_graph(
                 )?
                 .build()
             })?;
-    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema)?.build()
+    // GraphQL Federation: `@provides` "is an execution-time optimization and never a
+    // requirement for resolvability", so satisfiability ignores it for source schemas; query
+    // planning still uses it.
+    FederatedQueryGraphBuilder::new(query_graph, supergraph_schema, !for_query_planning)?.build()
 }
 
 // PORT_NOTE: Corresponds to `buildSupergraphAPIQueryGraph` from JS.
@@ -1140,12 +1147,15 @@ struct FederatedQueryGraphBuilder {
     base: BaseQueryGraphBuilder,
     supergraph_schema: ValidFederationSchema,
     subgraphs: FederatedQueryGraphBuilderSubgraphs,
+    /// Skip `@provides` of GraphQL Federation source schemas (satisfiability).
+    ignore_source_schema_provides: bool,
 }
 
 impl FederatedQueryGraphBuilder {
     fn new(
         mut query_graph: QueryGraph,
         supergraph_schema: ValidFederationSchema,
+        ignore_source_schema_provides: bool,
     ) -> Result<Self, FederationError> {
         query_graph.supergraph_schema = Some(supergraph_schema.clone());
         let base = BaseQueryGraphBuilder::new(
@@ -1161,6 +1171,7 @@ impl FederatedQueryGraphBuilder {
             base,
             supergraph_schema,
             subgraphs,
+            ignore_source_schema_provides,
         })
     }
 
@@ -1529,6 +1540,38 @@ impl FederatedQueryGraphBuilder {
                 )?;
                 all_conditions.push(conditions);
             }
+            // GraphQL Federation `@require` arguments: the executor must fetch what each
+            // selection map reads before it can supply the argument, exactly like the fields of
+            // a `@requires`.
+            if let Some(require_name) = &subgraph_data.require_directive_definition_name {
+                for argument in &field.arguments {
+                    let Some(map) = argument
+                        .directives
+                        .get(require_name)
+                        .and_then(|d| d.specified_argument_by_name("field"))
+                        .and_then(|v| v.as_str())
+                        .and_then(|text| crate::schema::field_selection_map::parse(text).ok())
+                    else {
+                        continue;
+                    };
+                    let parent = field_definition_position.parent().type_name().clone();
+                    let mut tree = SelectionTree::default();
+                    for (_, selection) in
+                        selections_for_type(&map, self.supergraph_schema.schema(), &parent)
+                    {
+                        tree.merge(&selection);
+                    }
+                    if tree.is_empty() {
+                        continue;
+                    }
+                    all_conditions.push(parse_field_set(
+                        &self.supergraph_schema,
+                        parent,
+                        &tree.to_string(),
+                        true,
+                    )?);
+                }
+            }
             if all_conditions.is_empty() {
                 continue;
             }
@@ -1884,6 +1927,9 @@ impl FederatedQueryGraphBuilder {
             let source = source.clone();
             let schema = self.base.query_graph.schema_by_source(&source)?;
             let subgraph_data = self.subgraphs.get(&source)?;
+            if self.ignore_source_schema_provides && subgraph_data.is_source_schema {
+                continue;
+            }
             let field = field_definition_position.get(schema.schema())?;
             let field_type_pos = schema.get_type(field.ty.inner_named_type())?;
             let mut all_conditions = Vec::new();
@@ -2391,6 +2437,14 @@ impl FederatedQueryGraphBuilderSubgraphs {
                 .from_context_directive_definition(schema)?
                 .name
                 .clone();
+            let require_directive_definition_name = SpecDefinition::directive_name_in_schema(
+                federation_spec_definition,
+                schema,
+                &FEDERATION_REQUIRE_DIRECTIVE_NAME_IN_SPEC,
+            )
+            .filter(|name| schema.schema().directive_definitions.contains_key(name));
+            // Extraction only defines the GraphQL Federation directives in source-schema subgraphs.
+            let is_source_schema = require_directive_definition_name.is_some();
             subgraphs.map.insert(
                 source.clone(),
                 FederatedQueryGraphBuilderSubgraphData {
@@ -2402,6 +2456,8 @@ impl FederatedQueryGraphBuilderSubgraphs {
                     overrides_directive_definition_name,
                     context_directive_definition_name,
                     from_context_directive_definition_name,
+                    require_directive_definition_name,
+                    is_source_schema,
                 },
             );
         }
@@ -2430,6 +2486,10 @@ struct FederatedQueryGraphBuilderSubgraphData {
     overrides_directive_definition_name: Name,
     context_directive_definition_name: Name,
     from_context_directive_definition_name: Name,
+    /// `@require`, when the subgraph is a GraphQL Federation source schema.
+    require_directive_definition_name: Option<Name>,
+    /// Whether the subgraph is a GraphQL Federation source schema.
+    is_source_schema: bool,
 }
 
 #[derive(Debug)]
