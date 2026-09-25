@@ -275,7 +275,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions
             .values()
             .rev()
-            .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
+            .find(|spec| federation_version.satisfies_federation(spec.minimum_federation_version()))
     }
 
     pub(crate) fn get_minimum_required_version(
@@ -284,7 +284,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
     ) -> Option<&'static T> {
         self.definitions
             .values()
-            .find(|spec| federation_version.satisfies(spec.minimum_federation_version()))
+            .find(|spec| federation_version.satisfies_federation(spec.minimum_federation_version()))
     }
 
     pub(crate) fn get_dyn_minimum_required_version(
