@@ -79,21 +79,42 @@ pub(crate) enum UpgradeMode {
     Minor,
 }
 
+/// The only series `UpgradeMode::Minor` applies: migration files named `{series}NNN-*.yaml`.
+///
+/// Pinned rather than read from `CARGO_PKG_VERSION_MAJOR` because nightlies are versioned
+/// `0.0.0-nightly-…`, and series 0 holds the 1.x migrations.
+const MIGRATION_SERIES: u64 = 2;
+
+/// The series of a migration file named `NNNN-name.yaml` (`NNNN / 1000`), or `None` for anything
+/// else in the migrations folder.
+fn migration_series(filename: &str) -> Option<u64> {
+    let (prefix, rest) = filename.split_at_checked(4)?;
+    if !prefix.bytes().all(|b| b.is_ascii_digit())
+        || !rest.starts_with('-')
+        || !rest.ends_with(".yaml")
+    {
+        return None;
+    }
+    prefix.parse::<u64>().ok().map(|n| n / 1000)
+}
+
+fn is_selected(filename: &str, upgrade_mode: UpgradeMode) -> bool {
+    match upgrade_mode {
+        UpgradeMode::Major => filename.ends_with(".yaml"),
+        UpgradeMode::Minor => migration_series(filename) == Some(MIGRATION_SERIES),
+    }
+}
+
 pub(crate) fn upgrade_configuration(
     config: &serde_json::Value,
     log_warnings: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
-    const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
-    let files = Asset::iter().sorted().filter(|f| {
-        if matches!(upgrade_mode, UpgradeMode::Major) {
-            f.ends_with(".yaml")
-        } else {
-            f.ends_with(".yaml") && f.starts_with(CURRENT_MAJOR_VERSION)
-        }
-    });
+    let files = Asset::iter()
+        .sorted()
+        .filter(|f| is_selected(f, upgrade_mode));
     for filename in files {
         if let Some(migration) = Asset::get(&filename) {
             let parsed_migration = serde_yaml::from_slice(&migration.data).map_err(|error| {
@@ -384,13 +405,20 @@ fn migration_failure_error<T: std::fmt::Display>(error: T) -> ConfigurationError
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use serde_json::Value;
     use serde_json::json;
 
     use crate::configuration::upgrade::Action;
+    use crate::configuration::upgrade::Asset;
+    use crate::configuration::upgrade::MIGRATION_SERIES;
     use crate::configuration::upgrade::Migration;
+    use crate::configuration::upgrade::UpgradeMode;
     use crate::configuration::upgrade::apply_migration;
     use crate::configuration::upgrade::generate_upgrade_output;
+    use crate::configuration::upgrade::is_selected;
+    use crate::configuration::upgrade::migration_series;
+    use crate::configuration::upgrade::upgrade_configuration;
 
     fn source_doc() -> Value {
         json!( {
@@ -403,6 +431,55 @@ mod test {
                 "v2"
             ]
         })
+    }
+
+    #[test]
+    fn migration_series_matches_major_version() {
+        let major: u64 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
+        // Nightlies are versioned `0.0.0-nightly-…`, so there's no real major to compare.
+        if major != 0 {
+            assert_eq!(
+                MIGRATION_SERIES, major,
+                "bump MIGRATION_SERIES along with the major version"
+            );
+        }
+    }
+
+    #[test]
+    fn migration_series_parses_the_prefix() {
+        assert_eq!(migration_series("0007-parser-recursion.yaml"), Some(0));
+        assert_eq!(migration_series("2044-response-cache.yaml"), Some(2));
+        assert_eq!(migration_series("20001-five-digits.yaml"), None);
+        assert_eq!(migration_series("2044-not-yaml.md"), None);
+        assert_eq!(migration_series("README.md"), None);
+    }
+
+    #[test]
+    fn minor_upgrade_selects_only_the_current_series() {
+        assert!(!is_selected(
+            "0007-parser-recursion.yaml",
+            UpgradeMode::Minor
+        ));
+
+        let minor: Vec<_> = Asset::iter()
+            .filter(|f| is_selected(f, UpgradeMode::Minor))
+            .sorted()
+            .collect();
+        // The same set a release build selected by major-version prefix.
+        let current: Vec<_> = Asset::iter()
+            .filter(|f| f.starts_with(&MIGRATION_SERIES.to_string()) && f.ends_with(".yaml"))
+            .sorted()
+            .collect();
+        assert!(!minor.is_empty());
+        assert_eq!(minor, current);
+    }
+
+    #[test]
+    fn minor_upgrade_keeps_server_section() {
+        // `0007` (1.x) ends with `delete: server`; it must never run at startup.
+        let config = json!({ "server": { "http": { "header_read_timeout": "620s" } } });
+        let upgraded = upgrade_configuration(&config, false, UpgradeMode::Minor).unwrap();
+        assert_eq!(upgraded, config);
     }
 
     #[test]
