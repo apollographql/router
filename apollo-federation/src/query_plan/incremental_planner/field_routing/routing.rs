@@ -8,6 +8,7 @@ use tracing::trace;
 
 use super::FieldRoutingSearchSpace;
 use super::RoutingSiteKey;
+use super::fork::ForkRemainder;
 use super::state::PendingSelection;
 use crate::error::FederationError;
 use crate::operation::FieldSelection;
@@ -91,10 +92,15 @@ pub(crate) enum RoutingChoice {
     StripFragment,
     /// Per-concrete-type explosion at an abstract position.
     TypeExplosion,
-    /// Fetch an ancestor field again from another subgraph, carrying only
-    /// the stranded remainder. The rescue when a keyless position leaves a
-    /// selection with no local edge and no key hop out.
-    RefetchAncestor,
+    /// The primary edge choice, fetching `kept`, plus the children its
+    /// target cannot reach re-fetched under the same field from other
+    /// subgraphs. Replaces the primary in the option pool rather than
+    /// joining it, so forking never adds a decision.
+    Fork {
+        primary: Box<RoutingChoice>,
+        kept: Selection,
+        remainders: Vec<ForkRemainder>,
+    },
 }
 
 impl RoutingChoice {
@@ -110,7 +116,8 @@ impl RoutingChoice {
             | Self::KeyHopWithExternalKey { edge: e, .. }
             | Self::ChainedKeyHop { edge: e, .. }
             | Self::CircularKeyHop { edge: e, .. } => Some(e),
-            Self::StripFragment | Self::TypeExplosion | Self::RefetchAncestor => None,
+            Self::Fork { primary, .. } => primary.edge(),
+            Self::StripFragment | Self::TypeExplosion => None,
         }
     }
 
@@ -122,6 +129,7 @@ impl RoutingChoice {
             | Self::KeyHopWithExternalKey { key, .. }
             | Self::ChainedKeyHop { key, .. }
             | Self::CircularKeyHop { key, .. } => Some(key),
+            Self::Fork { primary, .. } => primary.key_opt(),
             _ => None,
         }
     }
@@ -140,11 +148,6 @@ impl RoutingChoice {
             Self::StripFragment => {
                 static LABEL: std::sync::LazyLock<Arc<str>> =
                     std::sync::LazyLock::new(|| Arc::from("<strip-fragment>"));
-                &LABEL
-            }
-            Self::RefetchAncestor => {
-                static LABEL: std::sync::LazyLock<Arc<str>> =
-                    std::sync::LazyLock::new(|| Arc::from("<refetch-ancestor>"));
                 &LABEL
             }
             _ => unreachable!("all edge-based variants handled by edge()"),
@@ -168,11 +171,6 @@ impl RoutingChoice {
         matches!(self, Self::Provides(_) | Self::Local(_))
     }
 
-    /// Whether this is the ancestor-refetch rescue choice.
-    pub(crate) fn is_refetch_ancestor(&self) -> bool {
-        matches!(self, Self::RefetchAncestor)
-    }
-
     /// Whether this is a key hop (entity-based, not root-type-resolution).
     pub(crate) fn is_key_hop(&self) -> bool {
         self.key_opt().is_some()
@@ -187,6 +185,7 @@ impl RoutingChoice {
             | Self::CircularKeyHop {
                 intermediate_hops, ..
             } => intermediate_hops,
+            Self::Fork { primary, .. } => primary.intermediate_hops(),
             _ => &[],
         }
     }
@@ -207,8 +206,10 @@ impl RoutingChoice {
     /// selections over key hops, and key hops with locally available data
     /// over ones that require recursive planning through other subgraphs.
     /// Ties are broken by key condition leaf count so smaller keys win.
+    /// A fork ranks as its primary.
     pub(super) fn rank(&self) -> (u8, usize) {
         let variant = match self {
+            Self::Fork { primary, .. } => return primary.rank(),
             Self::Provides(_) => 0,
             Self::Local(_) => 1,
             // Same-subgraph entity re-entry for in-place-unresolvable @requires
@@ -222,7 +223,6 @@ impl RoutingChoice {
             Self::CircularKeyHop { .. } => 8,
             Self::StripFragment => 9,
             Self::TypeExplosion => 10,
-            Self::RefetchAncestor => 11,
         };
         let key_size = self
             .key_opt()
@@ -755,10 +755,10 @@ impl FieldRoutingSearchSpace {
                 .insert(key, result.clone());
             result
         };
-        if let Some(avoid) = &pending.split_avoid {
+        if let Some(only) = &pending.restrict_to {
             let options = unfiltered
                 .iter()
-                .filter(|choice| choice.target_subgraph() != avoid)
+                .filter(|choice| choice.target_subgraph() == only)
                 .cloned()
                 .collect::<Vec<_>>();
             return Ok(Arc::new(options));
@@ -785,22 +785,13 @@ impl FieldRoutingSearchSpace {
                     self.fragment_options(pending, fragment_selection)?
                 }
             };
-            // The ancestor refetch rescues weak positions: with no route it
-            // is the pool (a forced rescue), with exactly one route it sits
-            // in the forced-trail frame and is tried only when the real
-            // route's commit fails. Forcedness counts real options, so
-            // neither case creates a decision point, and positions with
-            // real alternatives recover through those instead. Viability of
-            // the ancestor walk is checked only at commit time.
-            if options.len() <= 1 && pending.split_parent.is_some() && !pending.best_effort {
-                options.push(RoutingChoice::RefetchAncestor);
-            }
             options.sort_by_key(RoutingChoice::rank);
             options
         };
         if !self.disabled_subgraphs.is_empty() {
             options.retain(|opt| !self.disabled_subgraphs.contains(opt.target_subgraph()));
         }
+        self.fork_stranded_children(pending, &mut options)?;
         Ok(options)
     }
 

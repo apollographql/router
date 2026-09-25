@@ -14,6 +14,7 @@ pub(super) mod cached_query_graph;
 mod commit;
 mod conditions;
 pub(super) mod context;
+mod fork;
 mod requires;
 mod routing;
 pub(super) mod state;
@@ -125,6 +126,8 @@ type KeyHopCache = RefCell<HashMap<(NodeIndex, RoutingSiteKey), Arc<Vec<RoutingC
 type CanSatisfyCache = RefCell<HashMap<(ConditionsKey, Name, Arc<str>), bool>>;
 type ConditionsRoutableCache =
     RefCell<HashMap<(NodeIndex, ArcKey<crate::operation::SelectionMap>), bool>>;
+type StrandedCache =
+    RefCell<HashMap<(NodeIndex, ArcKey<crate::operation::SelectionMap>), Arc<Vec<Selection>>>>;
 
 /// Monotonically-growing caches for computations that depend on search-space
 /// state or that reference routing types. These live on
@@ -135,6 +138,11 @@ pub(super) struct PlannerCaches {
     key_hops: KeyHopCache,
     pub(super) can_satisfy: CanSatisfyCache,
     pub(super) conditions_routable: ConditionsRoutableCache,
+    /// Stranded parts of a selection set at a query graph node, for
+    /// `fork_stranded_children`. The walk recurses through keyless
+    /// subtrees, and every level of a deep subtree asks about the levels
+    /// below it.
+    pub(super) stranded: StrandedCache,
     pub(super) key_hops_in_flight: RefCell<HashSet<(NodeIndex, RoutingSiteKey)>>,
     pub(super) guard_hits: std::cell::Cell<u64>,
     /// Sorted possible runtime type names per composite type in the
@@ -151,6 +159,7 @@ impl PlannerCaches {
             key_hops: RefCell::new(HashMap::new()),
             can_satisfy: RefCell::new(HashMap::new()),
             conditions_routable: RefCell::new(HashMap::new()),
+            stranded: RefCell::new(HashMap::new()),
             key_hops_in_flight: RefCell::new(HashSet::new()),
             guard_hits: std::cell::Cell::new(0),
             possible_type_names: RefCell::new(HashMap::new()),
@@ -294,76 +303,6 @@ impl FieldRoutingSearchSpace {
         Some(Arc::new(types.into_iter().map(|t| t.type_name).collect()))
     }
 
-    /// Find the re-push candidate for the [`RoutingChoice::RefetchAncestor`]
-    /// rescue: walk up the split_parent chain to an ancestor field with
-    /// routing options to a different subgraph, wrapping the stranded
-    /// remainder back into the ancestor's selection shape. Read-only, so
-    /// option enumeration can gate the choice on viability and the commit
-    /// can push the same candidate.
-    fn refetch_ancestor_candidate(&self, pending: &PendingSelection) -> Option<PendingSelection> {
-        if pending.best_effort {
-            return None;
-        }
-        let source = self.node_source(pending.query_graph_node).ok()?;
-        let avoid = source.subgraph;
-        let mut remainder: Vec<Selection> = vec![pending.selection.clone()];
-        let mut link = pending.split_parent.clone();
-        while let Some(anchor) = link {
-            let template = anchor.selection.selection_set()?;
-            let wrapped = if template.type_position.is_abstract_type() {
-                anchor.selection.clone()
-            } else {
-                wrap_in_parent(&anchor.selection, &remainder)?
-            };
-            if matches!(anchor.selection, Selection::Field(_))
-                && anchor.condition.is_none()
-                && self
-                    .root_may_duplicate(anchor.query_graph_node)
-                    .unwrap_or(false)
-            {
-                let mut candidate = anchor
-                    .fork(wrapped.clone())
-                    .with_split_avoid(Some(avoid.clone()));
-                candidate.condition = pending.condition;
-                // Alternatives must be real routes: the wrap's own pool may
-                // offer a further refetch, which cannot anchor this one.
-                let has_alternative = self
-                    .cached_routing_options(&candidate)
-                    .is_ok_and(|options| options.iter().any(|o| !o.is_refetch_ancestor()));
-                if has_alternative {
-                    let anchor_ss = anchor.selection.selection_set()?;
-                    let remainder_ss = wrapped.selection_set()?;
-                    if routing::selection_leaf_count(remainder_ss)
-                        >= routing::selection_leaf_count(anchor_ss)
-                    {
-                        return None;
-                    }
-                    return Some(candidate);
-                }
-            }
-            remainder = vec![wrapped];
-            link = anchor.split_parent.clone();
-        }
-        None
-    }
-
-    /// Commit the [`RoutingChoice::RefetchAncestor`] rescue. Returns
-    /// whether a re-push was viable.
-    fn commit_refetch_ancestor(&self, state: &mut PlanState, pending: &PendingSelection) -> bool {
-        let Some(candidate) = self.refetch_ancestor_candidate(pending) else {
-            return false;
-        };
-        debug!(
-            selection = %selection_label(&pending.selection),
-            remainder = %selection_label(&candidate.selection),
-            avoid = %candidate.split_avoid.as_deref().unwrap_or(""),
-            "re-pushing stranded remainder at ancestor with alternatives",
-        );
-        state.splits += 1;
-        state.push_pending(candidate);
-        true
-    }
-
     /// Advance past deterministic decisions in-place: commit single-option
     /// and zero-option selections, lift forced entries above open decisions
     /// so their fetch groups inform scoring. Stops at the first multi-option
@@ -376,7 +315,6 @@ impl FieldRoutingSearchSpace {
     /// forced commits to recover through.
     fn fast_forward(&self, state: &mut PlanState) -> Result<(), FederationError> {
         let mut trail = ForcedTrail::default();
-        let splits_at_entry = state.splits;
         // Lift-scan cursor: stack entries above it were already inspected
         // this call and found unliftable, and an entry's routing options are
         // fixed — so after a lift the scan resumes where it stopped instead
@@ -386,30 +324,18 @@ impl FieldRoutingSearchSpace {
         let mut lift_scan_floor = usize::MAX;
         while let Some(top) = state.pending.last() {
             if !trail.doomed.is_empty() && trail.doomed.contains(&pending_site(top)) {
-                if state.splits > splits_at_entry {
-                    let pending = state.pop_pending().unwrap();
-                    if !self.commit_refetch_ancestor(state, &pending) {
-                        self.drop_unresolvable(state, &pending);
-                    }
-                } else {
-                    self.recover_doomed(state, &mut trail);
-                }
+                self.recover_doomed(state, &mut trail);
                 lift_scan_floor = usize::MAX;
                 continue;
             }
             let options = self.cached_routing_options(top)?;
-            // A pending whose only alternative beyond its best route is the
-            // ranked-last ancestor refetch is still forced: committing
-            // through keeps forced chains intact, and the refetch stays
-            // reachable via the forced-trail frame's untried options.
-            let real_options = options.iter().filter(|o| !o.is_refetch_ancestor()).count();
-            match real_options {
-                0 if options.is_empty() => {
+            match options.len() {
+                0 => {
                     trail.doomed.insert(pending_site(top));
                     self.recover_doomed(state, &mut trail);
                     lift_scan_floor = usize::MAX;
                 }
-                0 | 1 => {
+                1 => {
                     if self.commit_forced(state, options, &mut trail) {
                         lift_scan_floor = usize::MAX;
                     }
@@ -447,15 +373,10 @@ impl FieldRoutingSearchSpace {
             let entry = &state.pending[index];
             // Read the per-pending memo directly: the scan runs over
             // thousands of entries, so even an Arc clone per entry is hot.
-            // Forcedness ignores the ranked-last ancestor refetch, matching
-            // fast_forward's forced-commit criterion.
-            let forced = |options: &[RoutingChoice]| {
-                options.iter().filter(|o| !o.is_refetch_ancestor()).count() <= 1
-            };
             let liftable = entry.condition.is_some()
                 || match entry.routing_options_memo.get() {
-                    Some(options) => forced(options),
-                    None => forced(&self.cached_routing_options(entry)?),
+                    Some(options) => options.len() <= 1,
+                    None => self.cached_routing_options(entry)?.len() <= 1,
                 };
             if liftable {
                 state.lift_pending(index);
@@ -468,15 +389,12 @@ impl FieldRoutingSearchSpace {
 
     /// Pop a pending whose site is proven hopeless and recover: rewind an
     /// ancestor forced commit if one has untried options (see
-    /// [`Self::backtrack_forced`], whose frames include the ranked-last
-    /// ancestor refetch), otherwise drop the selection. A best-effort pending is
-    /// dropped outright, its loss is tolerated by design and must not burn
-    /// backtracking budget.
+    /// [`Self::backtrack_forced`]), otherwise drop the selection. A
+    /// best-effort pending is dropped outright, its loss is tolerated by
+    /// design and must not burn backtracking budget.
     fn recover_doomed(&self, state: &mut PlanState, trail: &mut ForcedTrail) {
         let pending = state.pop_pending().unwrap();
-        if (pending.best_effort || !self.backtrack_forced(state, trail))
-            && !self.commit_refetch_ancestor(state, &pending)
-        {
+        if pending.best_effort || !self.backtrack_forced(state, trail) {
             self.drop_unresolvable(state, &pending);
         }
     }
@@ -521,11 +439,7 @@ impl FieldRoutingSearchSpace {
         } else if failed && !pending.best_effort {
             trail.doomed.insert(pending_site(&pending));
         }
-        if failed
-            && !best_effort
-            && !self.backtrack_forced(state, trail)
-            && !self.commit_refetch_ancestor(state, &pending)
-        {
+        if failed && !best_effort && !self.backtrack_forced(state, trail) {
             state.dropped_fields += 1;
         }
         failed
@@ -584,10 +498,7 @@ impl FieldRoutingSearchSpace {
         // which is correct: if the re-drive fails, the increment happens
         // here; if it succeeds, no field was dropped.
         if let Some((pending, choice)) = parked {
-            if self.commit_choice(state, &pending, &choice).is_err()
-                && !pending.best_effort
-                && !self.commit_refetch_ancestor(state, &pending)
-            {
+            if self.commit_choice(state, &pending, &choice).is_err() && !pending.best_effort {
                 state.dropped_fields += 1;
             }
             return true;
@@ -668,37 +579,6 @@ fn pending_site(pending: &PendingSelection) -> PendingSite {
     }
 }
 
-/// Wrap child selections back into a parent selection's shape.
-fn wrap_in_parent(parent: &Selection, children: &[Selection]) -> Option<Selection> {
-    let template = parent.selection_set()?;
-    let mut map = crate::operation::SelectionMap::new();
-    for child in children {
-        let child = child
-            .rebase_on(&template.type_position, &template.schema)
-            .ok()?;
-        map.insert(child);
-    }
-    let wrapped_ss = SelectionSet {
-        schema: template.schema.clone(),
-        type_position: template.type_position.clone(),
-        selections: Arc::new(map),
-    };
-    Some(match parent {
-        Selection::Field(field_sel) => {
-            Selection::Field(Arc::new(crate::operation::FieldSelection {
-                field: field_sel.field.clone(),
-                selection_set: Some(wrapped_ss),
-            }))
-        }
-        Selection::InlineFragment(frag_sel) => {
-            Selection::InlineFragment(Arc::new(crate::operation::InlineFragmentSelection {
-                inline_fragment: frag_sel.inline_fragment.clone(),
-                selection_set: wrapped_ss,
-            }))
-        }
-    })
-}
-
 impl BulbSearchSpace for FieldRoutingSearchSpace {
     type Candidate = PlanState;
     /// `Arc` so advance() hands out the stack top in O(1).
@@ -774,7 +654,7 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
                 error = ?e,
                 "commit_choice failed, dropping field",
             );
-            if !self.commit_refetch_ancestor(candidate, &pending) && !pending.best_effort {
+            if !pending.best_effort {
                 candidate.dropped_fields += 1;
             }
         }

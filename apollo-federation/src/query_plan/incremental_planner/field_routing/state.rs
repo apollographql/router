@@ -92,19 +92,11 @@ pub(crate) struct PendingSelection {
     /// concrete-`__typename` recovery, where no subgraph may be able to
     /// supply the concrete typename.
     pub(crate) best_effort: bool,
-    /// The ancestor pending this selection was dispatched from, chaining up
-    /// to the operation root. When a selection strands with no recovery, the
-    /// chain lets `refetch_ancestor_candidate` re-push a wrapped remainder at the
-    /// nearest ancestor field with an alternative routing target, so the
-    /// remainder can reach another subgraph through a key hop the stranded
-    /// position itself lacks (keyless subtrees split across subgraphs).
-    pub(crate) split_parent: Option<Arc<PendingSelection>>,
-    /// Set on split re-pushes: the subgraph whose descent stranded the
-    /// remainder this pending carries. Routing options targeting it are
-    /// filtered out — the failure already proved it cannot resolve this
-    /// remainder — which usually leaves a single forced hop instead of a
-    /// decision that would greedily repeat the doomed choice.
-    pub(crate) split_avoid: Option<Arc<str>>,
+    /// Set on fork remainders: the subgraph chosen to serve this part of a
+    /// forked field. Routing options into any other subgraph are filtered
+    /// out, so the remainder commits as a forced hop instead of reopening
+    /// the decision the fork already made.
+    pub(crate) restrict_to: Option<Arc<str>>,
     /// Lazily computed routing options for this exact pending (see
     /// `cached_routing_options`). Options are a pure function of the pending
     /// and the immutable query graph, and pendings are only queried once
@@ -156,12 +148,11 @@ impl PendingSelection {
             context_anchor: self.context_anchor.clone(),
             best_effort: self.best_effort,
             routing_options_memo: std::sync::OnceLock::new(),
-            split_parent: self.split_parent.clone(),
-            // The avoid constraint belongs to one re-pushed wrap only; a
-            // fork is a different selection (a child, a condition, a
-            // restructured shape) that may legitimately need the avoided
-            // subgraph. `refetch_ancestor_candidate` re-sets it explicitly.
-            split_avoid: None,
+            // The restriction belongs to one fork remainder only; a fork is
+            // a different selection (a child, a condition, a restructured
+            // shape) that may legitimately need another subgraph.
+            // `commit_fork` sets it explicitly on the remainders it pushes.
+            restrict_to: None,
         }
     }
 
@@ -212,13 +203,8 @@ impl PendingSelection {
         self
     }
 
-    pub(super) fn with_split_parent(mut self, split_parent: Option<Arc<PendingSelection>>) -> Self {
-        self.split_parent = split_parent;
-        self
-    }
-
-    pub(super) fn with_split_avoid(mut self, split_avoid: Option<Arc<str>>) -> Self {
-        self.split_avoid = split_avoid;
+    pub(super) fn with_restrict_to(mut self, restrict_to: Option<Arc<str>>) -> Self {
+        self.restrict_to = restrict_to;
         self
     }
 
@@ -289,11 +275,6 @@ pub(crate) struct PlanState {
     /// eagerly, creating combinatorial blowup on wide interfaces. Penalized
     /// in `cost()` above any structural cost but below drops.
     pub(crate) type_explosions: usize,
-    /// Ancestor refetches performed (see `refetch_ancestor_candidate`). Penalized in
-    /// `cost()` above any structural cost but far below a drop, so plans
-    /// achievable without splitting always win over split plans — splitting
-    /// only rescues candidates that would otherwise drop selections.
-    pub(crate) splits: usize,
     /// Monotonic count of pending-stack pushes over the whole search,
     /// including rolled-back work. Every unit of planning effort flows
     /// through `push_pending`, so this tracks wall time far more tightly
@@ -327,7 +308,6 @@ pub(crate) struct PlanCheckpoint {
     pending_cp: usize,
     dropped_fields: usize,
     type_explosions: usize,
-    splits: usize,
 }
 
 impl PlanState {
@@ -342,7 +322,6 @@ impl PlanState {
             pending_undo: Vec::new(),
             dropped_fields: 0,
             type_explosions: 0,
-            splits: 0,
             effort: 0,
             forced_backtracks: 0,
             condition_alias_ids: Vec::new(),
@@ -385,7 +364,6 @@ impl PlanState {
             effort: self.effort,
             forced_backtracks: self.forced_backtracks,
             type_explosions: self.type_explosions,
-            splits: self.splits,
         }
     }
 
@@ -396,7 +374,6 @@ impl PlanState {
             pending_cp: self.pending_undo.len(),
             dropped_fields: self.dropped_fields,
             type_explosions: self.type_explosions,
-            splits: self.splits,
         }
     }
 
@@ -419,7 +396,6 @@ impl PlanState {
         }
         self.dropped_fields = cp.dropped_fields;
         self.type_explosions = cp.type_explosions;
-        self.splits = cp.splits;
     }
 }
 
@@ -463,8 +439,7 @@ mod tests {
             defer_ref: None,
             context_anchor: Default::default(),
             parent_types: SharedPath::new(),
-            split_parent: None,
-            split_avoid: None,
+            restrict_to: None,
         };
         let ids = |state: &PlanState| -> Vec<usize> {
             state
