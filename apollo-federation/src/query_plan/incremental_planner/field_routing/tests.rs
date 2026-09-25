@@ -2787,16 +2787,18 @@ type Query
     "###);
 }
 
-/// Build the pieces `build_bulb_plan` needs directly, so tests can plan from
-/// heads the public planner never uses (it always enters at the federated
-/// root).
-fn bulb_test_parameters(
+/// Plan `query` with `build_bulb_plan` from subgraph `subgraph`'s Query
+/// root, which the public planner never uses as a head (it always enters at
+/// the federated root). Returns the evaluated plan count alongside the
+/// result because the public planner drops statistics on failure.
+fn plan_from_subgraph_root(
     schema: &str,
-) -> (
-    Supergraph,
-    Arc<crate::query_graph::QueryGraph>,
-    crate::query_plan::query_planner::QueryPlanningStatistics,
-) {
+    subgraph: &str,
+    query: &str,
+) -> (Result<super::super::BulbPlan, FederationError>, usize) {
+    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+    use crate::schema::position::SchemaRootDefinitionKind;
+
     let supergraph = Supergraph::new(schema).expect("supergraph parse");
     let api_schema = supergraph
         .to_api_schema(Default::default())
@@ -2810,32 +2812,16 @@ fn bulb_test_parameters(
         )
         .expect("query graph"),
     );
-    let statistics = Default::default();
-    (supergraph, query_graph, statistics)
-}
-
-/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
-/// root fetch group up front instead of fanning out from the federated root.
-/// The public planner always enters at the federated root, so this drives
-/// build_bulb_plan directly with the subgraph's own Query node as head.
-#[test]
-fn bulb_plan_from_concrete_subgraph_root_head() {
-    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
-    use crate::schema::position::SchemaRootDefinitionKind;
-
-    let (supergraph, query_graph, statistics) = bulb_test_parameters(SCHEMA);
+    let statistics = crate::query_plan::query_planner::QueryPlanningStatistics::default();
     let head = *query_graph
-        .root_kinds_to_nodes_by_source("a")
+        .root_kinds_to_nodes_by_source(subgraph)
         .expect("subgraph root kinds")
         .get(&SchemaRootDefinitionKind::Query)
         .expect("subgraph query root");
 
-    let operation = crate::operation::Operation::parse(
-        supergraph.schema.clone(),
-        "{ user { name email } }",
-        "test.graphql",
-    )
-    .expect("operation parse");
+    let operation =
+        crate::operation::Operation::parse(supergraph.schema.clone(), query, "test.graphql")
+            .expect("operation parse");
     let selection_set = operation.selection_set.clone();
     let parameters = QueryPlanningParameters {
         supergraph_schema: supergraph.schema.clone(),
@@ -2860,19 +2846,103 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
     };
 
     let mut naming = super::super::OperationNaming::new(false);
-    let bulb = super::super::build_bulb_plan(
+    let result = super::super::build_bulb_plan(
         &parameters,
         &selection_set,
         SchemaRootDefinitionKind::Query,
         &mut naming,
         false,
-    )
-    .expect("bulb plan");
-    let plan = bulb.plan.expect("plan node");
+    );
+    (result, statistics.evaluated_plan_count.get())
+}
+
+/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
+/// root fetch group up front instead of fanning out from the federated root.
+#[test]
+fn bulb_plan_from_concrete_subgraph_root_head() {
+    let (result, _) = plan_from_subgraph_root(SCHEMA, "a", "{ user { name email } }");
+    let plan = result.expect("bulb plan").plan.expect("plan node");
     let plan_str = format!("{plan}");
     assert!(
         plan_str.contains("name") && plan_str.contains("email"),
         "Plan from subgraph root head should fetch both fields: {plan_str}"
+    );
+}
+
+/// `target` is only reachable through T's circular key, so it is dropped
+/// on every path. Each `s*` field is shared by A and B, giving the search
+/// a real choice per field. Nothing below the drop can complete, so the
+/// search should give up without walking those choices.
+#[test]
+fn dropped_field_prunes_remaining_choices() {
+    let schema = r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  T @join__graph(name: "t", url: "http://t")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+{
+  entry: E @join__field(graph: A)
+}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: T, key: "c { cid cm }")
+{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  c: C @join__field(graph: A) @join__field(graph: T)
+  target: String @join__field(graph: T)
+  s1: E @join__field(graph: A) @join__field(graph: B)
+  s2: E @join__field(graph: A) @join__field(graph: B)
+  s3: E @join__field(graph: A) @join__field(graph: B)
+  s4: E @join__field(graph: A) @join__field(graph: B)
+  s5: E @join__field(graph: A) @join__field(graph: B)
+  s6: E @join__field(graph: A) @join__field(graph: B)
+}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: T, key: "cid cm")
+{
+  cid: ID! @join__field(graph: A) @join__field(graph: T)
+  cm: String @join__field(graph: T)
+}
+"#;
+    let (result, evaluated) = plan_from_subgraph_root(
+        schema,
+        "a",
+        "{ entry { target s1 { id } s2 { id } s3 { id } s4 { id } s5 { id } s6 { id } } }",
+    );
+    assert!(result.is_err(), "target is unreachable, planning must fail");
+    assert_eq!(
+        evaluated, 0,
+        "no terminal below the dropped field should be evaluated"
     );
 }
 
