@@ -119,6 +119,44 @@ pub(crate) fn definitely_mismatches(contract: &Shape, shape: &Shape) -> bool {
     }
 }
 
+/// Returns true if values of shapes `a` and `b` can be meaningfully compared
+/// with methods like `->eq`, meaning they have the same type, where an int can
+/// be compared with a float and unknown or named shapes with anything.
+///
+/// Literal values are compared by their type, not their value: comparing
+/// `"a"` with `"b"` is a valid comparison that happens to return false.
+pub(crate) fn is_same_type_comparison(a: &Shape, b: &Shape) -> bool {
+    let (a, b) = (widen_literals(a), widen_literals(b));
+    a.accepts(&b) || b.accepts(&a)
+}
+
+/// Replaces literal string, int, and bool shapes (like `"a"`, `1`, or `true`)
+/// anywhere in `shape` with the general shape of their type.
+fn widen_literals(shape: &Shape) -> Shape {
+    let locations = shape.locations().cloned();
+    match shape.case() {
+        ShapeCase::String(Some(_)) => Shape::string(locations),
+        ShapeCase::Int(Some(_)) => Shape::int(locations),
+        ShapeCase::Bool(Some(_)) => Shape::bool(locations),
+        ShapeCase::One(members) => Shape::one(members.iter().map(widen_literals), locations),
+        ShapeCase::All(members) => Shape::all(members.iter().map(widen_literals), locations),
+        ShapeCase::Array { prefix, tail } => Shape::array(
+            prefix.iter().map(widen_literals),
+            widen_literals(tail),
+            locations,
+        ),
+        ShapeCase::Object { fields, rest } => Shape::object(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), widen_literals(field)))
+                .collect(),
+            widen_literals(rest),
+            locations,
+        ),
+        _ => shape.clone(),
+    }
+}
+
 pub(crate) fn number_value_as_float(
     number: &Number,
     method_name: &WithRange<String>,
@@ -323,5 +361,39 @@ mod tests {
     )]
     fn test_definitely_mismatches_positive_cases(#[case] contract: Shape, #[case] shape: Shape) {
         assert!(definitely_mismatches(&contract, &shape));
+    }
+
+    #[rstest::rstest]
+    #[case::same_string_literals(Shape::string_value("a", []), Shape::string_value("a", []))]
+    #[case::different_string_literals(Shape::string_value("a", []), Shape::string_value("b", []))]
+    #[case::string_literal_and_string(Shape::string_value("a", []), Shape::string([]))]
+    #[case::different_int_literals(Shape::int_value(1, []), Shape::int_value(2, []))]
+    #[case::int_literal_and_float(Shape::int_value(1, []), Shape::float([]))]
+    #[case::different_bool_literals(Shape::bool_value(true, []), Shape::bool_value(false, []))]
+    #[case::literal_union(
+        Shape::one([Shape::string_value("x", []), Shape::string_value("y", [])], []),
+        Shape::string_value("z", [])
+    )]
+    #[case::nested_literals(
+        Shape::tuple([Shape::string_value("a", [])], []),
+        Shape::tuple([Shape::string_value("b", [])], [])
+    )]
+    #[case::named(Shape::string_value("a", []), Shape::name("$args.s", []))]
+    fn test_is_same_type_comparison_positive_cases(#[case] a: Shape, #[case] b: Shape) {
+        assert!(is_same_type_comparison(&a, &b));
+        assert!(is_same_type_comparison(&b, &a));
+    }
+
+    #[rstest::rstest]
+    #[case::string_and_int(Shape::string_value("a", []), Shape::int_value(1, []))]
+    #[case::bool_and_string(Shape::bool_value(true, []), Shape::string([]))]
+    #[case::string_and_null(Shape::string_value("a", []), Shape::null([]))]
+    #[case::nested_mismatch(
+        Shape::tuple([Shape::string_value("a", [])], []),
+        Shape::tuple([Shape::int_value(1, [])], [])
+    )]
+    fn test_is_same_type_comparison_negative_cases(#[case] a: Shape, #[case] b: Shape) {
+        assert!(!is_same_type_comparison(&a, &b));
+        assert!(!is_same_type_comparison(&b, &a));
     }
 }

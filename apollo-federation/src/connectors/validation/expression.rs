@@ -965,6 +965,9 @@ mod tests {
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
+    #[case::eq_string_int(r#"$("a")->eq(1)"#)]
+    #[case::in_string_ints(r#"$("a")->in([1, 2])"#)]
+    #[case::contains_ints_string(r#"$([1, 2])->contains("a")"#)]
     #[case::join_not_null_objects(r#"$([{"a": 1}])->joinNotNull(",")"#)]
     #[case::join_not_null_nested_arrays(r#"$([[1, 2]])->joinNotNull(",")"#)]
     #[case::join_not_null_mapped_to_objects(r#"$args.strings->map({ s: @ })->joinNotNull(",")"#)]
@@ -1016,6 +1019,26 @@ mod tests {
     #[case::after_slice(r#"$args.strings->slice(0, 2)->joinNotNull(",")"#)]
     #[case::literal_with_nulls(r#"$(["a", null, 1])->joinNotNull(",")"#)]
     fn valid_join_not_null_inputs(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, scalars(), spec)
+                .expect("expression is valid for this spec version");
+        }
+    }
+
+    // Comparing two different literals of the same type is valid, and returns
+    // false at runtime.
+    #[rstest]
+    #[case::eq_strings(r#"$("b")->eq("a")"#)]
+    #[case::ne_strings(r#"$("b")->ne("a")"#)]
+    #[case::eq_ints("$(1)->eq(2)")]
+    #[case::eq_int_float("$(1)->eq(1.5)")]
+    #[case::eq_bools("$(true)->eq(false)")]
+    #[case::in_strings(r#"$("b")->in(["a", "c"])"#)]
+    #[case::in_ints("$(1)->in([2, 3])")]
+    #[case::contains_strings(r#"$(["b", "c"])->contains("a")"#)]
+    #[case::eq_after_match(r#"$args.string->match(["a", "x"], [@, "y"])->eq("x")"#)]
+    #[case::in_after_match(r#"$args.string->match(["a", "x"], [@, "y"])->in(["x"])"#)]
+    fn valid_same_type_literal_comparisons(#[case] selection: &str) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
             validate_with_context(selection, scalars(), spec)
                 .expect("expression is valid for this spec version");

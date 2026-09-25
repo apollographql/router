@@ -9,6 +9,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::is_same_type_comparison;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
@@ -98,7 +99,7 @@ fn ne_shape(
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Ensures that the arguments are of the same type... this includes covering cases like int/float and unknown/name
-    if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
+    if !is_same_type_comparison(&input_shape, &arg_shape) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {input_shape} != {arg_shape}.",

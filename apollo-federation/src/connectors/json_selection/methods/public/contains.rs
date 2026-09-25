@@ -11,6 +11,7 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::is_same_type_comparison;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::impl_arrow_method;
 
@@ -143,7 +144,7 @@ fn contains_shape(
     // Ensures that the argument is of the same type as the array elements... this includes covering cases like int/float and unknown/name
     if let Some(item) = prefix
         .iter()
-        .find(|item| !(arg_shape.accepts(item) || item.accepts(&arg_shape)))
+        .find(|item| !is_same_type_comparison(&arg_shape, item))
     {
         return Shape::error_with_partial(
             format!(
@@ -156,7 +157,7 @@ fn contains_shape(
     }
 
     // Also check the tail for type mismatch
-    if !(tail.is_none() || arg_shape.accepts(tail) || tail.accepts(&arg_shape)) {
+    if !(tail.is_none() || is_same_type_comparison(&arg_shape, tail)) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {arg_shape} == {tail}.",
