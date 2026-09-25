@@ -39,6 +39,9 @@ pub(crate) struct SubgraphMetadata {
     provided_fields: IndexSet<FieldDefinitionPosition>,
     required_fields: IndexSet<FieldDefinitionPosition>,
     shareable_fields: IndexSet<FieldDefinitionPosition>,
+    /// Whether this is a GraphQL Federation source schema (see
+    /// [`crate::composite_schemas::is_composite_schema`]).
+    is_composite_schema: bool,
 }
 
 impl SubgraphMetadata {
@@ -61,6 +64,8 @@ impl SubgraphMetadata {
         } else {
             Self::collect_shareable_fields(schema, federation_spec_definition)?
         };
+        let is_composite_schema =
+            crate::composite_schemas::is_composite_schema(schema, federation_spec_definition);
 
         Ok(Self {
             federation_spec_definition,
@@ -72,7 +77,13 @@ impl SubgraphMetadata {
             provided_fields,
             required_fields,
             shareable_fields,
+            is_composite_schema,
         })
+    }
+
+    /// Whether this is a GraphQL Federation source schema.
+    pub(crate) fn is_composite_schema(&self) -> bool {
+        self.is_composite_schema
     }
 
     pub(crate) fn federation_spec_definition(&self) -> &'static FederationSpecDefinition {

@@ -42,6 +42,7 @@ pub enum HintCode {
     ImplicitlyUpgradedFederationVersion,
     ContextualArgumentNotContextualInAllSubgraphs,
     InterfaceKeyMissingImplementationType,
+    LookupReturnsNonNullableType,
 }
 
 impl HintCode {
@@ -109,6 +110,7 @@ impl HintCode {
             HintCode::InterfaceKeyMissingImplementationType => {
                 &INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE
             }
+            HintCode::LookupReturnsNonNullableType => &LOOKUP_RETURNS_NON_NULLABLE_TYPE,
         }
     }
 
@@ -146,6 +148,16 @@ fn connectors_hint_definition(code: ConnectorsCode) -> &'static HintCodeDefiniti
         .get(&code)
         .unwrap_or(&UNKNOWN_CONNECTORS_HINT)
 }
+
+pub(crate) static LOOKUP_RETURNS_NON_NULLABLE_TYPE: LazyLock<HintCodeDefinition> = LazyLock::new(
+    || {
+        HintCodeDefinition::new(
+            "LOOKUP_RETURNS_NON_NULLABLE_TYPE",
+            HintLevel::Warn,
+            "A `@lookup` field returns a non-nullable type; lookups should return nullable types so a missing entity resolves to null",
+        )
+    },
+);
 
 pub(crate) static INCONSISTENT_BUT_COMPATIBLE_FIELD_TYPE: LazyLock<HintCodeDefinition> =
     LazyLock::new(|| {

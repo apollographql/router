@@ -366,7 +366,13 @@ impl Subgraph<Initial> {
     }
 
     fn expand_links_internal(self) -> Result<Subgraph<Expanded>, FederationError> {
-        let schema = expand_schema(self.state.schema)?;
+        let mut schema = self.state.schema;
+        // A GraphQL Federation source schema carries no `@link`; stamp the implicit federation
+        // link before expansion, or it would be expanded as a Fed 1 schema.
+        if crate::composite_schemas::detection::is_composite_source_schema(&schema) {
+            crate::composite_schemas::detection::stamp_federation_link(&mut schema);
+        }
+        let schema = expand_schema(schema)?;
         let orphan_extension_types = self.state.orphan_extension_types;
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             bail!(
@@ -591,9 +597,13 @@ impl Subgraph<Expanded> {
         tracing::debug!("Subgraph<Expanded>: validate `{}`", self.name);
         // Connectors first: it is defined against the expanded-but-unvalidated schema, and its
         // diagnostics are more actionable than the GraphQL ones for a subgraph author.
-        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let mut hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        hints.extend(
+            crate::composite_schemas::validation::validate_source_schema(&schema)
+                .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?,
+        );
 
         Ok(Subgraph {
             name: self.name,
@@ -664,9 +674,13 @@ impl Subgraph<Upgraded> {
         // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
         // fed2 and so does not normally reach this state, but running here keeps the two paths into
         // `Validated` equivalent.
-        let hints = ConnectorsBlueprint::on_validation(&self)?;
+        let mut hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
+        hints.extend(
+            crate::composite_schemas::validation::validate_source_schema(&schema)
+                .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?,
+        );
         let Some(metadata) = schema.subgraph_metadata().cloned() else {
             return Err(SubgraphError::new_without_locations(
                 self.name.clone(),

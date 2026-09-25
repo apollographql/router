@@ -907,6 +907,42 @@ pub enum SingleFederationError {
     #[error("Context name \"{name}\" is invalid. It should have only alphanumeric characters.")]
     ContextNameInvalid { name: String },
     #[error("{message}")]
+    LookupMustHaveArguments { message: String },
+    #[error("{message}")]
+    LookupReturnsList { message: String },
+    #[error("{message}")]
+    LookupKeyMissingForType { message: String },
+    #[error("{message}")]
+    LookupNotReachable { message: String },
+    #[error("{message}")]
+    IsInvalidSyntax { message: String },
+    #[error("{message}")]
+    IsInvalidFieldType { message: String },
+    #[error("{message}")]
+    IsInvalidUsage { message: String },
+    #[error("{message}")]
+    IsFieldsHasArguments { message: String },
+    #[error("{message}")]
+    IsInvalidFields { message: String },
+    #[error("{message}")]
+    RequireInvalidSyntax { message: String },
+    #[error("{message}")]
+    RequireInvalidFieldType { message: String },
+    #[error("{message}")]
+    RequireInvalidUsage { message: String },
+    #[error("{message}")]
+    RequireInconsistentOnImplementation { message: String },
+    #[error("{message}")]
+    RequireInvalidFields { message: String },
+    #[error("{message}")]
+    ReferenceToInternalType { message: String },
+    #[error("{message}")]
+    RequiresInSourceSchema { message: String },
+    #[error("{message}")]
+    KeyResolvableInSourceSchema { message: String },
+    #[error("{message}")]
+    ContextInSourceSchemaUnsupported { message: String },
+    #[error("{message}")]
     ContextNotSet { message: String },
     #[error("{message}")]
     NoContextReferenced { message: String },
@@ -1153,6 +1189,40 @@ impl SingleFederationError {
                 ErrorCode::ContextNameContainsUnderscore
             }
             SingleFederationError::ContextNameInvalid { .. } => ErrorCode::ContextNameInvalid,
+            SingleFederationError::LookupMustHaveArguments { .. } => {
+                ErrorCode::LookupMustHaveArguments
+            }
+            SingleFederationError::LookupReturnsList { .. } => ErrorCode::LookupReturnsList,
+            SingleFederationError::LookupKeyMissingForType { .. } => {
+                ErrorCode::LookupKeyMissingForType
+            }
+            SingleFederationError::LookupNotReachable { .. } => ErrorCode::LookupNotReachable,
+            SingleFederationError::IsInvalidSyntax { .. } => ErrorCode::IsInvalidSyntax,
+            SingleFederationError::IsInvalidFieldType { .. } => ErrorCode::IsInvalidFieldType,
+            SingleFederationError::IsInvalidUsage { .. } => ErrorCode::IsInvalidUsage,
+            SingleFederationError::IsFieldsHasArguments { .. } => ErrorCode::IsFieldsHasArguments,
+            SingleFederationError::IsInvalidFields { .. } => ErrorCode::IsInvalidFields,
+            SingleFederationError::RequireInvalidSyntax { .. } => ErrorCode::RequireInvalidSyntax,
+            SingleFederationError::RequireInvalidFieldType { .. } => {
+                ErrorCode::RequireInvalidFieldType
+            }
+            SingleFederationError::RequireInvalidUsage { .. } => ErrorCode::RequireInvalidUsage,
+            SingleFederationError::RequireInconsistentOnImplementation { .. } => {
+                ErrorCode::RequireInconsistentOnImplementation
+            }
+            SingleFederationError::RequireInvalidFields { .. } => ErrorCode::RequireInvalidFields,
+            SingleFederationError::ReferenceToInternalType { .. } => {
+                ErrorCode::ReferenceToInternalType
+            }
+            SingleFederationError::RequiresInSourceSchema { .. } => {
+                ErrorCode::RequiresInSourceSchema
+            }
+            SingleFederationError::KeyResolvableInSourceSchema { .. } => {
+                ErrorCode::KeyResolvableInSourceSchema
+            }
+            SingleFederationError::ContextInSourceSchemaUnsupported { .. } => {
+                ErrorCode::ContextInSourceSchemaUnsupported
+            }
             SingleFederationError::ContextNotSet { .. } => ErrorCode::ContextNotSet,
             SingleFederationError::NoContextReferenced { .. } => ErrorCode::NoContextReferenced,
             SingleFederationError::NoSelectionForContext { .. } => ErrorCode::NoSelectionForContext,
@@ -2452,6 +2522,209 @@ static CONTEXT_NAME_INVALID: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     )
 });
 
+static LOOKUP_MUST_HAVE_ARGUMENTS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LOOKUP_MUST_HAVE_ARGUMENTS".to_owned(),
+        "A `@lookup` field must declare at least one argument.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static LOOKUP_RETURNS_LIST: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LOOKUP_RETURNS_LIST".to_owned(),
+        "A `@lookup` field must not return a list.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static LOOKUP_KEY_MISSING_FOR_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LOOKUP_KEY_MISSING_FOR_TYPE".to_owned(),
+        "A `@lookup` argument cannot be mapped to a field of every possible type the lookup field returns.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static LOOKUP_NOT_REACHABLE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "LOOKUP_NOT_REACHABLE".to_owned(),
+        "A `@lookup` field is not reachable from the query root through fields without arguments."
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static IS_INVALID_SYNTAX: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "IS_INVALID_SYNTAX".to_owned(),
+        "The `field` argument of an `@is` directive is not a valid field selection map.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static IS_INVALID_FIELD_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "IS_INVALID_FIELD_TYPE".to_owned(),
+        "The `field` argument of an `@is` directive is not a string.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static IS_INVALID_USAGE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "IS_INVALID_USAGE".to_owned(),
+        "An `@is` directive is applied to an argument of a field that is not a `@lookup` field."
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static IS_FIELDS_HAS_ARGUMENTS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "IS_FIELDS_HAS_ARGUMENTS".to_owned(),
+        "The selection map of an `@is` directive supplies field arguments.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static IS_INVALID_FIELDS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "IS_INVALID_FIELDS".to_owned(),
+        "The selection map of an `@is` directive does not select valid fields of the lookup's return type.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static REQUIRE_INVALID_SYNTAX: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "REQUIRE_INVALID_SYNTAX".to_owned(),
+        "The `field` argument of a `@require` directive is not a valid field selection map."
+            .to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static REQUIRE_INVALID_FIELD_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "REQUIRE_INVALID_FIELD_TYPE".to_owned(),
+        "The `field` argument of a `@require` directive is not a string.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static REQUIRE_INVALID_USAGE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "REQUIRE_INVALID_USAGE".to_owned(),
+        "A `@require` directive is applied to an argument of a `@lookup` field.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static REQUIRE_INCONSISTENT_ON_IMPLEMENTATION: LazyLock<ErrorCodeDefinition> = LazyLock::new(
+    || {
+        ErrorCodeDefinition::new(
+        "REQUIRE_INCONSISTENT_ON_IMPLEMENTATION".to_owned(),
+        "A `@require` directive is not applied consistently to an interface field argument and the corresponding argument of every implementing field.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+    },
+);
+
+static REQUIRE_INVALID_FIELDS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "REQUIRE_INVALID_FIELDS".to_owned(),
+        "The selection map of a `@require` directive does not select valid fields resolvable by another subgraph.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static REFERENCE_TO_INTERNAL_TYPE: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "REFERENCE_TO_INTERNAL_TYPE".to_owned(),
+        "A public field or argument references an `@internal` type.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static REQUIRES_IN_SOURCE_SCHEMA: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "REQUIRES_IN_SOURCE_SCHEMA".to_owned(),
+        "A GraphQL Federation source schema uses the federation `@requires` directive instead of `@require` on arguments.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static KEY_RESOLVABLE_IN_SOURCE_SCHEMA: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "KEY_RESOLVABLE_IN_SOURCE_SCHEMA".to_owned(),
+        "A GraphQL Federation source schema sets `resolvable` on `@key`; resolvability is derived from `@lookup` fields.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
+static CONTEXT_IN_SOURCE_SCHEMA_UNSUPPORTED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "CONTEXT_IN_SOURCE_SCHEMA_UNSUPPORTED".to_owned(),
+        "A GraphQL Federation source schema uses `@context` or `@fromContext`, which are not yet supported in source schemas.".to_owned(),
+        Some(ErrorCodeMetadata {
+            added_in: "2.16.0",
+            replaces: &[],
+        }),
+    )
+});
+
 static CONTEXT_NOT_SET: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
     ErrorCodeDefinition::new(
         "CONTEXT_NOT_SET".to_owned(),
@@ -2721,6 +2994,24 @@ pub enum ErrorCode {
     ListSizeInvalidAssumedSize,
     ListSizeInvalidSlicingArgument,
     ListSizeInvalidSizedField,
+    LookupMustHaveArguments,
+    LookupReturnsList,
+    LookupKeyMissingForType,
+    LookupNotReachable,
+    IsInvalidSyntax,
+    IsInvalidFieldType,
+    IsInvalidUsage,
+    IsFieldsHasArguments,
+    IsInvalidFields,
+    RequireInvalidSyntax,
+    RequireInvalidFieldType,
+    RequireInvalidUsage,
+    RequireInconsistentOnImplementation,
+    RequireInvalidFields,
+    ReferenceToInternalType,
+    RequiresInSourceSchema,
+    KeyResolvableInSourceSchema,
+    ContextInSourceSchemaUnsupported,
     ContextNameInvalid,
     ContextNameContainsUnderscore,
     ContextNotSet,
@@ -2851,6 +3142,26 @@ impl ErrorCode {
             ErrorCode::ListSizeInvalidSizedField => &LIST_SIZE_INVALID_SIZED_FIELD,
             ErrorCode::ContextNameContainsUnderscore => &CONTEXT_NAME_CONTAINS_UNDERSCORE,
             ErrorCode::ContextNameInvalid => &CONTEXT_NAME_INVALID,
+            ErrorCode::LookupMustHaveArguments => &LOOKUP_MUST_HAVE_ARGUMENTS,
+            ErrorCode::LookupReturnsList => &LOOKUP_RETURNS_LIST,
+            ErrorCode::LookupKeyMissingForType => &LOOKUP_KEY_MISSING_FOR_TYPE,
+            ErrorCode::LookupNotReachable => &LOOKUP_NOT_REACHABLE,
+            ErrorCode::IsInvalidSyntax => &IS_INVALID_SYNTAX,
+            ErrorCode::IsInvalidFieldType => &IS_INVALID_FIELD_TYPE,
+            ErrorCode::IsInvalidUsage => &IS_INVALID_USAGE,
+            ErrorCode::IsFieldsHasArguments => &IS_FIELDS_HAS_ARGUMENTS,
+            ErrorCode::IsInvalidFields => &IS_INVALID_FIELDS,
+            ErrorCode::RequireInvalidSyntax => &REQUIRE_INVALID_SYNTAX,
+            ErrorCode::RequireInvalidFieldType => &REQUIRE_INVALID_FIELD_TYPE,
+            ErrorCode::RequireInvalidUsage => &REQUIRE_INVALID_USAGE,
+            ErrorCode::RequireInconsistentOnImplementation => {
+                &REQUIRE_INCONSISTENT_ON_IMPLEMENTATION
+            }
+            ErrorCode::RequireInvalidFields => &REQUIRE_INVALID_FIELDS,
+            ErrorCode::ReferenceToInternalType => &REFERENCE_TO_INTERNAL_TYPE,
+            ErrorCode::RequiresInSourceSchema => &REQUIRES_IN_SOURCE_SCHEMA,
+            ErrorCode::KeyResolvableInSourceSchema => &KEY_RESOLVABLE_IN_SOURCE_SCHEMA,
+            ErrorCode::ContextInSourceSchemaUnsupported => &CONTEXT_IN_SOURCE_SCHEMA_UNSUPPORTED,
             ErrorCode::ContextNotSet => &CONTEXT_NOT_SET,
             ErrorCode::NoContextReferenced => &NO_CONTEXT_REFERENCED,
             ErrorCode::NoSelectionForContext => &NO_SELECTION_FOR_CONTEXT,

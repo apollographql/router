@@ -1000,7 +1000,8 @@ impl FederationSpecDefinition {
 
     /// Whether this version defines the GraphQL Federation source-schema directives.
     pub(crate) fn supports_composite_schemas(&self) -> bool {
-        self.version().satisfies(&COMPOSITE_SCHEMAS_FEDERATION_VERSION)
+        self.version()
+            .satisfies(&COMPOSITE_SCHEMAS_FEDERATION_VERSION)
     }
 
     fn cache_tag_directive_specification() -> DirectiveSpecification {
@@ -1064,22 +1065,17 @@ fn uses_composite_schema_elements(schema: &FederationSchema, link: &link::Link) 
         .map(|name| link.directive_name_in_schema(name))
         .collect();
     let applied = |directives: &apollo_compiler::ast::DirectiveList| {
-        directives
-            .iter()
-            .any(|d| names_in_schema.contains(&d.name))
+        directives.iter().any(|d| names_in_schema.contains(&d.name))
     };
     let applied_component = |directives: &apollo_compiler::schema::DirectiveList| {
-        directives
-            .iter()
-            .any(|d| names_in_schema.contains(&d.name))
+        directives.iter().any(|d| names_in_schema.contains(&d.name))
     };
     let field_uses = |field: &apollo_compiler::ast::FieldDefinition| {
         applied(&field.directives) || field.arguments.iter().any(|a| applied(&a.directives))
     };
     schema.schema().types.values().any(|ty| match ty {
         ExtendedType::Object(object) => {
-            applied_component(&object.directives)
-                || object.fields.values().any(|f| field_uses(f))
+            applied_component(&object.directives) || object.fields.values().any(|f| field_uses(f))
         }
         ExtendedType::Interface(interface) => {
             applied_component(&interface.directives)
