@@ -48,9 +48,11 @@ use crate::services::http::HttpResponse;
 use crate::spec::QueryHash;
 
 mod join_batch_requests_layer;
+mod lookup_batching;
 mod query_plan_analysis_layer;
 mod split_batch_request_layer;
 pub(crate) use self::join_batch_requests_layer::*;
+pub(crate) use self::lookup_batching::*;
 pub(crate) use self::query_plan_analysis_layer::*;
 pub(crate) use self::split_batch_request_layer::*;
 

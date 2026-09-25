@@ -41,6 +41,9 @@ pub(crate) struct FetchService {
     pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
     pub(crate) connector_services: Arc<ConnectorServices>,
     pub(crate) hoist_orphan_errors: Arc<SubgraphConfiguration<HoistOrphanErrors>>,
+    /// How lookup requests are sent to each subgraph (GraphQL Federation).
+    pub(crate) lookup_batching:
+        Arc<SubgraphConfiguration<crate::configuration::graphql_federation::LookupBatching>>,
 }
 
 impl FetchService {
@@ -59,7 +62,18 @@ impl FetchService {
             _subscription_config: subscription_config,
             connector_services,
             hoist_orphan_errors,
+            lookup_batching: Default::default(),
         }
+    }
+
+    pub(crate) fn with_lookup_batching(
+        mut self,
+        lookup_batching: Arc<
+            SubgraphConfiguration<crate::configuration::graphql_federation::LookupBatching>,
+        >,
+    ) -> Self {
+        self.lookup_batching = lookup_batching;
+        self
     }
 }
 
@@ -125,6 +139,7 @@ impl FetchService {
                 self.subgraph_schemas.clone(),
                 request,
                 hoist_orphan_errors,
+                self.lookup_batching.get(&service_name).clone(),
             )
             .instrument(tracing::info_span!(
                 FETCH_SPAN_NAME,
@@ -203,6 +218,7 @@ impl FetchService {
         subgraph_schemas: Arc<SubgraphSchemas>,
         request: FetchRequest,
         hoist_orphan_errors: bool,
+        lookup_batching: crate::configuration::graphql_federation::LookupBatching,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
             fetch_node,
@@ -274,6 +290,7 @@ impl FetchService {
                 context,
                 is_deferred,
                 hoist_orphan_errors,
+                lookup_batching,
             );
         }
 
@@ -337,6 +354,7 @@ impl FetchService {
         context: crate::Context,
         is_deferred: bool,
         hoist_orphan_errors: bool,
+        lookup_batching: crate::configuration::graphql_federation::LookupBatching,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         use crate::query_planner::lookup::LookupResults;
         use crate::query_planner::lookup::lookup_variable_sets;
@@ -344,10 +362,31 @@ impl FetchService {
         let inverted_paths = variables.inverted_paths;
         let sets = lookup_variable_sets(&entity_lookup, variables.variables);
         let service_name = fetch_node.service_name.to_string();
+        // Batched transport: each request carries its place in the batch down to the HTTP client,
+        // where the batch is joined (see `crate::batching::JoinLookupBatchesLayer`).
+        let mut slots = if (lookup_batching.variable_batching || lookup_batching.request_batching)
+            && sets.variable_sets.len() > 1
+        {
+            crate::batching::LookupBatch::new(
+                crate::batching::LookupBatchMode {
+                    variable_batching: lookup_batching.variable_batching,
+                    request_batching: lookup_batching.request_batching,
+                    maximum_size: lookup_batching.maximum_size,
+                },
+                1,
+            )
+            .join(sets.variable_sets.len())
+            .into_iter()
+            .map(Some)
+            .collect()
+        } else {
+            Vec::new()
+        };
         let requests: Vec<SubgraphRequest> = sets
             .variable_sets
             .into_iter()
-            .map(|variable_set| {
+            .enumerate()
+            .map(|(index, variable_set)| {
                 let mut subgraph_request = SubgraphRequest::builder()
                     .supergraph_request(supergraph_request.clone())
                     .subgraph_request(
@@ -376,6 +415,12 @@ impl FetchService {
                 subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
                 subgraph_request.authorization = fetch_node.authorization.clone();
                 subgraph_request.is_deferred_fetch = is_deferred;
+                if let Some(slot) = slots.get_mut(index).and_then(Option::take) {
+                    subgraph_request
+                        .subgraph_request
+                        .extensions_mut()
+                        .insert(slot);
+                }
                 subgraph_request
             })
             .collect();

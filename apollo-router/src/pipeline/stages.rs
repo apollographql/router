@@ -14,6 +14,7 @@ use crate::Configuration;
 use crate::apollo_studio_interop::extended_references_layer::ExtendedReferencesLayer;
 use crate::batching::BatchQueryPlanAnalysisLayer;
 use crate::batching::JoinBatchRequestsLayer;
+use crate::batching::JoinLookupBatchesLayer;
 use crate::batching::SplitBatchRequestLayer;
 use crate::cache::DeduplicatingCache;
 use crate::cache::redis::RedisCacheStorage;
@@ -146,6 +147,7 @@ pub(crate) fn build_http_client_service(
     plugins: Arc<Plugins>,
 ) -> http::BoxCloneService {
     ServiceBuilder::new()
+        .layer(JoinLookupBatchesLayer)
         .layer(JoinBatchRequestsLayer::new(name))
         .layer(SubgraphResponseSizeLimitLayer::new(name))
         .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
@@ -411,6 +413,9 @@ fn build_execution_service(
         subscription_plugin_conf.clone(),
         Arc::new(configuration.experimental_hoist_orphan_errors.clone()),
     );
+    let fetch_service = fetch_service.with_lookup_batching(Arc::new(
+        configuration.preview_graphql_federation.subgraph.clone(),
+    ));
 
     let apollo_telemetry_conf = plugins
         .iter()
