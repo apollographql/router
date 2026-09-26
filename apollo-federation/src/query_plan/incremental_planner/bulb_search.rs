@@ -131,6 +131,13 @@ pub trait BulbSearchSpace {
     /// Whether a terminal candidate satisfies the full request.
     fn is_complete(&self, candidate: &Self::Candidate) -> bool;
 
+    /// Whether a partial candidate can still lead to a complete terminal.
+    /// Once false it must stay false for every descendant, so the search
+    /// can skip the subtree.
+    fn is_viable(&self, _candidate: &Self::Candidate) -> bool {
+        true
+    }
+
     /// Monotonic total work spent across the whole search, including rolled-back work.
     fn effort(&self, candidate: &Self::Candidate) -> u64;
 }
@@ -452,7 +459,14 @@ fn bulb_probe<S: BulbSearchSpace>(
                 break 'descend false;
             }
 
-            match space.advance(candidate) {
+            let advanced = space.advance(candidate);
+            // Cost only prunes once there is an incumbent, so without this
+            // a search that never completes a plan can wander dead subtrees
+            // indefinitely.
+            if !space.is_viable(candidate) {
+                break 'descend false;
+            }
+            match advanced {
                 AdvanceResult::Complete => {
                     // Only cancellation skips recording. On fuel or time
                     // exhaustion the completion is already reached and the

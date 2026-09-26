@@ -705,6 +705,12 @@ impl BulbSearchSpace for FieldRoutingSearchSpace {
         candidate.dropped_fields == 0 && candidate.pending.is_empty()
     }
 
+    /// A drop is undone only by rollback, and `is_complete` rejects any
+    /// candidate with one, so nothing below a drop can be accepted.
+    fn is_viable(&self, candidate: &PlanState) -> bool {
+        candidate.dropped_fields == 0
+    }
+
     fn effort(&self, candidate: &PlanState) -> u64 {
         candidate.effort
     }

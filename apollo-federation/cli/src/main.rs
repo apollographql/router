@@ -78,6 +78,15 @@ struct QueryPlannerArgs {
     /// Set the `debug.paths_limit` option.
     #[arg(long)]
     paths_limit: Option<u32>,
+    /// Use the incremental (BULB) planner.
+    #[arg(long, default_value_t = false)]
+    incremental: bool,
+    /// BULB search fuel budget (implies --incremental).
+    #[arg(long)]
+    fuel: Option<u64>,
+    /// BULB search timeout in milliseconds (implies --incremental).
+    #[arg(long)]
+    timeout_ms: Option<u64>,
 }
 
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
@@ -195,6 +204,15 @@ impl QueryPlannerArgs {
             config.debug.max_evaluated_plans = max_evaluated_plans;
         }
         config.debug.paths_limit = self.paths_limit;
+        if self.incremental || self.fuel.is_some() || self.timeout_ms.is_some() {
+            config.incremental_planner.enabled = true;
+        }
+        if let Some(fuel) = self.fuel {
+            config.incremental_planner.fuel = fuel;
+        }
+        if let Some(timeout_ms) = self.timeout_ms {
+            config.incremental_planner.timeout = Some(std::time::Duration::from_millis(timeout_ms));
+        }
     }
 }
 
