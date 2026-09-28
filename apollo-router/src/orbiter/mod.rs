@@ -127,6 +127,10 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                 }
             })
     }
+
+    async fn shutdown(&mut self) {
+        self.delegate.shutdown().await
+    }
 }
 
 fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> UsageReport {

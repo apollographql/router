@@ -927,6 +927,9 @@ where
                 break;
             }
         }
+        // Release what the factory keeps across routers, such as the installed tracer provider.
+        // This runs whether the router stopped cleanly or because of an error.
+        self.router_configurator.shutdown().await;
         tracing::info!("stopped");
 
         match state {

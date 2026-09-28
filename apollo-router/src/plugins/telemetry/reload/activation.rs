@@ -21,13 +21,24 @@
 //! 2. **During drop**: Any uncommitted providers are moved to blocking tasks for cleanup
 //!
 //! This prevents blocking the async runtime while ensuring all resources are properly cleaned up.
+//!
+//! Dropping a tracer provider is not enough: every tracer and span holds a clone of its provider,
+//! and the SDK shuts the provider down when the last clone is dropped. A span that is still being
+//! exported when the provider is replaced could otherwise run that shutdown on an async worker.
+//! Retired tracer providers are therefore shut down explicitly, after which later drops do nothing.
+//!
+//! The global OpenTelemetry API does not hand back the provider it replaces, so the router keeps its
+//! own [`TracerProviderHandle`]. The router factory owns it for the lifetime of the state machine and
+//! lends it to each [`Activation`]; commit swaps the new provider into it and retires the old one.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use opentelemetry::InstrumentationScope;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use parking_lot::Mutex;
 use prometheus::Registry;
 use tokio::task::block_in_place;
@@ -48,8 +59,13 @@ use crate::plugins::telemetry::reload::otel::reload_fmt;
 /// Collects new telemetry providers and configuration during the preparation phase,
 /// then atomically applies them during the activation phase via [`Activation::commit()`].
 pub(crate) struct Activation {
-    /// The new tracer provider. None means leave the existing one
-    new_trace_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+    /// The new tracer provider. None means leave the existing one.
+    /// After commit this holds the retired provider, which is shut down on drop.
+    new_trace_provider: Option<SdkTracerProvider>,
+
+    /// The router's handle to the installed tracer provider, lent by the router factory.
+    /// None if this activation was prepared outside the router factory.
+    installed_trace_provider: Option<TracerProviderHandle>,
 
     /// The new tracer propagator. None means leave the existing one
     new_trace_propagator: Option<TextMapCompositePropagator>,
@@ -87,10 +103,35 @@ pub(crate) struct TestInstrumentation {
 /// that can be maintained across reloads.
 static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(Default::default);
 
+/// The tracer provider that the router has installed globally.
+///
+/// Owned by the router factory, which outlives every router it creates, so a reload that leaves
+/// tracing unchanged keeps the installed provider. Clones share the same provider.
+#[derive(Clone, Default)]
+pub(crate) struct TracerProviderHandle(Arc<Mutex<Option<SdkTracerProvider>>>);
+
+impl TracerProviderHandle {
+    /// Records `tracer_provider` as installed and returns the provider it replaces.
+    fn replace(&self, tracer_provider: SdkTracerProvider) -> Option<SdkTracerProvider> {
+        self.0.lock().replace(tracer_provider)
+    }
+
+    /// Shuts down the installed tracer provider, flushing any pending spans.
+    ///
+    /// This MUST be called from a blocking thread.
+    pub(crate) fn shutdown(&self) {
+        let tracer_provider = self.0.lock().take();
+        if let Some(tracer_provider) = tracer_provider {
+            shutdown(tracer_provider);
+        }
+    }
+}
+
 impl Activation {
     pub(crate) fn new() -> Self {
         Self {
             new_trace_provider: None,
+            installed_trace_provider: None,
             new_trace_propagator: None,
             new_meter_providers: HashMap::default(),
             // We can remove this is we allow state to be maintained across plugin reloads
@@ -136,15 +177,16 @@ impl Activation {
         }
     }
 
-    pub(crate) fn with_tracer_provider(
-        &mut self,
-        tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
-    ) {
+    pub(crate) fn with_tracer_provider(&mut self, tracer_provider: SdkTracerProvider) {
         self.new_trace_provider = Some(tracer_provider);
         #[cfg(test)]
         {
             self.test_instrumentation.tracer_provider_set = true;
         }
+    }
+
+    pub(crate) fn with_installed_tracer_provider(&mut self, installed: TracerProviderHandle) {
+        self.installed_trace_provider = Some(installed);
     }
 
     pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Option<Registry>) {
@@ -200,10 +242,19 @@ impl Activation {
             let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
-            // Install the new provider globally. The old provider is returned and must be
-            // dropped in a blocking task to avoid deadlocking the async runtime during shutdown.
-            // block_in_place is used to ensure that no tasks after this point use the old tracer provider.
+            let retired = self
+                .installed_trace_provider
+                .as_ref()
+                .and_then(|installed| installed.replace(tracer_provider.clone()));
+
+            // Install the new provider globally. `set_tracer_provider` drops the provider it
+            // replaces rather than returning it. We still hold the retired provider, so that drop
+            // cannot trigger its shutdown, but block_in_place keeps the worker safe if the global
+            // held the last reference to a provider installed elsewhere.
             block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
+
+            // Store the retired provider so that Drop shuts it down on a blocking thread.
+            self.new_trace_provider = retired;
         }
     }
 
@@ -212,6 +263,9 @@ impl Activation {
     /// This performs an atomic swap: new providers are installed and old providers are stored back
     /// in `self.new_meter_providers`. The old providers will be safely dropped when this `Activation`
     /// is dropped (using blocking tasks to avoid runtime deadlocks).
+    ///
+    /// Unlike tracer providers, dropping is sufficient here: meters and instruments do not hold
+    /// their meter provider, so the stored provider is its last reference.
     pub(crate) fn reload_metrics(&mut self) {
         let global_meter_provider = meter_provider_internal();
         // Swap new meter providers with old ones. Old providers stored here will be
@@ -246,10 +300,18 @@ impl Activation {
 /// This runs in two scenarios:
 /// 1. **After commit**: Drops the old providers that were replaced
 /// 2. **If preparation fails**: Drops the new providers that were never activated
+///
+/// The tracer provider is shut down explicitly because in-flight spans may still hold clones of it.
 impl Drop for Activation {
     fn drop(&mut self) {
         let meter_providers = std::mem::take(&mut self.new_meter_providers);
         let tracer_provider = self.new_trace_provider.take();
+        let cleanup = move || {
+            drop(meter_providers);
+            if let Some(tracer_provider) = tracer_provider {
+                shutdown(tracer_provider);
+            }
+        };
 
         // In tests, drop providers synchronously via block_in_place. This avoids a race
         // condition between spawn_blocking and Runtime::drop: when the tokio test runtime
@@ -261,18 +323,115 @@ impl Drop for Activation {
         // is still fully alive, so background tasks process shutdown messages normally.
         #[cfg(test)]
         {
-            block_in_place(|| {
-                drop(meter_providers);
-                drop(tracer_provider);
-            });
+            block_in_place(cleanup);
         }
 
         #[cfg(not(test))]
         {
-            spawn_blocking(|| {
-                drop(meter_providers);
-                drop(tracer_provider);
-            });
+            spawn_blocking(cleanup);
         }
+    }
+}
+
+/// Shuts down a tracer provider. This blocks until its span processors have shut down, so it MUST
+/// be called from a blocking thread.
+fn shutdown(tracer_provider: SdkTracerProvider) {
+    if let Err(error) = tracer_provider.shutdown() {
+        tracing::debug!(%error, "failed to shut down tracer provider");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use opentelemetry::Context;
+    use opentelemetry::trace::Tracer;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::trace::Span;
+    use opentelemetry_sdk::trace::SpanData;
+    use opentelemetry_sdk::trace::SpanProcessor;
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct CountShutdowns(Arc<AtomicUsize>);
+
+    impl SpanProcessor for CountShutdowns {
+        fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+
+        fn on_end(&self, _span: SpanData) {}
+
+        fn force_flush(&self) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// Builds a tracer provider and a count of how many times it has been shut down.
+    fn counting_tracer_provider() -> (SdkTracerProvider, Arc<AtomicUsize>) {
+        let shutdowns = Arc::new(AtomicUsize::new(0));
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_span_processor(CountShutdowns(shutdowns.clone()))
+            .build();
+        (tracer_provider, shutdowns)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retired_tracer_provider_is_shut_down_while_a_span_still_holds_it() {
+        let (retired, shutdowns) = counting_tracer_provider();
+        // A span that straddles the reload keeps its own reference to the retired provider.
+        let in_flight_span = retired.tracer("test").start("in-flight");
+
+        // After commit, the retired provider is held in the activation until it is dropped.
+        let mut activation = Activation::new();
+        activation.new_trace_provider = Some(retired);
+        drop(activation);
+        assert_eq!(
+            shutdowns.load(Ordering::SeqCst),
+            1,
+            "the retired provider must be shut down by the activation, not by the last span"
+        );
+
+        // Dropping the last reference must not run the shutdown again.
+        drop(in_flight_span);
+        assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn installed_tracer_provider_outlives_activations_until_its_owner_shuts_it_down() {
+        let (installed, installed_shutdowns) = counting_tracer_provider();
+        let handle = TracerProviderHandle::default();
+        assert!(handle.replace(installed).is_none());
+
+        // A reload that leaves tracing unchanged lends the handle but has no new provider.
+        let mut unchanged = Activation::new();
+        unchanged.with_installed_tracer_provider(handle.clone());
+        drop(unchanged);
+
+        // A failed reload drops its new provider without committing it.
+        let (abandoned, abandoned_shutdowns) = counting_tracer_provider();
+        let mut failed = Activation::new();
+        failed.with_installed_tracer_provider(handle.clone());
+        failed.with_tracer_provider(abandoned);
+        drop(failed);
+        assert_eq!(abandoned_shutdowns.load(Ordering::SeqCst), 1);
+
+        assert_eq!(
+            installed_shutdowns.load(Ordering::SeqCst),
+            0,
+            "an activation must never shut down the installed provider"
+        );
+
+        // The owner shuts the installed provider down when the router stops.
+        handle.shutdown();
+        assert_eq!(installed_shutdowns.load(Ordering::SeqCst), 1);
     }
 }

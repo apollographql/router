@@ -29,6 +29,8 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
 use crate::plugins::subscription::notification::Notify;
+use crate::plugins::telemetry::Telemetry;
+use crate::plugins::telemetry::reload::activation::TracerProviderHandle;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -177,11 +179,19 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError>;
+
+    /// Releases state that outlives individual routers. Called once when the state machine stops,
+    /// after its last router has been dropped.
+    async fn shutdown(&mut self) {}
 }
 
 /// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlRouterFactory;
+pub(crate) struct YamlRouterFactory {
+    /// The tracer provider installed by the routers this factory creates. Each router's telemetry
+    /// plugin retires the previous provider when it installs a new one.
+    tracer_provider: TracerProviderHandle,
+}
 
 #[async_trait::async_trait]
 impl RouterSuperServiceFactory for YamlRouterFactory {
@@ -238,10 +248,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
                 match factory.create_instance(telemetry_init).await {
                     Ok(plugin) => {
-                        if let Some(telemetry) = plugin
-                            .as_any()
-                            .downcast_ref::<crate::plugins::telemetry::Telemetry>()
-                        {
+                        if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
+                            telemetry.lend_installed_tracer_provider(&self.tracer_provider);
                             telemetry.activate();
                         }
                         initial_telemetry_plugin = Some(plugin);
@@ -252,7 +260,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         let router_span = tracing::info_span!(STARTING_SPAN_NAME);
-        Self.inner_create(
+        self.inner_create(
             configuration,
             schema,
             previous_router,
@@ -262,6 +270,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         )
         .instrument(router_span)
         .await
+    }
+
+    async fn shutdown(&mut self) {
+        let tracer_provider = self.tracer_provider.clone();
+        if let Err(error) = tokio::task::spawn_blocking(move || tracer_provider.shutdown()).await {
+            tracing::error!(%error, "failed to shut down tracer provider");
+        }
     }
 }
 
@@ -377,6 +392,12 @@ impl YamlRouterFactory {
             .into_iter()
             .collect(),
         );
+        if let Some(telemetry) = plugins
+            .get("apollo.telemetry")
+            .and_then(|plugin| plugin.as_any().downcast_ref::<Telemetry>())
+        {
+            telemetry.lend_installed_tracer_provider(&self.tracer_provider);
+        }
 
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(planner);

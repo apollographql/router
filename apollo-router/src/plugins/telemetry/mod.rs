@@ -51,6 +51,7 @@ use parking_lot::RwLock;
 use rand::RngExt as _;
 use regex::Regex;
 use reload::activation::Activation;
+use reload::activation::TracerProviderHandle;
 use reload::tracing::TracingConfigurator;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -1388,6 +1389,14 @@ impl PluginPrivate for Telemetry {
 }
 
 impl Telemetry {
+    /// Lends the router's handle to the installed tracer provider to the pending activation, so
+    /// that committing it can retire the provider it replaces. Does nothing once activated.
+    pub(crate) fn lend_installed_tracer_provider(&self, installed: &TracerProviderHandle) {
+        if let Some(activation) = self.activation.lock().as_mut() {
+            activation.with_installed_tracer_provider(installed.clone());
+        }
+    }
+
     fn filter_variables_values(
         variables: &Map<ByteString, Value>,
         forward_rules: &ForwardValues,
