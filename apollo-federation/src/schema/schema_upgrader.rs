@@ -923,11 +923,16 @@ fn inner_upgrade_subgraphs_if_necessary(
     let upgrade_to_fed_3 = subgraphs
         .iter()
         .any(|subgraph| is_fed_3(subgraph.metadata()));
-    if !upgrade_to_fed_3
-        && subgraphs
+    let already_upgraded = if upgrade_to_fed_3 {
+        subgraphs
+            .iter()
+            .all(|subgraph| is_fed_3(subgraph.metadata()))
+    } else {
+        subgraphs
             .iter()
             .all(|subgraph| subgraph.metadata().is_fed_2_schema())
-    {
+    };
+    if already_upgraded {
         return Ok(subgraphs.into_iter().map(Either::Left).collect());
     }
     // Maps type name → set of subgraph names with @interfaceObject on that type (fed2 subgraphs).
@@ -959,14 +964,6 @@ fn inner_upgrade_subgraphs_if_necessary(
                 }
                 Ok(Either::Right(result.subgraph))
             } else {
-                let mut subgraph = subgraph;
-                if upgrade_to_fed_3 && !is_fed_3(subgraph.metadata()) {
-                    subgraph
-                        .upgrade_federation_version(&FEDERATION_V3)
-                        .map_err(|e| {
-                            SubgraphError::new_without_locations(subgraph.name.clone(), e)
-                        })?;
-                }
                 subgraph
                     .metadata()
                     .interface_object_types()
@@ -977,7 +974,15 @@ fn inner_upgrade_subgraphs_if_necessary(
                             .or_default()
                             .insert(subgraph.name.clone());
                     });
-                Ok(Either::Left(subgraph))
+                if upgrade_to_fed_3 && !is_fed_3(subgraph.metadata()) {
+                    let subgraph_name = subgraph.name.clone();
+                    let upgraded = subgraph
+                        .into_federation_version(&FEDERATION_V3)
+                        .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))?;
+                    Ok(Either::Right(upgraded))
+                } else {
+                    Ok(Either::Left(subgraph))
+                }
             }
         })
         .filter_map(|r| {
@@ -3060,6 +3065,77 @@ scalar _FieldSet
             fed1.schema().schema().schema_definition.directives,
             @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#
         );
+    }
+
+    #[test]
+    fn returns_upgraded_state_only_for_upgraded_subgraphs() {
+        let fed1 = || {
+            parse_and_expand(
+                "fed1",
+                r#"
+                type T @key(fields: "id") {
+                    id: ID!
+                    a: Int
+                }
+                "#,
+            )
+        };
+        let fed2 = || {
+            parse_and_expand(
+                "fed2",
+                r#"
+                extend schema
+                    @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
+
+                type T @key(fields: "id") {
+                    id: ID!
+                    b: Int
+                }
+                "#,
+            )
+        };
+        let fed3 = parse_and_expand("fed3", FED3_SUBGRAPH);
+
+        // With a fed 3 subgraph, fed 1 and fed 2 subgraphs are upgraded to fed 3; the fed 3 one is
+        // already at the right version.
+        let [fed1_result, fed2_result, fed3_result]: [Either<_, _>; 3] =
+            inner_upgrade_subgraphs_if_necessary(vec![fed1(), fed2(), fed3])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 3 elements");
+        assert!(fed1_result.is_right());
+        assert!(fed2_result.is_right());
+        assert!(fed3_result.is_left());
+
+        // Without one, only the fed 1 subgraph is upgraded (to fed 2).
+        let [fed1_result, fed2_result]: [Either<_, _>; 2] =
+            inner_upgrade_subgraphs_if_necessary(vec![fed1(), fed2()])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 2 elements");
+        assert!(fed1_result.is_right());
+        assert!(fed2_result.is_left());
+    }
+
+    #[test]
+    fn does_not_upgrade_subgraphs_that_are_all_fed3() {
+        let s1 = parse_and_expand("s1", FED3_SUBGRAPH);
+        let s2 = parse_and_expand(
+            "s2",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key"])
+
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int
+            }
+            "#,
+        );
+
+        let upgraded = inner_upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrades schema");
+
+        assert!(upgraded.iter().all(Either::is_left));
     }
 
     #[test]

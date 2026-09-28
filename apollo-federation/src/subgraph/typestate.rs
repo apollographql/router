@@ -562,13 +562,15 @@ impl Subgraph<Expanded> {
         })
     }
 
-    /// Upgrades the subgraph's federation spec `@link` to the given federation version.
-    pub(crate) fn upgrade_federation_version(
-        &mut self,
+    /// Transitions from Expanded to Upgraded by upgrading the subgraph's federation spec `@link` to
+    /// the given federation version.
+    pub(crate) fn into_federation_version(
+        self,
         version: &Version,
-    ) -> Result<(), FederationError> {
-        self.state.metadata = upgrade_federation_version(&mut self.state.schema, version)?;
-        Ok(())
+    ) -> Result<Subgraph<Upgraded>, FederationError> {
+        let mut subgraph = self.assume_upgraded();
+        subgraph.upgrade_federation_version(version)?;
+        Ok(subgraph)
     }
 
     /// Transitions from Expanded to Upgraded skipping the actual upgrade process.
@@ -670,8 +672,8 @@ impl Subgraph<Upgraded> {
     pub fn validate(self) -> Result<Subgraph<Validated>, CompositionFailure> {
         tracing::debug!("Subgraph<Upgraded>: validate `{}`", self.name);
         // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
-        // fed2 and so does not normally reach this state, but running here keeps the two paths into
-        // `Validated` equivalent.
+        // fed2, so it only reaches this state when it is upgraded to fed3; running here keeps the
+        // two paths into `Validated` equivalent.
         let hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
