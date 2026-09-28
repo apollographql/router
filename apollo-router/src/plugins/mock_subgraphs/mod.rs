@@ -72,6 +72,7 @@ impl schemars::JsonSchema for Config {
     }
 }
 
+// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
 impl apollo_configuration::Validate for Config {}
 impl apollo_configuration::Configuration for Config {}
 

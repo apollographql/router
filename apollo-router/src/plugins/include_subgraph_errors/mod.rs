@@ -165,9 +165,6 @@ impl IncludeSubgraphErrors {
     }
 }
 
-impl apollo_configuration::Validate for Config {}
-impl apollo_configuration::Configuration for Config {}
-
 #[async_trait::async_trait]
 impl Plugin for IncludeSubgraphErrors {
     type Config = Config; // Use Config from the config module

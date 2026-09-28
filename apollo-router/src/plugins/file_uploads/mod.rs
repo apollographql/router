@@ -51,9 +51,6 @@ struct FileUploadsPlugin {
 
 register_private_plugin!("apollo", "preview_file_uploads", FileUploadsPlugin);
 
-impl apollo_configuration::Validate for FileUploadsConfig {}
-impl apollo_configuration::Configuration for FileUploadsConfig {}
-
 #[async_trait::async_trait]
 impl PluginPrivate for FileUploadsPlugin {
     type Config = FileUploadsConfig;

@@ -35,17 +35,20 @@ use crate::services::router;
 use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
     /// Limits that apply to inbound requests to the router.
+    #[config(skip_validate)]
     pub(crate) router: RouterLimitsConfig,
 
     /// Limits that apply to outbound subgraph responses.
+    #[config(skip_validate)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphLimits>,
 
     /// Limits that apply to outbound connector responses.
+    #[config(skip_validate)]
     pub(crate) connector: ConnectorConfiguration<ConnectorLimits>,
 }
 
@@ -247,9 +250,6 @@ impl Config {
 struct LimitsPlugin {
     config: Config,
 }
-
-impl apollo_configuration::Validate for Config {}
-impl apollo_configuration::Configuration for Config {}
 
 #[async_trait]
 impl PluginPrivate for LimitsPlugin {

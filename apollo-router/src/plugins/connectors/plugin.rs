@@ -37,9 +37,6 @@ struct Connectors {
     expose_sources_in_context: bool,
 }
 
-impl apollo_configuration::Validate for ConnectorsConfig {}
-impl apollo_configuration::Configuration for ConnectorsConfig {}
-
 #[async_trait::async_trait]
 impl Plugin for Connectors {
     type Config = ConnectorsConfig;

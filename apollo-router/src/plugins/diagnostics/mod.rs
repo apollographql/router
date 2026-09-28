@@ -38,8 +38,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use multimap::MultiMap;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -104,16 +102,22 @@ impl From<String> for DiagnosticsError {
 /// **Platform Requirements**: This plugin is supported on all platforms.
 /// Heap dump functionality is only available on Linux platforms due to
 /// jemalloc requirements. Other diagnostic features work across platforms.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct Config {
     /// Enable the diagnostics plugin
+    // SECURITY: Plugin disabled by default to prevent accidental exposure
+    // Diagnostics endpoints expose sensitive information and should only be enabled
+    // during development/debugging with network isolation.
     pub(crate) enabled: bool,
 
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8089
     /// Do not expose this endpoint to the internet as it exposes sensitive information.
+    // SECURITY: Bind to localhost only by default to prevent network exposure
+    // Using 127.0.0.1 instead of 0.0.0.0 ensures the diagnostic endpoints
+    // are only accessible from the local machine, not from the network
+    #[config(default = constants::network::default_listen_addr().into(), skip_validate)]
     pub(crate) listen: ListenAddr,
 
     /// Directory path for memory dump files
@@ -121,25 +125,8 @@ pub(crate) struct Config {
     ///
     /// This directory will be created automatically if it doesn't exist.
     /// Note: Memory dumps are only generated on Linux platforms.
+    #[config(default = PathBuf::from("/tmp/router-diagnostics"), skip_validate)]
     pub(crate) output_directory: PathBuf,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            // SECURITY: Plugin disabled by default to prevent accidental exposure
-            // Diagnostics endpoints expose sensitive information and should only be enabled
-            // during development/debugging with network isolation.
-            enabled: false,
-
-            // SECURITY: Bind to localhost only by default to prevent network exposure
-            // Using 127.0.0.1 instead of 0.0.0.0 ensures the diagnostic endpoints
-            // are only accessible from the local machine, not from the network
-            listen: constants::network::default_listen_addr().into(),
-
-            output_directory: PathBuf::from("/tmp/router-diagnostics"),
-        }
-    }
 }
 
 /// The diagnostics plugin
@@ -149,9 +136,6 @@ struct DiagnosticsPlugin {
     router_config: Arc<str>,
     supergraph_schema: Arc<String>,
 }
-
-impl apollo_configuration::Validate for Config {}
-impl apollo_configuration::Configuration for Config {}
 
 #[async_trait::async_trait]
 impl Plugin for DiagnosticsPlugin {

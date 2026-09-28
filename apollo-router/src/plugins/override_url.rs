@@ -4,8 +4,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use http::Uri;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -23,16 +21,13 @@ struct OverrideSubgraphUrl {
 }
 
 /// Subgraph URL mappings
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[serde(untagged)]
 enum Conf {
     /// Subgraph URL mappings
     Mapping(HashMap<String, String>),
 }
-
-impl apollo_configuration::Validate for Conf {}
-impl apollo_configuration::Configuration for Conf {}
 
 #[async_trait::async_trait]
 impl Plugin for OverrideSubgraphUrl {

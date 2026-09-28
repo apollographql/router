@@ -257,20 +257,20 @@ struct GlobalHeadersConfiguration {
 }
 
 /// Configuration for header propagation and masking
-#[derive(Clone, JsonSchema, Default, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[serde(rename_all = "snake_case")]
 #[schemars(rename = "HeadersConfig")]
 pub(crate) struct Config {
     /// Rules to apply to all subgraphs (global defaults)
-    #[serde(default)]
+    #[config(skip_validate)]
     all: Option<GlobalHeadersConfiguration>,
 
     /// Rules for specific subgraphs
-    #[serde(default)]
+    #[config(skip_validate)]
     subgraphs: HashMap<String, GlobalHeadersConfiguration>,
 
     /// Rules for connectors
-    #[serde(default)]
+    #[config(skip_validate)]
     connector: ConnectorHeadersConfiguration,
 }
 
@@ -330,9 +330,6 @@ fn merge_subgraph_masking(
         replace_defaults: true,
     }
 }
-
-impl apollo_configuration::Validate for Config {}
-impl apollo_configuration::Configuration for Config {}
 
 #[async_trait::async_trait]
 impl PluginPrivate for Headers {

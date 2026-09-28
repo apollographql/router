@@ -28,13 +28,14 @@ use crate::services::supergraph;
 const RECORD_HEADER: &str = "x-apollo-router-record";
 
 /// Request recording configuration.
-#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 struct RecordConfig {
     /// The recording plugin is disabled by default.
+    #[config(required)]
     enabled: bool,
     /// The path to the directory where recordings will be stored. Defaults to
     /// the current working directory.
+    #[config(required, skip_validate)]
     storage_path: Option<PathBuf>,
 }
 
@@ -50,9 +51,6 @@ struct Record {
 }
 
 register_plugin!("experimental", "record", Record);
-
-impl apollo_configuration::Validate for RecordConfig {}
-impl apollo_configuration::Configuration for RecordConfig {}
 
 #[async_trait::async_trait]
 impl Plugin for Record {
