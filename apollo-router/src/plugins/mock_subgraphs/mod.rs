@@ -57,7 +57,7 @@ struct Config(SubgraphConfigs);
 
 type SubgraphConfigs = HashMap<String, Arc<SubgraphConfig>>;
 
-/// The schema of the map itself, as before `Config` wrapped it.
+// Delegate to the map so that wrapping it leaves the generated schema unchanged.
 impl schemars::JsonSchema for Config {
     fn inline_schema() -> bool {
         SubgraphConfigs::inline_schema()

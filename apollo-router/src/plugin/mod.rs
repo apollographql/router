@@ -30,13 +30,14 @@ use ::serde::Deserialize;
 use ::serde::de::DeserializeOwned;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
-/// The trait a plugin's `Config` must implement. Re-exported so that a config type deriving
+/// Configuration data with a schema, deserialization and custom validation; every built-in
+/// plugin's `Config` implements it. Re-exported so that a config type deriving
 /// `serde::Deserialize` and `schemars::JsonSchema` can implement it without depending on
 /// `apollo-configuration`; its `#[configuration]` attribute needs that dependency.
 pub use apollo_configuration::Configuration;
 /// Collects a [`Validate`] impl's errors at their place in the configuration.
 pub use apollo_configuration::ErrorCollector;
-/// Custom validation for a plugin's `Config`, which runs while the configuration is parsed.
+/// Custom validation rules for a [`Configuration`] type.
 pub use apollo_configuration::Validate;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
