@@ -4,16 +4,16 @@ use apollo_router::register_plugin;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use http::StatusCode;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
 // This configuration will be used
 // to Deserialize the yml configuration
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 struct PropagateStatusCodeConfig {
+    #[config(required)]
     status_codes: Vec<u16>,
 }
 
@@ -22,9 +22,6 @@ struct PropagateStatusCode {
     // An ordered list of status codes to check
     status_codes: Vec<u16>,
 }
-
-impl apollo_router::plugin::Validate for PropagateStatusCodeConfig {}
-impl apollo_router::plugin::Configuration for PropagateStatusCodeConfig {}
 
 #[async_trait::async_trait]
 impl Plugin for PropagateStatusCode {

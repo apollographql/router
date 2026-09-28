@@ -12,8 +12,6 @@ use http::StatusCode;
 use http_body_util::BodyExt;
 use http_body_util::Full;
 use multimap::MultiMap;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::json;
 use tower::BoxError;
 use tower::Service;
@@ -25,14 +23,12 @@ struct EchoCoProcessor {
     configuration: Conf,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
+    #[config(required)]
     port: u16, // The port the custom echo server will listen to
 }
-
-impl apollo_router::plugin::Validate for Conf {}
-impl apollo_router::plugin::Configuration for Conf {}
 
 // This is a bare bones plugin that can be duplicated when creating your own.
 #[async_trait::async_trait]

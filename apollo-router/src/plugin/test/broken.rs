@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugin::Plugin;
@@ -13,15 +11,13 @@ register_plugin!("experimental", "broken", BrokenPlugin);
 struct BrokenPlugin;
 
 /// This is a broken plugin for testing purposes only.
-#[derive(Clone, JsonSchema, Deserialize)]
+#[apollo_configuration::configuration]
 struct Config {
     /// Enable the broken plugin.
+    #[config(required)]
     #[serde(rename = "enabled")]
     _enabled: bool,
 }
-
-impl apollo_configuration::Validate for Config {}
-impl apollo_configuration::Configuration for Config {}
 
 #[async_trait]
 impl Plugin for BrokenPlugin {

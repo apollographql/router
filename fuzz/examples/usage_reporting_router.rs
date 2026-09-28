@@ -25,6 +25,7 @@ struct ExposeReferencedFieldsByType {
 #[serde(transparent)]
 struct Enabled(#[allow(dead_code)] bool);
 
+// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
 impl Validate for Enabled {}
 impl Configuration for Enabled {}
 

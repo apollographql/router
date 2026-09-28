@@ -1,6 +1,4 @@
 use async_trait::async_trait;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugin::Plugin;
@@ -8,9 +6,10 @@ use crate::plugin::PluginInit;
 use crate::register_plugin;
 
 /// Restricted plugin (for testing purposes only)
-#[derive(Clone, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Config {
     /// Enable the restricted plugin (for testing purposes only)
+    #[config(required)]
     enabled: bool,
 }
 
@@ -18,9 +17,6 @@ struct Config {
 struct Restricted;
 
 register_plugin!("experimental", "restricted", Restricted);
-
-impl apollo_configuration::Validate for Config {}
-impl apollo_configuration::Configuration for Config {}
 
 #[async_trait]
 impl Plugin for Restricted {

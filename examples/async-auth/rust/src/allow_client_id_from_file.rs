@@ -8,17 +8,17 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 use http::StatusCode;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 // This structure is the one we'll deserialize the yml configuration into
-#[derive(Clone, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct AllowClientIdConfig {
+    #[config(required)]
     header: String,
+    #[config(required)]
     path: String,
 }
 
@@ -26,9 +26,6 @@ struct AllowClientIdFromFile {
     header: String,
     allowed_ids_path: PathBuf,
 }
-
-impl apollo_router::plugin::Validate for AllowClientIdConfig {}
-impl apollo_router::plugin::Configuration for AllowClientIdConfig {}
 
 #[async_trait::async_trait]
 impl Plugin for AllowClientIdFromFile {

@@ -418,8 +418,6 @@ mod test_for_harness {
     use ::http::HeaderMap;
     use ::http::HeaderValue;
     use async_trait::async_trait;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
     use tokio::join;
 
     use super::*;
@@ -432,13 +430,10 @@ mod test_for_harness {
     use crate::services::router::body;
 
     /// Config for the test plugin
-    #[derive(Clone, JsonSchema, Deserialize)]
+    #[apollo_configuration::configuration]
     struct MyTestPluginConfig {}
 
     struct MyTestPlugin {}
-    impl apollo_configuration::Validate for MyTestPluginConfig {}
-    impl apollo_configuration::Configuration for MyTestPluginConfig {}
-
     #[async_trait]
     impl Plugin for MyTestPlugin {
         type Config = MyTestPluginConfig;
