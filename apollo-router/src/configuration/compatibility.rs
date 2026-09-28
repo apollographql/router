@@ -1,814 +1,467 @@
-//! Compares effective settings from router's loader and `apollo-configuration`.
-//! Named cases record differences in diagnostics, expansion and configuration-usage data.
+//! Regression corpus for configuration loading with apollo-configuration.
+//!
+//! These fixtures were compared against the router's previous loader before it was removed, and
+//! both produced the same effective settings. The snapshots record what each fixture changes
+//! from the default configuration, so a change in loading behaviour shows up as a snapshot
+//! difference.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_configuration::expansion::FileVariables;
-use apollo_configuration::expansion::MapVariables;
-use apollo_configuration::provenance::Injection;
 use serde_json::Value;
 use serde_json::json;
 
 use super::Configuration;
-use super::apollo_configuration_parse::ExternalValues;
-use super::apollo_configuration_parse::apollo_configuration_options as router_options;
-use super::apollo_configuration_parse::parse_via_apollo_configuration;
+use super::ConfigurationError;
+use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::parse_configuration;
 use super::expansion::Expansion;
 use super::expansion::Override;
 use super::expansion::ValueType;
-use super::schema::Mode;
 use super::schema::router_config_schema;
-use super::schema::validate_yaml_configuration;
-use super::test_discovery;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::spec::Schema;
+use crate::test_harness::tracing_test;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 
-/// Which migration, if any, a corpus fixture needs before the shared parser can accept it.
+/// How an operator brings a corpus fixture into a loadable shape.
 #[derive(Clone, Copy)]
-enum Migration {
-    /// Already in the current on-disk shape.
-    None,
-    /// Needs a migration whose filename is prefixed with the current major version.
-    /// `validate_yaml_configuration(.., Mode::Upgrade)` applies these automatically, so router's
-    /// own startup path accepts the fixture as-is.
-    Minor,
-    /// Needs a migration outside the current major version's prefix. Startup rejects this
-    /// fixture outright; only `router config upgrade` (`UpgradeMode::Major`) can bring it
-    /// forward, so both sides of the comparison run it through that step first.
-    Major,
+enum Upgrade {
+    /// Already in the current shape, or migrated automatically at startup.
+    Startup,
+    /// Needs a migration outside the current major version. Startup rejects this fixture;
+    /// only `router config upgrade` (`UpgradeMode::Major`) can bring it forward.
+    Command,
 }
 
-/// One corpus fixture and how to compare it. `name` identifies the case in a failing assertion,
-/// independently of the file name.
+/// One corpus fixture. `name` identifies the case in a failing assertion, and `snapshot` names
+/// its snapshot, independently of the file name.
 struct Case {
     name: &'static str,
+    snapshot: &'static str,
     text: &'static str,
-    migration: Migration,
+    upgrade: Upgrade,
 }
 
 const FEATUREFUL_CASE: Case = Case {
     name: "cors policies, apq, persisted queries, batching, limits, health check, \
            subscription, a hidden built-in plugin and a custom plugin",
+    snapshot: "current_featureful",
     text: include_str!("testdata/compat/current_featureful.yaml"),
-    migration: Migration::None,
+    upgrade: Upgrade::Startup,
 };
 
 const CASES: &[Case] = &[
     Case {
         name: "minimal supergraph listener",
+        snapshot: "current_minimal",
         text: include_str!("testdata/compat/current_minimal.yaml"),
-        migration: Migration::None,
+        upgrade: Upgrade::Startup,
     },
     FEATUREFUL_CASE,
     Case {
         name: "batching integration configuration",
+        snapshot: "batching_all_enabled",
         text: include_str!("../../tests/fixtures/batching/all_enabled.router.yaml"),
-        migration: Migration::None,
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "documented persisted-query safelist configuration",
+        snapshot: "safelist_pq_require_id",
         text: include_str!("../../../examples/persisted-queries/safelist_pq_require_id.yaml"),
-        migration: Migration::None,
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "commercial configuration: every licence-restricted path \
                (authentication, authorization, batching, coprocessor, demand control, \
                persisted queries, subscriptions, the restricted plugin, response and \
                query-plan caching in Redis, and all four operation limits)",
+        snapshot: "current_commercial",
         text: include_str!("testdata/compat/current_commercial.yaml"),
-        migration: Migration::None,
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "enhanced_client_awareness and experimental_diagnostics top-level keys",
+        snapshot: "current_client_awareness_and_diagnostics",
         text: include_str!("testdata/compat/current_client_awareness_and_diagnostics.yaml"),
-        migration: Migration::None,
+        upgrade: Upgrade::Startup,
+    },
+    Case {
+        name: "telemetry exporters and instrumentation",
+        snapshot: "tracing_config",
+        text: include_str!("testdata/tracing_config.router.yaml"),
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "cors.origins migrates into cors.policies",
+        snapshot: "needs_minor_migration_cors_origins",
         text: include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
-        migration: Migration::Minor,
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "flat headers.all.request migrates under an operations key",
+        snapshot: "needs_minor_migration_headers_flat_list",
         text: include_str!("testdata/compat/needs_minor_migration_headers_flat_list.yaml"),
-        migration: Migration::Minor,
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "flat subscription.deduplication migrates under deduplication.all",
+        snapshot: "subscription_dedup_subgraph",
         text: include_str!("testdata/migrations/subscription_dedup_subgraph.yaml"),
-        migration: Migration::Minor,
+        upgrade: Upgrade::Startup,
     },
     Case {
         name: "experimental_batching renamed to batching (breaking; needs `router config upgrade`)",
+        snapshot: "batching_major_migration",
         text: include_str!("testdata/migrations/batching.yaml"),
-        migration: Migration::Major,
+        upgrade: Upgrade::Command,
     },
 ];
 
-/// Applies the major-version migrations and serializes the result, as `router config upgrade`
-/// does before an operator starts the upgraded router.
-fn upgrade_major(text: &str) -> Result<String, String> {
-    let raw: Value = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
-    let migrated = upgrade_configuration(&raw, false, UpgradeMode::Major)
-        .map_err(|error| error.to_string())?;
-    serde_yaml::to_string(&migrated).map_err(|error| error.to_string())
+fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
+    parse_configuration(text, Expansion::builder().build(), Migration::WithinMajor)
 }
 
-/// Parses `case` the way router's own startup path does: `Configuration::from_str`'s
-/// `Mode::Upgrade` migrates within-major shapes automatically, and a case needing a major
-/// migration is pre-upgraded first, standing in for an operator running `router config upgrade`
-/// before startup would otherwise reject the file.
-fn router_effective_settings(case: &Case) -> Result<Configuration, String> {
-    let text = case.text;
-    match case.migration {
-        Migration::None | Migration::Minor => {
-            validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
-                .map_err(|error| error.to_string())
-        }
-        Migration::Major => {
-            let upgraded_yaml = upgrade_major(text)?;
-            validate_yaml_configuration(
-                &upgraded_yaml,
-                Expansion::builder().build(),
-                Mode::NoUpgrade,
-            )
-            .map_err(|error| error.to_string())
+/// Loads `case` the way an operator would run it.
+fn load(case: &Case) -> Result<Configuration, ConfigurationError> {
+    match case.upgrade {
+        Upgrade::Startup => parse(case.text),
+        Upgrade::Command => {
+            let original: Value = serde_yaml::from_str(case.text).expect("fixtures are YAML");
+            let upgraded = upgrade_configuration(&original, false, UpgradeMode::Major)?;
+            let upgraded = serde_yaml::to_string(&upgraded).expect("migrations serialize");
+            parse_configuration(&upgraded, Expansion::builder().build(), Migration::None)
         }
     }
 }
 
-/// Parses `case` through the shared-parser adapter, which applies within-major migrations
-/// itself. A case needing a major migration is pre-upgraded first, as for router.
-fn shared_effective_settings(case: &Case) -> Result<Configuration, String> {
-    let text = match case.migration {
-        Migration::None | Migration::Minor => case.text.to_string(),
-        Migration::Major => upgrade_major(case.text)?,
-    };
-    parse_via_apollo_configuration(&text, ExternalValues::default())
-        .map_err(|error| error.to_string())
-}
-
-/// Returns a JSON pointer to the first difference, or `None` when the values match.
-fn first_difference(a: &Value, b: &Value) -> Option<String> {
-    fn walk(a: &Value, b: &Value, path: &mut String) -> Option<String> {
-        match (a, b) {
-            (Value::Object(a_map), Value::Object(b_map)) => {
-                let mut keys: Vec<&String> = a_map.keys().chain(b_map.keys()).collect();
-                keys.sort();
-                keys.dedup();
-                for key in keys {
+/// Every setting in `config` that differs from the default configuration, keyed by JSON pointer.
+fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
+    fn walk(
+        default: Option<&Value>,
+        value: &Value,
+        path: &mut String,
+        changes: &mut BTreeMap<String, Value>,
+    ) {
+        match (default, value) {
+            (Some(Value::Object(default)), Value::Object(entries)) => {
+                for (key, entry) in entries {
                     let prefix_len = path.len();
                     path.push('/');
                     path.push_str(&key.replace('~', "~0").replace('/', "~1"));
-                    let found = match (a_map.get(key), b_map.get(key)) {
-                        (Some(av), Some(bv)) => walk(av, bv, path),
-                        (None, None) => None,
-                        _ => Some(path.clone()),
-                    };
-                    if found.is_some() {
-                        return found;
-                    }
+                    walk(default.get(key), entry, path, changes);
                     path.truncate(prefix_len);
                 }
-                None
             }
-            (Value::Array(a_items), Value::Array(b_items)) if a_items.len() == b_items.len() => {
-                for (index, (av, bv)) in a_items.iter().zip(b_items).enumerate() {
-                    let prefix_len = path.len();
-                    path.push('/');
-                    path.push_str(&index.to_string());
-                    let found = walk(av, bv, path);
-                    if found.is_some() {
-                        return found;
-                    }
-                    path.truncate(prefix_len);
-                }
-                None
+            (Some(default), value) if default == value => {}
+            _ => {
+                changes.insert(path.clone(), value.clone());
             }
-            _ if a == b => None,
-            _ => Some(path.clone()),
         }
     }
 
-    let mut path = String::new();
-    walk(a, b, &mut path)
-}
-
-#[test]
-fn difference_paths_resolve_object_keys_and_array_entries() {
-    for (left, right, expected) in [
-        (
-            json!({"a/b~c": [1, 2]}),
-            json!({"a/b~c": [1, 3]}),
-            "/a~1b~0c/1",
-        ),
-        (json!({"a": 1}), json!({}), "/a"),
-        (json!({}), json!({"a": 1}), "/a"),
-        (json!([1]), json!([1, 2]), ""),
-        (json!(null), json!(false), ""),
-    ] {
-        let path = first_difference(&left, &right).expect("values differ");
-        assert_eq!(path, expected);
-        assert_ne!(left.pointer(&path), right.pointer(&path));
-    }
-    let identical = json!({"a": [null, true, 1, "text", {}]});
-    assert_eq!(first_difference(&identical, &identical), None);
-}
-
-/// Serializes both parsers' results and describes the first path where they disagree, or `None`
-/// when they match. Callers prefix the description with whatever identifies the input.
-///
-/// The comparison needs plaintext credentials so that a disagreement about a password is still
-/// detected, but the description replaces every value the schema marks as secret, because it
-/// ends up in test failure output.
-fn settings_disagreement(router: &Configuration, shared: &Configuration) -> Option<String> {
     // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
-    let router_json = serde_json::to_value(router).expect("Configuration serializes");
-    let shared_json = serde_json::to_value(shared).expect("Configuration serializes");
-    let path = first_difference(&router_json, &shared_json)?;
-    let secrets = SecretRedactor::new(router_config_schema());
-    let describe =
-        |json: &Value| secrets.redact_at(&path, json.pointer(&path).unwrap_or(&Value::Null));
-    Some(format!(
-        "router's own pipeline and the shared parser disagree at `{path}`\n\
-         router:  {}\n\
-         shared:  {}",
-        describe(&router_json),
-        describe(&shared_json),
-    ))
-}
-
-/// Replaces the values that a configuration schema marks with `x-apollo-secret`.
-struct SecretRedactor<'schema> {
-    root: &'schema Value,
-}
-
-impl<'schema> SecretRedactor<'schema> {
-    const REDACTED: &'static str = "[REDACTED]";
-
-    fn new(root: &'schema Value) -> Self {
-        Self { root }
-    }
-
-    /// Redacts `value`, the configuration found at JSON `pointer`.
-    fn redact_at(&self, pointer: &str, value: &Value) -> Value {
-        let mut schemas = self.expand([self.root]);
-        for token in pointer.split('/').skip(1) {
-            let key = token.replace("~1", "/").replace("~0", "~");
-            schemas = self.children(&schemas, &key);
-        }
-        self.redact(&schemas, value)
-    }
-
-    fn redact(&self, schemas: &[&'schema Value], value: &Value) -> Value {
-        let is_secret = schemas
-            .iter()
-            .any(|schema| schema.get("x-apollo-secret") == Some(&Value::Bool(true)));
-        match value {
-            Value::Null => Value::Null,
-            _ if is_secret => Value::String(Self::REDACTED.to_string()),
-            Value::Object(entries) => entries
-                .iter()
-                .map(|(key, entry)| {
-                    (
-                        key.clone(),
-                        self.redact(&self.children(schemas, key), entry),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>()
-                .into(),
-            Value::Array(items) => items
-                .iter()
-                .enumerate()
-                .map(|(index, item)| self.redact(&self.children(schemas, &index.to_string()), item))
-                .collect(),
-            _ => value.clone(),
-        }
-    }
-
-    /// The schemas that can describe the entry `key` of a value described by `schemas`.
-    fn children(&self, schemas: &[&'schema Value], key: &str) -> Vec<&'schema Value> {
-        let children = schemas.iter().filter_map(|schema| {
-            schema
-                .get("properties")
-                .and_then(|properties| properties.get(key))
-                .or_else(|| schema.get("additionalProperties").filter(|p| p.is_object()))
-                .or_else(|| {
-                    key.parse::<usize>()
-                        .ok()
-                        .and(schema.get("items").filter(|i| i.is_object()))
-                })
-        });
-        self.expand(children)
-    }
-
-    /// Follows `$ref`s and `allOf`/`anyOf`/`oneOf` branches, so every schema that applies to a
-    /// value is checked for the secret annotation.
-    fn expand(&self, schemas: impl IntoIterator<Item = &'schema Value>) -> Vec<&'schema Value> {
-        let mut expanded = Vec::new();
-        let mut pending: Vec<&'schema Value> = schemas.into_iter().collect();
-        while let Some(schema) = pending.pop() {
-            if let Some(target) = schema
-                .get("$ref")
-                .and_then(Value::as_str)
-                .and_then(|reference| reference.strip_prefix('#'))
-                .and_then(|pointer| self.root.pointer(pointer))
-            {
-                pending.push(target);
-            }
-            for combinator in ["allOf", "anyOf", "oneOf"] {
-                if let Some(branches) = schema.get(combinator).and_then(Value::as_array) {
-                    pending.extend(branches);
-                }
-            }
-            expanded.push(schema);
-        }
-        expanded
-    }
+    let default = serde_json::to_value(parse("").expect("the default configuration is valid"))
+        .expect("Configuration serializes");
+    let value = serde_json::to_value(config).expect("Configuration serializes");
+    let mut changes = BTreeMap::new();
+    walk(Some(&default), &value, &mut String::new(), &mut changes);
+    changes
 }
 
 #[test]
-fn disagreements_about_secrets_are_detected_without_printing_them() {
-    let parse = |yaml: &str| {
-        validate_yaml_configuration(yaml, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect("the fixture is valid")
-    };
-    let with_password = |password: &str| {
-        parse(&format!(
-            "supergraph:\n  query_planning:\n    cache:\n      redis:\n        urls: [\"redis://localhost:6379\"]\n        password: \"{password}\"\n"
-        ))
-    };
-    let first = with_password("first-synthetic-redis-password"); // gitleaks:allow
-    let second = with_password("second-synthetic-redis-password"); // gitleaks:allow
-    let without_redis = parse("supergraph:\n  query_planning:\n    cache: {}\n");
+fn changed_settings_name_each_setting() {
+    let config = parse(
+        "supergraph:\n  listen: 127.0.0.1:4001\n  query_planning:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n",
+    )
+    .expect("the fixture is valid");
 
-    let mismatch = settings_disagreement(&first, &second).expect("the passwords differ");
-    assert!(
-        mismatch.contains("/supergraph/query_planning/cache/redis/password"),
-        "{mismatch}"
-    );
-    assert!(mismatch.contains("[REDACTED]"), "{mismatch}");
-    assert!(!mismatch.contains("synthetic-redis-password"), "{mismatch}");
+    let changes = changed_settings(&config);
 
-    // A disagreement about a whole section redacts the secrets inside it.
-    let mismatch = settings_disagreement(&first, &without_redis).expect("only one uses Redis");
-    assert!(
-        mismatch.contains("/supergraph/query_planning/cache/redis`"),
-        "{mismatch}"
-    );
-    assert!(mismatch.contains("redis://localhost:6379"), "{mismatch}");
-    assert!(!mismatch.contains("synthetic-redis-password"), "{mismatch}");
+    assert_eq!(changes["/supergraph/listen"], json!("127.0.0.1:4001"));
+    let redis = &changes["/supergraph/query_planning/cache/redis"];
+    assert_eq!(redis["urls"], json!(["redis://localhost"]));
 }
 
-/// Current-format inputs, and inputs each loader migrates the way a real deployment would, must
-/// produce the same effective settings through both parsers. A mismatch
-/// names the case and the configuration path where the two disagree.
+/// Each fixture, loaded as an operator would load it, keeps the effective settings recorded in
+/// its snapshot.
 #[test]
-fn effective_settings_agree_for_the_shared_corpus() {
+fn corpus_effective_settings() {
     for case in CASES {
-        let router = router_effective_settings(case).unwrap_or_else(|error| {
+        let config = load(case).unwrap_or_else(|error| {
             panic!(
-                "[{}] router's own pipeline rejected a fixture expected to succeed: {error}",
+                "[{}] loading rejected a fixture expected to succeed: {error}",
                 case.name
             )
         });
-        let shared = shared_effective_settings(case).unwrap_or_else(|error| {
-            panic!(
-                "[{}] the shared parser rejected a fixture expected to succeed: {error}",
-                case.name
-            )
+        insta::with_settings!({ snapshot_suffix => case.snapshot, description => case.name }, {
+            insta::assert_json_snapshot!(changed_settings(&config));
         });
-        if let Some(mismatch) = settings_disagreement(&router, &shared) {
-            panic!("[{}] {mismatch}", case.name);
-        }
     }
 }
 
 #[test]
-fn schema_derived_boolean_values_agree_between_parsers() {
+fn schema_derived_boolean_values_are_applied() {
     let schema = router_config_schema();
     let default = schema["properties"]["experimental_type_conditioned_fetching"]["default"]
         .as_bool()
         .expect("the schema declares a boolean default");
     for enabled in [default, !default] {
-        let text = format!("experimental_type_conditioned_fetching: {enabled}\n");
-        let router =
-            validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
-                .expect("schema-derived input is valid");
-        let shared = router_options()
-            .parse::<Configuration>(&text)
-            .expect("schema-derived input is valid");
-        assert_eq!(router.experimental_type_conditioned_fetching, enabled);
-        assert_eq!(shared.experimental_type_conditioned_fetching, enabled);
+        let config = parse(&format!(
+            "experimental_type_conditioned_fetching: {enabled}\n"
+        ))
+        .expect("schema-derived input is valid");
+        assert_eq!(config.experimental_type_conditioned_fetching, enabled);
     }
 }
 
-/// An unknown top-level key is a schema violation on both sides, because the shared parser uses
-/// router's own patched root schema (see `router_options`).
+/// An unknown top-level key is a schema violation, because the parser uses router's patched root
+/// schema.
 #[test]
-fn unknown_top_level_key_is_rejected_by_both_parsers() {
-    let text = include_str!("testdata/compat/unknown_top_level_key.yaml");
-    validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect_err("router's own pipeline should reject the unknown key");
-    router_options()
-        .parse::<Configuration>(text)
-        .expect_err("the shared parser should reject the unknown key too");
-}
-
-/// An unregistered plugin name is rejected the same way: `UserPlugins`'s generated schema sets
-/// `additionalProperties: false`, so a name outside the registry fails validation before router's
-/// own runtime unknown-plugin check would even run.
-#[test]
-fn unknown_plugin_name_is_rejected_by_both_parsers() {
-    let text = include_str!("testdata/compat/unknown_plugin_name.yaml");
-    validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect_err("router's own pipeline should reject the unregistered plugin name");
-    router_options()
-        .parse::<Configuration>(text)
-        .expect_err("the shared parser should reject it too");
-}
-
-/// Router normalizes `plugins: null` to an empty map before schema validation.
-/// The shared parser validates the null value and rejects it.
-#[test]
-fn null_plugins_requires_router_normalization() {
-    let text = "plugins: null\n";
-    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect("router accepts null plugin settings");
+fn unknown_top_level_key_is_rejected() {
+    let error = parse(include_str!("testdata/compat/unknown_top_level_key.yaml"))
+        .expect_err("the key is not declared")
+        .to_string();
     assert!(
-        router
-            .plugins
-            .plugins
-            .as_ref()
-            .is_none_or(|plugins| plugins.is_empty())
-    );
-    let error = router_options()
-        .parse::<Configuration>(text)
-        .expect_err("the shared parser requires an object for plugins");
-    let messages = miette::Diagnostic::related(&error)
-        .into_iter()
-        .flatten()
-        .map(|diagnostic| diagnostic.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(messages.contains("is not of type \"object\""), "{messages}");
-}
-
-/// Duplicate-key diagnostics differ: router reports "duplicated keys", while the shared
-/// parser reports serde_yaml's "duplicate entry" error.
-#[test]
-fn duplicate_top_level_keys_is_rejected_by_both_with_different_messages() {
-    let text = include_str!("testdata/compat/duplicate_keys.yaml");
-
-    let router_error =
-        validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect_err("router's own pipeline rejects duplicate keys before validation");
-    assert!(
-        router_error.to_string().contains("duplicated keys"),
-        "expected a duplicated-keys error, got: {router_error}"
-    );
-
-    let shared_error = router_options()
-        .parse::<Configuration>(text)
-        .expect_err("the shared parser also rejects the duplicated key, via serde_yaml itself");
-    assert!(
-        format!("{shared_error}").contains("duplicate entry"),
-        "expected serde_yaml's own duplicate-entry message, got: {shared_error}"
+        error.contains("this_key_does_not_exist_anywhere"),
+        "{error}"
     );
 }
 
-/// Configuration-usage selectors read `validated_yaml`. The shared parser leaves it empty;
-/// `parse_via_apollo_configuration` supplies the expanded document for those selectors.
+/// An unregistered plugin name is rejected: `UserPlugins`'s generated schema sets
+/// `additionalProperties: false`.
 #[test]
-fn configuration_usage_telemetry_needs_the_adapter_to_populate_validated_yaml() {
-    let text = "persisted_queries:\n  enabled: true\n";
+fn unknown_plugin_name_is_rejected() {
+    parse(include_str!("testdata/compat/unknown_plugin_name.yaml"))
+        .expect_err("the plugin is not registered");
+}
 
-    let bare_shared: Configuration = router_options()
-        .parse(text)
-        .expect("the shared parser accepts this");
-    assert!(
-        bare_shared.validated_yaml.is_none(),
-        "a bare shared-parser call has nothing to populate `validated_yaml` from"
-    );
+/// Duplicate keys are rejected in the original text, before migration or parsing could
+/// collapse them.
+#[test]
+fn duplicate_keys_are_rejected_before_migration() {
+    let error = parse(include_str!("testdata/compat/duplicate_keys.yaml"))
+        .expect_err("migration must not erase duplicate keys");
+    assert!(error.to_string().contains("duplicated keys"), "{error}");
+}
 
-    let router_config =
-        validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect("router's own pipeline accepts this");
-    let adapted_shared = parse_via_apollo_configuration(text, ExternalValues::default())
-        .expect("the adapter accepts this");
+/// Configuration-usage selectors and licence checks read `validated_yaml`, which holds the
+/// expanded document with overrides applied.
+#[test]
+fn validated_yaml_carries_expansion_and_overrides_for_usage_selectors() {
+    let text = "persisted_queries:\n  enabled: ${env.COMPAT_PERSISTED_QUERIES}\n";
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("COMPAT_PERSISTED_QUERIES", "true")
+        .override_config(
+            Override::builder()
+                .config_path("subscription.enabled")
+                .env_name("COMPAT_SUBSCRIPTION")
+                .mocked_env_var("COMPAT_SUBSCRIPTION", "true")
+                .value_type(ValueType::Bool)
+                .build(),
+        )
+        .build();
+    let config =
+        parse_configuration(text, expansion, Migration::None).expect("the configuration is valid");
 
+    let document = config.validated_yaml.as_ref().unwrap();
+    assert_eq!(document["persisted_queries"]["enabled"], json!(true));
+    assert_eq!(document["subscription"]["enabled"], json!(true));
     let selector =
         jsonpath_rust::JsonPathInst::from_str("$.persisted_queries[?(@.enabled == true)]")
             .expect("valid path");
-    let router_hits = selector
-        .find_slice(
-            router_config
-                .validated_yaml
-                .as_ref()
-                .expect("router sets this"),
-        )
-        .len();
-    let adapted_hits = selector
-        .find_slice(
-            adapted_shared
-                .validated_yaml
-                .as_ref()
-                .expect("the adapter sets this"),
-        )
-        .len();
     assert_eq!(
-        router_hits, adapted_hits,
-        "the usage gauge for `apollo.router.config.persisted_queries` must see the same match count"
+        selector.find_slice(document).len(),
+        1,
+        "the usage gauge for `apollo.router.config.persisted_queries` must fire"
     );
     assert_eq!(
-        router_hits, 1,
-        "the fixture enables persisted queries, so the gauge must fire"
-    );
-}
-
-/// The adapter preserves the parser's input text in `raw_yaml`, matching the router loader.
-/// Bare shared parsing leaves this field empty.
-#[test]
-fn raw_yaml_needs_the_adapter_because_deserialize_always_clears_it() {
-    let text = include_str!("testdata/compat/current_minimal.yaml");
-
-    let bare_shared: Configuration = router_options()
-        .parse(text)
-        .expect("the shared parser accepts this");
-    assert!(
-        bare_shared.raw_yaml.is_none(),
-        "Configuration::deserialize always sets raw_yaml to None, with no text to populate it from"
-    );
-
-    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect("router's own pipeline accepts this");
-    let adapted_shared = parse_via_apollo_configuration(text, ExternalValues::default())
-        .expect("the adapter accepts this");
-
-    assert_eq!(
-        router.raw_yaml.as_deref(),
-        Some(text),
-        "router keeps the exact pre-expansion text"
-    );
-    assert_eq!(
-        router.raw_yaml.as_deref(),
-        adapted_shared.raw_yaml.as_deref(),
-        "the adapter must reproduce the same raw_yaml router itself would have set"
-    );
-}
-
-#[test]
-fn adapter_document_uses_shared_expansion_and_injections() {
-    let text = r#"
-persisted_queries:
-  enabled: ${env.COMPAT_PERSISTED_QUERIES}
-subscription:
-  enabled: false
-"#;
-    let router_expansion = Expansion::builder()
-        .supported_mode("env")
-        .mocked_env_var("COMPAT_PERSISTED_QUERIES", "false")
-        .build();
-    let router = validate_yaml_configuration(text, router_expansion, Mode::NoUpgrade)
-        .expect("the router accepts the disabled configuration");
-    let external = ExternalValues::default()
-        .add_variables(MapVariables(HashMap::from([(
-            "COMPAT_PERSISTED_QUERIES".to_string(),
-            "true".to_string(),
-        )])))
-        .inject([Injection::env(
-            &["subscription", "enabled"],
-            json!(true),
-            "COMPAT_SUBSCRIPTION",
-        )]);
-    let shared = parse_via_apollo_configuration(text, external)
-        .expect("the shared parser accepts its independently enabled configuration");
-    let document = shared.validated_yaml.as_ref().unwrap();
-    assert_eq!(document["persisted_queries"]["enabled"], json!(true));
-    assert_eq!(document["subscription"]["enabled"], json!(true));
-    assert_eq!(
-        shared.apollo_plugins.plugins["subscription"]["enabled"],
+        config.apollo_plugins.plugins["subscription"]["enabled"],
         json!(true)
     );
-    // Deliberately different providers must remain observable in the selector inputs.
-    assert_ne!(router.validated_yaml, shared.validated_yaml);
+    assert_eq!(config.raw_yaml.as_deref(), Some(text));
 }
 
 #[test]
-fn adapter_document_migrates_cors_before_shared_expansion() {
+fn migrated_documents_keep_the_original_text_as_raw_yaml() {
     let text = include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml");
-    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::Upgrade)
-        .expect("the router migrates legacy CORS settings");
-    let shared = parse_via_apollo_configuration(text, ExternalValues::default())
-        .expect("the adapter migrates legacy CORS settings");
-    let document = shared.validated_yaml.as_ref().unwrap();
+    let config = parse(text).expect("the router migrates legacy CORS settings");
+    let document = config.validated_yaml.as_ref().unwrap();
     assert!(document["cors"].get("origins").is_none());
     assert!(document["cors"].get("policies").is_some());
-    assert_eq!(router.validated_yaml, shared.validated_yaml);
-    assert_eq!(shared.raw_yaml.as_deref(), Some(text));
-    assert_eq!(router.raw_yaml, shared.raw_yaml);
-}
-
-#[test]
-fn adapter_rejects_duplicate_keys_before_migration() {
-    let error = parse_via_apollo_configuration(
-        include_str!("testdata/compat/duplicate_keys.yaml"),
-        ExternalValues::default(),
-    )
-    .expect_err("migration must not erase duplicate keys");
-    assert!(error.to_string().contains("duplicated keys"), "{error}");
+    assert_eq!(config.raw_yaml.as_deref(), Some(text));
 }
 
 #[test]
 fn unknown_key_is_rejected_before_and_after_migration() {
-    // The existing loader falls back to validating the original input when the migrated
-    // value fails schema validation. This key is invalid in either form; this case does
-    // not assert that the loader always rejects an invalid migrated value.
-    let case = Case {
-        name: "unknown key after a minor migration",
-        text: "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n",
-        migration: Migration::Minor,
-    };
-    for error in [
-        router_effective_settings(&case).expect_err("router rejects the unknown key"),
-        shared_effective_settings(&case).expect_err("the shared parser rejects the migrated input"),
-    ] {
-        assert!(
-            error.contains("this_key_does_not_exist_anywhere"),
-            "{error}"
-        );
-    }
+    let text = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
+    let error = parse(text).expect_err("the key is unknown in either form");
+    assert!(
+        error
+            .to_string()
+            .contains("this_key_does_not_exist_anywhere"),
+        "{error}"
+    );
 }
 
 #[test]
-fn introspection_defaults_and_explicit_values_agree_between_parsers() {
-    let previous_text = include_str!("testdata/compat/current_minimal.yaml");
-    let next_text = include_str!("testdata/compat/current_minimal_v2.yaml");
+fn introspection_defaults_and_explicit_values_are_applied() {
+    let previous = parse(include_str!("testdata/compat/current_minimal.yaml")).unwrap();
+    let next = parse(include_str!("testdata/compat/current_minimal_v2.yaml")).unwrap();
 
-    let router_previous =
-        validate_yaml_configuration(previous_text, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect("router's own pipeline accepts the previous configuration");
-    let shared_previous = router_options()
-        .parse::<Configuration>(previous_text)
-        .expect("the shared parser accepts the previous configuration");
-
-    let router_next =
-        validate_yaml_configuration(next_text, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect("router's own pipeline accepts the replacement configuration");
-    let shared_next = router_options()
-        .parse::<Configuration>(next_text)
-        .expect("the shared parser accepts the replacement configuration");
-
-    assert!(!router_previous.supergraph.introspection);
-    assert!(!shared_previous.supergraph.introspection);
-    assert!(router_next.supergraph.introspection);
-    assert!(shared_next.supergraph.introspection);
-}
-
-struct TypedApolloPlugins {
-    health_check: HealthCheck,
-    subscription: SubscriptionConfig,
-}
-
-fn typed_apollo_plugins(config: &Configuration) -> Result<TypedApolloPlugins, String> {
-    fn raw(config: &Configuration, name: &str) -> Result<Value, String> {
-        config
-            .apollo_plugins
-            .plugins
-            .get(name)
-            .cloned()
-            .ok_or_else(|| format!("the parsed configuration holds no `{name}` plugin config"))
-    }
-
-    Ok(TypedApolloPlugins {
-        health_check: serde_json::from_value(raw(config, "health_check")?)
-            .map_err(|error| error.to_string())?,
-        subscription: serde_json::from_value(raw(config, "subscription")?)
-            .map_err(|error| error.to_string())?,
-    })
+    assert!(!previous.supergraph.introspection);
+    assert!(next.supergraph.introspection);
 }
 
 /// Mandatory plugin defaults (`limits`, `health_check`) are present even when the document never
-/// mentions them, on both sides, because both call the same `Configuration::deserialize`.
+/// mentions them.
 #[test]
 fn mandatory_plugin_defaults_are_present_without_being_configured() {
-    let text = include_str!("testdata/compat/current_minimal.yaml");
-    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect("router's own pipeline accepts this");
-    let shared = router_options()
-        .parse::<Configuration>(text)
-        .expect("the shared parser accepts this");
+    let config = parse(include_str!("testdata/compat/current_minimal.yaml")).unwrap();
 
     for plugin in ["limits", "health_check"] {
         assert!(
-            router.apollo_plugins.plugins.contains_key(plugin),
-            "router's own pipeline must default the mandatory `{plugin}` plugin entry"
+            config.apollo_plugins.plugins.contains_key(plugin),
+            "the mandatory `{plugin}` plugin entry must be defaulted"
         );
         assert!(
-            shared.apollo_plugins.plugins.contains_key(plugin),
-            "the shared parser must default the mandatory `{plugin}` plugin entry too"
+            config.plugin_config(&format!("apollo.{plugin}")).is_some(),
+            "the mandatory `{plugin}` plugin config must be kept"
         );
     }
 }
 
-/// Both parsers retain raw plugin settings. Deserialize those settings into the plugin types
-/// to check subscription deduplication and health-check defaults beyond schema validation.
+/// Parsing keeps typed plugin config that matches the document, and plugins are constructed
+/// from it.
 #[tokio::test]
-async fn typed_plugin_configs_and_initialization_agree() {
-    let case = &FEATUREFUL_CASE;
-    let router = router_effective_settings(case).expect("the featureful fixture is valid");
-    let shared = shared_effective_settings(case).expect("the featureful fixture is valid");
+async fn typed_plugin_configs_are_retained_and_construct_plugins() {
+    let config = load(&FEATUREFUL_CASE).expect("the featureful fixture is valid");
 
-    let router_typed =
-        typed_apollo_plugins(&router).expect("router's raw plugin config is typed-deserializable");
-    let shared_typed = typed_apollo_plugins(&shared)
-        .expect("the shared parser's raw plugin config is typed-deserializable");
-
+    let subscription: SubscriptionConfig = config
+        .plugin_config("apollo.subscription")
+        .expect("subscription config is kept")
+        .typed()
+        .unwrap();
+    let health_check: HealthCheck = config
+        .plugin_config("apollo.health_check")
+        .expect("health check config is kept")
+        .typed()
+        .unwrap();
+    let document: SubscriptionConfig =
+        serde_json::from_value(config.apollo_plugins.plugins["subscription"].clone()).unwrap();
     assert_eq!(
-        serde_json::to_value(&router_typed.subscription).unwrap(),
-        serde_json::to_value(&shared_typed.subscription).unwrap(),
-        "typed subscription config, including deduplication, must agree"
+        serde_json::to_value(&subscription).unwrap(),
+        serde_json::to_value(&document).unwrap(),
+        "typed subscription config, including deduplication, must match the document"
     );
     assert_eq!(
-        serde_json::to_value(&router_typed.health_check).unwrap(),
-        serde_json::to_value(&shared_typed.health_check).unwrap(),
-        "typed health_check config must agree"
+        serde_json::to_value(&health_check).unwrap(),
+        serde_json::to_value(&config.health_check).unwrap()
     );
 
-    for name in ["health_check", "subscription"] {
+    for name in ["apollo.health_check", "apollo.subscription"] {
         let factory = crate::plugin::plugins()
-            .find(|factory| factory.name == format!("apollo.{name}"))
+            .find(|factory| factory.name == name)
             .expect("built-in plugin is registered");
-        for config in [&router, &shared] {
-            factory
-                .create_instance(
-                    crate::plugin::PluginInit::fake_builder()
-                        .config(config.apollo_plugins.plugins[name].clone())
-                        .build(),
-                )
-                .await
-                .unwrap_or_else(|error| panic!("{name} initialization failed: {error}"));
-        }
+        let retained = config.plugin_config(name).unwrap().clone();
+        factory
+            .create_from_config(
+                crate::plugin::PluginInit::fake_builder()
+                    .config(())
+                    .build()
+                    .with_config(retained, None),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{name} initialization failed: {error}"));
     }
 }
 
 /// The flat deduplication shape passes schema validation but fails typed deserialization.
-/// Migration must nest its settings under `deduplication.all` before plugin initialization.
+/// Startup migrates it under `deduplication.all`; without migration, parsing rejects it before
+/// any plugin is constructed.
 #[test]
-fn unmigrated_flat_subscription_dedup_fails_at_plugin_init_not_at_parse() {
+fn unmigrated_flat_subscription_dedup_is_rejected_while_parsing() {
     let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
 
-    let shared = router_options()
-        .parse::<Configuration>(text)
-        .expect("Configuration-level parsing accepts the unmigrated flat shape");
-    let raw_subscription = shared
-        .apollo_plugins
-        .plugins
-        .get("subscription")
-        .cloned()
-        .expect("subscription config is present");
-    let plugin_init_result: Result<SubscriptionConfig, _> =
-        serde_json::from_value(raw_subscription);
+    parse(text).expect("startup migrates the flat shape");
+    let error = parse_configuration(text, Expansion::builder().build(), Migration::None)
+        .expect_err("typed deserialization rejects the unmigrated flat shape")
+        .to_string();
+    assert!(error.contains("apollo.subscription"), "{error}");
+}
+
+/// Cross-field validation runs inside `Configuration`'s deserializer.
+#[test]
+fn cross_field_validation_rejects_sandbox_with_homepage() {
+    let error = parse(
+        "sandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n",
+    )
+    .expect_err("sandbox and homepage cannot both be enabled");
     assert!(
-        plugin_init_result.is_err(),
-        "the unmigrated flat shape must fail SubscriptionConfig's typed deserialize at plugin \
-         construction, the way it does through router's own pipeline today"
+        error
+            .to_string()
+            .contains("sandbox and homepage cannot be enabled"),
+        "{error}"
     );
 }
 
-/// Both parsers report the cross-field conflict between enabled sandbox and homepage settings.
+/// Intentional difference from the previous loader, which fell back to the original document
+/// only when the migrated one failed the schema check. apollo-configuration validates in one call,
+/// so a migrated document rejected after the schema check, here by a plugin's config, falls back
+/// too. Startup migration 2045 fixes the flat deduplication settings, the migrated copy then
+/// fails on the traffic shaping timeout, and so does the file as written.
 #[test]
-fn cross_field_validation_embedded_in_deserialize_rejects_both_the_same_way() {
-    let text = "sandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n";
-    let router_error =
-        validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect_err("router's own pipeline rejects sandbox and homepage both enabled");
-    let shared_error = router_options()
-        .parse::<Configuration>(text)
-        .expect_err("the shared parser rejects it too, via the same Deserialize impl");
+fn migrated_document_failing_plugin_config_falls_back_to_the_file() {
+    let _guard = tracing_test::dispatcher_guard();
+
+    let error = parse(include_str!(
+        "testdata/compat/fallback_after_plugin_config_error.yaml"
+    ))
+    .expect_err("the traffic shaping timeout is invalid")
+    .to_string();
+
+    assert!(error.contains("apollo.traffic_shaping"), "{error}");
+    // Only the operator's file has this comment; the serialized migrated copy has none.
     assert!(
-        router_error
-            .to_string()
-            .contains("sandbox and homepage cannot be enabled")
+        error.contains("# The schema accepts any string here"),
+        "the diagnostic should quote the operator's file: {error}"
     );
+    tracing_test::logs_assert(|lines| {
+        lines
+            .iter()
+            .any(|line| line.contains("could not be upgraded automatically"))
+            .then_some(())
+            .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
+    })
+    .unwrap();
+}
+
+/// The sandbox checks run once the document has been parsed, so a migrated document that
+/// enables both sandbox and homepage is still rejected, without falling back.
+#[test]
+fn sandbox_conflicts_are_rejected_after_migration() {
+    let error = parse(
+        "subscription:\n  deduplication:\n    enabled: true\nsandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n",
+    )
+    .expect_err("sandbox and homepage cannot both be enabled");
     assert!(
-        shared_error
+        error
             .to_string()
-            .contains("sandbox and homepage cannot be enabled")
+            .contains("sandbox and homepage cannot be enabled"),
+        "{error}"
     );
 }
 
 /// Exercises the shared crate's custom-validation hook with a synthetic configuration type.
 mod custom_plugin_validation {
+    use apollo_configuration::ConfigParser;
     use apollo_configuration::ErrorCollector;
-    use apollo_configuration::ParseYamlOptions;
     use apollo_configuration::configuration;
     use miette::Diagnostic as _;
 
@@ -842,18 +495,22 @@ mod custom_plugin_validation {
     }
 
     /// Passes JSON Schema (both fields are integers) but fails the custom validator, and the
-    /// shared parse call (`ParseYamlOptions::parse`) is what surfaces the rejection.
+    /// shared parse call (`ConfigParser::parse_yaml`) is what surfaces the rejection.
     #[test]
     fn schema_valid_input_is_rejected_by_the_custom_validator() {
         let yaml = "replica_count: 0\nshard_count: 1\n";
-        let error = ParseYamlOptions::default()
-            .parse::<WidgetConfig>(yaml)
+        let error = ConfigParser::<WidgetConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml(yaml)
             .expect_err("zero replicas passes the schema but fails custom validation");
         let messages: Vec<_> = error.related().unwrap().map(ToString::to_string).collect();
         assert_eq!(messages, ["replica_count must be at least 1"]);
 
-        ParseYamlOptions::default()
-            .parse::<WidgetConfig>("replica_count: 1\nshard_count: 1\n")
+        ConfigParser::<WidgetConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml("replica_count: 1\nshard_count: 1\n")
             .expect("positive counts pass custom validation");
     }
 
@@ -862,8 +519,10 @@ mod custom_plugin_validation {
     #[test]
     fn multiple_custom_validation_errors_keep_distinct_nested_locations() {
         let yaml = "widget:\n  replica_count: 0\n  shard_count: 0\n";
-        let error = ParseYamlOptions::default()
-            .parse::<PluginConfig>(yaml)
+        let error = ConfigParser::<PluginConfig>::builder()
+            .build()
+            .unwrap()
+            .parse_yaml(yaml)
             .expect_err("both fields are invalid");
 
         let related: Vec<_> = error
@@ -893,69 +552,58 @@ mod custom_plugin_validation {
     }
 }
 
+/// An override replaces an explicit value in the document.
 #[test]
-fn env_expansion_agrees_between_the_two_expanders() {
-    let text = "supergraph:\n  listen: 127.0.0.1:${env.COMPAT_TEST_PORT}\n";
-
-    let router_expansion = Expansion::builder()
-        .supported_mode("env")
-        .mocked_env_var("COMPAT_TEST_PORT", "4001")
+fn an_env_var_override_beats_the_documents_own_value() {
+    let expansion = Expansion::builder()
+        .override_config(
+            Override::builder()
+                .config_path("supergraph.listen")
+                .env_name("COMPAT_TEST_LISTEN_OVERRIDE")
+                .value_type(ValueType::String)
+                .mocked_env_var("COMPAT_TEST_LISTEN_OVERRIDE", "127.0.0.1:9999")
+                .build(),
+        )
         .build();
-    let router_config = validate_yaml_configuration(text, router_expansion, Mode::NoUpgrade)
-        .expect("router's own expansion resolves this");
+    let config = parse_configuration(
+        "supergraph:\n  listen: 127.0.0.1:4000\n",
+        expansion,
+        Migration::None,
+    )
+    .expect("the override applies");
 
-    let external = ExternalValues::default().add_variables(MapVariables(HashMap::from([(
-        "COMPAT_TEST_PORT".to_string(),
-        "4001".to_string(),
-    )])));
-    let shared_config = parse_via_apollo_configuration(text, external)
-        .expect("the shared crate's expansion resolves this too");
-
-    assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
     assert_eq!(
-        router_config.supergraph.listen,
-        shared_config.supergraph.listen
-    );
-}
-
-/// Router overrides and shared-parser injections replace an explicit value in the document.
-#[test]
-fn an_env_var_override_beats_the_documents_own_value_on_both_sides() {
-    let text = "supergraph:\n  listen: 127.0.0.1:4000\n";
-
-    let router_override = Override::builder()
-        .config_path("supergraph.listen")
-        .env_name("COMPAT_TEST_LISTEN_OVERRIDE")
-        .value_type(ValueType::String)
-        .mocked_env_var("COMPAT_TEST_LISTEN_OVERRIDE", "127.0.0.1:9999")
-        .build();
-    let router_expansion = Expansion::builder()
-        .override_config(router_override)
-        .build();
-    let router_config = validate_yaml_configuration(text, router_expansion, Mode::NoUpgrade)
-        .expect("router's own override mechanism applies this");
-
-    let external = ExternalValues::default().inject(vec![Injection::env(
-        &["supergraph", "listen"],
-        json!("127.0.0.1:9999"),
-        "COMPAT_TEST_LISTEN_OVERRIDE",
-    )]);
-    let shared_config = parse_via_apollo_configuration(text, external)
-        .expect("the shared crate's injection mechanism applies this too");
-
-    assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
-    assert_eq!(
-        router_config.supergraph.listen.to_string(),
-        "http://127.0.0.1:9999"
+        config.validated_yaml.unwrap()["supergraph"]["listen"],
+        json!("127.0.0.1:9999")
     );
     assert_eq!(
-        shared_config.supergraph.listen.to_string(),
+        config.supergraph.listen.to_string(),
         "http://127.0.0.1:9999"
     );
 }
 
+/// An invalid override is reported against the environment variable that supplied it.
 #[test]
-fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
+fn an_invalid_override_names_its_environment_variable() {
+    let expansion = Expansion::builder()
+        .override_config(
+            Override::builder()
+                .config_path("supergraph.introspection")
+                .env_name("COMPAT_TEST_INTROSPECTION")
+                .value_type(ValueType::String)
+                .mocked_env_var("COMPAT_TEST_INTROSPECTION", "sometimes")
+                .build(),
+        )
+        .build();
+    let error = parse_configuration("", expansion, Migration::None)
+        .expect_err("introspection must be a boolean")
+        .to_string();
+
+    assert!(error.contains("COMPAT_TEST_INTROSPECTION"), "{error}");
+}
+
+#[test]
+fn file_expansion_resolves_a_root_level_field() {
     let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
     std::io::Write::write_all(&mut file, b"true").expect("can write the temp file");
     let text = format!(
@@ -963,17 +611,14 @@ fn file_expansion_agrees_between_the_two_expanders_for_a_root_level_field() {
         file.path().to_string_lossy()
     );
 
-    let router_expansion = Expansion::builder().supported_mode("file").build();
-    let router_config = validate_yaml_configuration(&text, router_expansion, Mode::NoUpgrade)
-        .expect("router's own file expansion resolves this");
+    let config = parse_configuration(
+        &text,
+        Expansion::builder().supported_mode("file").build(),
+        Migration::None,
+    )
+    .expect("file expansion resolves this");
 
-    let external = ExternalValues::default().add_variables(FileVariables);
-    let shared_config = parse_via_apollo_configuration(&text, external)
-        .expect("the shared crate's file expansion resolves this too");
-
-    assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
-    assert!(router_config.experimental_type_conditioned_fetching);
-    assert!(shared_config.experimental_type_conditioned_fetching);
+    assert!(config.experimental_type_conditioned_fetching);
 }
 
 /// File expansion coerces a nested boolean through the schema's `allOf` reference wrapper.
@@ -986,96 +631,46 @@ fn file_expansion_boolean_coercion_resolves_through_a_nested_allof_ref() {
         file.path().to_string_lossy()
     );
 
-    let router_expansion = Expansion::builder().supported_mode("file").build();
-    let router_config = validate_yaml_configuration(&text, router_expansion, Mode::NoUpgrade)
-        .expect("router's own file expansion resolves this");
+    let config = parse_configuration(
+        &text,
+        Expansion::builder().supported_mode("file").build(),
+        Migration::None,
+    )
+    .expect("the nested field's declared type resolves the coercion");
 
-    let external = ExternalValues::default().add_variables(FileVariables);
-    let shared_config = parse_via_apollo_configuration(&text, external)
-        .expect("the shared crate resolves the nested field's declared type too");
-
-    assert_eq!(router_config.validated_yaml, shared_config.validated_yaml);
-    assert!(router_config.supergraph.introspection);
-    assert!(shared_config.supergraph.introspection);
+    assert!(config.supergraph.introspection);
 }
 
+/// File expansion removes one trailing newline, so values written with `echo` expand to the
+/// file's text.
 #[test]
-fn telemetry_input_agrees_between_the_two_parsers() {
-    let text = include_str!("testdata/tracing_config.router.yaml");
-    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect("router's own pipeline accepts this telemetry input");
-    let shared = router_options()
-        .parse::<Configuration>(text)
-        .expect("the shared parser accepts this telemetry input too");
-
-    if let Some(mismatch) = settings_disagreement(&router, &shared) {
-        panic!("telemetry input: {mismatch}");
-    }
-}
-
-/// Discovered configurations produce matching effective settings with identical expansion
-/// inputs. Failures identify the source file and any differing configuration path.
-#[test]
-fn effective_settings_agree_for_discovered_project_documents() {
-    let mocked_env_vars = test_discovery::discovery_env_vars();
-    let mut compared = 0usize;
-    let mut unexpected = Vec::new();
-
-    for doc in test_discovery::discover_project_configs() {
-        // Use explicit providers to keep process-environment overrides out of the comparison.
-        let router_expansion = Expansion::builder()
-            .supported_mode("env")
-            .supported_mode("file")
-            .mocked_env_vars(mocked_env_vars.clone())
-            .build();
-        let router = match validate_yaml_configuration(&doc.yaml, router_expansion, Mode::NoUpgrade)
-        {
-            Ok(config) => config,
-            Err(error) => {
-                unexpected.push(format!(
-                    "{}: router's own pipeline rejected a discovered document expected to \
-                     succeed: {error}",
-                    doc.path.display()
-                ));
-                continue;
-            }
-        };
-
-        let shared_options = router_options()
-            .add_variables(MapVariables(mocked_env_vars.clone()))
-            .add_variables(FileVariables);
-        match shared_options.parse::<Configuration>(&doc.yaml) {
-            Ok(shared) => {
-                compared += 1;
-                if let Some(mismatch) = settings_disagreement(&router, &shared) {
-                    unexpected.push(format!("{}: {mismatch}", doc.path.display()));
-                }
-            }
-            Err(error) => unexpected.push(format!(
-                "{}: the shared parser rejected a discovered document expected to succeed: {:?}",
-                doc.path.display(),
-                miette::Report::new(error)
-            )),
-        }
-    }
-
-    assert!(
-        unexpected.is_empty(),
-        "discovered documents disagree between router's own pipeline and the shared parser:\n\n{}",
-        unexpected.join("\n\n")
+fn file_expansion_removes_one_trailing_newline() {
+    let mut file = tempfile::NamedTempFile::new().expect("can create a temp file");
+    std::io::Write::write_all(&mut file, b"https://example.com/usage\n")
+        .expect("can write the temp file");
+    let text = format!(
+        "telemetry:\n  apollo:\n    endpoint: \"${{file.{}}}\"\n",
+        file.path().to_string_lossy()
     );
-    assert!(
-        compared > 0,
-        "expected to discover at least one project configuration document"
+
+    let config = parse_configuration(
+        &text,
+        Expansion::builder().supported_mode("file").build(),
+        Migration::None,
+    )
+    .expect("file expansion resolves this");
+
+    assert_eq!(
+        config.validated_yaml.unwrap()["telemetry"]["apollo"]["endpoint"],
+        json!("https://example.com/usage")
     );
 }
 
-/// Both parsers accept each top-level boolean, string and number default declared by the
-/// generated schema and produce matching effective settings.
+/// Setting a top-level boolean, string or number to the default its schema declares has the
+/// same effect as omitting it.
 #[test]
-fn schema_declared_top_level_defaults_agree_between_parsers() {
-    let schema = router_config_schema();
-    let properties = schema["properties"]
+fn schema_declared_top_level_defaults_match_the_default_configuration() {
+    let properties = router_config_schema()["properties"]
         .as_object()
         .expect("the root schema declares properties");
 
@@ -1091,27 +686,14 @@ fn schema_declared_top_level_defaults_agree_between_parsers() {
 
         // A JSON scalar is valid YAML flow-scalar syntax, so `default`'s `Display` (JSON text)
         // can be written directly after the key without a round trip through `serde_yaml`.
-        let text = format!("{key}: {default}\n");
-
-        let router = validate_yaml_configuration(
-            &text,
-            Expansion::builder().build(),
-            Mode::NoUpgrade,
-        )
-        .unwrap_or_else(|error| {
-            panic!(
-                "[{key}] router's own pipeline rejected its own schema-declared default: {error}"
-            )
+        let config = parse(&format!("{key}: {default}\n")).unwrap_or_else(|error| {
+            panic!("[{key}] loading rejected its own schema-declared default: {error}")
         });
-        let shared = router_options()
-            .parse::<Configuration>(&text)
-            .unwrap_or_else(|error| {
-                panic!("[{key}] the shared parser rejected the schema-declared default: {error}")
-            });
-
-        if let Some(mismatch) = settings_disagreement(&router, &shared) {
-            panic!("[{key}, set to the schema's own declared default] {mismatch}");
-        }
+        let changes = changed_settings(&config);
+        assert!(
+            changes.is_empty(),
+            "[{key}, set to the schema's own declared default] changed {changes:?}"
+        );
     }
 
     assert!(
@@ -1120,129 +702,39 @@ fn schema_declared_top_level_defaults_agree_between_parsers() {
     );
 }
 
-/// Both parsers agree on rate limits with different capacities and intervals.
+/// Rate limits with different capacities and intervals are applied.
 #[test]
-fn schema_derived_required_field_permutations_agree_between_parsers() {
+fn rate_limit_settings_are_applied() {
     for (capacity, interval) in [(10, "1s"), (500, "30s")] {
-        let text = format!(
+        let config = parse(&format!(
             "traffic_shaping:\n  all:\n    global_rate_limit:\n      capacity: {capacity}\n      interval: {interval}\n"
-        );
-
-        let router =
-            validate_yaml_configuration(&text, Expansion::builder().build(), Mode::NoUpgrade)
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "[capacity={capacity}, interval={interval}] router's own pipeline rejected \
-                     a document supplying RateLimitConf's required fields: {error}"
-                    )
-                });
-        let shared = router_options()
-            .parse::<Configuration>(&text)
-            .unwrap_or_else(|error| {
-                panic!(
-                    "[capacity={capacity}, interval={interval}] the shared parser rejected a \
-                     document supplying RateLimitConf's required fields: {error}"
-                )
-            });
-
-        if let Some(mismatch) = settings_disagreement(&router, &shared) {
-            panic!("[capacity={capacity}, interval={interval}] {mismatch}");
-        }
-    }
-}
-
-/// The adapter preserves licence-selector inputs in `validated_yaml`: the presence of
-/// batching and persisted queries, and the value of `subscription.enabled`.
-#[test]
-fn licence_restricted_configuration_paths_agree_between_parsers_via_validated_yaml() {
-    let text = "batching:\n  enabled: true\npersisted_queries:\n  enabled: true\nsubscription:\n  enabled: true\n";
-
-    let router = validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-        .expect("router's own pipeline accepts this");
-    let adapted_shared = parse_via_apollo_configuration(text, ExternalValues::default())
-        .expect("the adapter accepts this");
-
-    let router_yaml = router
-        .validated_yaml
-        .as_ref()
-        .expect("router populates validated_yaml");
-    let shared_yaml = adapted_shared
-        .validated_yaml
-        .as_ref()
-        .expect("the adapter populates validated_yaml");
-
-    for (path, expected_value) in [
-        ("$.batching", None),
-        ("$.persisted_queries", None),
-        ("$.subscription.enabled", Some(json!(true))),
-    ] {
-        let router_hit = jsonpath_lib::selector(router_yaml)(path)
-            .unwrap_or_else(|error| panic!("[{path}] valid JSONPath on router's side: {error}"))
-            .first()
-            .copied()
-            .cloned();
-        let shared_hit = jsonpath_lib::selector(shared_yaml)(path)
-            .unwrap_or_else(|error| panic!("[{path}] valid JSONPath on the shared side: {error}"))
-            .first()
-            .copied()
-            .cloned();
-
+        ))
+        .unwrap_or_else(|error| {
+            panic!("[capacity={capacity}, interval={interval}] loading rejected valid settings: {error}")
+        });
+        let changes = changed_settings(&config);
         assert_eq!(
-            router_hit.is_some(),
-            shared_hit.is_some(),
-            "[{path}] licence-restriction presence check must agree"
+            changes["/traffic_shaping"]["all"]["global_rate_limit"],
+            json!({ "capacity": capacity, "interval": interval }),
+            "{changes:?}"
         );
-        if let Some(expected) = expected_value {
-            assert_eq!(router_hit, Some(expected.clone()), "[{path}] router side");
-            assert_eq!(shared_hit, Some(expected), "[{path}] shared side");
-        }
     }
 }
 
-/// Licence enforcement reports the same restricted features and verdict for an unlicensed
-/// router using either parser's commercial configuration.
+/// Licence enforcement reads `validated_yaml` and flags every restricted feature the commercial
+/// fixture enables, so an unlicensed router refuses it.
 #[test]
-fn licence_verdict_agrees_between_parsers_for_commercial_configuration() {
+fn licence_enforcement_flags_the_commercial_configuration() {
     let text = include_str!("testdata/compat/current_commercial.yaml");
     let schema_sdl = include_str!("../uplink/testdata/oss.graphql");
-    let license = Arc::new(LicenseState::Unlicensed);
+    let config = parse(text).expect("the commercial fixture is valid");
+    let schema = Schema::parse(schema_sdl, &config).expect("the schema parses");
 
-    let router_config =
-        validate_yaml_configuration(text, Expansion::builder().build(), Mode::NoUpgrade)
-            .expect("router's own pipeline accepts the commercial fixture");
-    let shared_config = parse_via_apollo_configuration(text, ExternalValues::default())
-        .expect("the adapter accepts the commercial fixture");
+    let report =
+        LicenseEnforcementReport::build(&config, &schema, Arc::new(LicenseState::Unlicensed));
 
-    let router_schema = Schema::parse(schema_sdl, &router_config)
-        .expect("the schema parses against router's configuration");
-    let shared_schema = Schema::parse(schema_sdl, &shared_config)
-        .expect("the schema parses against the shared configuration");
-
-    let router_report =
-        LicenseEnforcementReport::build(&router_config, &router_schema, license.clone());
-    let shared_report = LicenseEnforcementReport::build(&shared_config, &shared_schema, license);
-
-    assert!(
-        router_report.uses_restricted_features(),
-        "the commercial fixture sets restricted paths, so router's report must flag them"
-    );
-    assert!(
-        shared_report.uses_restricted_features(),
-        "the commercial fixture sets restricted paths, so the shared report must flag them too"
-    );
-
-    let mut router_features = router_report.restricted_features_in_use();
-    router_features.sort();
-    let mut shared_features = shared_report.restricted_features_in_use();
-    shared_features.sort();
-    assert_eq!(
-        router_features, shared_features,
-        "both parsers must name the same restricted features"
-    );
-
-    assert_eq!(
-        router_report.enforce().is_err(),
-        shared_report.enforce().is_err(),
-        "both parsers must reach the same licence verdict for an unlicensed router"
-    );
+    let mut features = report.restricted_features_in_use();
+    features.sort();
+    insta::assert_json_snapshot!(features);
+    assert!(report.enforce().is_err());
 }

@@ -56,7 +56,7 @@ fn default_intern_strings() -> bool {
 }
 
 /// Configuration for the Rhai Plugin
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
