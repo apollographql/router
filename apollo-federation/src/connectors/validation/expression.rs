@@ -24,6 +24,7 @@ use crate::connectors::Namespace;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::json_selection::VarPaths;
+use crate::connectors::json_selection::could_satisfy;
 use crate::connectors::string_template::Expression;
 use crate::connectors::validation::Code;
 use crate::connectors::validation::Message;
@@ -287,6 +288,62 @@ pub(crate) fn validate(
     context: &Context,
     expected_shape: &Shape,
 ) -> Result<(), Message> {
+    let actual_shape = resolved_output_shape(expression, context)?;
+    if let Some(mismatch) = expected_shape
+        .validate(&actual_shape)
+        .into_iter()
+        // Unknown satisfies nothing, but we have to allow it for things like `$config`
+        .find(|mismatch| !mismatch.received.is_unknown())
+    {
+        Err(Message {
+            code: context.code,
+            message: format!(
+                "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
+                short_shape_name(&mismatch.expected),
+                short_shape_name(&mismatch.received),
+                mismatch.expected.pretty_print(),
+                mismatch.received.pretty_print(),
+            ),
+            locations: transform_locations(mismatch.received.locations(), context, expression),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Like [`validate`], but only rejects an expression when no value it could
+/// produce satisfies `expected_shape`, for places where the runtime handles any
+/// other value itself.
+///
+/// For example, `isSuccess` counts a missing or non-boolean value as failure
+/// at runtime, so `$.items->find(@.ok)->eq(true)` (which may be missing) and
+/// `->match` with a non-boolean fallback are fine, but `$.items->size` (always
+/// an integer) is not.
+pub(crate) fn validate_could_satisfy(
+    expression: &Expression,
+    context: &Context,
+    expected_shape: &Shape,
+) -> Result<(), Message> {
+    let actual_shape = resolved_output_shape(expression, context)?;
+    if could_satisfy(expected_shape, &actual_shape) {
+        Ok(())
+    } else {
+        Err(Message {
+            code: context.code,
+            message: format!(
+                "expected {} but received incompatible {}\nDetails: `{}` is never `{}`",
+                short_shape_name(expected_shape),
+                short_shape_name(&actual_shape),
+                actual_shape.pretty_print(),
+                expected_shape.pretty_print(),
+            ),
+            locations: transform_locations(actual_shape.locations(), context, expression),
+        })
+    }
+}
+
+/// Checks the variables an expression uses, and resolves its output shape.
+fn resolved_output_shape(expression: &Expression, context: &Context) -> Result<Shape, Message> {
     // TODO: this check should be done in the shape checking, but currently
     // shape resolution can drop references to inputs if the expressions ends with
     // a method, i.e. `$batch.id->joinNotNull(',')` — this resolves to simply
@@ -325,27 +382,7 @@ pub(crate) fn validate(
     let shape = expression.expression.shape();
 
     let mut resolving = HashSet::default();
-    let actual_shape = resolve_shape(&shape, context, expression, &mut resolving)?;
-    if let Some(mismatch) = expected_shape
-        .validate(&actual_shape)
-        .into_iter()
-        // Unknown satisfies nothing, but we have to allow it for things like `$config`
-        .find(|mismatch| !mismatch.received.is_unknown())
-    {
-        Err(Message {
-            code: context.code,
-            message: format!(
-                "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
-                short_shape_name(&mismatch.expected),
-                short_shape_name(&mismatch.received),
-                mismatch.expected.pretty_print(),
-                mismatch.received.pretty_print(),
-            ),
-            locations: transform_locations(mismatch.received.locations(), context, expression),
-        })
-    } else {
-        Ok(())
-    }
+    resolve_shape(&shape, context, expression, &mut resolving)
 }
 
 /// Validate that the shape is an acceptable output shape for an Expression.
