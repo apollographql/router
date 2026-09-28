@@ -46,8 +46,9 @@ fn log_license_parse_error(is_version_incompatible: bool, err: impl std::fmt::Di
 }
 
 /// Records that a license fetch failed, tagged by source and a short stable failure reason.
-/// A source genuinely reporting "no license configured" (e.g. `OciError::is_not_found()`)
-/// is not a fetch failure and must not be recorded here.
+/// A source genuinely reporting "no license configured" (e.g.
+/// `OciError::is_transient_not_found()` or `is_missing_entitlement_layer()`) is not a fetch
+/// failure and must not be recorded here.
 fn record_license_fetch_failure(source: &'static str, reason: &'static str) {
     u64_counter_with_unit!(
         "apollo.router.license.fetch.failure.total",
@@ -253,20 +254,27 @@ impl LicenseSource {
                     Ok(stream) => stream
                         .filter_map(|res| {
                             future::ready(match res {
-                                Ok(license) => Some(license),
+                                Ok(Some(license)) => Some(license),
+                                Ok(None) => Some(License::default()),
+                                Err(e) if e.is_missing_entitlement_layer() => {
+                                    tracing::error!(
+                                        code = APOLLO_ROUTER_LICENSE_INVALID,
+                                        "{e}; the router will run unlicensed"
+                                    );
+                                    Some(License::default())
+                                }
                                 Err(e) => {
-                                    // A "no entitlement" case (missing manifest, missing
-                                    // entitlement blob, or a manifest with no entitlement
-                                    // layer) is semantically "unlicensed," not a fetch
-                                    // failure, and must not be recorded or warned on —
-                                    // `OciError::is_not_found()` is the source of truth for
-                                    // that classification (only the "no entitlement layer on
-                                    // an otherwise-fetched manifest" shape is pre-converted to
-                                    // `Ok(License::default())` inside
-                                    // `fetch_license_from_reference`; missing manifest/blob
-                                    // still surface here as `Err`).
+                                    // Missing annotation is already converted to `Ok(None)`
+                                    // upstream, and a missing entitlement layer is handled by
+                                    // the `is_missing_entitlement_layer` arm above, so a
+                                    // genuinely "not found" `Err` reaching here
+                                    // (`OciError::is_transient_not_found()`) means the
+                                    // entitlement just isn't backfilled/accessible yet — not a
+                                    // fetch failure, so it must not be recorded or warned on.
+                                    // Anything else here is a real transient failure (auth,
+                                    // 5xx, network) to retry on the next poll.
                                     let reason = oci_error_reason(&e);
-                                    if e.is_not_found() {
+                                    if e.is_transient_not_found() {
                                         tracing::debug!(
                                             source = "oci",
                                             reason,
