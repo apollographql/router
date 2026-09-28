@@ -64,7 +64,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
          # These keys are optional. Default values are shown.
          header_name: Authorization
          header_value_prefix: Bearer
-         on_error: RedactedError
+         on_error: redacted_error
          # array of alternative token sources
          sources:
            - type: header
@@ -166,13 +166,13 @@ The default value is `Bearer`.
 </td>
 <td>
 
-This setting controls the behavior of the router when an error occurs during JWT validation. Possible values are `RedactedError` (default), `Error`, and `Continue`.
+This setting controls the behavior of the router when an error occurs during JWT validation. Possible values are `redacted_error` (default), `error`, and `continue`.
 
-- `RedactedError`: The router rejects the request, and every validation failure returns the same generic `Authentication failed` message with the `AUTH_ERROR` extension code. This is the safer default for routers reachable from the public internet, since the detailed messages returned by `Error` would disclose which signing algorithms the router accepts and which issuers and audiences it's configured with. The details of the failure remain available to you in the request context and in telemetry, as described below.
-- `Error`: The router responds with an error when an error occurs during JWT validation. The error message describes the validation failure—for example, that the token's signature couldn't be decoded, or that its `aud` claim doesn't match the audiences you configured.
-- `Continue`: The router continues processing the request when an error occurs during JWT validation. Requests with invalid JWTs will be treated as unauthenticated.
+- `redacted_error`: The router rejects the request, and every validation failure returns the same generic `Authentication failed` message with the `AUTH_ERROR` extension code. This is the safer default for routers reachable from the public internet, since the detailed messages returned by `error` would disclose which signing algorithms the router accepts and which issuers and audiences it's configured with. The details of the failure remain available to you in the request context and in telemetry, as described below.
+- `error`: The router responds with an error when an error occurs during JWT validation. The error message describes the validation failure—for example, that the token's signature couldn't be decoded, or that its `aud` claim doesn't match the audiences you configured.
+- `continue`: The router continues processing the request when an error occurs during JWT validation. Requests with invalid JWTs will be treated as unauthenticated.
 
-Regardless of whether JWT authentication succeeds, the status of JWT processing is inserted into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes. The context value always carries the full details of the failure, including when `on_error` is `RedactedError`, so you can log the reason a request was rejected without returning it to the client.
+Regardless of whether JWT authentication succeeds, the status of JWT processing is inserted into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes. The context value always carries the full details of the failure, including when `on_error` is `redacted_error`, so you can log the reason a request was rejected without returning it to the client.
 
 ```js
 // On failure
@@ -263,8 +263,8 @@ After the GraphOS Router validates a client request's JWT, it adds that token's 
 
 > - If no JWT is present for a client request, this context value is the empty tuple, `()`.
 > - If a JWT _is_ present but validation of the JWT fails,
->     - When `on_error` is set to `Error` or `RedactedError`, the router _rejects_ the request.
->     - When `on_error` is set to `Continue`, the router _continues_ processing the request, and the context value is the empty tuple, `()`.
+>     - When `on_error` is set to `error` or `redacted_error`, the router _rejects_ the request.
+>     - When `on_error` is set to `continue`, the router _continues_ processing the request, and the context value is the empty tuple, `()`.
 
 If unauthenticated requests should be rejected, the router can be configured like this:
 
@@ -807,7 +807,7 @@ If your router enables [tracing](/router/configuration/telemetry/exporters/traci
 
 If your router [exports metrics](/graphos/routing/observability/telemetry/metrics-exporters/overview), the JWT authentication plugin exports the `apollo.router.operations.authentication.jwt` metric. You can use the metric's `authentication.jwt.failed` attribute to count failed authentications. If the `authentication.jwt.failed` attribute is absent or `false`, the authentication succeeded.
 
-Failed authentications also carry an `authentication.jwt.failure_code` attribute holding a machine-readable code for the failure, such as `CANNOT_DECODE_JWT`, `INVALID_AUDIENCE`, or `CANNOT_FIND_KID`. Use this attribute to break down why authentications fail—particularly when [`on_error`](#on_error) is `RedactedError` and the reason isn't in the response.
+Failed authentications also carry an `authentication.jwt.failure_code` attribute holding a machine-readable code for the failure, such as `CANNOT_DECODE_JWT`, `INVALID_AUDIENCE`, or `CANNOT_FIND_KID`. Use this attribute to break down why authentications fail—particularly when [`on_error`](#on_error) is `redacted_error` and the reason isn't in the response.
 
 ## Additional resources
 

@@ -6938,7 +6938,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `RedactedError`.\n\n* When set to `RedactedError`, requests that fail JWT authentication are rejected with a\n  generic error message instead of the details of the validation failure. The details\n  remain available in the `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error, and the response contains the details of the validation failure.\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `redacted_error`.\n\n* When set to `redacted_error`, requests that fail JWT authentication are rejected with a\n  generic error message instead of the details of the validation failure. The details\n  remain available in the `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric.\n* When set to `error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error, and the response contains the details of the validation failure.\n* When set to `continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -7569,9 +7569,9 @@ expression: "&schema"
     },
     "OnError": {
       "enum": [
-        "Continue",
-        "Error",
-        "RedactedError"
+        "continue",
+        "error",
+        "redacted_error"
       ],
       "type": "string"
     },
