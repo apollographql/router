@@ -10,6 +10,7 @@ use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::spec::ConnectSpec;
 
 mod common;
+pub(crate) use common::could_satisfy;
 
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
