@@ -9,10 +9,8 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
@@ -498,9 +496,7 @@ impl HasType for InputObjectFieldDefinitionPosition {
         &self,
         schema: &FederationSchema,
     ) -> Result<EnumExampleAst, FederationError> {
-        Ok(EnumExampleAst::Input(
-            self.get(schema.schema())?.clone().node,
-        ))
+        Ok(EnumExampleAst::Input(self.get(schema.schema())?.clone()))
     }
 
     fn is_argument() -> bool {
@@ -529,8 +525,7 @@ impl HasType for ObjectFieldDefinitionPosition {
         &self,
         schema: &FederationSchema,
     ) -> Result<EnumExampleAst, FederationError> {
-        let node = self.get(schema.schema())?.clone().node;
-        Ok(EnumExampleAst::Field(node))
+        Ok(EnumExampleAst::Field(self.get(schema.schema())?.clone()))
     }
 
     fn is_argument() -> bool {
@@ -559,8 +554,7 @@ impl HasType for InterfaceFieldDefinitionPosition {
         &self,
         schema: &FederationSchema,
     ) -> Result<EnumExampleAst, FederationError> {
-        let node = self.get(schema.schema())?.clone().node;
-        Ok(EnumExampleAst::Field(node))
+        Ok(EnumExampleAst::Field(self.get(schema.schema())?.clone()))
     }
 
     fn is_argument() -> bool {
@@ -643,21 +637,14 @@ impl HasMutableDirectives for InputObjectFieldDefinitionPosition {
 }
 
 /// A trait that exposes the list of applied directives on a given schema position.
-///
-/// Depending on the underlying GraphQL type, `apollo-rs` exposes the associated directives
-/// as either wrapped in `Node<Directive>` (reference-counter smart pointer) or `Component<Directive>`
-/// (wraps node and tracks its origin in the schema). By defining `AppliedDirective` associated
-/// type as `AsRef<Directive>` we can define a common trait that works with both wrappers.
 pub(crate) trait HasAppliedDirectives {
-    type AppliedDirective: AsRef<Directive>;
-
-    fn filter_directives<'dir, T: AsRef<Directive>>(
-        directives: impl IntoIterator<Item = &'dir T>,
+    fn filter_directives<'dir>(
+        directives: impl IntoIterator<Item = &'dir Node<Directive>>,
         name: &Name,
-    ) -> Vec<&'dir T> {
+    ) -> Vec<&'dir Node<Directive>> {
         directives
             .into_iter()
-            .filter(|directive| &directive.as_ref().name == name)
+            .filter(|directive| &directive.name == name)
             .collect()
     }
 
@@ -665,30 +652,26 @@ pub(crate) trait HasAppliedDirectives {
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Self::AppliedDirective>;
+    ) -> Vec<&'schema Node<Directive>>;
 }
 
 impl HasAppliedDirectives for SchemaDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         let schema_def = self.get(&schema.schema);
         Self::filter_directives(schema_def.directives.iter(), directive_name)
     }
 }
 
 impl HasAppliedDirectives for TypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         match self {
             TypeDefinitionPosition::Scalar(type_) => {
                 type_.get_applied_directives(schema, directive_name)
@@ -713,13 +696,11 @@ impl HasAppliedDirectives for TypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         match self {
             CompositeTypeDefinitionPosition::Object(type_) => {
                 type_.get_applied_directives(schema, directive_name)
@@ -735,8 +716,6 @@ impl HasAppliedDirectives for CompositeTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for FieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -755,8 +734,6 @@ impl HasAppliedDirectives for FieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -770,13 +747,11 @@ impl HasAppliedDirectives for ObjectOrInterfaceFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         match self {
             ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
                 type_.get_applied_directives(schema, directive_name)
@@ -789,13 +764,11 @@ impl HasAppliedDirectives for ObjectOrInterfaceTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
             .map(|scalar| Self::filter_directives(scalar.directives.iter(), directive_name))
             .unwrap_or_default()
@@ -803,13 +776,11 @@ impl HasAppliedDirectives for ScalarTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
             .map(|object| Self::filter_directives(object.directives.iter(), directive_name))
             .unwrap_or_default()
@@ -817,8 +788,6 @@ impl HasAppliedDirectives for ObjectTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -831,8 +800,6 @@ impl HasAppliedDirectives for ObjectFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -845,13 +812,11 @@ impl HasAppliedDirectives for ObjectFieldArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
             .map(|intf| Self::filter_directives(intf.directives.iter(), directive_name))
             .unwrap_or_default()
@@ -859,8 +824,6 @@ impl HasAppliedDirectives for InterfaceTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
-
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -873,7 +836,6 @@ impl HasAppliedDirectives for InterfaceFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -886,12 +848,11 @@ impl HasAppliedDirectives for InterfaceFieldArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for UnionTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
             .map(|union| Self::filter_directives(union.directives.iter(), directive_name))
             .unwrap_or_default()
@@ -899,12 +860,11 @@ impl HasAppliedDirectives for UnionTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for EnumTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
             .map(|enum_type| Self::filter_directives(enum_type.directives.iter(), directive_name))
             .unwrap_or_default()
@@ -912,7 +872,6 @@ impl HasAppliedDirectives for EnumTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for EnumValueDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -925,12 +884,11 @@ impl HasAppliedDirectives for EnumValueDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
-    type AppliedDirective = Component<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
-    ) -> Vec<&'schema Component<Directive>> {
+    ) -> Vec<&'schema Node<Directive>> {
         self.try_get(&schema.schema)
             .map(|input| Self::filter_directives(input.directives.iter(), directive_name))
             .unwrap_or_default()
@@ -938,7 +896,6 @@ impl HasAppliedDirectives for InputObjectTypeDefinitionPosition {
 }
 
 impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -951,7 +908,6 @@ impl HasAppliedDirectives for InputObjectFieldDefinitionPosition {
 }
 
 impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -964,53 +920,24 @@ impl HasAppliedDirectives for DirectiveArgumentDefinitionPosition {
 }
 
 impl HasAppliedDirectives for DirectiveTargetPosition {
-    type AppliedDirective = Node<Directive>;
     fn get_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
         directive_name: &Name,
     ) -> Vec<&'schema Node<Directive>> {
         match self {
-            Self::Schema(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::ScalarType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::ObjectType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
+            Self::Schema(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::ScalarType(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::ObjectType(pos) => pos.get_applied_directives(schema, directive_name),
             Self::ObjectField(pos) => pos.get_applied_directives(schema, directive_name),
             Self::ObjectFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::InterfaceType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
+            Self::InterfaceType(pos) => pos.get_applied_directives(schema, directive_name),
             Self::InterfaceField(pos) => pos.get_applied_directives(schema, directive_name),
             Self::InterfaceFieldArgument(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::UnionType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
-            Self::EnumType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
+            Self::UnionType(pos) => pos.get_applied_directives(schema, directive_name),
+            Self::EnumType(pos) => pos.get_applied_directives(schema, directive_name),
             Self::EnumValue(pos) => pos.get_applied_directives(schema, directive_name),
-            Self::InputObjectType(pos) => pos
-                .get_applied_directives(schema, directive_name)
-                .iter()
-                .map(|d| &d.node)
-                .collect(),
+            Self::InputObjectType(pos) => pos.get_applied_directives(schema, directive_name),
             Self::InputObjectField(pos) => pos.get_applied_directives(schema, directive_name),
             Self::DirectiveArgument(pos) => pos.get_applied_directives(schema, directive_name),
         }
@@ -1117,7 +1044,7 @@ impl TypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         match self {
             TypeDefinitionPosition::Scalar(type_) => type_.insert_directive(schema, directive),
@@ -1223,7 +1150,7 @@ impl TypeDefinitionPosition {
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         match self {
             TypeDefinitionPosition::Scalar(type_) => type_.remove_directive(schema, directive),
@@ -1596,7 +1523,7 @@ impl CompositeTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         match self {
             CompositeTypeDefinitionPosition::Object(type_) => {
@@ -1708,7 +1635,7 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         match self {
             Self::Object(type_) => type_.insert_directive(schema, directive),
@@ -1719,8 +1646,7 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     pub(crate) fn implemented_interfaces<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<&'schema apollo_compiler::collections::IndexSet<ComponentName>, PositionLookupError>
-    {
+    ) -> Result<&'schema IndexSet<Node<Name>>, PositionLookupError> {
         match self {
             Self::Object(type_) => type_
                 .get(schema.schema())
@@ -1734,7 +1660,7 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
-        interface_name: ComponentName,
+        interface_name: Node<Name>,
     ) -> Result<(), FederationError> {
         match self {
             Self::Object(type_) => type_.insert_implements_interface(schema, interface_name),
@@ -1828,7 +1754,7 @@ impl FieldDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
+    ) -> Option<&'schema Node<FieldDefinition>> {
         match self {
             FieldDefinitionPosition::Object(field) => field.try_get(schema),
             FieldDefinitionPosition::Interface(field) => field.try_get(schema),
@@ -1839,7 +1765,7 @@ impl FieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<FieldDefinition>, PositionLookupError> {
         match self {
             FieldDefinitionPosition::Object(field) => field.get(schema),
             FieldDefinitionPosition::Interface(field) => field.get(schema),
@@ -1912,7 +1838,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
+    ) -> Option<&'schema Node<FieldDefinition>> {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.try_get(schema),
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.try_get(schema),
@@ -1922,7 +1848,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<FieldDefinition>, PositionLookupError> {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.get(schema),
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.get(schema),
@@ -1977,7 +1903,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        field_def: Component<FieldDefinition>,
+        field_def: Node<FieldDefinition>,
     ) -> Result<(), FederationError> {
         match self {
             Self::Object(field) => field.insert(schema, field_def),
@@ -2049,7 +1975,7 @@ impl SchemaDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> impl Iterator<Item = &'schema Component<Directive>> {
+    ) -> impl Iterator<Item = &'schema Node<Directive>> {
         self.get(&schema.schema).directives.iter()
     }
 
@@ -2067,7 +1993,7 @@ impl SchemaDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         self.insert_directive_at(schema, directive, self.get(&schema.schema).directives.len())
     }
@@ -2075,7 +2001,7 @@ impl SchemaDefinitionPosition {
     pub(crate) fn insert_directive_at(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
         index: usize,
     ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
@@ -2126,7 +2052,7 @@ impl SchemaDefinitionPosition {
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(schema_definition.directives.deref())?;
+        validate_directives(schema_definition.directives.deref())?;
         for directive_reference in schema_definition.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -2195,7 +2121,7 @@ impl SchemaDefinitionPosition {
         &self,
         schema: &'schema FederationSchema,
         kind: SchemaRootDefinitionKind,
-    ) -> Option<&'schema ComponentName> {
+    ) -> Option<&'schema Node<Name>> {
         let schema_definition = self.get(schema.schema());
         match kind {
             SchemaRootDefinitionKind::Query => schema_definition.query.as_ref(),
@@ -2208,7 +2134,7 @@ impl SchemaDefinitionPosition {
         &self,
         schema: &mut FederationSchema,
         kind: SchemaRootDefinitionKind,
-        type_name: ComponentName,
+        type_name: Node<Name>,
     ) -> Result<(), FederationError> {
         let schema_definition = self.make_mut(&mut schema.schema);
         match kind {
@@ -2347,10 +2273,7 @@ impl SchemaRootDefinitionPosition {
         SchemaDefinitionPosition
     }
 
-    pub(crate) fn try_get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Option<&'schema ComponentName> {
+    pub(crate) fn try_get<'schema>(&self, schema: &'schema Schema) -> Option<&'schema Node<Name>> {
         let schema_definition = self.parent().get(schema);
         match self.root_kind {
             SchemaRootDefinitionKind::Query => schema_definition.query.as_ref(),
@@ -2362,7 +2285,7 @@ impl SchemaRootDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ComponentName, FederationError> {
+    ) -> Result<&'schema Node<Name>, FederationError> {
         self.try_get(schema).ok_or_else(|| {
             SingleFederationError::Internal {
                 message: format!("Schema definition has no root {self} type"),
@@ -2374,7 +2297,7 @@ impl SchemaRootDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        root_type: ComponentName,
+        root_type: Node<Name>,
     ) -> Result<(), FederationError> {
         if self.try_get(&schema.schema).is_some() {
             return Err(SingleFederationError::Internal {
@@ -2424,7 +2347,7 @@ impl SchemaRootDefinitionPosition {
 
     fn insert_references(
         &self,
-        root_type: &ComponentName,
+        root_type: &Node<Name>,
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
@@ -2441,7 +2364,7 @@ impl SchemaRootDefinitionPosition {
         object_type_referencers.schema_roots.insert(self.clone());
         if self.root_kind == SchemaRootDefinitionKind::Query {
             ObjectTypeDefinitionPosition {
-                type_name: root_type.name.clone(),
+                type_name: Name::clone(root_type),
             }
             .insert_root_query_references(schema, referencers)?;
         }
@@ -2450,13 +2373,13 @@ impl SchemaRootDefinitionPosition {
 
     fn remove_references(
         &self,
-        root_type: &ComponentName,
+        root_type: &Node<Name>,
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if self.root_kind == SchemaRootDefinitionKind::Query {
             ObjectTypeDefinitionPosition {
-                type_name: root_type.name.clone(),
+                type_name: Name::clone(root_type),
             }
             .remove_root_query_references(schema, referencers)?;
         }
@@ -2477,17 +2400,17 @@ impl SchemaRootDefinitionPosition {
         match self.root_kind {
             SchemaRootDefinitionKind::Query => {
                 if let Some(query) = &mut parent.query {
-                    query.name = new_name;
+                    *query = new_name.to_node(query.extension_id().cloned());
                 }
             }
             SchemaRootDefinitionKind::Mutation => {
                 if let Some(mutation) = &mut parent.mutation {
-                    mutation.name = new_name;
+                    *mutation = new_name.to_node(mutation.extension_id().cloned());
                 }
             }
             SchemaRootDefinitionKind::Subscription => {
                 if let Some(subscription) = &mut parent.subscription {
-                    subscription.name = new_name;
+                    *subscription = new_name.to_node(subscription.extension_id().cloned());
                 }
             }
         }
@@ -2659,7 +2582,7 @@ impl ScalarTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         if type_
@@ -2697,7 +2620,7 @@ impl ScalarTypeDefinitionPosition {
         type_: &Node<ScalarType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -2773,7 +2696,7 @@ impl ScalarTypeDefinitionPosition {
             .directives
             .iter_mut()
         {
-            directive.origin = ComponentOrigin::Definition;
+            *directive = directive.same_location((**directive).clone());
         }
         Ok(())
     }
@@ -2795,14 +2718,14 @@ impl ScalarTypeDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         let Some(obj) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -3041,7 +2964,7 @@ impl ObjectTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         if type_
@@ -3077,7 +3000,7 @@ impl ObjectTypeDefinitionPosition {
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
-        name: ComponentName,
+        name: Node<Name>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         type_.make_mut().implements_interfaces.insert(name.clone());
@@ -3101,7 +3024,7 @@ impl ObjectTypeDefinitionPosition {
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -3128,7 +3051,7 @@ impl ObjectTypeDefinitionPosition {
             // the meta-fields wouldn't be found (since the type has only been pre-inserted at that
             // point, not fully inserted). We instead need to execute the reference insertion here,
             // as it's right after the type has been inserted.
-            if self.type_name == root_query_type.name {
+            if self.type_name == **root_query_type {
                 self.insert_root_query_references(schema, referencers)?;
             }
         }
@@ -3176,7 +3099,7 @@ impl ObjectTypeDefinitionPosition {
             // meta-fields __schema or __type, as the type has already been removed from the schema
             // before it executes. We instead need to execute the reference removal here, as it's
             // right before the type has been removed.
-            if self.type_name == root_query_type.name {
+            if self.type_name == **root_query_type {
                 self.remove_root_query_references(schema, referencers)?;
             }
         }
@@ -3313,19 +3236,15 @@ impl ObjectTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            directive.origin = ComponentOrigin::Definition;
+            *directive = directive.same_location((**directive).clone());
         }
         type_.implements_interfaces = type_
             .implements_interfaces
             .iter()
-            .map(|i| {
-                let mut i = i.clone();
-                i.origin = ComponentOrigin::Definition;
-                i
-            })
+            .map(|i| Name::clone(i).to_node(None))
             .collect();
         for (_, field) in type_.fields.iter_mut() {
-            field.origin = ComponentOrigin::Definition;
+            *field = field.same_location((**field).clone());
         }
         Ok(())
     }
@@ -3347,14 +3266,14 @@ impl ObjectTypeDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         let Some(obj) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -3470,7 +3389,7 @@ impl ObjectFieldDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
+    ) -> Option<&'schema Node<FieldDefinition>> {
         self.parent().try_get(schema)?;
         schema.type_field(&self.type_name, &self.field_name).ok()
     }
@@ -3478,7 +3397,7 @@ impl ObjectFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
@@ -3496,7 +3415,7 @@ impl ObjectFieldDefinitionPosition {
     pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema mut Node<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -3519,7 +3438,7 @@ impl ObjectFieldDefinitionPosition {
     fn try_make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Option<&'schema mut Component<FieldDefinition>> {
+    ) -> Option<&'schema mut Node<FieldDefinition>> {
         if self.try_get(schema).is_some() {
             self.make_mut(schema).ok()
         } else {
@@ -3530,7 +3449,7 @@ impl ObjectFieldDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        field: Component<FieldDefinition>,
+        field: Node<FieldDefinition>,
     ) -> Result<(), FederationError> {
         if self.field_name != field.name {
             return Err(SingleFederationError::Internal {
@@ -3653,7 +3572,7 @@ impl ObjectFieldDefinitionPosition {
 
     fn insert_references(
         &self,
-        field: &Component<FieldDefinition>,
+        field: &Node<FieldDefinition>,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -3675,7 +3594,7 @@ impl ObjectFieldDefinitionPosition {
 
     fn remove_references(
         &self,
-        field: &Component<FieldDefinition>,
+        field: &Node<FieldDefinition>,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -3718,7 +3637,7 @@ impl ObjectFieldDefinitionPosition {
 
     fn insert_type_references(
         &self,
-        field: &Component<FieldDefinition>,
+        field: &Node<FieldDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let output_type_reference = field.ty.inner_named_type();
@@ -3754,11 +3673,7 @@ impl ObjectFieldDefinitionPosition {
         Ok(())
     }
 
-    fn remove_type_references(
-        &self,
-        field: &Component<FieldDefinition>,
-        referencers: &mut Referencers,
-    ) {
+    fn remove_type_references(&self, field: &Node<FieldDefinition>, referencers: &mut Referencers) {
         let output_type_reference = field.ty.inner_named_type();
         if let Some(scalar_type_referencers) =
             referencers.scalar_types.get_mut(output_type_reference)
@@ -4434,7 +4349,7 @@ impl InterfaceTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         if type_
@@ -4470,7 +4385,7 @@ impl InterfaceTypeDefinitionPosition {
     pub(crate) fn insert_implements_interface(
         &self,
         schema: &mut FederationSchema,
-        name: ComponentName,
+        name: Node<Name>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         type_.make_mut().implements_interfaces.insert(name.clone());
@@ -4494,7 +4409,7 @@ impl InterfaceTypeDefinitionPosition {
         schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -4644,19 +4559,15 @@ impl InterfaceTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            directive.origin = ComponentOrigin::Definition;
+            *directive = directive.same_location((**directive).clone());
         }
         type_.implements_interfaces = type_
             .implements_interfaces
             .iter()
-            .map(|i| {
-                let mut i = i.clone();
-                i.origin = ComponentOrigin::Definition;
-                i
-            })
+            .map(|i| Name::clone(i).to_node(None))
             .collect();
         for (_, field) in type_.fields.iter_mut() {
-            field.origin = ComponentOrigin::Definition;
+            *field = field.same_location((**field).clone());
         }
         Ok(())
     }
@@ -4678,14 +4589,14 @@ impl InterfaceTypeDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         let Some(obj) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -4731,7 +4642,7 @@ impl InterfaceFieldDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
+    ) -> Option<&'schema Node<FieldDefinition>> {
         self.parent().try_get(schema)?;
         schema.type_field(&self.type_name, &self.field_name).ok()
     }
@@ -4739,7 +4650,7 @@ impl InterfaceFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
@@ -4757,7 +4668,7 @@ impl InterfaceFieldDefinitionPosition {
     pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema mut Node<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -4780,7 +4691,7 @@ impl InterfaceFieldDefinitionPosition {
     fn try_make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Option<&'schema mut Component<FieldDefinition>> {
+    ) -> Option<&'schema mut Node<FieldDefinition>> {
         if self.try_get(schema).is_some() {
             self.make_mut(schema).ok()
         } else {
@@ -4791,7 +4702,7 @@ impl InterfaceFieldDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        field: Component<FieldDefinition>,
+        field: Node<FieldDefinition>,
     ) -> Result<(), FederationError> {
         if self.field_name != field.name {
             return Err(SingleFederationError::Internal {
@@ -4914,7 +4825,7 @@ impl InterfaceFieldDefinitionPosition {
 
     fn insert_references(
         &self,
-        field: &Component<FieldDefinition>,
+        field: &Node<FieldDefinition>,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -4936,7 +4847,7 @@ impl InterfaceFieldDefinitionPosition {
 
     fn remove_references(
         &self,
-        field: &Component<FieldDefinition>,
+        field: &Node<FieldDefinition>,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -4979,7 +4890,7 @@ impl InterfaceFieldDefinitionPosition {
 
     fn insert_type_references(
         &self,
-        field: &Component<FieldDefinition>,
+        field: &Node<FieldDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let output_type_reference = field.ty.inner_named_type();
@@ -5019,11 +4930,7 @@ impl InterfaceFieldDefinitionPosition {
         Ok(())
     }
 
-    fn remove_type_references(
-        &self,
-        field: &Component<FieldDefinition>,
-        referencers: &mut Referencers,
-    ) {
+    fn remove_type_references(&self, field: &Node<FieldDefinition>, referencers: &mut Referencers) {
         let output_type_reference = field.ty.inner_named_type();
         if let Some(scalar_type_referencers) =
             referencers.scalar_types.get_mut(output_type_reference)
@@ -5584,7 +5491,7 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         if type_
@@ -5620,7 +5527,7 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn insert_member(
         &self,
         schema: &mut FederationSchema,
-        name: ComponentName,
+        name: Node<Name>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         type_.make_mut().members.insert(name.clone());
@@ -5658,7 +5565,7 @@ impl UnionTypeDefinitionPosition {
         type_: &Node<UnionType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -5757,16 +5664,12 @@ impl UnionTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            directive.origin = ComponentOrigin::Definition;
+            *directive = directive.same_location((**directive).clone());
         }
         type_.members = type_
             .members
             .iter()
-            .map(|m| {
-                let mut m = m.clone();
-                m.origin = ComponentOrigin::Definition;
-                m
-            })
+            .map(|m| Name::clone(m).to_node(None))
             .collect();
         Ok(())
     }
@@ -5788,14 +5691,14 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         let Some(obj) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -5836,7 +5739,7 @@ impl UnionTypenameFieldDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<FieldDefinition>> {
+    ) -> Option<&'schema Node<FieldDefinition>> {
         self.parent().try_get(schema)?;
         schema.type_field(&self.type_name, self.field_name()).ok()
     }
@@ -5844,7 +5747,7 @@ impl UnionTypenameFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
@@ -6059,7 +5962,7 @@ impl EnumTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         if type_
@@ -6097,7 +6000,7 @@ impl EnumTypeDefinitionPosition {
         type_: &Node<EnumType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -6179,10 +6082,10 @@ impl EnumTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            directive.origin = ComponentOrigin::Definition;
+            *directive = directive.same_location((**directive).clone());
         }
         for (_, v) in type_.values.iter_mut() {
-            v.origin = ComponentOrigin::Definition;
+            *v = v.same_location((**v).clone());
         }
         Ok(())
     }
@@ -6204,14 +6107,14 @@ impl EnumTypeDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         let Some(obj) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -6256,7 +6159,7 @@ impl EnumValueDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<EnumValueDefinition>> {
+    ) -> Option<&'schema Node<EnumValueDefinition>> {
         let type_ = self.parent().try_get(schema)?;
         type_.values.get(&self.value_name)
     }
@@ -6264,7 +6167,7 @@ impl EnumValueDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<EnumValueDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<EnumValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
@@ -6277,7 +6180,7 @@ impl EnumValueDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<EnumValueDefinition>, PositionLookupError> {
+    ) -> Result<&'schema mut Node<EnumValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -6290,7 +6193,7 @@ impl EnumValueDefinitionPosition {
     fn try_make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Option<&'schema mut Component<EnumValueDefinition>> {
+    ) -> Option<&'schema mut Node<EnumValueDefinition>> {
         if self.try_get(schema).is_some() {
             self.make_mut(schema).ok()
         } else {
@@ -6301,7 +6204,7 @@ impl EnumValueDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        value: Component<EnumValueDefinition>,
+        value: Node<EnumValueDefinition>,
     ) -> Result<(), FederationError> {
         if self.value_name != value.value {
             return Err(SingleFederationError::Internal {
@@ -6378,7 +6281,7 @@ impl EnumValueDefinitionPosition {
 
     fn insert_references(
         &self,
-        value: &Component<EnumValueDefinition>,
+        value: &Node<EnumValueDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.value_name) {
@@ -6393,7 +6296,7 @@ impl EnumValueDefinitionPosition {
 
     fn remove_references(
         &self,
-        value: &Component<EnumValueDefinition>,
+        value: &Node<EnumValueDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.value_name) {
@@ -6621,7 +6524,7 @@ impl InputObjectTypeDefinitionPosition {
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: Component<Directive>,
+        directive: Node<Directive>,
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         if type_
@@ -6659,7 +6562,7 @@ impl InputObjectTypeDefinitionPosition {
         type_: &Node<InputObjectType>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
-        validate_component_directives(type_.directives.deref())?;
+        validate_directives(type_.directives.deref())?;
         for directive_reference in type_.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
@@ -6730,10 +6633,10 @@ impl InputObjectTypeDefinitionPosition {
     fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         for directive in type_.directives.iter_mut() {
-            directive.origin = ComponentOrigin::Definition;
+            *directive = directive.same_location((**directive).clone());
         }
         for (_, field) in type_.fields.iter_mut() {
-            field.origin = ComponentOrigin::Definition;
+            *field = field.same_location((**field).clone());
         }
         Ok(())
     }
@@ -6755,14 +6658,14 @@ impl InputObjectTypeDefinitionPosition {
     pub(crate) fn get_all_applied_directives<'schema>(
         &self,
         schema: &'schema FederationSchema,
-    ) -> Result<impl Iterator<Item = &'schema Component<Directive>>, FederationError> {
+    ) -> Result<impl Iterator<Item = &'schema Node<Directive>>, FederationError> {
         Ok(self.get(&schema.schema)?.directives.iter())
     }
 
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
-        directive: &Component<Directive>,
+        directive: &Node<Directive>,
     ) {
         let Some(obj) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -6817,7 +6720,7 @@ impl InputObjectFieldDefinitionPosition {
     pub(crate) fn try_get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Option<&'schema Component<InputValueDefinition>> {
+    ) -> Option<&'schema Node<InputValueDefinition>> {
         let type_ = self.parent().try_get(schema)?;
         type_.fields.get(&self.field_name)
     }
@@ -6825,7 +6728,7 @@ impl InputObjectFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<InputValueDefinition>, PositionLookupError> {
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
@@ -6841,7 +6744,7 @@ impl InputObjectFieldDefinitionPosition {
     pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<InputValueDefinition>, PositionLookupError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -6857,7 +6760,7 @@ impl InputObjectFieldDefinitionPosition {
     fn try_make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Option<&'schema mut Component<InputValueDefinition>> {
+    ) -> Option<&'schema mut Node<InputValueDefinition>> {
         if self.try_get(schema).is_some() {
             self.make_mut(schema).ok()
         } else {
@@ -6868,7 +6771,7 @@ impl InputObjectFieldDefinitionPosition {
     pub(crate) fn insert(
         &self,
         schema: &mut FederationSchema,
-        field: Component<InputValueDefinition>,
+        field: Node<InputValueDefinition>,
     ) -> Result<(), FederationError> {
         if self.field_name != field.name {
             return Err(SingleFederationError::Internal {
@@ -6962,7 +6865,7 @@ impl InputObjectFieldDefinitionPosition {
 
     fn insert_references(
         &self,
-        field: &Component<InputValueDefinition>,
+        field: &Node<InputValueDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
@@ -6979,7 +6882,7 @@ impl InputObjectFieldDefinitionPosition {
 
     fn remove_references(
         &self,
-        field: &Component<InputValueDefinition>,
+        field: &Node<InputValueDefinition>,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
@@ -7053,7 +6956,7 @@ impl InputObjectFieldDefinitionPosition {
 
     fn remove_type_references(
         &self,
-        field: &Component<InputValueDefinition>,
+        field: &Node<InputValueDefinition>,
         referencers: &mut Referencers,
     ) {
         let input_type_reference = field.ty.inner_named_type();
@@ -7307,7 +7210,7 @@ impl DirectiveDefinitionPosition {
     pub(crate) fn set_locations(
         &self,
         schema: &mut FederationSchema,
-        locations: Vec<DirectiveLocation>,
+        locations: IndexSet<DirectiveLocation>,
     ) -> Result<(), FederationError> {
         self.make_mut(&mut schema.schema)?.make_mut().locations = locations;
         Ok(())
@@ -7692,17 +7595,14 @@ impl DirectiveTargetPosition {
         schema: &'schema FederationSchema,
     ) -> Vec<&'schema Node<Directive>> {
         match self {
-            Self::Schema(pos) => pos
-                .get_all_applied_directives(schema)
-                .map(|component| &component.node)
-                .collect(),
+            Self::Schema(pos) => pos.get_all_applied_directives(schema).collect(),
             Self::ScalarType(pos) => pos
                 .get_all_applied_directives(schema)
-                .map(|it| it.map(|component| &component.node).collect())
+                .map(|it| it.collect())
                 .unwrap_or_default(),
             Self::ObjectType(pos) => pos
                 .get_all_applied_directives(schema)
-                .map(|it| it.map(|component| &component.node).collect())
+                .map(|it| it.collect())
                 .unwrap_or_default(),
             Self::ObjectField(pos) => pos
                 .get_all_applied_directives(schema)
@@ -7714,7 +7614,7 @@ impl DirectiveTargetPosition {
                 .unwrap_or_default(),
             Self::InterfaceType(pos) => pos
                 .get_all_applied_directives(schema)
-                .map(|it| it.map(|component| &component.node).collect())
+                .map(|it| it.collect())
                 .unwrap_or_default(),
             Self::InterfaceField(pos) => pos
                 .get_all_applied_directives(schema)
@@ -7726,11 +7626,11 @@ impl DirectiveTargetPosition {
                 .unwrap_or_default(),
             Self::UnionType(pos) => pos
                 .get_all_applied_directives(schema)
-                .map(|it| it.map(|component| &component.node).collect())
+                .map(|it| it.collect())
                 .unwrap_or_default(),
             Self::EnumType(pos) => pos
                 .get_all_applied_directives(schema)
-                .map(|it| it.map(|component| &component.node).collect())
+                .map(|it| it.collect())
                 .unwrap_or_default(),
             Self::EnumValue(pos) => pos
                 .get_all_applied_directives(schema)
@@ -7738,7 +7638,7 @@ impl DirectiveTargetPosition {
                 .unwrap_or_default(),
             Self::InputObjectType(pos) => pos
                 .get_all_applied_directives(schema)
-                .map(|it| it.map(|component| &component.node).collect())
+                .map(|it| it.collect())
                 .unwrap_or_default(),
             Self::InputObjectField(pos) => pos
                 .get_all_applied_directives(schema)
@@ -7757,18 +7657,18 @@ impl DirectiveTargetPosition {
         directive: Directive,
     ) -> Result<(), FederationError> {
         match self {
-            Self::Schema(pos) => pos.insert_directive(schema, Component::new(directive)),
-            Self::ScalarType(pos) => pos.insert_directive(schema, Component::new(directive)),
-            Self::ObjectType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::Schema(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::ScalarType(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::ObjectType(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::ObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::ObjectFieldArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
-            Self::InterfaceType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::InterfaceType(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::InterfaceField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::InterfaceFieldArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
-            Self::UnionType(pos) => pos.insert_directive(schema, Component::new(directive)),
-            Self::EnumType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::UnionType(pos) => pos.insert_directive(schema, Node::new(directive)),
+            Self::EnumType(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::EnumValue(pos) => pos.insert_directive(schema, Node::new(directive)),
-            Self::InputObjectType(pos) => pos.insert_directive(schema, Component::new(directive)),
+            Self::InputObjectType(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::InputObjectField(pos) => pos.insert_directive(schema, Node::new(directive)),
             Self::DirectiveArgument(pos) => pos.insert_directive(schema, Node::new(directive)),
         }
@@ -7936,9 +7836,7 @@ pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
 
 pub(crate) static INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
 
-fn validate_component_directives(
-    directives: &[Component<Directive>],
-) -> Result<(), FederationError> {
+fn validate_directives(directives: &[Node<Directive>]) -> Result<(), FederationError> {
     for directive in directives.iter() {
         if directives
             .iter()
@@ -8440,5 +8338,80 @@ mod tests {
               B
             }
         "#);
+    }
+
+    #[test]
+    fn remove_extensions_preserves_source_locations() {
+        let sdl = r#"
+            directive @custom repeatable on OBJECT | FIELD_DEFINITION
+
+            type Query {
+                q: T
+            }
+
+            type T @custom {
+                a: Int
+            }
+
+            extend type T @custom {
+                b: String
+            }
+        "#;
+
+        let mut schema = FederationSchema::new(
+            Schema::parse_and_validate(sdl, "schema.graphql")
+                .unwrap()
+                .into_inner(),
+        )
+        .unwrap();
+
+        let pos = ObjectTypeDefinitionPosition::new(name!("T"));
+        let type_before = pos.get(schema.schema()).unwrap();
+
+        // All directives and fields should have source locations before removal.
+        for d in &type_before.directives {
+            assert!(
+                d.location().is_some(),
+                "directive should have location before remove_extensions"
+            );
+        }
+        for (_, f) in &type_before.fields {
+            assert!(
+                f.location().is_some(),
+                "field should have location before remove_extensions"
+            );
+        }
+
+        pos.remove_extensions(&mut schema).unwrap();
+
+        let type_after = pos.get(schema.schema()).unwrap();
+
+        // Locations must survive after clearing extension origins.
+        for d in &type_after.directives {
+            assert!(
+                d.location().is_some(),
+                "directive lost its source location after remove_extensions"
+            );
+        }
+        for (_, f) in &type_after.fields {
+            assert!(
+                f.location().is_some(),
+                "field lost its source location after remove_extensions"
+            );
+        }
+
+        // Extension IDs should be cleared.
+        for d in &type_after.directives {
+            assert!(
+                d.extension_id().is_none(),
+                "directive should have no extension_id after remove_extensions"
+            );
+        }
+        for (_, f) in &type_after.fields {
+            assert!(
+                f.extension_id().is_none(),
+                "field should have no extension_id after remove_extensions"
+            );
+        }
     }
 }

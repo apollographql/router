@@ -99,6 +99,83 @@ fn implements_on_type_definition_not_extend_type() {
 }
 
 #[test]
+fn implements_only_from_extension_is_on_type_definition() {
+    let subgraph_a = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            type Query {
+              t: T
+            }
+
+            interface I1 {
+              id: ID!
+            }
+
+            type T implements I1 @key(fields: "id") {
+              id: ID!
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+            interface I2 {
+              note: String
+            }
+
+            extend type T implements I2 @key(fields: "id") {
+              id: ID!
+              note: String
+            }
+        "#,
+    };
+
+    let supergraph =
+        compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).expect("composition should succeed");
+    let sdl = supergraph.schema().schema().to_string();
+    assert!(!sdl.contains("extend type T"), "{sdl}");
+    assert!(sdl.contains("type T implements I1 & I2"), "{sdl}");
+}
+
+#[test]
+fn union_member_only_from_extension_is_on_union_definition() {
+    let subgraph_a = ServiceDefinition {
+        name: "Subgraph1",
+        type_defs: r#"
+            type Query {
+              u: U
+            }
+
+            union U = A
+
+            type A {
+              a: Int
+            }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "Subgraph2",
+        type_defs: r#"
+            union U
+
+            extend union U = B
+
+            type B {
+              b: Int
+            }
+        "#,
+    };
+
+    let supergraph =
+        compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]).expect("composition should succeed");
+    let sdl = supergraph.schema().schema().to_string();
+    assert!(!sdl.contains("extend union U"), "{sdl}");
+    assert!(sdl.contains("= A | B"), "{sdl}");
+}
+
+#[test]
 fn preserves_descriptions() {
     let subgraph1 = ServiceDefinition {
         name: "Subgraph1",
