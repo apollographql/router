@@ -41,6 +41,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
                 .with_interval(config.batch_processor.scheduled_delay)
                 .build(),
         );
+        builder.with_public_overflow_counted_by_push();
 
         Ok(())
     }

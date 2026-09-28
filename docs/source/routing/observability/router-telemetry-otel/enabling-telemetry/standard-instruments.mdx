@@ -333,8 +333,8 @@ telemetry:
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
-- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket.
-  - `metric.name`: The name of the metric that exceeded its cardinality limit.
+- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket. Every metrics exporter reports it, including Prometheus. It increases by one per export or Prometheus scrape while the metric has an overflow bucket.
+  - `metric.name`: The OpenTelemetry name of the metric that exceeded its cardinality limit (for example, `http.server.request.duration`), whichever exporter you use.
 
 ## Internals
 

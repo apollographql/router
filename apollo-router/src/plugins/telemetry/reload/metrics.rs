@@ -30,7 +30,6 @@ use opentelemetry_sdk::metrics::InstrumentKind;
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::Stream;
-use prometheus::Registry;
 use tower::BoxError;
 
 use crate::_private::telemetry::ConfigResource;
@@ -41,6 +40,7 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::InstrumentNameMatcher;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::prometheus::PrometheusRegistry;
 
 /// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {
@@ -61,7 +61,9 @@ pub(crate) struct MetricsBuilder<'a> {
     /// when observable instruments are registered with providers that have no readers.
     providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
-    prometheus_registry: Option<Registry>,
+    prometheus_registry: Option<PrometheusRegistry>,
+    /// Set when a push exporter on the public meter provider already counts cardinality overflow.
+    public_overflow_counted_by_push: bool,
     metrics_common: &'a MetricsCommon,
     resource: Resource,
 }
@@ -70,12 +72,20 @@ impl<'a> MetricsBuilder<'a> {
     pub(crate) fn build(
         self,
     ) -> (
-        Option<Registry>,
+        Option<PrometheusRegistry>,
         HashMap<MeterProviderType, FilterMeterProvider>,
         Sender,
     ) {
+        let mut prometheus_registry = self.prometheus_registry;
+        // Count each overflow once: if a push exporter already counts overflow on the public
+        // meter provider, Prometheus scrapes must not count it again.
+        if self.public_overflow_counted_by_push
+            && let Some(prometheus_registry) = &mut prometheus_registry
+        {
+            prometheus_registry.overflow_reader = None;
+        }
         (
-            self.prometheus_registry,
+            prometheus_registry,
             self.meter_provider_builders
                 .into_iter()
                 .map(|(k, v)| {
@@ -118,14 +128,23 @@ impl<'a> MetricsBuilder<'a> {
             resource,
             apollo_metrics_sender: Sender::default(),
             prometheus_registry: None,
+            public_overflow_counted_by_push: false,
             metrics_common: &config.exporters.metrics.common,
         }
     }
     pub(crate) fn metrics_common(&self) -> &MetricsCommon {
         self.metrics_common
     }
-    pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Registry) -> &mut Self {
+    pub(crate) fn with_prometheus_registry(
+        &mut self,
+        prometheus_registry: PrometheusRegistry,
+    ) -> &mut Self {
         self.prometheus_registry = Some(prometheus_registry);
+        self
+    }
+    /// Record that a push exporter on the public meter provider counts cardinality overflow.
+    pub(crate) fn with_public_overflow_counted_by_push(&mut self) -> &mut Self {
+        self.public_overflow_counted_by_push = true;
         self
     }
     pub(crate) fn with_apollo_metrics_sender(

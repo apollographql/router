@@ -9,4 +9,5 @@ mod retry;
 
 pub(crate) use named::NamedMetricExporter;
 pub(crate) use overflow::OverflowMetricExporter;
+pub(crate) use overflow::OverflowMetricReader;
 pub(crate) use retry::RetryMetricExporter;

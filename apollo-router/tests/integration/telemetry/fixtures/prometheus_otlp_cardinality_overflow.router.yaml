@@ -1,0 +1,28 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: required
+      router:
+        http.server.request.duration:
+          attributes:
+            server.port: false
+            server.address: false
+            http.response.status_code:
+              alias: status
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>/metrics
+        protocol: http
+        batch_processor:
+          scheduled_delay: 100ms
+      common:
+        views:
+          # A successful and a failed request are enough to overflow this limit
+          - name: http.server.request.duration
+            cardinality_limit: 1

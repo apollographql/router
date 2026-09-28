@@ -13,6 +13,7 @@ use wiremock::matchers::method;
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::otlp::mock_otlp_server;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const PROMETHEUS_RESPONSE_BODY_SIZE_CONFIG: &str =
@@ -1130,6 +1131,93 @@ async fn test_connector_mapping_warning_is_not_reported_or_counted() {
     router
         .assert_metrics_does_not_contain(r#"apollo_router_graphql_error_total"#)
         .await;
+
+    router.graceful_shutdown().await;
+}
+
+fn cardinality_overflow_lines(metrics: &str) -> Vec<&str> {
+    metrics
+        .lines()
+        .filter(|l| l.starts_with("apollo_router_telemetry_metrics_cardinality_overflow"))
+        .collect()
+}
+
+/// Sends a successful and a failed request, which is enough to push
+/// `http.server.request.duration` past the fixtures' `cardinality_limit: 1`.
+async fn overflow_request_duration(router: &mut IntegrationTest) {
+    router.execute_default_query().await;
+    router
+        .execute_query(Query::default().with_bad_query())
+        .await;
+}
+
+/// With only the Prometheus exporter, an overflowed instrument is reported by
+/// `apollo.router.telemetry.metrics.cardinality_overflow` labelled with its
+/// OpenTelemetry name.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_cardinality_overflow_counter() {
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/prometheus_cardinality_overflow.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+
+    router
+        .assert_metrics_contains_multiple(
+            vec![
+                r#"http_server_request_duration_seconds_count{otel_metric_overflow="true""#,
+                r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration""#,
+            ],
+            None,
+        )
+        .await;
+
+    router.graceful_shutdown().await;
+}
+
+/// With Prometheus and OTLP both enabled, the OTLP exporter counts the overflow
+/// and the Prometheus endpoint shows exactly that one series.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_and_otlp_cardinality_overflow_counter_single_series() {
+    let mock_server = mock_otlp_server(0..).await;
+    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder().config(&config).build().await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+
+    // OTLP counts on its export interval, so wait for its first count to reach Prometheus.
+    // Scrapes must not count as well; that is covered by the telemetry plugin unit tests.
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration",otel_scope_name="apollo/router"} <any>"#,
+            None,
+        )
+        .await;
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+    let counter = cardinality_overflow_lines(&metrics);
+    assert_eq!(
+        counter.len(),
+        1,
+        "expected one counter series in:\n{metrics}"
+    );
+    assert!(
+        counter[0].contains(r#"metric_name="http.server.request.duration""#),
+        "{counter:?}"
+    );
 
     router.graceful_shutdown().await;
 }
