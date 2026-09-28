@@ -7800,9 +7800,15 @@ expression: "&schema"
         },
         "test.always_starts_and_stops": {
           "$ref": "#/definitions/Conf"
+        },
+        "test.records_previous_config": {
+          "$ref": "#/definitions/Conf"
         }
       },
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "Policy": {
       "additionalProperties": false,

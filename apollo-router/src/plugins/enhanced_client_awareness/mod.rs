@@ -20,7 +20,7 @@ const CLIENT_LIBRARY_NAME_KEY: &str = "name";
 const CLIENT_LIBRARY_VERSION_KEY: &str = "version";
 
 /// The enhanced client-awareness plugin has no configuration.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 struct Config {}
 
 struct EnhancedClientAwareness {}

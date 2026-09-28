@@ -25,7 +25,7 @@ struct EchoCoProcessor {
     configuration: Conf,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
     port: u16, // The port the custom echo server will listen to

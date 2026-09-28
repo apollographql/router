@@ -330,18 +330,16 @@ impl<'a> TestHarness<'a> {
                     dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
                 });
             if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
-                Arc::make_mut(&mut config)
-                    .apollo_plugins
-                    .plugins
-                    .entry("experimental_mock_subgraphs")
-                    .or_insert_with(canned::mock_subgraphs);
+                Arc::make_mut(&mut config).add_apollo_plugin_if_absent(
+                    "experimental_mock_subgraphs",
+                    canned::mock_subgraphs,
+                );
             }
             if !self.subgraph_network_requests {
                 Arc::make_mut(&mut config)
-                    .apollo_plugins
-                    .plugins
-                    .entry("experimental_mock_subgraphs")
-                    .or_insert(serde_json::json!({}));
+                    .add_apollo_plugin_if_absent("experimental_mock_subgraphs", || {
+                        serde_json::json!({})
+                    });
             }
         }
         #[cfg(not(any(test, feature = "mock_subgraphs_testing")))]

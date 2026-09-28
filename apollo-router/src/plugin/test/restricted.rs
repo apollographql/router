@@ -8,7 +8,7 @@ use crate::plugin::PluginInit;
 use crate::register_plugin;
 
 /// Restricted plugin (for testing purposes only)
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct Config {
     /// Enable the restricted plugin (for testing purposes only)
     enabled: bool,
