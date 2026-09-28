@@ -55,10 +55,36 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
+type ConfigFactory = fn(serde_json::Value) -> Result<PluginConfig, BoxError>;
+
 type InstanceFactory =
-    fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
+    fn(PluginInit<PluginConfig>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
+
+/// A plugin's config, deserialized when the router configuration is parsed.
+#[derive(Clone)]
+pub(crate) struct PluginConfig(Arc<dyn std::any::Any + Send + Sync>);
+
+impl fmt::Debug for PluginConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Typed config may hold secrets and has no common `Debug` bound.
+        f.write_str("PluginConfig")
+    }
+}
+
+impl PluginConfig {
+    pub(crate) fn typed<C: Clone + 'static>(&self) -> Result<C, BoxError> {
+        self.downcast_ref::<C>()
+            .cloned()
+            .ok_or_else(|| "retained plugin configuration has an unexpected type".into())
+    }
+
+    /// The config, when it is a `C`.
+    pub(crate) fn downcast_ref<C: 'static>(&self) -> Option<&C> {
+        self.0.downcast_ref::<C>()
+    }
+}
 
 /// Global list of plugins.
 #[linkme::distributed_slice]
@@ -249,11 +275,50 @@ impl PluginInit<serde_json::Value> {
     }
 }
 
+impl<T> PluginInit<T> {
+    /// The same initialisation context with different plugin configuration.
+    pub(crate) fn with_config<C>(&self, config: C, previous_config: Option<C>) -> PluginInit<C> {
+        PluginInit {
+            config,
+            previous_config,
+            supergraph_sdl: self.supergraph_sdl.clone(),
+            supergraph_schema_id: self.supergraph_schema_id.clone(),
+            supergraph_schema: self.supergraph_schema.clone(),
+            subgraph_schemas: self.subgraph_schemas.clone(),
+            launch_id: self.launch_id.clone(),
+            notify: self.notify.clone(),
+            license: self.license.clone(),
+            full_config: self.full_config.clone(),
+            raw_yaml: self.raw_yaml.clone(),
+        }
+    }
+
+    fn try_map_config<C>(
+        self,
+        convert: impl Fn(T) -> Result<C, BoxError>,
+    ) -> Result<PluginInit<C>, BoxError> {
+        Ok(PluginInit {
+            config: convert(self.config)?,
+            previous_config: self.previous_config.map(&convert).transpose()?,
+            supergraph_sdl: self.supergraph_sdl,
+            supergraph_schema_id: self.supergraph_schema_id,
+            supergraph_schema: self.supergraph_schema,
+            subgraph_schemas: self.subgraph_schemas,
+            launch_id: self.launch_id,
+            notify: self.notify,
+            license: self.license,
+            full_config: self.full_config,
+            raw_yaml: self.raw_yaml,
+        })
+    }
+}
+
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
 pub struct PluginFactory {
     pub(crate) name: String,
     pub(crate) hidden_from_config_json_schema: bool,
+    config_factory: ConfigFactory,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
@@ -275,25 +340,7 @@ impl PluginFactory {
 
     /// Create a plugin factory.
     pub fn new<P: PluginUnstable>(group: &str, name: &str) -> PluginFactory {
-        let plugin_factory_name = if group.is_empty() {
-            name.to_string()
-        } else {
-            format!("{group}.{name}")
-        };
-        tracing::debug!(%plugin_factory_name, "creating plugin factory");
-        PluginFactory {
-            name: plugin_factory_name,
-            hidden_from_config_json_schema: false,
-            instance_factory: |init| {
-                Box::pin(async move {
-                    let init = init.with_deserialized_config()?;
-                    let plugin = P::new(init).await?;
-                    Ok(Box::new(plugin) as Box<dyn DynPlugin>)
-                })
-            },
-            schema_factory: |generator| generator.subschema_for::<<P as PluginUnstable>::Config>(),
-            type_id: TypeId::of::<P>(),
-        }
+        Self::new_private::<P>(group, name)
     }
 
     /// Create a plugin factory.
@@ -307,9 +354,13 @@ impl PluginFactory {
         PluginFactory {
             name: plugin_factory_name,
             hidden_from_config_json_schema: P::HIDDEN_FROM_CONFIG_JSON_SCHEMA,
+            config_factory: |value| {
+                let config: P::Config = serde_json::from_value(value)?;
+                Ok(PluginConfig(Arc::new(config)))
+            },
             instance_factory: |init| {
                 Box::pin(async move {
-                    let init = init.with_deserialized_config()?;
+                    let init = init.try_map_config(|config| config.typed())?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -319,11 +370,28 @@ impl PluginFactory {
         }
     }
 
+    /// Deserializes a plugin's validated config for construction, so invalid config is reported
+    /// when the configuration is parsed.
+    pub(crate) fn parse_config(&self, config: serde_json::Value) -> Result<PluginConfig, BoxError> {
+        (self.config_factory)(config)
+    }
+
+    /// Constructs the plugin from config deserialized by [`Self::parse_config`].
+    pub(crate) async fn create_from_config(
+        &self,
+        init: PluginInit<PluginConfig>,
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
+        (self.instance_factory)(init).await
+    }
+
+    /// Deserializes `init`'s config and constructs the plugin from it.
+    #[cfg(test)]
     pub(crate) async fn create_instance(
         &self,
         init: PluginInit<serde_json::Value>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(init).await
+        let init = init.try_map_config(|config| self.parse_config(config))?;
+        self.create_from_config(init).await
     }
 
     #[cfg(test)]
@@ -331,7 +399,7 @@ impl PluginFactory {
         &self,
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(
+        self.create_instance(
             PluginInit::fake_builder()
                 .config(configuration.clone())
                 .build(),
@@ -365,7 +433,7 @@ pub trait Plugin: Send + Sync + 'static {
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -442,7 +510,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -626,7 +694,7 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// by having a sub-section named after the plugin.
     /// The contents of this section are deserialized into this `Config` type
     /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
 
