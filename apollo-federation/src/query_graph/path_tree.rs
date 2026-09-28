@@ -726,6 +726,7 @@ mod tests {
             &schema,
             &Default::default(),
             &never_cancel,
+            true,
         )
         .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);

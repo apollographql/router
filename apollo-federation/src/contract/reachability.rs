@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 
@@ -54,7 +54,7 @@ fn reachable_types(
     let mut queue: VecDeque<Name> = VecDeque::new();
 
     for (_, root) in schema.schema().schema_definition.iter_root_operations() {
-        queue.push_back(root.name.clone());
+        queue.push_back(Name::clone(root));
     }
 
     // Operation directives can appear in any operation, so their argument types are reachable.
@@ -109,7 +109,7 @@ fn reachable_types(
         match type_ {
             ExtendedType::Object(object) => {
                 push_field_types(&mut queue, &object.fields, inaccessible);
-                queue.extend(object.implements_interfaces.iter().map(|i| i.name.clone()));
+                queue.extend(object.implements_interfaces.iter().map(|i| Name::clone(i)));
                 // Reaching an object also reaches the unions it is a member of.
                 if let Some(object) = referencers.object_types.get(&type_name) {
                     queue.extend(object.union_types.iter().map(|u| u.type_name.clone()));
@@ -125,14 +125,14 @@ fn reachable_types(
                     interface
                         .implements_interfaces
                         .iter()
-                        .map(|i| i.name.clone()),
+                        .map(|i| Name::clone(i)),
                 );
                 if let Some(interface) = referencers.interface_types.get(&type_name) {
                     queue.extend(interface.object_types.iter().map(|o| o.type_name.clone()));
                 }
             }
             ExtendedType::Union(union_type) => {
-                queue.extend(union_type.members.iter().map(|m| m.name.clone()));
+                queue.extend(union_type.members.iter().map(|m| Name::clone(m)));
             }
             ExtendedType::InputObject(input) => {
                 queue.extend(
@@ -153,7 +153,7 @@ fn reachable_types(
 /// Queue the return and argument types of every accessible field.
 fn push_field_types(
     queue: &mut VecDeque<Name>,
-    fields: &IndexMap<Name, Component<FieldDefinition>>,
+    fields: &IndexMap<Name, Node<FieldDefinition>>,
     inaccessible: &Name,
 ) {
     for field in fields.values().filter(|f| !f.directives.has(inaccessible)) {

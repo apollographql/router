@@ -12,7 +12,7 @@ use tower::ServiceExt;
 
 // This configuration will be used
 // to Deserialize the yml configuration
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 struct PropagateStatusCodeConfig {
     status_codes: Vec<u16>,
 }

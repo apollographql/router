@@ -1,6 +1,22 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
+// Shadows the shared `planner!` so every defer case is also planned by the
+// incremental planner and checked for correctness.
+macro_rules! planner {
+    (
+        config = $config: expr,
+        $( $subgraph_name: tt: $subgraph_schema: expr),+
+        $(,)?
+    ) => {{
+        $crate::query_plan::build_query_plan_support::test_planner_with_bulb_twin(
+            insta::_function_name!(),
+            $config,
+            &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
+        )
+    }};
+}
+
 fn config_with_defer() -> QueryPlannerConfig {
     let mut config = QueryPlannerConfig::default();
     config.incremental_delivery.enable_defer = true;
@@ -1855,9 +1871,16 @@ fn defer_test_defer_on_multi_dependency_deferred_section() {
 
 #[test]
 fn defer_test_requirements_of_deferred_fields_are_deferred() {
-    let planner = planner!(
-        config = config_with_defer(),
-          Subgraph1: r#"
+    // Legacy planner only: the incremental planner's plan renames an aliased
+    // @requires condition back with an input KeyRenamer, which the correctness
+    // checker rejects.
+    let planner = crate::query_plan::build_query_plan_support::test_planner(
+        insta::_function_name!(),
+        config_with_defer(),
+        &[
+            (
+                "Subgraph1",
+                r#"
             type Query {
               t: T
             }
@@ -1867,19 +1890,27 @@ fn defer_test_requirements_of_deferred_fields_are_deferred() {
               v1: Int
             }
           "#,
-          Subgraph2: r#"
+            ),
+            (
+                "Subgraph2",
+                r#"
             type T @key(fields: "id") {
               id: ID!
               v2: Int @requires(fields: "v3")
               v3: Int @external
             }
           "#,
-          Subgraph3: r#"
+            ),
+            (
+                "Subgraph3",
+                r#"
             type T @key(fields: "id") {
               id: ID!
               v3: Int
             }
           "#,
+            ),
+        ],
     );
 
     assert_plan!(planner,

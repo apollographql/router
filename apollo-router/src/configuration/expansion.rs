@@ -1,23 +1,31 @@
-//! Environment variable expansion in the configuration file
+//! Environment variable expansion and external overrides for the configuration file
 
 use std::collections::HashMap;
 use std::env;
 use std::env::VarError;
-use std::fs;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 
-use proteus::Parser;
-use proteus::TransformBuilder;
+use apollo_configuration::expansion::FileVariables;
+use apollo_configuration::expansion::LookupError;
+use apollo_configuration::expansion::VariableProvider;
+use apollo_configuration::expansion::argument_for_kind;
+use apollo_configuration::provenance::Injection;
 use serde_json::Value;
 
 use super::ConfigurationError;
+use super::apollo_configuration_parse::ExternalValues;
 
+/// The inputs the router supplies to configuration parsing alongside the configuration file:
+/// providers for `${env.NAME}` and `${file.PATH}` references, and overrides that set values at
+/// fixed paths from environment variables and command-line flags.
 #[derive(buildstructor::Builder, Clone)]
 pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
     override_configs: Vec<Override>,
+    /// Applies the `--dev` config after parsing.
+    dev_mode: Option<bool>,
     #[cfg(test)]
     mocked_env_vars: HashMap<String, String>,
 }
@@ -26,14 +34,30 @@ pub(crate) struct Expansion {
 pub(crate) struct Override {
     /// The path to the config value to override.
     config_path: String,
-    /// Env variables take precedence over any override values.
+    /// Env variables take precedence over the flag's value.
     env_name: Option<String>,
-    /// Override value
-    value: Option<Value>,
+    /// A value supplied by a command-line flag, used when the environment variable is unset.
+    flag_value: Option<FlagValue>,
     /// The type of the value, used to coerce env variables.
     value_type: ValueType,
     #[cfg(test)]
     mocked_env_vars: HashMap<String, String>,
+}
+
+/// A command-line flag and the value it supplies. The flag is named in diagnostics.
+#[derive(Clone)]
+pub(crate) struct FlagValue {
+    flag: &'static str,
+    value: Value,
+}
+
+impl FlagValue {
+    pub(crate) fn new(flag: &'static str, value: impl Into<Value>) -> Self {
+        Self {
+            flag,
+            value: value.into(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -41,37 +65,38 @@ pub(crate) enum ValueType {
     String,
     #[allow(dead_code)]
     Number,
+    #[allow(dead_code)]
     Bool,
 }
 
 impl Override {
-    fn value(&self) -> Option<Value> {
-        // Order of precedence is:
-        // 1. In tests only, if the mocked env variable is set, use that
-        // 2. If the env variable is set, use that
-        // 3. If the override is set, use that
-        // 4. Don't change the config
-        let env_value = self.env_name.as_ref().and_then(|name| {
-            #[cfg(test)]
-            if let Some(value) = self.mocked_env_vars.get(name) {
-                return Some(value.clone());
-            }
-            std::env::var(name).ok()
-        });
-        match (env_value, self.value.clone()) {
-            (Some(value), _) => {
-                // Coerce the env variable into the correct format, otherwise let it through as a string
-                let parsed = Value::from_str(&value);
-                let string_var = Value::String(value);
-                Some(match (&self.value_type, parsed) {
-                    (ValueType::Bool, Ok(Value::Bool(bool))) => Value::Bool(bool),
-                    (ValueType::Number, Ok(Value::Number(number))) => Value::Number(number),
-                    _ => string_var,
-                })
-            }
-            (_, Some(value)) => Some(value),
-            _ => None,
+    /// The environment variable's value, coerced to the override's type when it parses as one.
+    fn env_value(&self) -> Option<Value> {
+        let name = self.env_name.as_ref()?;
+        #[cfg(test)]
+        let value = self
+            .mocked_env_vars
+            .get(name)
+            .cloned()
+            .or_else(|| std::env::var(name).ok());
+        #[cfg(not(test))]
+        let value = std::env::var(name).ok();
+        let value = value?;
+        Some(match (&self.value_type, Value::from_str(&value)) {
+            (ValueType::Bool, Ok(Value::Bool(bool))) => Value::Bool(bool),
+            (ValueType::Number, Ok(Value::Number(number))) => Value::Number(number),
+            _ => Value::String(value),
+        })
+    }
+
+    /// The override as an apollo-configuration injection naming its source, when it supplies a value.
+    fn injection(&self) -> Option<Injection> {
+        let path: Vec<&str> = self.config_path.split('.').collect();
+        if let (Some(value), Some(name)) = (self.env_value(), &self.env_name) {
+            return Some(Injection::env(&path, value, name));
         }
+        let FlagValue { flag, value } = self.flag_value.as_ref()?;
+        Some(Injection::cli_flag(&path, value.clone(), flag))
     }
 }
 
@@ -97,28 +122,22 @@ impl Expansion {
             .map(|mode| mode.trim().to_string())
             .collect::<Vec<String>>();
 
-        let dev_mode_defaults = if crate::executable::APOLLO_ROUTER_DEV_MODE.load(Ordering::Relaxed)
-        {
+        let dev_mode = crate::executable::APOLLO_ROUTER_DEV_MODE.load(Ordering::Relaxed);
+        if dev_mode {
             tracing::info!(
                 "Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)"
             );
-            dev_mode_defaults()
-        } else {
-            Vec::new()
-        };
+        }
 
         let builder = Expansion::builder();
         #[cfg(test)]
         let builder = builder.mocked_env_vars(mocked_env_vars);
+        let listen = *crate::executable::APOLLO_ROUTER_LISTEN_ADDRESS.lock();
         let listen_override = Override::builder()
             .config_path("supergraph.listen")
-            .value_type(ValueType::String);
-        let listen = *crate::executable::APOLLO_ROUTER_LISTEN_ADDRESS.lock();
-        let listen_override = if let Some(listen) = listen {
-            listen_override.value(listen.to_string()).build()
-        } else {
-            listen_override.build()
-        };
+            .and_flag_value(listen.map(|listen| FlagValue::new("--listen", listen.to_string())))
+            .value_type(ValueType::String)
+            .build();
         Ok(builder
             .and_prefix(prefix)
             .supported_modes(supported_modes)
@@ -137,7 +156,7 @@ impl Expansion {
                     .build(),
             )
             .override_config(listen_override)
-            .override_configs(dev_mode_defaults)
+            .dev_mode(dev_mode)
             .build())
     }
 
@@ -158,89 +177,21 @@ impl Expansion {
     }
 }
 
-fn dev_mode_defaults() -> Vec<Override> {
-    vec![
-        Override::builder()
-            .config_path("expose_query_plan")
-            .value(true)
-            .value_type(ValueType::Bool)
-            .build(),
-        Override::builder()
-            .config_path("include_subgraph_errors.all")
-            .value(true)
-            .value_type(ValueType::Bool)
-            .build(),
-        Override::builder()
-            .config_path("telemetry.exporters.tracing.response_trace_id.enabled")
-            .value(true)
-            .value_type(ValueType::Bool)
-            .build(),
-        Override::builder()
-            .config_path("supergraph.introspection")
-            .value(true)
-            .value_type(ValueType::Bool)
-            .build(),
-        Override::builder()
-            .config_path("sandbox.enabled")
-            .value(true)
-            .value_type(ValueType::Bool)
-            .build(),
-        Override::builder()
-            .config_path("homepage.enabled")
-            .value(false)
-            .value_type(ValueType::Bool)
-            .build(),
-        Override::builder()
-            .config_path("connectors.debug_extensions")
-            .value(true)
-            .value_type(ValueType::Bool)
-            .build(),
-    ]
-}
-
 impl Expansion {
-    fn context_fn(&self) -> impl Fn(&str) -> Result<Option<String>, ConfigurationError> + '_ {
-        move |key: &str| {
-            if !self
-                .supported_modes
-                .iter()
-                .any(|prefix| key.starts_with(prefix.as_str()))
-            {
-                return Err(ConfigurationError::UnknownExpansionMode {
-                    key: key.to_string(),
-                    supported_modes: self.supported_modes.join("|"),
-                });
-            }
-
-            if let Some(key) = key.strip_prefix("env.") {
-                return self.expand_env(key);
-            }
-            if let Some(key) = key.strip_prefix("file.") {
-                if !std::path::Path::new(key).exists() {
-                    return Ok(None);
-                }
-
-                return fs::read_to_string(key).map(Some).map_err(|cause| {
-                    ConfigurationError::CannotExpandVariable {
-                        key: key.to_string(),
-                        cause: format!("{cause}"),
-                    }
-                });
-            }
-            Err(ConfigurationError::InvalidExpansionModeConfig)
-        }
+    pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
+        self.get_env(&self.env_name(key))
+            .map(Some)
+            .map_err(|cause| ConfigurationError::CannotExpandVariable {
+                key: key.to_string(),
+                cause: format!("{cause}"),
+            })
     }
 
-    pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
+    fn env_name(&self, key: &str) -> String {
         match self.prefix.as_ref() {
-            None => self.get_env(key),
-            Some(prefix) => self.get_env(&format!("{prefix}_{key}")),
+            None => key.to_string(),
+            Some(prefix) => format!("{prefix}_{key}"),
         }
-        .map(Some)
-        .map_err(|cause| ConfigurationError::CannotExpandVariable {
-            key: key.to_string(),
-            cause: format!("{cause}"),
-        })
     }
 
     fn get_env(&self, name: &str) -> Result<String, std::env::VarError> {
@@ -250,186 +201,191 @@ impl Expansion {
         }
         env::var(name)
     }
+}
 
-    pub(crate) fn expand(
-        &self,
-        configuration: &serde_json::Value,
-    ) -> Result<serde_json::Value, ConfigurationError> {
-        let mut configuration = configuration.clone();
-        self.defaults(&mut configuration)?;
-        self.visit(&mut configuration)?;
-        Ok(configuration)
-    }
-
-    fn defaults(&self, config: &mut Value) -> Result<(), ConfigurationError> {
-        // Anything that needs expanding via env variable should be placed here. Don't pollute the codebase with calls to std::env.
-        // For testing we have the one fixed expansion. We don't actually want to expand env variables during tests
-        let mut transformer_builder = TransformBuilder::default();
-        transformer_builder = transformer_builder.add_action(Parser::parse("", "")?);
-        for override_config in &self.override_configs {
-            if let Some(value) = override_config.value() {
-                transformer_builder = transformer_builder.add_action(Parser::parse(
-                    &format!("const({value})"),
-                    &override_config.config_path,
-                )?);
-            }
+/// The router's expansion providers and overrides. Only the supported modes are expanded; any
+/// other `${kind.NAME}` reference is an error.
+impl From<Expansion> for ExternalValues {
+    fn from(expansion: Expansion) -> Self {
+        let injections: Vec<Injection> = expansion
+            .override_configs
+            .iter()
+            .filter_map(Override::injection)
+            .collect();
+        let supported_modes = expansion.supported_modes.join("|");
+        let mut external = ExternalValues::default();
+        for mode in &expansion.supported_modes {
+            external = match mode.as_str() {
+                "env" => external.add_variables(EnvVariables(expansion.clone())),
+                // Removes one trailing newline, so `true\n` in a file still expands to a boolean.
+                "file" => external.add_variables(FileVariables),
+                _ => external,
+            };
         }
-        *config = transformer_builder
-            .build()?
-            .apply(config)
-            .map_err(|e| ConfigurationError::InvalidConfiguration {
-                message: "could not set configuration defaults as the source configuration had an invalid structure",
-                error: e.to_string(),
-            })?;
-        Ok(())
-    }
-
-    fn visit(&self, value: &mut Value) -> Result<(), ConfigurationError> {
-        let mut expanded: Option<String> = None;
-        match value {
-            Value::String(value) => {
-                let new_value =
-                    shellexpand::env_with_context(value, self.context_fn()).map_err(|e| e.cause)?;
-                if &new_value != value {
-                    expanded = Some(new_value.to_string());
-                }
-            }
-            Value::Array(a) => {
-                for v in a {
-                    self.visit(v)?
-                }
-            }
-            Value::Object(o) => {
-                for v in o.values_mut() {
-                    self.visit(v)?
-                }
-            }
-            _ => {}
-        }
-        // The expansion may have resulted in a primitive, reparse and replace
-        if let Some(expanded) = expanded {
-            *value = coerce(&expanded)
-        }
-        Ok(())
+        external
+            .dev_mode(expansion.dev_mode.unwrap_or_default())
+            .add_variables(UnsupportedMode { supported_modes })
+            .inject(injections)
     }
 }
 
-pub(crate) fn coerce(expanded: &str) -> Value {
-    match serde_yaml::from_str(expanded) {
-        Ok(Value::Bool(b)) => Value::Bool(b),
-        Ok(Value::Number(n)) => Value::Number(n),
-        Ok(Value::Null) => Value::Null,
-        _ => Value::String(expanded.to_string()),
+/// Resolves `${env.NAME}`, reading `<prefix>_NAME` when the router has an environment prefix.
+struct EnvVariables(Expansion);
+
+impl VariableProvider for EnvVariables {
+    fn get(&self, reference: &str) -> Result<String, LookupError> {
+        let key = argument_for_kind(reference, "env")?;
+        self.0
+            .get_env(&self.0.env_name(key))
+            .map_err(|error| match error {
+                VarError::NotPresent => LookupError::NotPresent,
+                VarError::NotUnicode(_) => LookupError::NotUnicode,
+            })
+    }
+}
+
+/// Rejects references whose kind is not a supported mode.
+struct UnsupportedMode {
+    supported_modes: String,
+}
+
+impl VariableProvider for UnsupportedMode {
+    fn get(&self, _reference: &str) -> Result<String, LookupError> {
+        Err(LookupError::Other(format!(
+            "variables must be prefixed with one of '{}' followed by '.' e.g. 'env.'",
+            self.supported_modes
+        )))
     }
 }
 
 #[cfg(test)]
 mod test {
+    use apollo_configuration::provenance::Injection;
     use insta::assert_yaml_snapshot;
     use serde_json::Value;
-    use serde_json::json;
 
     use crate::configuration::Expansion;
+    use crate::configuration::apollo_configuration_parse::ExternalValues;
+    use crate::configuration::expansion::FlagValue;
     use crate::configuration::expansion::Override;
     use crate::configuration::expansion::ValueType;
-    use crate::configuration::expansion::dev_mode_defaults;
+
+    /// Expands `yaml` with `expansion`'s providers and overrides, without Router's schema.
+    fn expand(expansion: &Expansion, yaml: &str) -> Value {
+        ExternalValues::from(expansion.clone())
+            .expand_without_schema(yaml)
+            .expect("expansion must succeed")
+    }
+
+    fn injection(override_config: Override) -> String {
+        format!("{:?}", override_config.injection())
+    }
+
+    fn from_env(name: &str, value: Value) -> String {
+        format!("{:?}", Some(Injection::env(&[""], value, name)))
+    }
+
+    fn from_flag(flag: &str, value: Value) -> String {
+        format!("{:?}", Some(Injection::cli_flag(&[""], value, flag)))
+    }
 
     #[test]
     fn test_override_precedence() {
         assert_eq!(
-            None,
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            "None",
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            None,
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .env_name("NON_EXISTENT")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            "None",
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .env_name("NON_EXISTENT")
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            Some(Value::String("override".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .env_name("NON_EXISTENT")
-                .value("override")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_flag("--listen", Value::String("override".to_string())),
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .env_name("NON_EXISTENT")
+                    .flag_value(FlagValue::new("--listen", "override"))
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            Some(Value::String("override".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .value("override")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_flag("--listen", Value::String("override".to_string())),
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .flag_value(FlagValue::new("--listen", "override"))
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
         assert_eq!(
-            Some(Value::String("env_override".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_OVERRIDE", "env_override")
-                .config_path("")
-                .env_name("TEST_OVERRIDE")
-                .value("override")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_env("TEST_OVERRIDE", Value::String("env_override".to_string())),
+            injection(
+                Override::builder()
+                    .mocked_env_var("TEST_OVERRIDE", "env_override")
+                    .config_path("")
+                    .env_name("TEST_OVERRIDE")
+                    .flag_value(FlagValue::new("--listen", "override"))
+                    .value_type(ValueType::String)
+                    .build()
+            )
         );
     }
 
     #[test]
     fn test_type_coercion() {
+        let coerced = |name: &str, value: &str, value_type: ValueType| {
+            injection(
+                Override::builder()
+                    .mocked_env_var(name, value)
+                    .config_path("")
+                    .env_name(name)
+                    .value_type(value_type)
+                    .build(),
+            )
+        };
         assert_eq!(
-            Some(Value::String("overridden_string".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_STRING_VAR", "overridden_string")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_STRING_VAR")
-                .value_type(ValueType::String)
-                .build()
-                .value()
+            from_env(
+                "TEST_DEFAULTED_STRING_VAR",
+                Value::String("overridden_string".to_string())
+            ),
+            coerced(
+                "TEST_DEFAULTED_STRING_VAR",
+                "overridden_string",
+                ValueType::String
+            )
         );
         assert_eq!(
-            Some(Value::Number(1.into())),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_NUMERIC_VAR", "1")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_NUMERIC_VAR")
-                .value_type(ValueType::Number)
-                .build()
-                .value()
+            from_env("TEST_DEFAULTED_NUMERIC_VAR", Value::Number(1.into())),
+            coerced("TEST_DEFAULTED_NUMERIC_VAR", "1", ValueType::Number)
         );
         assert_eq!(
-            Some(Value::Bool(true)),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_BOOL_VAR", "true")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_BOOL_VAR")
-                .value_type(ValueType::Bool)
-                .build()
-                .value()
+            from_env("TEST_DEFAULTED_BOOL_VAR", Value::Bool(true)),
+            coerced("TEST_DEFAULTED_BOOL_VAR", "true", ValueType::Bool)
         );
         assert_eq!(
-            Some(Value::String("true".to_string())),
-            Override::builder()
-                .mocked_env_var("TEST_DEFAULTED_INCORRECT_TYPE", "true")
-                .config_path("")
-                .env_name("TEST_DEFAULTED_INCORRECT_TYPE")
-                .value_type(ValueType::Number)
-                .build()
-                .value()
+            from_env(
+                "TEST_DEFAULTED_INCORRECT_TYPE",
+                Value::String("true".to_string())
+            ),
+            coerced("TEST_DEFAULTED_INCORRECT_TYPE", "true", ValueType::Number)
         );
     }
 
@@ -445,7 +401,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
-                    .value("defaulted")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -455,7 +411,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
-                    .value("defaulted")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -465,14 +421,16 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("overridden")
                     .env_name("TEST_OVERRIDDEN_VAR")
-                    .value("defaulted")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
             .build();
 
-        let mut value = json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "default"});
-        value = expansion.expand(&value).expect("expansion must succeed");
+        let value = expand(
+            &expansion,
+            "expanded: ${env.TEST_EXPANSION_VAR}\noverridden: default\n",
+        );
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
         })
@@ -491,7 +449,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
-                    .value("defaulted")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -501,7 +459,7 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
-                    .value("defaulted")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
@@ -511,29 +469,52 @@ mod test {
                     .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("overridden")
                     .env_name("TEST_OVERRIDDEN_VAR")
-                    .value("defaulted")
+                    .flag_value(FlagValue::new("--listen", "defaulted"))
                     .value_type(ValueType::String)
                     .build(),
             )
             .build();
-        let mut value = json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "default"});
-        value = expansion.expand(&value).expect("expansion must succeed");
+        let value = expand(
+            &expansion,
+            "expanded: ${env.TEST_EXPANSION_VAR}\noverridden: default\n",
+        );
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
         })
     }
 
+    /// `--dev` config is applied after migration, so it wins over a legacy key that migration
+    /// moves onto the same path, and it reaches the typed config, the plugin config and the
+    /// retained document alike.
     #[test]
-    fn test_dev_mode() {
-        let expansion = Expansion::builder()
-            .override_configs(dev_mode_defaults())
-            .build();
-        let mut value =
-            json!({"homepage": {"enabled": false, "some_other_config": "should remain"}});
-        value = expansion.expand(&value).expect("expansion must succeed");
-        insta::with_settings!({sort_maps => true}, {
-            assert_yaml_snapshot!(value);
-        })
+    fn dev_mode_applies_after_migration() {
+        let expansion = Expansion::builder().dev_mode(true).build();
+
+        let config = crate::configuration::parse_configuration(
+            "cors:\n  origins:\n    - https://example.com\nexpose_query_plan: false\nhomepage:\n  enabled: true\n",
+            expansion,
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect("the migrated document is valid");
+
+        assert!(config.supergraph.introspection);
+        assert!(config.sandbox.enabled);
+        assert!(!config.homepage.enabled);
+        assert!(config.plugin_config("apollo.expose_query_plan").is_some());
+        assert_eq!(config.apollo_plugins.plugins["expose_query_plan"], true);
+        let document = config.validated_yaml.expect("the retained document");
+        assert_eq!(document["expose_query_plan"], true);
+        assert_eq!(document["sandbox"]["enabled"], true);
+        assert_eq!(document["homepage"]["enabled"], false);
+        assert_eq!(document["supergraph"]["introspection"], true);
+        assert_eq!(
+            document["telemetry"]["exporters"]["tracing"]["response_trace_id"]["enabled"],
+            true
+        );
+        assert_eq!(
+            document["cors"]["policies"][0]["origins"][0],
+            "https://example.com"
+        );
     }
 
     #[test]
@@ -544,21 +525,101 @@ mod test {
             .supported_mode("env")
             .build();
 
-        let value = json!({
-            // $$ should become a single $
-            "literal_dollar": "some$$api$$key",
-            // $$ alongside ${env.VAR} expansion
-            "mixed": "https://${env.API_HOST}/path?price=$$100",
-            // Multiple $$ in a row
-            "multiple_escapes": "$$first $$second $$third",
-            // $$ at start and end
-            "edges": "$$start and end$$",
-            // No expansion needed (plain string)
-            "plain": "no dollars here"
-        });
-        let result = expansion.expand(&value).expect("expansion must succeed");
+        let result = expand(
+            &expansion,
+            r#"
+# $$ should become a single $
+literal_dollar: "some$$api$$key"
+# $$ alongside ${env.VAR} expansion
+mixed: "https://${env.API_HOST}/path?price=$$100"
+# Multiple $$ in a row
+multiple_escapes: "$$first $$second $$third"
+# $$ at start and end
+edges: "$$start and end$$"
+# No expansion needed (plain string)
+plain: "no dollars here"
+"#,
+        );
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(result);
         })
+    }
+
+    /// `--dev` sets the sandbox, homepage and introspection settings, so a file whose own values
+    /// for them conflict still loads with it, as in earlier releases, and fails without it.
+    #[test]
+    fn dev_mode_fixes_sandbox_settings_the_file_conflicts_on() {
+        let text = "sandbox:\n  enabled: true\n";
+
+        let config = crate::configuration::parse_configuration(
+            text,
+            Expansion::builder().dev_mode(true).build(),
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect("--dev disables the homepage and enables introspection");
+        assert!(config.sandbox.enabled);
+
+        let error = crate::configuration::parse_configuration(
+            text,
+            Expansion::builder().build(),
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect_err("the homepage is enabled by default")
+        .to_string();
+        assert!(
+            error.contains("sandbox and homepage cannot be enabled"),
+            "{error}"
+        );
+    }
+
+    /// `--dev` replaces a section that has its own settings, as earlier releases did, instead of
+    /// refusing to override it.
+    #[test]
+    fn dev_mode_replaces_a_section_with_settings() {
+        let expansion = Expansion::builder().dev_mode(true).build();
+
+        let config = crate::configuration::parse_configuration(
+            "include_subgraph_errors:\n  all:\n    allow_extensions_keys: [code]\n    redact_message: true\n",
+            expansion,
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect("--dev replaces the section");
+
+        assert_eq!(
+            config.validated_yaml.expect("the retained document")["include_subgraph_errors"]["all"],
+            serde_json::json!(true)
+        );
+    }
+
+    /// `--dev` config is applied after parsing, so diagnostics quote the operator's file: a
+    /// literal anchored into a secret field stays redacted and locations match the file.
+    #[test]
+    fn dev_mode_diagnostics_quote_the_file_with_anchors_redacted() {
+        let expansion = Expansion::builder().dev_mode(true).build();
+        let text = indoc::indoc! {"
+            # operator comment
+            apq:
+              router:
+                cache:
+                  redis:
+                    urls: [redis://localhost]
+                    namespace: &pw anchored-secret-value
+                    unexpected: true
+                    password: *pw
+        "}; // gitleaks:allow
+
+        let error = crate::configuration::parse_configuration(
+            text,
+            expansion,
+            crate::configuration::Migration::WithinMajor,
+        )
+        .expect_err("the Redis configuration contains an unknown field")
+        .to_string();
+
+        assert!(!error.contains("anchored-secret-value"), "{error}");
+        // Only the file has the anchor; a serialized copy would expand it.
+        assert!(error.contains("namespace: &pw [REDACTED]"), "{error}");
+        // The leading comment makes this line 6 of the file; a serialized copy has no comment.
+        assert!(error.contains("[6:9]"), "{error}");
     }
 }

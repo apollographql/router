@@ -114,6 +114,15 @@ impl Default for QueryPlannerConfig {
     }
 }
 
+impl QueryPlannerConfig {
+    /// Whether operations are planned by the incremental planner. There is no
+    /// legacy fallback: with native connectors the schema is unexpanded and
+    /// only the incremental planner can route it.
+    pub(crate) fn uses_incremental_planner(&self) -> bool {
+        self.incremental_planner.enabled
+    }
+}
+
 impl std::hash::Hash for QueryPlannerConfig {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // Destructured so adding a field is a compile error until it is
@@ -327,6 +336,10 @@ pub struct QueryPlanner {
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    /// Lookup table from (type, field) to connectors, built once at planner
+    /// construction so the incremental planner can route fields to connectors
+    /// without expanding them into virtual subgraphs.
+    connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
@@ -406,7 +419,7 @@ impl QueryPlanner {
                             .try_get(subgraph.schema())?
                             .members
                             .iter()
-                            .map(|member| ObjectTypeDefinitionPosition::new(member.name.clone()))
+                            .map(|member| ObjectTypeDefinitionPosition::new(Name::clone(member)))
                             .collect(),
                     ),
                     _ => None,
@@ -427,6 +440,20 @@ impl QueryPlanner {
             .map(|position| position.type_name().clone())
             .collect::<IndexSet<_>>();
 
+        // Build the connector index from the subgraph schemas. Subgraphs
+        // without connector directives contribute nothing.
+        let mut connectors_by_subgraph = Vec::new();
+        for (subgraph_name, subgraph_schema) in query_graph.subgraph_schemas() {
+            let connectors =
+                crate::connectors::Connector::from_schema(subgraph_schema.schema(), subgraph_name)?;
+            if !connectors.is_empty() {
+                connectors_by_subgraph.push((subgraph_schema, connectors));
+            }
+        }
+        let connector_index = Arc::new(crate::connectors::index::ConnectorIndex::from_subgraphs(
+            connectors_by_subgraph,
+        )?);
+
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
@@ -434,11 +461,16 @@ impl QueryPlanner {
             api_schema,
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
+            connector_index,
         })
     }
 
     pub fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
         self.federated_query_graph.subgraph_schemas()
+    }
+
+    pub fn connector_index(&self) -> &crate::connectors::index::ConnectorIndex {
+        &self.connector_index
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -481,6 +513,7 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
+            !self.config.uses_incremental_planner(),
         )?;
 
         let NormalizedDefer {
@@ -523,12 +556,13 @@ impl QueryPlanner {
         } else {
             SubgraphOperationCompression::Disabled
         };
+        let client_labels = Arc::new(client_labels);
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            client_labels,
+            client_labels.as_ref().clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -548,6 +582,7 @@ impl QueryPlanner {
                 &self.federated_query_graph,
                 &IndexSet::from_iter(options.override_conditions),
             ),
+            connector_index: self.connector_index.clone(),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
@@ -561,6 +596,7 @@ impl QueryPlanner {
                     }
                 })
                 .collect(),
+            client_labels: client_labels.clone(),
         };
 
         let mut non_local_selection_state = options
@@ -929,11 +965,7 @@ fn compute_plan_internal(
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
-    // The BULB planner has no defer support yet: it would plan every field
-    // eagerly and silently drop the DeferNodes, so deferred operations
-    // (including the defer-conditionals path, which always plans with
-    // has_defers) fall back to the legacy planner.
-    let use_incremental = parameters.config.incremental_planner.enabled && !has_defers;
+    let use_incremental = parameters.config.uses_incremental_planner();
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
         && use_incremental
@@ -956,6 +988,7 @@ fn compute_plan_internal(
                 &field_selection,
                 root_kind,
                 &mut naming,
+                has_defers,
             )?;
             plans.push(bulb.plan);
         }
@@ -1008,6 +1041,7 @@ fn compute_plan_internal(
             &selection_set,
             root_kind,
             &mut naming,
+            has_defers,
         )?;
         (bulb.plan, vec![], None, bulb.cost)
     } else {
@@ -1106,7 +1140,11 @@ impl SubgraphOperationCompression {
     pub(crate) fn compress(
         &mut self,
         operation: Operation,
+        skip_validation: bool,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        if skip_validation {
+            return self.compress_unchecked(operation);
+        }
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
@@ -1121,6 +1159,16 @@ impl SubgraphOperationCompression {
                 })?;
                 Ok(operation_document)
             }
+        }
+    }
+
+    fn compress_unchecked(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        match self {
+            Self::GenerateFragments => Ok(operation.generate_fragments_unchecked()?),
+            Self::Disabled => operation.into_document_unchecked(),
         }
     }
 }

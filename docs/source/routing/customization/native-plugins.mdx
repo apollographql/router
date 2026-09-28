@@ -51,13 +51,15 @@ All plugins require an associated configuration. At a minimum, this configuratio
 Create your configuration struct like so:
 
 ```rust title="hello_world.rs"
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     // Put your plugin configuration here. It's deserialized from YAML automatically.
 }
 ```
 
 > **Note:** You need to `derive` `JsonSchema` so that your configuration can participate in [JSON schema generation](/router/configuration/overview/#configuration-awareness-in-your-text-editor).
+>
+> Your configuration must also be `Clone`, `Send`, `Sync` and `'static`.
 
 Then define the plugin itself and specify the configuration as an associated type:
 

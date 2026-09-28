@@ -16,7 +16,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 // This structure is the one we'll deserialize the yml configuration into
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct AllowClientIdConfig {
     header: String,
     path: String,

@@ -114,7 +114,7 @@ fn authenticated_comprehensive_locations() {
     ] {
         let target = coord.lookup_field(schema).expect("Target exists");
         let has_auth = target.directives.iter().any(|d| d.name == "authenticated");
-        assert!(has_auth, "No auth directive found in {}", target.node);
+        assert!(has_auth, "No auth directive found in {}", target);
     }
 }
 
@@ -371,7 +371,7 @@ fn requires_scopes_comprehensive_locations() {
         assert!(
             has_scopes,
             "No requiresScopes directive found in {}",
-            target.node
+            target
         );
     }
 }
@@ -480,7 +480,7 @@ fn policy_comprehensive_locations() {
     ] {
         let target = coord.lookup_field(schema).expect("Target exists");
         let has_policy = target.directives.iter().any(|d| d.name == "policy");
-        assert!(has_policy, "No policy directive found in {}", target.node);
+        assert!(has_policy, "No policy directive found in {}", target);
     }
 }
 
@@ -1614,7 +1614,6 @@ mod propagate_auth {
     use apollo_compiler::Schema;
     use apollo_compiler::ast::Value;
     use apollo_compiler::collections::IndexMap;
-    use apollo_compiler::schema::Component;
     use apollo_compiler::schema::FieldDefinition;
     use apollo_federation::subgraph::typestate::Subgraph;
 
@@ -2513,7 +2512,7 @@ mod propagate_auth {
     }
 
     fn verify_field_access_control(
-        fields: &IndexMap<Name, Component<FieldDefinition>>,
+        fields: &IndexMap<Name, Node<FieldDefinition>>,
         field_name: &str,
         target_directive: &str,
         arg_name: &str,

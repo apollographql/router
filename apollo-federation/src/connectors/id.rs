@@ -4,10 +4,10 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
-use apollo_compiler::schema::Component;
 
 use crate::connectors::schema_type_ref::SchemaTypeRef;
 use crate::error::FederationError;
@@ -80,7 +80,7 @@ impl ConnectorPosition {
     pub(crate) fn field_definition<'s>(
         &self,
         schema: &'s Schema,
-    ) -> Option<&'s Component<FieldDefinition>> {
+    ) -> Option<&'s Node<FieldDefinition>> {
         match self {
             ConnectorPosition::Field(pos) => pos.field.try_get(schema),
             ConnectorPosition::Type(_) => None,
@@ -132,7 +132,7 @@ impl ConnectorPosition {
             .query
             .as_ref()
             .is_some_and(|query| match self {
-                ConnectorPosition::Field(pos) => *pos.field.type_name() == query.name,
+                ConnectorPosition::Field(pos) => *pos.field.type_name() == **query,
                 ConnectorPosition::Type(_) => false,
             })
     }
@@ -143,7 +143,7 @@ impl ConnectorPosition {
             .mutation
             .as_ref()
             .is_some_and(|mutation| match self {
-                ConnectorPosition::Field(pos) => *pos.field.type_name() == mutation.name,
+                ConnectorPosition::Field(pos) => *pos.field.type_name() == **mutation,
                 ConnectorPosition::Type(_) => false,
             })
     }
@@ -154,7 +154,7 @@ impl ConnectorPosition {
 pub(crate) enum ConnectedElement<'schema> {
     Field {
         parent_type: SchemaTypeRef<'schema>,
-        field_def: &'schema Component<FieldDefinition>,
+        field_def: &'schema Node<FieldDefinition>,
         parent_category: ObjectCategory,
     },
     Type {
@@ -181,7 +181,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|query| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_ref } => type_ref.name() == query.name.as_str(),
+                ConnectedElement::Type { type_ref } => type_ref.name() == query.as_str(),
             })
     }
 
@@ -192,7 +192,7 @@ impl ConnectedElement<'_> {
             .as_ref()
             .is_some_and(|mutation| match self {
                 ConnectedElement::Field { .. } => false,
-                ConnectedElement::Type { type_ref } => type_ref.name() == mutation.name.as_str(),
+                ConnectedElement::Type { type_ref } => type_ref.name() == mutation.as_str(),
             })
     }
 }
