@@ -9,7 +9,11 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::is_same_type_comparison;
+use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
+use crate::connectors::json_selection::methods::common::or_missing;
+use crate::connectors::json_selection::methods::common::present_part;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -97,8 +101,14 @@ fn ne_shape(
     };
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
+    let maybe_missing = may_be_missing(&arg_shape);
+    let Some(arg_shape) = present_part(&arg_shape) else {
+        // The method produces no value when its argument has none.
+        return Shape::none();
+    };
+
     // Ensures that the arguments are of the same type... this includes covering cases like int/float and unknown/name
-    if !(input_shape.accepts(&arg_shape) || arg_shape.accepts(&input_shape)) {
+    if !is_same_type_comparison(&input_shape, &arg_shape) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {input_shape} != {arg_shape}.",
@@ -109,7 +119,11 @@ fn ne_shape(
         );
     }
 
-    Shape::bool(method_name.shape_location(context.source_id()))
+    or_missing(
+        context,
+        Shape::bool(method_name.shape_location(context.source_id())),
+        maybe_missing,
+    )
 }
 
 #[cfg(test)]

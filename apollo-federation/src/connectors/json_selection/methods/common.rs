@@ -1,24 +1,204 @@
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
+use shape::ShapeCase;
 
 use crate::connectors::ApplyToError;
+use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::spec::ConnectSpec;
 
+/// Returns true if `shape1` and `shape2` could both be numbers, or could both
+/// be strings, so that methods like `->gt` could compare them.
 pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) -> bool {
-    if Shape::float([]).accepts(shape1) {
-        Shape::float([]).accepts(shape2) || shape2.accepts(&Shape::unknown([]))
-    } else if Shape::string([]).accepts(shape1) {
-        Shape::string([]).accepts(shape2) || shape2.accepts(&Shape::unknown([]))
-    } else if shape1.accepts(&Shape::unknown([])) {
-        Shape::float([]).accepts(shape2)
-            || Shape::string([]).accepts(shape2)
-            || shape2.accepts(&Shape::unknown([]))
+    [Shape::float([]), Shape::string([])]
+        .iter()
+        .any(|kind| could_satisfy(kind, shape1) && could_satisfy(kind, shape2))
+}
+
+/// Returns true if some value of `shape` that is not `None` could satisfy
+/// `contract`, judging only by the parts of `shape` that are known when method
+/// shapes are computed.
+///
+/// Method shapes are computed before variables like `$args` are resolved, so a
+/// shape can contain unbound named shapes anywhere inside it (for example
+/// `List<$args.ids.*>` after `->map(@)`). `Shape::validate` rejects those, as
+/// well as `Unknown`, even though they could turn out to be fine. It also
+/// requires every member of a union to satisfy the contract, while a method
+/// call can still succeed at runtime if any one of them does.
+///
+/// Shape functions use this to avoid denying a call that some combination of
+/// argument values could make succeed at runtime.
+pub(crate) fn could_satisfy(contract: &Shape, shape: &Shape) -> bool {
+    if contract.validate(shape).is_none() {
+        return true;
+    }
+
+    match shape.case() {
+        ShapeCase::Name(name, weak) => {
+            return weak
+                .upgrade(name)
+                .is_none_or(|named| could_satisfy(contract, &named));
+        }
+        ShapeCase::Unknown => return true,
+        ShapeCase::None => return false,
+        ShapeCase::One(members) => {
+            return members
+                .iter()
+                .any(|member| !member.is_none() && could_satisfy(contract, member));
+        }
+        // A value of an intersection has the shape of every member, so it
+        // satisfies the contract if any member does.
+        ShapeCase::All(members) => {
+            return members.iter().any(|member| could_satisfy(contract, member));
+        }
+        ShapeCase::Error(shape::Error {
+            partial: Some(partial),
+            ..
+        }) => return could_satisfy(contract, partial),
+        _ => {}
+    }
+
+    match (contract.case(), shape.case()) {
+        (ShapeCase::Name(name, weak), _) => weak
+            .upgrade(name)
+            .is_none_or(|named| could_satisfy(&named, shape)),
+        (ShapeCase::One(members), _) => members.iter().any(|member| could_satisfy(member, shape)),
+        (ShapeCase::All(members), _) => members.iter().all(|member| could_satisfy(member, shape)),
+        (
+            ShapeCase::Array {
+                prefix: contract_prefix,
+                tail: contract_tail,
+            },
+            ShapeCase::Array { prefix, tail },
+        ) => {
+            let items_could = (0..contract_prefix.len().max(prefix.len())).all(|i| {
+                let expected = match contract_prefix.get(i) {
+                    Some(expected) => expected,
+                    // The contract has no expectations past its prefix.
+                    None if contract_tail.is_none() => return true,
+                    None => contract_tail,
+                };
+                let received = prefix.get(i).unwrap_or(tail);
+                could_satisfy(expected, received)
+            });
+            items_could
+                && (contract_tail.is_none() || tail.is_none() || could_satisfy(contract_tail, tail))
+        }
+        (
+            ShapeCase::Object {
+                fields: contract_fields,
+                rest: contract_rest,
+            },
+            ShapeCase::Object { fields, rest },
+        ) => {
+            let fields_could = contract_fields.iter().all(|(name, expected)| {
+                fields
+                    .get(name)
+                    .is_none_or(|received| could_satisfy(expected, received))
+            });
+            fields_could
+                && (contract_rest.is_none() || rest.is_none() || could_satisfy(contract_rest, rest))
+        }
+        // `shape` is known here, and `validate` has already rejected it.
+        _ => false,
+    }
+}
+
+/// Returns the part of `shape` that is not `None`, or `None` if `shape` is
+/// always `None` (missing).
+///
+/// At runtime, most `->` methods stop and produce no value, without an error,
+/// when one of their arguments produces no value. Shape logic mirrors that by
+/// checking only the present part of an argument shape, and adding `None` to
+/// the result shape (see [`or_missing`]) when the argument may be missing.
+pub(crate) fn present_part(shape: &Shape) -> Option<Shape> {
+    match shape.case() {
+        ShapeCase::None => None,
+        ShapeCase::One(members) if members.iter().any(Shape::is_none) => Some(Shape::one(
+            members.iter().filter(|member| !member.is_none()).cloned(),
+            shape.locations().cloned(),
+        )),
+        _ => Some(shape.clone()),
+    }
+}
+
+/// Returns true if `shape` is `None` or a union that includes `None`.
+pub(crate) fn may_be_missing(shape: &Shape) -> bool {
+    match shape.case() {
+        ShapeCase::None => true,
+        ShapeCase::One(members) => members.iter().any(Shape::is_none),
+        _ => false,
+    }
+}
+
+/// Adds `None` to `result` if `maybe_missing`, for methods that produce no
+/// value when an argument may be missing.
+///
+/// This changes the result shape of expressions that were already valid, which
+/// can make them fail where an exact shape is expected (like a `Bool` for
+/// `isSuccess`), so it only applies from `connect/v0.5`.
+pub(crate) fn or_missing(context: &ShapeContext, result: Shape, maybe_missing: bool) -> Shape {
+    if maybe_missing && context.spec() >= ConnectSpec::V0_5 {
+        Shape::one([result, Shape::none()], [])
     } else {
-        false
+        result
+    }
+}
+
+/// Returns true if values of shapes `a` and `b` can be meaningfully compared
+/// with methods like `->eq`, meaning they have the same type, where an int can
+/// be compared with a float and unknown or named shapes with anything.
+///
+/// Literal values are compared by their type, not their value: comparing
+/// `"a"` with `"b"` is a valid comparison that happens to return false.
+///
+/// For unions, it is enough that some member of `a` could be compared with some
+/// member of `b`, since those values could meet at runtime.
+pub(crate) fn is_same_type_comparison(a: &Shape, b: &Shape) -> bool {
+    fn present_members(shape: &Shape) -> Vec<Shape> {
+        match shape.case() {
+            ShapeCase::One(members) => members
+                .iter()
+                .filter(|member| !member.is_none())
+                .map(widen_literals)
+                .collect(),
+            _ => vec![widen_literals(shape)],
+        }
+    }
+
+    let b_members = present_members(b);
+    present_members(a)
+        .iter()
+        .any(|a| b_members.iter().any(|b| a.accepts(b) || b.accepts(a)))
+}
+
+/// Replaces literal string, int, and bool shapes (like `"a"`, `1`, or `true`)
+/// anywhere in `shape` with the general shape of their type.
+fn widen_literals(shape: &Shape) -> Shape {
+    let locations = shape.locations().cloned();
+    match shape.case() {
+        ShapeCase::String(Some(_)) => Shape::string(locations),
+        ShapeCase::Int(Some(_)) => Shape::int(locations),
+        ShapeCase::Bool(Some(_)) => Shape::bool(locations),
+        ShapeCase::One(members) => Shape::one(members.iter().map(widen_literals), locations),
+        ShapeCase::All(members) => Shape::all(members.iter().map(widen_literals), locations),
+        ShapeCase::Array { prefix, tail } => Shape::array(
+            prefix.iter().map(widen_literals),
+            widen_literals(tail),
+            locations,
+        ),
+        ShapeCase::Object { fields, rest } => Shape::object(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), widen_literals(field)))
+                .collect(),
+            widen_literals(rest),
+            locations,
+        ),
+        _ => shape.clone(),
     }
 }
 
@@ -142,5 +322,138 @@ mod tests {
         #[case] shape2: Shape,
     ) {
         assert!(!is_comparable_shape_combination(&shape1, &shape2));
+    }
+
+    fn scalar_list() -> Shape {
+        Shape::list(
+            Shape::one([Shape::string([]), Shape::int([]), Shape::null([])], []),
+            [],
+        )
+    }
+
+    fn record(field: &str, shape: Shape) -> Shape {
+        Shape::record([(field.to_string(), shape)].into_iter().collect(), [])
+    }
+
+    #[rstest::rstest]
+    #[case::exact(Shape::string([]), Shape::string([]))]
+    #[case::named(Shape::string([]), Shape::name("$args.s", []))]
+    #[case::unknown(Shape::string([]), Shape::unknown([]))]
+    #[case::named_or_string(
+        Shape::string([]),
+        Shape::one([Shape::name("$args.s", []), Shape::string([])], [])
+    )]
+    #[case::list_of_named(scalar_list(), Shape::list(Shape::name("$args.ids.*", []), []))]
+    #[case::list_of_unknown(scalar_list(), Shape::list(Shape::unknown([]), []))]
+    #[case::tuple_with_named(
+        scalar_list(),
+        Shape::tuple([Shape::string([]), Shape::name("$args.id", [])], [])
+    )]
+    #[case::union_contract(
+        Shape::one([Shape::string([]), scalar_list()], []),
+        Shape::list(Shape::name("$args.ids.*", []), [])
+    )]
+    #[case::union_on_both_sides(
+        Shape::one([Shape::string([]), scalar_list()], []),
+        Shape::one(
+            [Shape::string([]), Shape::list(Shape::name("$args.ids.*", []), [])],
+            []
+        )
+    )]
+    #[case::record_with_named_field(
+        record("a", Shape::string([])),
+        record("a", Shape::name("$args.a", []))
+    )]
+    #[case::maybe_missing(
+        Shape::string([]),
+        Shape::one([Shape::string([]), Shape::none()], [])
+    )]
+    #[case::named_or_object(
+        Shape::string([]),
+        Shape::one(
+            [Shape::name("$args.s", []), Shape::dict(Shape::string([]), [])],
+            []
+        )
+    )]
+    #[case::some_union_member(
+        Shape::string([]),
+        Shape::one([Shape::int([]), Shape::string([])], [])
+    )]
+    #[case::list_of_string_or_object(
+        scalar_list(),
+        Shape::list(
+            Shape::one([Shape::string([]), Shape::empty_object([])], []),
+            []
+        )
+    )]
+    fn test_could_satisfy_positive_cases(#[case] contract: Shape, #[case] shape: Shape) {
+        assert!(could_satisfy(&contract, &shape));
+    }
+
+    #[rstest::rstest]
+    #[case::wrong_scalar(Shape::string([]), Shape::int([]))]
+    #[case::none(Shape::string([]), Shape::none())]
+    #[case::no_union_member(
+        Shape::string([]),
+        Shape::one([Shape::int([]), Shape::bool([]), Shape::none()], [])
+    )]
+    #[case::list_for_string(
+        Shape::string([]),
+        Shape::list(Shape::name("$args.ids.*", []), [])
+    )]
+    #[case::object_for_string(Shape::string([]), Shape::dict(Shape::name("$args.v", []), []))]
+    #[case::list_of_objects(scalar_list(), Shape::list(Shape::dict(Shape::string([]), []), []))]
+    #[case::list_of_lists(
+        scalar_list(),
+        Shape::list(Shape::list(Shape::name("$args.ids.*", []), []), [])
+    )]
+    #[case::tuple_with_object(
+        scalar_list(),
+        Shape::tuple([Shape::name("$args.id", []), Shape::empty_object([])], [])
+    )]
+    #[case::union_contract(
+        Shape::one([Shape::string([]), scalar_list()], []),
+        Shape::list(Shape::empty_object([]), [])
+    )]
+    #[case::record_with_wrong_field(
+        record("a", Shape::string([])),
+        record("a", Shape::bool([]))
+    )]
+    fn test_could_satisfy_negative_cases(#[case] contract: Shape, #[case] shape: Shape) {
+        assert!(!could_satisfy(&contract, &shape));
+    }
+
+    #[rstest::rstest]
+    #[case::same_string_literals(Shape::string_value("a", []), Shape::string_value("a", []))]
+    #[case::different_string_literals(Shape::string_value("a", []), Shape::string_value("b", []))]
+    #[case::string_literal_and_string(Shape::string_value("a", []), Shape::string([]))]
+    #[case::different_int_literals(Shape::int_value(1, []), Shape::int_value(2, []))]
+    #[case::int_literal_and_float(Shape::int_value(1, []), Shape::float([]))]
+    #[case::different_bool_literals(Shape::bool_value(true, []), Shape::bool_value(false, []))]
+    #[case::literal_union(
+        Shape::one([Shape::string_value("x", []), Shape::string_value("y", [])], []),
+        Shape::string_value("z", [])
+    )]
+    #[case::nested_literals(
+        Shape::tuple([Shape::string_value("a", [])], []),
+        Shape::tuple([Shape::string_value("b", [])], [])
+    )]
+    #[case::named(Shape::string_value("a", []), Shape::name("$args.s", []))]
+    fn test_is_same_type_comparison_positive_cases(#[case] a: Shape, #[case] b: Shape) {
+        assert!(is_same_type_comparison(&a, &b));
+        assert!(is_same_type_comparison(&b, &a));
+    }
+
+    #[rstest::rstest]
+    #[case::string_and_int(Shape::string_value("a", []), Shape::int_value(1, []))]
+    #[case::bool_and_string(Shape::bool_value(true, []), Shape::string([]))]
+    #[case::string_and_null(Shape::string_value("a", []), Shape::null([]))]
+    #[case::nested_mismatch(
+        Shape::tuple([Shape::string_value("a", [])], []),
+        Shape::tuple([Shape::int_value(1, [])], [])
+    )]
+    fn test_is_same_type_comparison_negative_cases(#[case] a: Shape, #[case] b: Shape) {
+        assert!(!is_same_type_comparison(&a, &b));
+        assert!(!is_same_type_comparison(&b, &a));
     }
 }

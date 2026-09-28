@@ -8,6 +8,7 @@ use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
+use crate::connectors::json_selection::helpers::missing_as_null;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -109,14 +110,33 @@ fn map_shape(
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    first_arg.compute_output_shape(context, shape.clone(), dollar_shape.clone())
+                    missing_as_null(
+                        context,
+                        first_arg.compute_output_shape(
+                            context,
+                            shape.clone(),
+                            dollar_shape.clone(),
+                        ),
+                    )
                 })
                 .collect::<Vec<_>>();
-            let new_tail = first_arg.compute_output_shape(context, tail.clone(), dollar_shape);
+            // A None tail means there are no more elements, so there is nothing
+            // to map, and it must stay None.
+            let new_tail = if tail.is_none() {
+                tail.clone()
+            } else {
+                missing_as_null(
+                    context,
+                    first_arg.compute_output_shape(context, tail.clone(), dollar_shape),
+                )
+            };
             Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
         }
         _ => Shape::list(
-            first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
+            missing_as_null(
+                context,
+                first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
+            ),
             input_shape.locations().cloned(),
         ),
     }
