@@ -694,7 +694,16 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
+<<<<<<< HEAD
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
+||||||| 46d4e61cc
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+=======
+    use crate::services::connector::request_service::TransportOutcome;
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+>>>>>>> 794ca6c
     use crate::services::router;
     use crate::spec::Schema;
 
@@ -1235,16 +1244,16 @@ mod test {
             "test_subgraph.test_sourcename".to_string(),
         );
 
-        assert!(
+        assert!(matches!(
             svc.ready()
                 .await
                 .expect("it is ready")
                 .call(request)
                 .await
                 .unwrap()
-                .transport_result
-                .is_ok()
-        );
+                .transport_outcome,
+            TransportOutcome::Response(_)
+        ));
 
         let request = get_fake_connector_request(None, "testing".to_string());
         let response = svc
@@ -1255,25 +1264,24 @@ mod test {
             .await
             .expect("it responded");
 
-        assert!(response.transport_result.is_err());
         assert!(matches!(
-            response.transport_result.err().unwrap(),
-            Error::RateLimited
+            response.transport_outcome,
+            TransportOutcome::Error(Error::RateLimited)
         ));
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         let request = get_fake_connector_request(None, "testing".to_string());
-        assert!(
+        assert!(matches!(
             svc.ready()
                 .await
                 .expect("it is ready")
                 .call(request)
                 .await
                 .unwrap()
-                .transport_result
-                .is_ok()
-        );
+                .transport_outcome,
+            TransportOutcome::Response(_)
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
