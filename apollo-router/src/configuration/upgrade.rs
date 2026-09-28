@@ -88,7 +88,7 @@ impl UpgradeMode {
                 env!("CARGO_PKG_VERSION_MAJOR"),
                 env!("CARGO_PKG_VERSION_PRE"),
             )
-            .expect("the router version should carry a major version"),
+            .expect("0.x router versions should be nightlies: `0.0.0-nightly-{base_version}…`"),
         )
     }
 }
@@ -108,6 +108,7 @@ fn migration_major(major: &str, pre: &str) -> Option<i64> {
         .next()?
         .parse()
         .ok()
+        .filter(|&major| major > 0)
 }
 
 pub(crate) fn upgrade_configuration(
@@ -449,17 +450,15 @@ mod test {
         );
         assert_eq!(migration_major("0", ""), None);
         assert_eq!(migration_major("0", "dev"), None);
+        assert_eq!(migration_major("0", "nightly-0.1.0.20260924"), None);
     }
 
     #[test]
     fn current_minor_keeps_server_section() {
-        let config = json!({ "server": { "http": { "header_read_timeout": "620s" } } });
-        let upgraded = upgrade_configuration(&config, false, UpgradeMode::current_minor()).unwrap();
+        let config = json!({ "server": { "http": { "header_read_timeout": "30s" } } });
+        let upgraded = upgrade_configuration(&config, false, UpgradeMode::current_minor())
+            .expect("expected successful migration");
         assert_eq!(upgraded, config);
-
-        // What a nightly applied before: `0007` (1.x) ends with `delete: server`.
-        let upgraded = upgrade_configuration(&config, false, UpgradeMode::Minor(0)).unwrap();
-        assert_ne!(upgraded, config);
     }
 
     #[test]

@@ -222,8 +222,9 @@ impl Prepare {
                 let base_version = Self::cargo_toml_version()?;
                 let date = Utc::now().format("%Y%m%d");
 
-                // `apollo-router`'s `migration_major` (configuration/upgrade.rs) reads the major
-                // of `base_version` back out of this, so keep them in sync.
+                // `apollo-router`'s `migration_major` (configuration/upgrade.rs) parses this
+                // format, the `nightly-` prefix and the major of `base_version`, so keep them in
+                // sync.
                 replace_in_file!(
                     "./apollo-router/Cargo.toml",
                     r#"^(?P<existingVersion>version\s*=\s*)"[^"]+""#,
