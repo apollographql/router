@@ -268,30 +268,96 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.iter()
     }
 
+    /// Returns the latest spec version usable with the given federation version, i.e. the latest
+    /// one whose minimum federation version is at most `federation_version`.
+    ///
+    /// Only versions with the same major as the latest spec version are returned: if the matching
+    /// version has an older major, the oldest version with the latest major is returned instead.
+    // PORT_NOTE: This corresponds to `FeatureDefinitions.getMinimumRequiredVersion` in JS.
     pub(crate) fn get_maximum_allowed_version(
         &'static self,
         federation_version: &Version,
     ) -> Option<&'static T> {
-        self.definitions
+        let spec = self
+            .definitions
             .values()
             .rev()
-            .find(|spec| federation_version.satisfies_federation(spec.minimum_federation_version()))
+            .find(|spec| federation_version >= spec.minimum_federation_version())?;
+        let latest_major = self.latest().version().major;
+        if spec.version().major != latest_major {
+            return self
+                .definitions
+                .values()
+                .find(|spec| spec.version().major == latest_major);
+        }
+        Some(spec)
     }
 
-    pub(crate) fn get_minimum_required_version(
-        &'static self,
-        federation_version: &Version,
-    ) -> Option<&'static T> {
-        self.definitions
-            .values()
-            .find(|spec| federation_version.satisfies_federation(spec.minimum_federation_version()))
-    }
-
-    pub(crate) fn get_dyn_minimum_required_version(
+    pub(crate) fn get_dyn_maximum_allowed_version(
         &'static self,
         federation_version: &Version,
     ) -> Option<&'static dyn SpecDefinition> {
-        self.get_minimum_required_version(federation_version)
+        self.get_maximum_allowed_version(federation_version)
             .map(|spec| spec as &dyn SpecDefinition)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::link::cost_spec_definition::COST_VERSIONS;
+    use crate::link::inaccessible_spec_definition::INACCESSIBLE_VERSIONS;
+    use crate::link::join_spec_definition::JOIN_VERSIONS;
+    use crate::link::link_spec_definition::LINK_VERSIONS;
+    use crate::link::tag_spec_definition::TAG_VERSIONS;
+
+    fn v(major: u32, minor: u32) -> Version {
+        Version { major, minor }
+    }
+
+    fn maximum_allowed<T: SpecDefinition>(
+        definitions: &'static SpecDefinitions<T>,
+        federation_version: Version,
+    ) -> Option<Version> {
+        definitions
+            .get_maximum_allowed_version(&federation_version)
+            .map(|spec| spec.version().clone())
+    }
+
+    #[test]
+    fn maximum_allowed_version_is_latest_compatible_version() {
+        assert_eq!(maximum_allowed(&JOIN_VERSIONS, v(2, 0)), Some(v(0, 3)));
+        assert_eq!(maximum_allowed(&JOIN_VERSIONS, v(2, 7)), Some(v(0, 4)));
+        assert_eq!(maximum_allowed(&JOIN_VERSIONS, v(2, 15)), Some(v(0, 5)));
+        assert_eq!(maximum_allowed(&JOIN_VERSIONS, v(3, 0)), Some(v(0, 6)));
+    }
+
+    #[test]
+    fn maximum_allowed_version_skips_fed_1_versions_for_fed_2() {
+        // Tag v0.1/v0.2 and inaccessible v0.1 only require federation v1.0, but a later version is
+        // compatible with fed 2 and takes precedence.
+        assert_eq!(maximum_allowed(&TAG_VERSIONS, v(2, 0)), Some(v(0, 3)));
+        assert_eq!(
+            maximum_allowed(&INACCESSIBLE_VERSIONS, v(2, 0)),
+            Some(v(0, 2))
+        );
+        assert_eq!(maximum_allowed(&LINK_VERSIONS, v(2, 0)), Some(v(1, 0)));
+    }
+
+    #[test]
+    fn maximum_allowed_version_accepts_fed_2_versions_for_fed_3() {
+        assert_eq!(maximum_allowed(&TAG_VERSIONS, v(3, 0)), Some(v(0, 3)));
+        assert_eq!(
+            maximum_allowed(&INACCESSIBLE_VERSIONS, v(3, 0)),
+            Some(v(0, 2))
+        );
+        assert_eq!(maximum_allowed(&LINK_VERSIONS, v(3, 0)), Some(v(1, 0)));
+        assert_eq!(maximum_allowed(&COST_VERSIONS, v(3, 0)), Some(v(0, 1)));
+    }
+
+    #[test]
+    fn maximum_allowed_version_is_none_below_the_minimum_federation_version() {
+        assert_eq!(maximum_allowed(&COST_VERSIONS, v(2, 8)), None);
+        assert_eq!(maximum_allowed(&LINK_VERSIONS, v(1, 0)), None);
     }
 }

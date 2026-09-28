@@ -956,7 +956,7 @@ impl FederationSpecDefinition {
             ],
             Some(DirectiveCompositionOptions {
                 supergraph_specification: &|v| {
-                    CACHE_TAG_VERSIONS.get_dyn_minimum_required_version(v)
+                    CACHE_TAG_VERSIONS.get_dyn_maximum_allowed_version(v)
                 },
                 static_argument_transform: None,
                 use_join_directive: true,
@@ -1004,7 +1004,7 @@ impl SpecDefinition for FederationSpecDefinition {
         specs.push(Box::new(self.shareable_directive_specification()));
 
         if let Some(inaccessible_spec) =
-            INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(self.version())
+            INACCESSIBLE_VERSIONS.get_dyn_maximum_allowed_version(self.version())
         {
             specs.extend(inaccessible_spec.directive_specs());
         }
