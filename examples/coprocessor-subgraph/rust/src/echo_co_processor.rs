@@ -31,6 +31,9 @@ struct Conf {
     port: u16, // The port the custom echo server will listen to
 }
 
+impl apollo_router::plugin::Validate for Conf {}
+impl apollo_router::plugin::Configuration for Conf {}
+
 // This is a bare bones plugin that can be duplicated when creating your own.
 #[async_trait::async_trait]
 impl Plugin for EchoCoProcessor {

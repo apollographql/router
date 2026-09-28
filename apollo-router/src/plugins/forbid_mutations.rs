@@ -29,6 +29,9 @@ struct ForbidMutationsConfig(
     bool,
 );
 
+impl apollo_configuration::Validate for ForbidMutationsConfig {}
+impl apollo_configuration::Configuration for ForbidMutationsConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for ForbidMutations {
     type Config = ForbidMutationsConfig;

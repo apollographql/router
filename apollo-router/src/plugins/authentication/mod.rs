@@ -236,6 +236,9 @@ fn default_poll_interval() -> Duration {
     DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL
 }
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for AuthenticationPlugin {
     type Config = Conf;

@@ -27,6 +27,9 @@ struct AllowClientIdFromFile {
     allowed_ids_path: PathBuf,
 }
 
+impl apollo_router::plugin::Validate for AllowClientIdConfig {}
+impl apollo_router::plugin::Configuration for AllowClientIdConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for AllowClientIdFromFile {
     type Config = AllowClientIdConfig;

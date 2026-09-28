@@ -90,6 +90,9 @@ pub(crate) struct Csrf {
     config: CSRFConfig,
 }
 
+impl apollo_configuration::Validate for CSRFConfig {}
+impl apollo_configuration::Configuration for CSRFConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for Csrf {
     type Config = CSRFConfig;

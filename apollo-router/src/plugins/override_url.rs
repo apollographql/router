@@ -31,6 +31,9 @@ enum Conf {
     Mapping(HashMap<String, String>),
 }
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl Plugin for OverrideSubgraphUrl {
     type Config = Conf;

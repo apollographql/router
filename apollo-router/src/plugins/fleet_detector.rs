@@ -226,6 +226,9 @@ struct FleetDetector {
     gauge_options: GaugeOptions,
 }
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for FleetDetector {
     type Config = Conf;

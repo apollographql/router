@@ -20,6 +20,9 @@ struct Config {
     _enabled: bool,
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait]
 impl Plugin for BrokenPlugin {
     type Config = Config;

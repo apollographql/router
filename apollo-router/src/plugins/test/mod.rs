@@ -436,6 +436,9 @@ mod test_for_harness {
     struct MyTestPluginConfig {}
 
     struct MyTestPlugin {}
+    impl apollo_configuration::Validate for MyTestPluginConfig {}
+    impl apollo_configuration::Configuration for MyTestPluginConfig {}
+
     #[async_trait]
     impl Plugin for MyTestPlugin {
         type Config = MyTestPluginConfig;

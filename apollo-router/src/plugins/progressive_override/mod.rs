@@ -122,6 +122,9 @@ fn collect_labels_from_schema(schema: &Schema) -> LabelsFromSchema {
     (Arc::new(static_percentages), Arc::new(other_labels))
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait::async_trait]
 impl Plugin for ProgressiveOverridePlugin {
     type Config = Config;

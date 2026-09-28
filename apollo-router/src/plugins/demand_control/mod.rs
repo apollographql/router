@@ -490,6 +490,9 @@ impl DemandControl {
     }
 }
 
+impl apollo_configuration::Validate for DemandControlConfig {}
+impl apollo_configuration::Configuration for DemandControlConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for DemandControl {
     type Config = DemandControlConfig;

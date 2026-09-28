@@ -52,6 +52,9 @@ struct Conf {
     name: String,
 }
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl Plugin for AlwaysStartsAndStopsPlugin {
     type Config = Conf;

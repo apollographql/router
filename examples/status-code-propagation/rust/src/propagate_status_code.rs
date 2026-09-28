@@ -23,6 +23,9 @@ struct PropagateStatusCode {
     status_codes: Vec<u16>,
 }
 
+impl apollo_router::plugin::Validate for PropagateStatusCodeConfig {}
+impl apollo_router::plugin::Configuration for PropagateStatusCodeConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for PropagateStatusCode {
     type Config = PropagateStatusCodeConfig;

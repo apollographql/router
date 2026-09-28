@@ -347,6 +347,9 @@ macro_rules! make_plugin {
             #[derive(Clone, Deserialize, JsonSchema)]
             pub(super) struct Config {}
 
+            impl apollo_router::plugin::Validate for Config {}
+            impl apollo_router::plugin::Configuration for Config {}
+
             /// Dummy plugin (for testing purposes only)
             pub(super) struct TestOrderingPlugin;
 

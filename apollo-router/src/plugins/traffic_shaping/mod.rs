@@ -307,6 +307,9 @@ pub(crate) struct TrafficShaping {
     rate_limit_sources: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for TrafficShaping {
     type Config = Config;

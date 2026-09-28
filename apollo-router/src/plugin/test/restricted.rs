@@ -19,6 +19,9 @@ struct Restricted;
 
 register_plugin!("experimental", "restricted", Restricted);
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait]
 impl Plugin for Restricted {
     type Config = Config;

@@ -77,6 +77,9 @@ pub(crate) struct Conf {
     intern_strings: bool,
 }
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl Plugin for Rhai {
     type Config = Conf;

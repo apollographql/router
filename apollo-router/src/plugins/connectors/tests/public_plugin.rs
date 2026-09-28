@@ -45,6 +45,9 @@ struct ObservingPlugin {
 #[derive(Clone, Deserialize, JsonSchema)]
 struct Conf {}
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl PluginUnstable for ObservingPlugin {
     type Config = Conf;

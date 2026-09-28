@@ -274,6 +274,9 @@ pub(crate) fn default_listen_addr() -> ListenAddr {
     ListenAddr::SocketAddr("127.0.0.1:4000".parse().expect("valid ListenAddr"))
 }
 
+impl apollo_configuration::Validate for SubscriptionConfig {}
+impl apollo_configuration::Configuration for SubscriptionConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for Subscription {
     type Config = SubscriptionConfig;

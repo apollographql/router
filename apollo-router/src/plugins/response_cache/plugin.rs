@@ -369,6 +369,9 @@ pub(crate) struct CacheHitMiss {
     pub(crate) miss: usize,
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for ResponseCache {
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = true;

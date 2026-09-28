@@ -321,6 +321,9 @@ fn merge_subgraph_masking(
     }
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Headers {
     type Config = Config;

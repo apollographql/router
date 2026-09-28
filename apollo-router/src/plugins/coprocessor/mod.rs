@@ -184,6 +184,9 @@ where
 // Type alias for coprocessor HTTP client - uses HttpClientService with timeout
 type HTTPClientService = tower::timeout::Timeout<crate::services::http::HttpClientService>;
 
+impl apollo_configuration::Validate for Conf {}
+impl apollo_configuration::Configuration for Conf {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;

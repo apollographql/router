@@ -230,6 +230,9 @@ impl EnabledFeatures {
     }
 }
 
+impl apollo_configuration::Validate for config::Conf {}
+impl apollo_configuration::Configuration for config::Conf {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for Telemetry {
     type Config = config::Conf;

@@ -167,6 +167,9 @@ struct HealthCheck {
     ticker: tokio::task::JoinHandle<()>,
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait::async_trait]
 impl PluginPrivate for HealthCheck {
     type Config = Config;

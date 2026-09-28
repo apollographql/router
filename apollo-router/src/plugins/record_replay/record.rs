@@ -51,6 +51,9 @@ struct Record {
 
 register_plugin!("experimental", "record", Record);
 
+impl apollo_configuration::Validate for RecordConfig {}
+impl apollo_configuration::Configuration for RecordConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for Record {
     type Config = RecordConfig;

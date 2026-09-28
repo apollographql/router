@@ -150,6 +150,9 @@ struct DiagnosticsPlugin {
     supergraph_schema: Arc<String>,
 }
 
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
+
 #[async_trait::async_trait]
 impl Plugin for DiagnosticsPlugin {
     type Config = Config;
