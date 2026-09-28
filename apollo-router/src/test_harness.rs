@@ -318,7 +318,7 @@ impl<'a> TestHarness<'a> {
         let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
             limits: Default::default(),
         }));
-        let supergraph_creator = YamlRouterFactory
+        let supergraph_creator = YamlRouterFactory::default()
             .inner_create_supergraph(
                 config.clone(),
                 schema.clone(),

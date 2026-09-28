@@ -5359,7 +5359,7 @@ async fn create_connector_cache_factory_with_schema(
     }
 
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
-    let mut factory = YamlRouterFactory;
+    let mut factory = YamlRouterFactory::default();
     factory
         .create(
             false,

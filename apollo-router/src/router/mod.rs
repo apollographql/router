@@ -140,7 +140,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
+        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
         let state_machine = StateMachine::new(
             is_telemetry_disabled.unwrap_or(false),
             server_factory,
@@ -264,7 +264,7 @@ impl TestRouterHttpServer {
 
         let server_factory = AxumHttpServerFactory::new();
         let router_factory: OrbiterRouterSuperServiceFactory =
-            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory);
+            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
         let state_machine = StateMachine::for_tests(
             server_factory,
             router_factory,
