@@ -4,7 +4,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
+use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
@@ -467,14 +467,13 @@ impl SchemaQueryGraphBuilder {
             .base
             .query_graph
             .schema()?
-            .get_type(&root_type_name.name)?
+            .get_type(root_type_name.as_ref())?
         {
             TypeDefinitionPosition::Object(pos) => pos,
             _ => {
                 return Err(SingleFederationError::Internal {
                     message: format!(
-                        "Root type \"{}\" was unexpectedly not an object type",
-                        root_type_name.name,
+                        "Root type \"{root_type_name}\" was unexpectedly not an object type",
                     ),
                 }
                 .into());
@@ -2447,7 +2446,7 @@ impl QueryGraphEdgeData {
 }
 
 fn resolvable_key_applications<'doc>(
-    directives: &'doc ComponentDirectiveList,
+    directives: &'doc DirectiveList,
     key_directive_definition_name: &Name,
     federation_spec_definition: &'static FederationSpecDefinition,
 ) -> Result<Vec<KeyDirectiveArguments<'doc>>, FederationError> {

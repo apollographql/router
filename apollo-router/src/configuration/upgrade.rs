@@ -388,6 +388,16 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     Ok(new_config)
 }
 
+/// Whether startup would migrate `config`, meaning it still uses settings that the current major
+/// version has replaced.
+pub(crate) fn uses_migrated_settings(config: &str) -> bool {
+    let Ok(parsed) = serde_yaml::from_str::<serde_json::Value>(config) else {
+        return false;
+    };
+    upgrade_configuration(&parsed, false, UpgradeMode::current_minor())
+        .is_ok_and(|upgraded| upgraded != parsed)
+}
+
 /// Used for upgrade command
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
     let parsed_config =
@@ -568,6 +578,19 @@ mod test {
                 "v2"
             ]
         })
+    }
+
+    #[test]
+    fn detects_settings_that_startup_migrates() {
+        assert!(super::uses_migrated_settings(indoc::indoc! {"
+            subscription:
+              deduplication:
+                enabled: true
+        "}));
+        assert!(!super::uses_migrated_settings(indoc::indoc! {"
+            supergraph:
+              listen: 127.0.0.1:4000
+        "}));
     }
 
     #[test]

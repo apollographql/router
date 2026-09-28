@@ -42,7 +42,7 @@ struct ObservingPlugin {
     observed: Arc<Mutex<Observed>>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 struct Conf {}
 
 #[async_trait::async_trait]

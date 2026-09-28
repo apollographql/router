@@ -150,14 +150,14 @@ impl<'schema> Connect<'schema> {
             .schema_definition
             .query
             .as_ref()
-            .is_some_and(|query| query.name == *type_ref.name())
+            .is_some_and(|query| **query == *type_ref.name())
         {
             ObjectCategory::Query
         } else if schema
             .schema_definition
             .mutation
             .as_ref()
-            .is_some_and(|mutation| mutation.name == *type_ref.name())
+            .is_some_and(|mutation| **mutation == *type_ref.name())
         {
             ObjectCategory::Mutation
         } else {

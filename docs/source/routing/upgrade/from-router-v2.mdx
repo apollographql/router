@@ -10,6 +10,8 @@ This upgrade guide describes the steps to upgrade your GraphOS Router deployment
 
 ## Upgrade strategy
 
+This guide starts from a configuration that works with router v2.x. If you run router v1.x, first upgrade to v2.x by following [Upgrading from Versions 1.x](/graphos/reference/upgrade/from-router-v1), using a v2.x router to upgrade your configuration.
+
 Before making any changes, auto-upgrade your configuration. This will remove options that already have no effect in v2.x, and make the rest of the upgrade easier.
 
 Check the changes that will be applied using:
@@ -88,6 +90,37 @@ The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` ins
 - If your binary depends directly on `ring`-backed features of `reqwest`, `tonic`, `fred`, or `aws-smithy-http-client`, switch to their `aws-lc-rs`-backed equivalents to avoid pulling in a second copy of `ring` alongside the router's `aws-lc-rs` build.
 
 Deployments that only use the `router` binary as-is are unaffected.
+
+### Configuration is validated more strictly when it loads
+
+The router checks its configuration more thoroughly at startup and on reload, so a configuration that loaded with router v2.x can be rejected:
+
+- **Plugin settings are fully checked at load.** Settings the configuration schema accepted, but a plugin rejected only when it was built, now fail when the configuration loads. Each invalid plugin's error is reported against its section of the file.
+- **Error messages have a new format.** They quote the offending lines of your file and name the environment variable or command-line flag that supplied a value.
+- **`router config validate` checks what startup would load.** It applies the same automatic upgrades as startup, and says when your file relies on them.
+- **A missing file in `${file.PATH}` is an error.** Previously the reference was left in the configuration as literal text.
+- **Expanded values take the type their setting declares.** A value such as `${env.FIVE}` becomes a number or boolean only where the setting's schema declares that type. Where it declares none, such as connector `$config` values, the value stays a string: with `FIVE=5`, `$config.timeout: ${env.FIVE}` is now the string `"5"`, where router v2.x produced the number `5`.
+
+**Upgrade steps**:
+
+- Run `router config validate` against your configuration and fix any errors it reports.
+- If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
+- Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
+
+### Native plugin configuration must be `Clone`, `Send`, `Sync` and `'static`
+
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `Clone + Send + Sync + 'static`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins).
+
+**Upgrade step**:
+
+- Add `Clone` to your plugin configuration type's derives:
+
+```rust
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+struct Conf {
+    name: String,
+}
+```
 
 ### Renamed Prometheus metrics
 

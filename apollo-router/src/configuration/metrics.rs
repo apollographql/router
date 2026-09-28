@@ -741,6 +741,41 @@ mod test {
         }
     }
 
+    /// Production reads usage gauges from the document that parsing retains. For every fixture,
+    /// that document must drive the same gauges as the document startup migrates the file to.
+    /// Parsing uses no environment overrides, such as `APOLLO_USAGE_REPORTING_INGRESS_URL`, so the
+    /// shell running the test cannot change either side.
+    #[test]
+    fn parsed_configuration_keeps_usage_telemetry_meaning() {
+        for file_name in Asset::iter() {
+            let source = Asset::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data).expect("expected utf8");
+            let migrated = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(input).expect("config must be valid yaml"),
+                false,
+                crate::configuration::upgrade::UpgradeMode::current_minor(),
+            )
+            .expect("the fixture migrates");
+            let parsed = crate::configuration::parse_configuration(
+                input,
+                crate::configuration::Expansion::builder().build(),
+                crate::configuration::Migration::WithinMajor,
+            )
+            .unwrap_or_else(|error| panic!("{file_name}: {error}"));
+
+            let mut from_document = InstrumentData::default();
+            from_document.populate_config_instruments(&migrated);
+            let mut from_parsed = InstrumentData::default();
+            from_parsed.populate_config_instruments(
+                parsed
+                    .validated_yaml
+                    .as_ref()
+                    .expect("parsing retains the document"),
+            );
+            assert_eq!(from_parsed.data, from_document.data, "{file_name}");
+        }
+    }
+
     #[test]
     fn test_env_metrics() {
         let mut data = InstrumentData::default();

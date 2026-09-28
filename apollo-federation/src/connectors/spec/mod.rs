@@ -14,7 +14,6 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 pub use connect::ConnectHTTPArguments;
 pub(crate) use connect::extract_connect_directive_arguments;
 use itertools::Itertools;
@@ -49,7 +48,7 @@ pub(crate) struct ConnectLink {
     pub(crate) spec: ConnectSpec,
     pub(crate) source_directive_name: Name,
     pub(crate) connect_directive_name: Name,
-    pub(crate) directive: Component<Directive>,
+    pub(crate) directive: Node<Directive>,
     pub(crate) link: Link,
 }
 
@@ -108,7 +107,7 @@ pub(crate) fn connect_spec_from_schema(schema: &Schema) -> Option<ConnectSpec> {
 /// any message reported against it stays accurate.
 pub(crate) fn upgrade_connect_link_if_needed(schema: &mut Schema) {
     let connect_identity = ConnectSpec::identity();
-    let is_v0_1 = |directive: &Component<Directive>| {
+    let is_v0_1 = |directive: &Node<Directive>| {
         directive
             .specified_argument_by_name(&LINK_DIRECTIVE_URL_ARGUMENT_NAME)
             .and_then(|value| value.as_str())
