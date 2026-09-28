@@ -1363,10 +1363,10 @@ mod tests {
 
     /// Mount the graph@variant manifest (with the entitlement id annotation) and
     /// the entitlement's own manifest + blob(s), matching the two round trips
-    /// `fetch_license_oci` now makes: it fetches the graph manifest first to
+    /// `stream_license_from_oci` now makes: it fetches the graph manifest first to
     /// discover the entitlement id, then fetches the entitlement's manifest
     /// under the `entitlements/{entitlement_id}` repository. Returns the graph
-    /// `Reference` to point `fetch_license_oci`/`stream_license_from_oci` at.
+    /// `Reference` to point `stream_license_from_oci` at.
     async fn setup_license_mocks(
         mock_server: &MockServer,
         entitlement_id: &str,

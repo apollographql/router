@@ -178,7 +178,7 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
 
 /// Mount the entitlement's own manifest + license blob under the
 /// `entitlements/{entitlement_id}` repository, tagged `latest` — the second
-/// round trip `fetch_license_oci` makes once it has read the entitlement id
+/// round trip `stream_license_from_oci` makes once it has read the entitlement id
 /// off the graph manifest.
 async fn mount_entitlement_mocks(mock_server: &MockServer, entitlement_id: &str) {
     let license_layer = ImageLayer {
