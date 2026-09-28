@@ -685,7 +685,6 @@ fn stream_license_from_oci(
 
     // Build an async task to poll for the license
     let task = async move {
-        // Value is None until the graph manifest has been read at least once
         let mut entitlement_id: String = String::new();
         let mut last_entitlement_digest: Option<String> = None;
         let mut polling_time = oci_config.poll_interval;
