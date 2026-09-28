@@ -139,6 +139,28 @@ pub(crate) fn present_arg(context: &ShapeContext, shape: &Shape) -> Option<Shape
     })
 }
 
+/// Carries any error in `arg_shape` over to `result`, for methods whose output
+/// does not include the argument's own shape (like a `->filter` condition).
+///
+/// [`could_satisfy`] looks through an error to its `partial` shape, so an
+/// argument like `$(1)->gt("x")` (an error with a `Bool` partial) passes the
+/// argument check. Without this, its error would be dropped along with the
+/// argument shape, and validation would never report it. Chained errors are
+/// kept, with `result` as the innermost partial.
+pub(crate) fn with_arg_error(arg_shape: &Shape, result: Shape) -> Shape {
+    match arg_shape.case() {
+        ShapeCase::Error(shape::Error { message, partial }) => Shape::error_with_partial(
+            message.clone(),
+            match partial {
+                Some(partial) => with_arg_error(partial, result),
+                None => result,
+            },
+            arg_shape.locations().cloned(),
+        ),
+        _ => result,
+    }
+}
+
 /// Returns true if `shape` is `None` or a union that includes `None`.
 pub(crate) fn may_be_missing(shape: &Shape) -> bool {
     match shape.case() {

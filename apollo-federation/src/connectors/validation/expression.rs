@@ -974,6 +974,10 @@ mod tests {
     #[case::join_not_null_objects(r#"$([{"a": 1}])->joinNotNull(",")"#)]
     #[case::join_not_null_nested_arrays(r#"$([[1, 2]])->joinNotNull(",")"#)]
     #[case::join_not_null_mapped_to_objects(r#"$args.strings->map({ s: @ })->joinNotNull(",")"#)]
+    // Errors in a condition must be reported even though the condition shape
+    // is not part of the method's output.
+    #[case::filter_condition_error(r#"$([1])->filter($(1)->gt("x"))->joinNotNull(",")"#)]
+    #[case::find_condition_error(r#"$([1])->find(@->gt("x"))"#)]
     fn invalid_expressions_with_method_shape_checking(#[case] selection: &str) {
         // If this fails, another ConnectSpec version has probably been added,
         // and should probably be tested here in addition to v0.3/v0.4/v0.5.

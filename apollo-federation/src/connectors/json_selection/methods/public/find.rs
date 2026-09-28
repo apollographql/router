@@ -11,6 +11,7 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::with_arg_error;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(FindMethod, find_method, find_shape);
@@ -172,7 +173,10 @@ fn find_shape(
     }
 
     // Find returns a single item (or None), so we return the item type of the input shape
-    Shape::one([Shape::none(), input_shape.any_item([])], [])
+    with_arg_error(
+        &condition_shape,
+        Shape::one([Shape::none(), input_shape.any_item([])], []),
+    )
 }
 
 #[cfg(test)]
