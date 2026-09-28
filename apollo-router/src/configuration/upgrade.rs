@@ -80,8 +80,8 @@ pub(crate) enum UpgradeMode {
 }
 
 impl UpgradeMode {
-    /// The within-major migrations for this router's own major version, which startup and
-    /// reload apply automatically.
+    /// The within-major migrations for this router's own major version (for a nightly, the
+    /// major of its base version), which startup and reload apply automatically.
     pub(crate) fn current_minor() -> Self {
         Self::Minor(
             migration_major(
