@@ -506,18 +506,7 @@ fn validate_connector_shared_key(
         _ => return false,
     };
 
-    config
-        .all
-        .invalidation
-        .as_ref()
-        .map(|i| i.shared_key == shared_key)
-        .unwrap_or_default()
-        || config
-            .sources
-            .get(source_name)
-            .and_then(|s| s.invalidation.as_ref())
-            .map(|i| i.shared_key == shared_key)
-            .unwrap_or_default()
+    validate_connector_shared_key_by_source(config, shared_key, source_name)
 }
 
 /// Validate shared key for a connector source by name.
@@ -527,18 +516,16 @@ fn validate_connector_shared_key_by_source(
     shared_key: &str,
     source_name: &str,
 ) -> bool {
-    config
-        .all
-        .invalidation
-        .as_ref()
-        .map(|i| i.shared_key == shared_key)
-        .unwrap_or_default()
-        || config
+    let matches_all = shared_key_matches(config.all.invalidation.as_ref(), shared_key);
+    let matches_source = shared_key_matches(
+        config
             .sources
             .get(source_name)
-            .and_then(|s| s.invalidation.as_ref())
-            .map(|i| i.shared_key == shared_key)
-            .unwrap_or_default()
+            .and_then(|s| s.invalidation.as_ref()),
+        shared_key,
+    );
+    // Check both keys before combining them, so timing does not reveal which one matched.
+    matches_all | matches_source
 }
 
 fn validate_shared_key(
@@ -1054,7 +1041,7 @@ indexes:
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     indexes: indexes_with(&[IndexMode::Type, IndexMode::CacheTag]),
                 }),
                 ..Default::default()
@@ -1077,7 +1064,7 @@ indexes:
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     indexes: indexes_with(&[IndexMode::Subgraph, IndexMode::CacheTag]),
                 }),
                 ..Default::default()
@@ -1107,7 +1094,7 @@ indexes:
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1139,7 +1126,7 @@ indexes:
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1173,7 +1160,7 @@ indexes:
             ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1207,7 +1194,7 @@ indexes:
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     // cache_tag deliberately absent → disabled.
                     indexes: indexes_with(&[IndexMode::Subgraph, IndexMode::Type]),
                 }),
@@ -1237,7 +1224,7 @@ indexes:
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "k".to_string(),
+                    shared_key: Redacted::new("k".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1641,7 +1628,7 @@ mod tests {
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "my_secret".to_string(),
+                    shared_key: Redacted::new("my_secret".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1663,7 +1650,7 @@ mod tests {
                 ConnectorCacheSource {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: "source_secret".to_string(),
+                        shared_key: Redacted::new("source_secret".to_string()),
                         indexes: InvalidationIndexes::default(),
                     }),
                     ..Default::default()
@@ -1688,7 +1675,7 @@ mod tests {
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "correct_key".to_string(),
+                    shared_key: Redacted::new("correct_key".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1707,7 +1694,7 @@ mod tests {
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "my_secret".to_string(),
+                    shared_key: Redacted::new("my_secret".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1726,7 +1713,7 @@ mod tests {
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: "all_key".to_string(),
+                    shared_key: Redacted::new("all_key".to_string()),
                     indexes: InvalidationIndexes::default(),
                 }),
                 ..Default::default()
@@ -1749,7 +1736,7 @@ mod tests {
                 ConnectorCacheSource {
                     invalidation: Some(SubgraphInvalidationConfig {
                         enabled: true,
-                        shared_key: "source_key".to_string(),
+                        shared_key: Redacted::new("source_key".to_string()),
                         indexes: InvalidationIndexes::default(),
                     }),
                     ..Default::default()
@@ -1789,7 +1776,7 @@ mod tests {
             all: Subgraph {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("subgraph-key"),
+                    shared_key: Redacted::new(String::from("subgraph-key")),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1800,7 +1787,7 @@ mod tests {
             all: ConnectorCacheSource {
                 invalidation: Some(SubgraphInvalidationConfig {
                     enabled: true,
-                    shared_key: String::from("connector-key"),
+                    shared_key: Redacted::new(String::from("connector-key")),
                     ..Default::default()
                 }),
                 ..Default::default()

@@ -284,6 +284,7 @@ fn build_connector_services(
     subgraph_schemas: Arc<SubgraphSchemas>,
     subscription_config: Option<SubscriptionConfig>,
     connector_request_services: ConnectorRequestServices,
+    plugins: &Arc<Plugins>,
 ) -> ConnectorServices {
     let connectors_by_service_name = schema
         .connectors
@@ -296,16 +297,25 @@ fn build_connector_services(
         let connector_request_service =
             connector_request_services.get(connector.source_config_key());
 
-        let service = ConnectorService {
-            _schema: schema.clone(),
-            _subgraph_schemas: subgraph_schemas.clone(),
-            _subscription_config: subscription_config.clone(),
-            connector: connector.clone(),
-            connector_request_service,
-        };
+        let service = ServiceBuilder::new()
+            .apply_plugin_layer(plugins, Telemetry::instrument_connector_cache_layer)
+            .rust_plugins(plugins.clone(), |plugin, service| {
+                plugin.connector_service(service)
+            })
+            .service(
+                ConnectorService {
+                    _schema: schema.clone(),
+                    _subgraph_schemas: subgraph_schemas.clone(),
+                    _subscription_config: subscription_config.clone(),
+                    connector: connector.clone(),
+                    connector_request_service,
+                }
+                .boxed_clone(),
+            )
+            .boxed_clone();
         services.insert(
             service_name.to_string(),
-            UnconstrainedBuffer::new(service.boxed_clone(), DEFAULT_BUFFER_SIZE),
+            UnconstrainedBuffer::new(service, DEFAULT_BUFFER_SIZE),
         );
     }
 
@@ -401,6 +411,7 @@ fn build_execution_service(
         subgraph_schemas.clone(),
         subscription_plugin_conf.clone(),
         build_connector_request_services(connector_http_services, &plugins),
+        &plugins,
     );
 
     let fetch_service = FetchService::new(

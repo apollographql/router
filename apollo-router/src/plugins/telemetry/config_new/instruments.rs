@@ -2688,13 +2688,7 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
-<<<<<<< HEAD
-||||||| 46d4e61cc
-    use crate::spec::operation_limits::OperationLimits;
-=======
     use crate::services::connector::request_service::TransportOutcome;
-    use crate::spec::operation_limits::OperationLimits;
->>>>>>> 794ca6c
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
