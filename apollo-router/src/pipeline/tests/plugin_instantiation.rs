@@ -13,7 +13,7 @@ use tower_http::BoxError;
 
 use crate::AllowedFeature;
 use crate::configuration::Configuration;
-use crate::pipeline::plugins::inject_schema_id;
+use crate::pipeline::plugins::create_plugins;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::router_factory::PipelineFactory;
@@ -46,7 +46,7 @@ const OSS_PLUGINS: &[&str] = &[
 struct AlwaysStartsAndStopsPlugin {}
 
 /// Configuration for the test plugin
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     /// The name of the test
     name: String,
@@ -85,6 +85,30 @@ impl Plugin for AlwaysFailsToStartPlugin {
 
 register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
+// Records the previous config it is built with
+
+/// The previous config the last built `test.records_previous_config` received.
+static PREVIOUS_CONFIG: parking_lot::Mutex<Option<Option<String>>> = parking_lot::Mutex::new(None);
+
+#[derive(Debug)]
+struct RecordsPreviousConfigPlugin {}
+
+#[async_trait::async_trait]
+impl Plugin for RecordsPreviousConfigPlugin {
+    type Config = Conf;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        *PREVIOUS_CONFIG.lock() = Some(init.previous_config.map(|previous| previous.name));
+        Ok(RecordsPreviousConfigPlugin {})
+    }
+}
+
+register_plugin!(
+    "test",
+    "records_previous_config",
+    RecordsPreviousConfigPlugin
+);
+
 async fn create_service(config: Configuration) -> Result<(), BoxError> {
     let schema = include_str!("../../testdata/supergraph.graphql");
     let schema = Schema::parse(schema, &config)?;
@@ -101,6 +125,74 @@ async fn create_service(config: Configuration) -> Result<(), BoxError> {
         )
         .await;
     service.map(|_| ())
+}
+
+/// Plugins registered through the public API have their config deserialized when the
+/// configuration is parsed, like built-in plugins, so each construction reuses the validated value.
+#[test]
+fn user_plugin_config_is_deserialized_when_parsed() {
+    let config: Configuration =
+        "plugins:\n  test.always_starts_and_stops:\n    name: parsed once\n"
+            .parse()
+            .expect("the plugin config is valid");
+
+    let plugin_config: Conf = config
+        .plugin_configs
+        .user("test.always_starts_and_stops")
+        .expect("the plugin's config is kept")
+        .config
+        .typed()
+        .expect("the config was deserialized during parsing");
+    assert_eq!(plugin_config.name, "parsed once");
+}
+
+/// Construction takes user plugins from their parsed config, in configuration order, so later
+/// edits to the raw sections change nothing. A section naming no registered plugin is recorded
+/// for construction to report.
+#[test]
+fn user_plugins_are_built_from_their_parsed_config() {
+    let mut config: Configuration = serde_yaml::from_str(
+        "plugins:\n  test.always_fails_to_start:\n    name: first\n  acme.unregistered: {}\n  test.always_starts_and_stops:\n    name: second\n",
+    )
+    .expect("the user plugin sections deserialize");
+    // Construction must not read the raw sections, so removing them changes nothing below.
+    config.plugins.plugins = None;
+
+    let configs = &config.plugin_configs;
+    let names: Vec<&str> = configs.user_plugins().map(|(name, _)| name).collect();
+    assert_eq!(
+        names,
+        ["test.always_fails_to_start", "test.always_starts_and_stops"]
+    );
+    assert_eq!(configs.unknown_plugins(), ["acme.unregistered"]);
+}
+
+/// On a hot reload, each plugin is built with the config it ran with before.
+#[tokio::test]
+async fn plugins_receive_their_previous_config_on_reload() {
+    let configuration = |name: &str| -> Configuration {
+        format!("plugins:\n  test.records_previous_config:\n    name: {name}\n")
+            .parse()
+            .expect("the plugin config is valid")
+    };
+    let previous = configuration("before");
+    let current = configuration("after");
+    let schema = Schema::parse(include_str!("../../testdata/supergraph.graphql"), &current)
+        .expect("the supergraph is valid");
+
+    create_plugins(
+        &current,
+        &schema,
+        Default::default(),
+        None,
+        None,
+        Default::default(),
+        Some(Arc::new(previous)),
+    )
+    .await
+    .expect("the plugins build");
+
+    assert_eq!(*PREVIOUS_CONFIG.lock(), Some(Some("before".to_string())));
 }
 
 #[tokio::test]
@@ -154,18 +246,29 @@ async fn test_yaml_plugins_combo_start_and_fail() {
     assert!(service.is_err())
 }
 
-#[test]
-fn test_inject_schema_id() {
-    let mut config = json!({ "apollo": {} });
-    inject_schema_id(
-        "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8",
-        &mut config,
-    );
-    let config = serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();
-    assert_eq!(
-        &config.apollo.schema_id,
-        "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
-    );
+/// The telemetry plugin reports against the supergraph schema's ID when Apollo reporting is
+/// configured.
+#[tokio::test(flavor = "multi_thread")]
+async fn telemetry_reports_the_supergraph_schema_id() {
+    let schema_id = "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8";
+    let factory = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.telemetry")
+        .expect("telemetry is registered");
+    let plugin = factory
+        .create_instance(
+            PluginInit::fake_builder()
+                .config(json!({ "apollo": {} }))
+                .supergraph_schema_id(Arc::new(schema_id.to_string()))
+                .full_config(json!({ "telemetry": { "apollo": {} } }))
+                .build(),
+        )
+        .await
+        .expect("telemetry builds");
+    let telemetry = plugin
+        .as_any()
+        .downcast_ref::<crate::plugins::telemetry::Telemetry>()
+        .expect("the telemetry plugin");
+    assert_eq!(telemetry.config.apollo.schema_id, schema_id);
 }
 
 fn get_plugin_config(plugin: &str) -> &str {

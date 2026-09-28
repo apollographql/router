@@ -7,6 +7,7 @@ use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use sha1::Digest;
@@ -69,11 +70,14 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .expect("valid graphql document");
-        let plan = $planner.build_query_plan(&document, None, $options).expect("query plan generated");
+        let options: apollo_federation::query_plan::query_planner::QueryPlanOptions = $options;
+        let plan = $planner.build_query_plan(&document, None, options.clone()).expect("query plan generated");
         insta::assert_snapshot!(plan, @$expected);
         // temporary workaround for correctness errors such as FED-515
         if $validate_correctness {
             apollo_federation::correctness::check_plan($planner.api_schema(), $planner.supergraph_schema(), $planner.subgraph_schemas(), &document, &plan).expect("generated correct plan");
+            use $crate::query_plan::build_query_plan_support::CheckBulbTwin as _;
+            $planner.check_bulb_twin(&document, options);
         }
         plan
     }};
@@ -95,6 +99,73 @@ pub(crate) fn test_planner(
     let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
         .expect("valid supergraph");
     QueryPlanner::new(&supergraph, config).expect("can create query planner")
+}
+
+/// A legacy planner paired with an incremental (BULB) planner over the same
+/// supergraph. `assert_plan!` snapshots the legacy plan and additionally
+/// requires the BULB plan to pass `check_plan`, without snapshotting it.
+pub(crate) struct BulbTwinPlanner {
+    legacy: QueryPlanner,
+    bulb: QueryPlanner,
+}
+
+impl std::ops::Deref for BulbTwinPlanner {
+    type Target = QueryPlanner;
+
+    fn deref(&self) -> &QueryPlanner {
+        &self.legacy
+    }
+}
+
+#[track_caller]
+pub(crate) fn test_planner_with_bulb_twin(
+    function_path: &'static str,
+    config: QueryPlannerConfig,
+    subgraph_names_and_schemas: &[(&str, &str)],
+) -> BulbTwinPlanner {
+    let supergraph = compose(function_path, subgraph_names_and_schemas);
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    let mut bulb_config = config.clone();
+    bulb_config.incremental_planner.enabled = true;
+    BulbTwinPlanner {
+        legacy: QueryPlanner::new(&supergraph, config).expect("can create query planner"),
+        bulb: QueryPlanner::new(&supergraph, bulb_config).expect("can create BULB planner"),
+    }
+}
+
+pub(crate) trait CheckBulbTwin {
+    fn check_bulb_twin(
+        &self,
+        _document: &apollo_compiler::validation::Valid<apollo_compiler::ExecutableDocument>,
+        _options: QueryPlanOptions,
+    ) {
+    }
+}
+
+impl CheckBulbTwin for QueryPlanner {}
+
+impl CheckBulbTwin for BulbTwinPlanner {
+    #[track_caller]
+    fn check_bulb_twin(
+        &self,
+        document: &apollo_compiler::validation::Valid<apollo_compiler::ExecutableDocument>,
+        options: QueryPlanOptions,
+    ) {
+        let plan = self
+            .bulb
+            .build_query_plan(document, None, options)
+            .expect("BULB query plan generated");
+        if let Err(err) = apollo_federation::correctness::check_plan(
+            self.bulb.api_schema(),
+            self.bulb.supergraph_schema(),
+            self.bulb.subgraph_schemas(),
+            document,
+            &plan,
+        ) {
+            panic!("BULB plan failed check_plan: {err}\n{plan}");
+        }
+    }
 }
 
 #[track_caller]

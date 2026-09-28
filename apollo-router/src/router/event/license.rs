@@ -79,7 +79,7 @@ pub enum LicenseSource {
     Registry(UplinkConfig),
 
     /// Apollo graph artifact OCI registry.
-    #[display("Registry")]
+    #[display("OCI")]
     OCI(OciConfig),
 }
 

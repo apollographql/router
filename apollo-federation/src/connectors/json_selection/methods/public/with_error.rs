@@ -20,10 +20,12 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// `->match`, this lets a mapping attach errors to values without interrupting
 /// them:
 ///
-///     status: type_code->match(
-///         ["2", $("VAN")],
-///         [@, @->withError("Unrecognized type code")]
-///     )
+/// ```graphql
+/// status: type_code->match(
+///     ["2", $("VAN")],
+///     [@, @->withError("Unrecognized type code")]
+/// )
+/// ```
 ///
 /// Any number of arguments is allowed, and they may be of any type, in the
 /// spirit of `console.log`: string arguments are interpolated as written, every
@@ -31,7 +33,9 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// and the results are joined with single spaces into one message. So a
 /// diagnostic can carry the offending value along with the prose describing it:
 ///
-///     @->withError("Unrecognized type code:", @.type_code, "in", @.id)
+/// ```graphql
+/// @->withError("Unrecognized type code:", @.type_code, "in", @.id)
+/// ```
 ///
 /// If every argument produces a value, the input flows through unchanged, so
 /// the tail applies to it exactly as if the method were absent. If any argument
@@ -48,7 +52,9 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// An author who wants the message reported even when a path may be missing
 /// says so with `??`, which supplies a value where there would have been none:
 ///
-///     @->withError("Unrecognized type code:", @.type_code ?? "<absent>")
+/// ```graphql
+/// @->withError("Unrecognized type code:", @.type_code ?? "<absent>")
+/// ```
 ///
 /// That spells the absence out in the message text instead of losing the whole
 /// message to it.

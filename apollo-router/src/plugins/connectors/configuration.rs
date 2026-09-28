@@ -104,10 +104,9 @@ pub(crate) fn apply_config(
     // into the logs for any incompatibilities found.
     warn_incompatible_plugins(router_config, &connectors);
 
-    let Some(config) = router_config.apollo_plugins.plugins.get(PLUGIN_NAME) else {
-        return connectors;
-    };
-    let Ok(config) = serde_json::from_value::<ConnectorsConfig>(config.clone()) else {
+    let Some(config) =
+        router_config.typed_plugin_config::<ConnectorsConfig>(&format!("apollo.{PLUGIN_NAME}"))
+    else {
         return connectors;
     };
 
