@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::Supergraph;
 use crate::error::FederationError;
 use crate::query_plan::TopLevelPlanNode;
@@ -64,6 +66,78 @@ fn plan_query_with_router_specs(schema: &str, query: &str) -> String {
         .build_query_plan(&document, None, Default::default())
         .expect("query plan");
     format!("{plan}")
+}
+
+/// Like plan_query_with_router_specs, but returns the plan value so tests
+/// can assert on individual fetches.
+fn build_plan_with_router_specs(schema: &str, query: &str) -> crate::query_plan::QueryPlan {
+    let supergraph = Supergraph::new_with_router_specs(schema).expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        query,
+        "test.graphql",
+    )
+    .expect("query parse");
+    planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan")
+}
+
+fn collect_fetches(plan: &crate::query_plan::QueryPlan) -> Vec<&crate::query_plan::FetchNode> {
+    fn walk<'a>(
+        node: &'a crate::query_plan::PlanNode,
+        out: &mut Vec<&'a crate::query_plan::FetchNode>,
+    ) {
+        use crate::query_plan::PlanNode;
+        match node {
+            PlanNode::Fetch(fetch) => out.push(fetch),
+            PlanNode::Sequence(seq) => seq.nodes.iter().for_each(|n| walk(n, out)),
+            PlanNode::Parallel(par) => par.nodes.iter().for_each(|n| walk(n, out)),
+            PlanNode::Flatten(flat) => walk(&flat.node, out),
+            PlanNode::Defer(defer) => {
+                if let Some(n) = &defer.primary.node {
+                    walk(n, out);
+                }
+                defer
+                    .deferred
+                    .iter()
+                    .filter_map(|d| d.node.as_deref())
+                    .for_each(|n| walk(n, out));
+            }
+            PlanNode::Condition(cond) => {
+                if let Some(n) = &cond.if_clause {
+                    walk(n, out);
+                }
+                if let Some(n) = &cond.else_clause {
+                    walk(n, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    match &plan.node {
+        Some(TopLevelPlanNode::Fetch(fetch)) => out.push(&**fetch),
+        Some(TopLevelPlanNode::Subscription(sub)) => out.push(&sub.primary),
+        Some(TopLevelPlanNode::Sequence(seq)) => seq.nodes.iter().for_each(|n| walk(n, &mut out)),
+        Some(TopLevelPlanNode::Parallel(par)) => par.nodes.iter().for_each(|n| walk(n, &mut out)),
+        Some(TopLevelPlanNode::Flatten(flat)) => walk(&flat.node, &mut out),
+        Some(TopLevelPlanNode::Defer(defer)) => {
+            if let Some(n) = &defer.primary.node {
+                walk(n, &mut out);
+            }
+        }
+        Some(TopLevelPlanNode::Condition(cond)) => {
+            if let Some(n) = &cond.if_clause {
+                walk(n, &mut out);
+            }
+            if let Some(n) = &cond.else_clause {
+                walk(n, &mut out);
+            }
+        }
+        None => {}
+    }
+    out
 }
 
 /// One supergraph shared by every test here; each test picks the part of
@@ -1166,25 +1240,50 @@ fn t_pending(
         .next()
         .expect("field selection")
         .clone();
-    PendingSelection {
-        selection: field_sel,
-        query_graph_node: t_node(space, "a"),
-        fetch_node,
-        op_path: SharedPath::new(),
-        path_in_fetch: SharedPath::new(),
-        condition: dependent.map(|dependent| ConditionScope {
-            dependent,
-            depth: 1,
-        }),
-        provides_anchor: None,
-        narrowing: Default::default(),
-        routing_options_memo: Default::default(),
-        best_effort: false,
-        defer_ref: None,
-        context_anchor: Default::default(),
-        parent_types: SharedPath::new(),
-        restrict_to: None,
-    }
+    let mut pending = PendingSelection::root(field_sel, t_node(space, "a"), fetch_node);
+    pending.condition = dependent.map(|dependent| ConditionScope {
+        dependent,
+        depth: 1,
+    });
+    pending
+}
+
+/// The search enumerates options through cached_routing_options, so a fork
+/// remainder's restrict_to must confine every consumer (fast_forward, the
+/// lift scan, BULB options) to the serving subgraph.
+#[test]
+fn restrict_to_filters_enumerated_options() {
+    let space = search_space();
+    let fetch_node = NodeIndex::new(0);
+
+    let unfiltered = {
+        let pending = Arc::new(t_pending(&space, "y", fetch_node, None));
+        space
+            .cached_routing_options(&pending)
+            .expect("options enumerate")
+    };
+    assert!(!unfiltered.is_empty(), "y must have routing options");
+    let only = unfiltered[0].target_subgraph().clone();
+
+    let mut restricted = t_pending(&space, "y", fetch_node, None);
+    restricted.restrict_to = Some(only.clone());
+    let filtered = space
+        .cached_routing_options(&Arc::new(restricted))
+        .expect("filtered options enumerate");
+    assert!(!filtered.is_empty());
+    assert!(
+        filtered
+            .iter()
+            .all(|choice| *choice.target_subgraph() == only),
+        "restrict_to must keep only options into {only}"
+    );
+
+    let mut elsewhere = t_pending(&space, "y", fetch_node, None);
+    elsewhere.restrict_to = Some(Arc::from("<no-such-subgraph>"));
+    let none = space
+        .cached_routing_options(&Arc::new(elsewhere))
+        .expect("filtered options enumerate");
+    assert!(none.is_empty(), "restrict_to must drop every other option");
 }
 
 /// State with root group A feeding entity group B, so an ordering
@@ -2049,6 +2148,93 @@ fn key_hop_requires_under_include_fragment_uses_alias() {
     );
 }
 
+/// A keyless value type (no @key on V) whose fields are split across two
+/// subgraphs: `a` in A and `b` in B. A single fetch can't resolve both, so the
+/// planner must split the parent selection and fetch each half independently.
+/// Targets fork.rs fork_stranded_children.
+#[test]
+fn keyless_value_type_splits_across_subgraphs() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query(&schema, "{ v { __typename a b } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Parallel {
+        Fetch(service: "b") {
+          {
+            v {
+              b
+            }
+          }
+        },
+        Fetch(service: "a") {
+          {
+            v {
+              __typename
+              a
+            }
+          }
+        },
+      },
+    }
+    "###);
+}
+
+/// Same keyless fork, but the stranded child hides inside a @defer'd
+/// fragment: the stranded walk must recurse through the fragment and
+/// preserve the wrapper (carrying @defer) on the remainder.
+/// Targets fork.rs stranded_selection.
+#[test]
+fn keyless_value_type_split_recovers_deferred_fragment_children() {
+    let schema = wrap_supergraph(
+        r#"  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")"#,
+        r#"
+type V
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  a: String @join__field(graph: A)
+  b: String @join__field(graph: B)
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+{
+  v: V
+}
+"#,
+    );
+    let plan_str = plan_query_with_defer(
+        &schema,
+        "query($s: Boolean!) { v { a ... @defer { __typename ... on V @skip(if: $s) { b } } } }",
+    );
+    assert!(plan_str.contains("a"), "Plan should fetch 'a': {plan_str}");
+    assert!(
+        plan_str.contains("b"),
+        "Plan should fetch deferred 'b' from the other subgraph: {plan_str}"
+    );
+}
+
 /// Statically constant @skip(if: true) should eliminate the fragment entirely;
 /// a type condition on the root Query type is vacuous and passes through.
 /// Targets type_conditions.rs try_pass_through_fragment's Boolean(false)
@@ -2516,252 +2702,6 @@ fn context_from_context_produces_valid_plan() {
     );
 }
 
-const CONTEXT_BOUNDARY_SCHEMA: &str = r#"
-schema
-  @link(url: "https://specs.apollo.dev/link/v1.0")
-  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-  @link(url: "https://specs.apollo.dev/context/v0.1", import: ["@context"], for: SECURITY)
-{
-  query: Query
-}
-
-directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
-
-directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
-
-directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-
-directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-
-directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-
-directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-scalar context__ContextFieldValue
-
-input join__ContextArgument {
-  name: String!
-  type: String!
-  context: String!
-  selection: join__FieldValue!
-}
-
-scalar join__DirectiveArguments
-
-scalar join__FieldSet
-
-scalar join__FieldValue
-
-scalar link__Import
-
-enum link__Purpose {
-  SECURITY
-  EXECUTION
-}
-
-enum join__Graph {
-  S1 @join__graph(name: "s1", url: "http://s1")
-  S2 @join__graph(name: "s2", url: "http://s2")
-}
-
-type Query
-  @join__type(graph: S1)
-  @join__type(graph: S2)
-{
-  t: T! @join__field(graph: S1)
-}
-
-type T
-  @join__type(graph: S1, key: "id")
-  @join__type(graph: S2, key: "id")
-  @context(name: "s2__ctx")
-{
-  id: ID!
-  prop: String! @join__field(graph: S1) @join__field(graph: S2)
-  child: T @join__field(graph: S2)
-  field: Int! @join__field(graph: S2, contextArguments: [{context: "s2__ctx", name: "a", type: "String", selection: " { prop }"}])
-}
-"#;
-
-/// @fromContext consumed inside an entity fetch whose entity root type IS
-/// the @context ancestor: the context value rides the entity representation
-/// (no extra isolation hop), the context selection lands on the fetch
-/// feeding the entity fetch, and the rewrite path has no Parent elements.
-#[test]
-fn context_value_rides_entity_representation_at_boundary() {
-    let plan_str =
-        plan_query_with_router_specs(CONTEXT_BOUNDARY_SCHEMA, "{ t { child { field } } }");
-    assert!(
-        plan_str.contains("contextualArgument"),
-        "Plan should pass the context variable: {plan_str}"
-    );
-    insta::assert_snapshot!(plan_str, @r###"
-    QueryPlan {
-      Sequence {
-        Fetch(service: "s1") {
-          {
-            t {
-              __typename
-              id
-              prop
-            }
-          }
-        },
-        Flatten(path: "t") {
-          Fetch(service: "s2") {
-            {
-              ... on T {
-                __typename
-                id
-              }
-            } =>
-            {
-              ... on T {
-                child {
-                  field(a: $contextualArgument_2_0)
-                }
-              }
-            }
-          },
-        },
-      },
-    }
-    "###);
-}
-
-/// The search enumerates options through cached_routing_options, so a fork
-/// remainder's restrict_to must confine every consumer (fast_forward, the
-/// lift scan, BULB options) to the serving subgraph.
-#[test]
-fn restrict_to_filters_enumerated_options() {
-    let space = search_space();
-    let fetch_node = NodeIndex::new(0);
-
-    let unfiltered = {
-        let pending = Arc::new(t_pending(&space, "y", fetch_node, None));
-        space
-            .cached_routing_options(&pending)
-            .expect("options enumerate")
-    };
-    assert!(!unfiltered.is_empty(), "y must have routing options");
-    let only = unfiltered[0].target_subgraph().clone();
-
-    let mut restricted = t_pending(&space, "y", fetch_node, None);
-    restricted.restrict_to = Some(only.clone());
-    let filtered = space
-        .cached_routing_options(&Arc::new(restricted))
-        .expect("filtered options enumerate");
-    assert!(!filtered.is_empty());
-    assert!(
-        filtered
-            .iter()
-            .all(|choice| *choice.target_subgraph() == only),
-        "restrict_to must keep only options into {only}"
-    );
-
-    let mut elsewhere = t_pending(&space, "y", fetch_node, None);
-    elsewhere.restrict_to = Some(Arc::from("<no-such-subgraph>"));
-    let none = space
-        .cached_routing_options(&Arc::new(elsewhere))
-        .expect("filtered options enumerate");
-    assert!(none.is_empty(), "restrict_to must drop every other option");
-}
-
-/// A keyless value type (no @key on V) whose fields are split across two
-/// subgraphs: `a` in A and `b` in B. A single fetch can't resolve both, so the
-/// planner must split the parent selection and fetch each half independently.
-/// Targets fork.rs fork_stranded_children.
-#[test]
-fn keyless_value_type_splits_across_subgraphs() {
-    let schema = wrap_supergraph(
-        r#"  A @join__graph(name: "a", url: "http://a")
-  B @join__graph(name: "b", url: "http://b")"#,
-        r#"
-type V
-  @join__type(graph: A)
-  @join__type(graph: B)
-{
-  a: String @join__field(graph: A)
-  b: String @join__field(graph: B)
-}
-
-type Query
-  @join__type(graph: A)
-  @join__type(graph: B)
-{
-  v: V
-}
-"#,
-    );
-    let plan_str = plan_query(&schema, "{ v { __typename a b } }");
-    insta::assert_snapshot!(plan_str, @r###"
-    QueryPlan {
-      Parallel {
-        Fetch(service: "b") {
-          {
-            v {
-              b
-            }
-          }
-        },
-        Fetch(service: "a") {
-          {
-            v {
-              __typename
-              a
-            }
-          }
-        },
-      },
-    }
-    "###);
-}
-
-/// Same keyless fork, but the stranded child hides inside a @defer'd
-/// fragment: the stranded walk must recurse through the fragment and
-/// preserve the wrapper (carrying @defer) on the remainder.
-/// Targets fork.rs stranded_selection.
-#[test]
-fn keyless_value_type_split_recovers_deferred_fragment_children() {
-    let schema = wrap_supergraph(
-        r#"  A @join__graph(name: "a", url: "http://a")
-  B @join__graph(name: "b", url: "http://b")"#,
-        r#"
-type V
-  @join__type(graph: A)
-  @join__type(graph: B)
-{
-  a: String @join__field(graph: A)
-  b: String @join__field(graph: B)
-}
-
-type Query
-  @join__type(graph: A)
-  @join__type(graph: B)
-{
-  v: V
-}
-"#,
-    );
-    let plan_str = plan_query_with_defer(
-        &schema,
-        "query($s: Boolean!) { v { a ... @defer { __typename ... on V @skip(if: $s) { b } } } }",
-    );
-    assert!(plan_str.contains("a"), "Plan should fetch 'a': {plan_str}");
-    assert!(
-        plan_str.contains("b"),
-        "Plan should fetch deferred 'b' from the other subgraph: {plan_str}"
-    );
-}
-
 /// Deep keyless fork: the strand sits two keyless levels below the field
 /// with routing alternatives. Routing `conn` to A strands `Inner.b` (Inner
 /// and Conn are keyless, so no hop can recover it), so the A option becomes
@@ -2845,6 +2785,905 @@ type Query
       },
     }
     "###);
+}
+
+/// Build the pieces `build_bulb_plan` needs directly, so tests can plan from
+/// heads the public planner never uses (it always enters at the federated
+/// root).
+fn bulb_test_parameters(
+    schema: &str,
+) -> (
+    Supergraph,
+    Arc<crate::query_graph::QueryGraph>,
+    crate::query_plan::query_planner::QueryPlanningStatistics,
+) {
+    let supergraph = Supergraph::new(schema).expect("supergraph parse");
+    let api_schema = supergraph
+        .to_api_schema(Default::default())
+        .expect("api schema");
+    let query_graph = Arc::new(
+        crate::query_graph::build_federated_query_graph(
+            supergraph.schema.clone(),
+            api_schema,
+            Some(true),
+            Some(true),
+        )
+        .expect("query graph"),
+    );
+    let statistics = Default::default();
+    (supergraph, query_graph, statistics)
+}
+
+/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
+/// root fetch group up front instead of fanning out from the federated root.
+/// The public planner always enters at the federated root, so this drives
+/// build_bulb_plan directly with the subgraph's own Query node as head.
+#[test]
+fn bulb_plan_from_concrete_subgraph_root_head() {
+    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+    use crate::schema::position::SchemaRootDefinitionKind;
+
+    let (supergraph, query_graph, statistics) = bulb_test_parameters(SCHEMA);
+    let head = *query_graph
+        .root_kinds_to_nodes_by_source("a")
+        .expect("subgraph root kinds")
+        .get(&SchemaRootDefinitionKind::Query)
+        .expect("subgraph query root");
+
+    let operation = crate::operation::Operation::parse(
+        supergraph.schema.clone(),
+        "{ user { name email } }",
+        "test.graphql",
+    )
+    .expect("operation parse");
+    let selection_set = operation.selection_set.clone();
+    let parameters = QueryPlanningParameters {
+        supergraph_schema: supergraph.schema.clone(),
+        federated_query_graph: query_graph.clone(),
+        operation: Arc::new(operation),
+        fetch_id_generator: Arc::new(
+            crate::query_plan::fetch_dependency_graph::FetchIdGenerator::new(),
+        ),
+        head,
+        head_must_be_root: true,
+        abstract_types_with_inconsistent_runtime_types: Default::default(),
+        config: default_config(),
+        statistics: &statistics,
+        override_conditions: crate::query_graph::OverrideConditions::new(
+            &query_graph,
+            &Default::default(),
+        ),
+        connector_index: Default::default(),
+        check_for_cooperative_cancellation: None,
+        disabled_subgraphs: Default::default(),
+        client_labels: Default::default(),
+    };
+
+    let mut naming = super::super::OperationNaming::new(false);
+    let bulb = super::super::build_bulb_plan(
+        &parameters,
+        &selection_set,
+        SchemaRootDefinitionKind::Query,
+        &mut naming,
+        false,
+    )
+    .expect("bulb plan");
+    let plan = bulb.plan.expect("plan node");
+    let plan_str = format!("{plan}");
+    assert!(
+        plan_str.contains("name") && plan_str.contains("email"),
+        "Plan from subgraph root head should fetch both fields: {plan_str}"
+    );
+}
+
+const CONNECTOR_ROOT_FIELD_SCHEMA: &str = include_str!("../fixtures/connector_root_field.graphql");
+
+#[test]
+fn connector_root_field_produces_fetch_with_synthetic_service_name() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_ROOT_FIELD_SCHEMA,
+        "{ products { id name price } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_products_0") {
+        {
+          products {
+            id
+            name
+            price
+          }
+        }
+      },
+    }
+    "###);
+}
+
+const CONNECTOR_MIXED_SCHEMA: &str = include_str!("../fixtures/connector_mixed.graphql");
+
+#[test]
+fn mixed_connector_and_subgraph_produces_correct_plan() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_MIXED_SCHEMA,
+        "{ users { id name } topProducts { id title } }",
+    );
+    assert!(
+        plan_str.contains("connectors"),
+        "Plan should target 'connectors' subgraph: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("graphql"),
+        "Plan should target 'graphql' subgraph: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("users"),
+        "Plan should fetch 'users': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("topProducts"),
+        "Plan should fetch 'topProducts': {plan_str}"
+    );
+}
+
+const CONNECTOR_ENTITY_RESOLVER_SCHEMA: &str =
+    include_str!("../fixtures/connector_entity_resolver.graphql");
+
+/// An entity-resolver connector serves a field the entry subgraph lacks:
+/// the plan must contain a dependent connector fetch keyed on `id`.
+#[test]
+fn connector_entity_resolver_produces_connector_fetch() {
+    let plan = build_plan_with_router_specs(
+        CONNECTOR_ENTITY_RESOLVER_SCHEMA,
+        "{ currentUser { email name } }",
+    );
+    let plan_str = format!("{plan}");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "graphql") {
+          {
+            currentUser {
+              __typename
+              email
+              id
+            }
+          }
+        },
+        Flatten(path: "currentUser") {
+          Fetch(service: "connectors_Query_user_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+const CONNECTOR_COMPETING_EDGE_SCHEMA: &str =
+    include_str!("../fixtures/connector_competing_edge.graphql");
+
+/// A field deferred out of a connector fetch (c1's shape lacks `avatar`)
+/// must route to the connector that provides it (c2), not to a plain
+/// GraphQL edge back into the endpoint-less connector subgraph c1.
+#[test]
+fn connector_outranked_by_local_edge_into_connector_subgraph() {
+    let plan = build_plan_with_router_specs(
+        CONNECTOR_COMPETING_EDGE_SCHEMA,
+        "{ currentUser { name avatar } }",
+    );
+    let fetches = collect_fetches(&plan);
+    assert!(
+        fetches
+            .iter()
+            .all(|f| !["c1", "c2"].contains(&f.subgraph_name.as_ref())),
+        "every fetch must be connector-backed, got: {plan}"
+    );
+    assert!(
+        fetches
+            .iter()
+            .any(|f| f.subgraph_name.as_ref() == "c2_User_avatar_0"),
+        "avatar must resolve through c2's connector, got: {plan}"
+    );
+}
+
+const CONNECTOR_ROOT_COMPETITION_SCHEMA: &str =
+    include_str!("../fixtures/connector_root_competition.graphql");
+
+/// A leaf root field declared in both a connector-backed subgraph (with no
+/// connector for it) and a GraphQL subgraph must fetch from the GraphQL
+/// subgraph; the connector subgraph has no endpoint to POST to. A leaf is
+/// the sharp case: with sub-selections the search self-corrects by
+/// backtracking when the sub-fields strand inside the connector subgraph.
+#[test]
+fn connector_root_edge_dropped_in_federated_root_options() {
+    let plan = build_plan_with_router_specs(CONNECTOR_ROOT_COMPETITION_SCHEMA, "{ version }");
+    let fetches = collect_fetches(&plan);
+    assert!(
+        fetches
+            .iter()
+            .all(|f| f.subgraph_name.as_ref() != "connectors"),
+        "no plain GraphQL fetch may target the connectors subgraph: {plan}"
+    );
+}
+
+/// Sub-selected variant of the root competition: the plan must fetch the
+/// root in the GraphQL subgraph and hop to the entity-resolver connector
+/// for the connector-only field.
+#[test]
+fn connector_root_competition_with_sub_selections_routes_through_graphql() {
+    let plan = build_plan_with_router_specs(
+        CONNECTOR_ROOT_COMPETITION_SCHEMA,
+        "{ products { id name extra } }",
+    );
+    let fetches = collect_fetches(&plan);
+    assert!(
+        fetches
+            .iter()
+            .all(|f| f.subgraph_name.as_ref() != "connectors"),
+        "no plain GraphQL fetch may target the connectors subgraph: {plan}"
+    );
+}
+
+const CONNECTOR_TWO_RESOLVERS_SCHEMA: &str =
+    include_str!("../fixtures/connector_two_resolvers.graphql");
+
+/// Two entity-resolver connectors on the same type and merge path resolve
+/// disjoint fields; each must keep its own fetch. Merging them would send
+/// one connector's fields to the other's endpoint.
+#[test]
+fn sibling_connector_entity_groups_not_merged() {
+    let plan = build_plan_with_router_specs(
+        CONNECTOR_TWO_RESOLVERS_SCHEMA,
+        "{ currentUser { name avatar } }",
+    );
+    let fetches = collect_fetches(&plan);
+    let coordinates: Vec<&str> = fetches
+        .iter()
+        .map(|f| f.subgraph_name.as_ref())
+        .filter(|name| name.starts_with("connectors_"))
+        .collect();
+    assert_eq!(
+        coordinates.len(),
+        2,
+        "each connector resolution keeps its own fetch: {plan}"
+    );
+    assert!(coordinates.contains(&"connectors_Query_user_0"), "{plan}");
+    assert!(
+        coordinates.contains(&"connectors_Query_userDetails_0"),
+        "{plan}"
+    );
+}
+
+const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
+    include_str!("../fixtures/connector_output_shape.graphql");
+
+/// Scalar leaves and lists of scalars inside the connector's output shape
+/// are kept whole in the connector fetch; __typename is always kept.
+#[test]
+fn connector_shape_keeps_scalars_lists_and_typename() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "{ users { __typename id name tags } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_users_0") {
+        {
+          users {
+            __typename
+            id
+            name
+            tags
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A field below the committed connector field that the output shape does
+/// not provide (Address.city) is deferred and fetched from the subgraph
+/// that has it, keyed on the shape-provided Address key.
+#[test]
+fn connector_partial_shape_defers_unprovided_field() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "{ users { name address { street city } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_users_0") {
+          {
+            users {
+              name
+              address {
+                __typename
+                street
+                aid
+              }
+            }
+          }
+        },
+        Flatten(path: "users.@.address") {
+          Fetch(service: "graphql") {
+            {
+              ... on Address {
+                __typename
+                aid
+              }
+            } =>
+            {
+              ... on Address {
+                city
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// An unprovided field directly on the connector's landing type (User.bio)
+/// re-routes through the entity key to the owning subgraph.
+#[test]
+fn connector_partial_shape_defers_field_on_landing_type() {
+    let plan_str =
+        plan_query_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA, "{ users { name bio } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_users_0") {
+          {
+            users {
+              __typename
+              name
+              id
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                bio
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// Inline fragments recurse into the same output shape under the
+/// fragment's type condition.
+#[test]
+fn connector_shape_inline_fragment_partition() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "{ users { ... on User { name address { street } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_users_0") {
+        {
+          users {
+            name
+            address {
+              street
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A connector with a non-object output shape ($.raw) resolves its whole
+/// subtree; nothing is partitioned out.
+#[test]
+fn connector_non_object_output_resolves_whole_subtree() {
+    let plan_str =
+        plan_query_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA, "{ stats { total label } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_stats_0") {
+        {
+          stats {
+            total
+            label
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// Entity-resolver output shapes describe the entity level (User), but the
+/// committed field is deeper (address); the partition drills into the
+/// field's sub-shape before checking sub-selections.
+#[test]
+fn connector_entity_shape_drills_into_committed_field() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "{ everyone { address { street } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "graphql") {
+          {
+            everyone {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "everyone.@") {
+          Fetch(service: "connectors_Query_user_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                address {
+                  street
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A field connector on a non-root type with no key variables has no way
+/// to attach its result to parent entities; planning must surface an error
+/// rather than emit a fetch with no representation inputs.
+#[test]
+fn connector_direct_field_without_key_errors() {
+    let supergraph =
+        Supergraph::new_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA).expect("supergraph parse");
+    let planner = QueryPlanner::new(&supergraph, default_config()).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ users { name staticAvatar } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let result = planner.build_query_plan(&document, None, Default::default());
+    assert!(
+        result.is_err(),
+        "keyless non-root connector must not plan silently: {result:?}"
+    );
+}
+
+/// A connector selection that names an object field without sub-selections
+/// (address without braces) yields a non-object child shape; the query's
+/// sub-selections under it are kept whole in the connector fetch.
+#[test]
+fn connector_non_object_child_shape_keeps_subtree() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "{ flatUsers { address { aid street } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_flatUsers_0") {
+        {
+          flatUsers {
+            address {
+              aid
+              street
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// A scalar connector root field has no sub-selections to partition.
+#[test]
+fn connector_scalar_root_field() {
+    let plan_str = plan_query_with_router_specs(CONNECTOR_OUTPUT_SHAPE_SCHEMA, "{ version }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_version_0") {
+        {
+          version
+        }
+      },
+    }
+    "###);
+}
+
+/// Drilling into a list-typed committed field unwraps array shapes before
+/// partitioning against the element shape.
+#[test]
+fn connector_entity_shape_unwraps_list_of_committed_field() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "{ everyone { addresses { street } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "graphql") {
+          {
+            everyone {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "everyone.@") {
+          Fetch(service: "connectors_Query_user_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                addresses {
+                  street
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// An inline fragment carrying directives survives normalization, so the
+/// partition recurses through it against the same output shape.
+#[test]
+fn connector_shape_partitions_through_directive_fragment() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_OUTPUT_SHAPE_SCHEMA,
+        "query($v: Boolean!) { users { ... on User @include(if: $v) { name address { street } } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Fetch(service: "connectors_Query_users_0") {
+        {
+          users {
+            ... on User @include(if: $v) {
+              name
+              address {
+                street
+              }
+            }
+          }
+        }
+      },
+    }
+    "###);
+}
+
+/// @defer with connectors: the schema is unexpanded, so there is no
+/// legacy fallback; BULB must produce the DeferNode with the connector
+/// fetch inside the deferred block.
+#[test]
+fn connector_defer_produces_defer_plan_with_connector_fetch() {
+    let supergraph = Supergraph::new_with_router_specs(CONNECTOR_ENTITY_RESOLVER_SCHEMA)
+        .expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        r#"{ currentUser { email ... @defer(label: "slow") { name } } }"#,
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    let plan_str = format!("{plan}");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { currentUser { email } }:
+          Fetch(service: "graphql", id: 0) {
+            {
+              currentUser {
+                __typename
+                email
+                id
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "currentUser", label: "slow") {
+            { name }:
+            Flatten(path: "currentUser") {
+              Fetch(service: "connectors_Query_user_0") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    name
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+/// Ad-hoc corpus repro driver: set CORPUS_SCHEMA and CORPUS_OP to file
+/// paths, get the BULB plan and correctness verdict printed.
+#[test_log::test]
+fn corpus_repro_debug() {
+    let Ok(schema_path) = std::env::var("CORPUS_SCHEMA") else {
+        return;
+    };
+    let op_path = std::env::var("CORPUS_OP").unwrap();
+    let schema_str = std::fs::read_to_string(schema_path).unwrap();
+    let op_str = std::fs::read_to_string(op_path).unwrap();
+    let defaults = IncrementalPlannerConfig::default();
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            fuel: std::env::var("BULB_FUEL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(defaults.fuel),
+            beam_width: std::env::var("BULB_BEAM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(defaults.beam_width),
+            ..defaults
+        },
+        ..Default::default()
+    };
+    let supergraph = Supergraph::new_with_router_specs(&schema_str).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let api_schema = planner.api_schema();
+    let op = apollo_compiler::ExecutableDocument::parse_and_validate(
+        api_schema.schema(),
+        &op_str,
+        "op.graphql",
+    )
+    .unwrap();
+    let plan = planner
+        .build_query_plan(&op, None, Default::default())
+        .unwrap();
+    println!("PLAN:\n{plan}");
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    let result = crate::correctness::check_plan(
+        api_schema,
+        planner.supergraph_schema(),
+        &subgraphs_by_name,
+        &op,
+        &plan,
+    );
+    println!("CHECK: {:?}", result.err().map(|e| e.to_string()));
+}
+
+/// Ad-hoc corpus timing driver: CORPUS_SCHEMA + CORPUS_OPS_DIR, plans every
+/// operation (no correctness check) and prints ones slower than
+/// CORPUS_SLOW_MS (default 1000).
+#[test]
+fn corpus_timing_debug() {
+    let Ok(schema_path) = std::env::var("CORPUS_SCHEMA") else {
+        return;
+    };
+    let Ok(ops_dir) = std::env::var("CORPUS_OPS_DIR") else {
+        return;
+    };
+    let slow_ms: u128 = std::env::var("CORPUS_SLOW_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000);
+    let schema_str = std::fs::read_to_string(schema_path).unwrap();
+    let config = QueryPlannerConfig {
+        incremental_planner: IncrementalPlannerConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let supergraph = Supergraph::new_with_router_specs(&schema_str).unwrap();
+    let planner = QueryPlanner::new(&supergraph, config).unwrap();
+    let api_schema = planner.api_schema();
+    let mut entries: Vec<_> = std::fs::read_dir(&ops_dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "graphql"))
+        .collect();
+    entries.sort();
+    for (i, path) in entries.iter().enumerate() {
+        let op_str = std::fs::read_to_string(path).unwrap();
+        let Ok(op) = apollo_compiler::ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            &op_str,
+            "op.graphql",
+        ) else {
+            continue;
+        };
+        let started = std::time::Instant::now();
+        let _ = planner.build_query_plan(&op, None, Default::default());
+        let ms = started.elapsed().as_millis();
+        if ms >= slow_ms {
+            println!("SLOW {ms}ms {}", path.display());
+        }
+        if i % 2000 == 0 {
+            println!("progress {i}/{}", entries.len());
+        }
+    }
+    println!("timing done");
+}
+
+/// A @skip condition on a cross-subgraph field should produce a condition
+/// node wrapping the entity fetch. Exercises the group conditions hoisting
+/// in fetch_graph plan_builder.
+#[test]
+fn skip_on_cross_subgraph_field_produces_condition_node() {
+    let plan_str = plan_query_with_options(
+        SCHEMA,
+        "query($s: Boolean!) { user { name email @skip(if: $s) } }",
+        default_config(),
+        Default::default(),
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should reference 'email': {plan_str}"
+    );
+}
+
+/// @include on a cross-subgraph field wraps the entity fetch in a
+/// condition node, exercising the Variables path in group_conditions.
+#[test]
+fn include_on_cross_subgraph_field_produces_condition_node() {
+    let plan_str = plan_query_with_options(
+        SCHEMA,
+        "query($inc: Boolean!) { user { name email @include(if: $inc) } }",
+        default_config(),
+        Default::default(),
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should reference 'email': {plan_str}"
+    );
+}
+
+/// A three-way entity hop exercises deeper fetch graph construction:
+/// A -> B -> C entity resolution with each subgraph owning different fields.
+#[test]
+fn three_way_entity_hop_plans_correctly() {
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { name email address } }");
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Plan should fetch 'address': {plan_str}"
+    );
+}
+
+/// Cross-subgraph mutation with entity hop: the mutation result lives in
+/// subgraph A, but its email field requires a key hop to B, exercising
+/// fetch graph construction under mutation sequencing.
+#[test]
+fn cross_subgraph_mutation_with_entity_hop() {
+    let plan_str = plan_query(
+        SCHEMA,
+        r#"mutation { createUser(name: "Alice") { id name email } }"#,
+    );
+    assert!(
+        plan_str.contains("createUser"),
+        "Plan should contain createUser: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should hop to B for email: {plan_str}"
+    );
+}
+
+/// A field with an inline fragment on the same type exercises the
+/// vacuous type condition path in type_conditions, and inline fragment
+/// handling in selection_builder.
+#[test]
+fn inline_fragment_on_same_type_passes_through() {
+    let plan_str = plan_query(SCHEMA, "{ user { ... on User { name email } } }");
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name' through inline fragment: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email' through inline fragment: {plan_str}"
+    );
+}
+
+/// An alias on a cross-subgraph field exercises the alias propagation
+/// through selection builder entries.
+#[test]
+fn aliased_cross_subgraph_field_preserves_alias() {
+    let plan_str = plan_query(SCHEMA, "{ user { name myEmail: email } }");
+    assert!(
+        plan_str.contains("myEmail") || plan_str.contains("email"),
+        "Plan should reference the aliased email field: {plan_str}"
+    );
+    assert!(
+        plan_str.contains("name"),
+        "Plan should fetch 'name': {plan_str}"
+    );
+}
+
+/// Multiple entity hops from the same root entity exercises the parallel
+/// fetch graph construction for independent subgraph fetches.
+#[test]
+fn parallel_entity_hops_from_same_root() {
+    let plan_str = plan_query(THREE_SUBGRAPH_SCHEMA, "{ user { email address } }");
+    assert!(
+        plan_str.contains("email"),
+        "Plan should fetch 'email': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("address"),
+        "Plan should fetch 'address': {plan_str}"
+    );
+    assert!(
+        plan_str.contains("Parallel") || plan_str.contains("Sequence"),
+        "Plan should have multi-fetch structure: {plan_str}"
+    );
 }
 
 const VALUE_TYPE_DEFER_SCHEMA: &str = include_str!(

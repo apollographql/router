@@ -2,14 +2,18 @@
 source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
-configuration had errors: 
-1. at line 5
+apollo::configuration::schema
 
-  
-  supergraph:
-    # The socket address and port to listen on
-    # Defaults to 127.0.0.1:4000
-    listen: true
-            ^----- true is not valid under any of the schemas listed in the 'anyOf' keyword
+  × schema validation error
+  ╰─▶ schema validation error
 
+Error: apollo::configuration::validation
 
+  × true is not valid under any of the schemas listed in the 'anyOf' keyword
+   ╭─[5:11]
+ 4 │   # Defaults to 127.0.0.1:4000
+ 5 │   listen: true
+   ·           ──┬─
+   ·             ╰── true is not valid under any of the schemas listed in the 'anyOf' keyword
+ 6 │         
+   ╰────

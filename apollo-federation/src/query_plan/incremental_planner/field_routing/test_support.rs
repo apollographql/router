@@ -45,6 +45,7 @@ fn space_for(schema: ValidFederationSchema, api: ValidFederationSchema) -> Field
         cached_query_graph: CachedQueryGraph::new(Arc::new(query_graph), Default::default()),
         supergraph_schema: schema,
         inconsistent_abstract_types: Default::default(),
+        connector_index: Default::default(),
         caches: super::PlannerCaches::new(),
         disabled_subgraphs: Default::default(),
     }

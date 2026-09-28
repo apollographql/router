@@ -158,6 +158,24 @@ pub struct ContextCondition {
     pub(crate) argument_type: Node<Type>,
 }
 
+impl ContextCondition {
+    pub(crate) fn types_with_context_set(&self) -> &IndexSet<CompositeTypeDefinitionPosition> {
+        &self.types_with_context_set
+    }
+
+    pub(crate) fn argument_name(&self) -> &Name {
+        &self.argument_name
+    }
+
+    pub(crate) fn argument_coordinate(&self) -> &ObjectFieldArgumentDefinitionPosition {
+        &self.argument_coordinate
+    }
+
+    pub(crate) fn argument_type(&self) -> &Node<Type> {
+        &self.argument_type
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct QueryGraphEdge {
     /// Indicates what kind of edge this is and what the edge does/represents. For instance, if the

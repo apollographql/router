@@ -21,7 +21,6 @@ use crate::operation::InlineFragmentSelection;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
-use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::schema::ValidFederationSchema;
@@ -111,72 +110,42 @@ impl FieldRoutingSearchSpace {
         state: &mut PlanState,
         pending: &PendingSelection,
     ) -> Result<bool, FederationError> {
-        if let Selection::InlineFragment(frag_sel) = &pending.selection
-            && let Some(type_cond) = &frag_sel.inline_fragment.type_condition_position
-        {
-            let current_node = self.qg().node_weight(pending.query_graph_node)?;
-
-            let is_vacuous =
-                if matches!(current_node.type_, QueryGraphNodeType::FederatedRootType(_)) {
-                    true
-                } else {
-                    let current_type: CompositeTypeDefinitionPosition =
-                        current_node.type_.clone().try_into()?;
-                    let current_schema = self.qg().schema_by_source(&current_node.source)?;
-                    let current_runtime_types =
-                        current_schema.possible_runtime_types(current_type.clone())?;
-                    let cond_runtime_types = self
-                        .supergraph_schema
-                        .possible_runtime_types(type_cond.clone())?;
-                    current_runtime_types.is_subset(&cond_runtime_types)
-                };
-
-            if is_vacuous {
-                trace!(
-                    type_condition = %type_cond,
-                    "vacuous type condition, treating as pass-through",
-                );
-                let has_defer = frag_sel
-                    .inline_fragment
-                    .directives
-                    .iter()
-                    .any(|d| d.name == "defer");
-                let child_defer_ref = if has_defer {
-                    extract_defer_label(&frag_sel.inline_fragment)
-                        .or_else(|| pending.defer_ref.clone())
-                } else {
-                    pending.defer_ref.clone()
-                };
-                let non_defer_directives: DirectiveList = frag_sel
-                    .inline_fragment
-                    .directives
-                    .iter()
-                    .filter(|d| d.name != "defer")
-                    .cloned()
-                    .collect();
-                let child_op_path = if !non_defer_directives.is_empty() {
-                    let stripped = frag_sel
-                        .inline_fragment
-                        .with_updated_directives(non_defer_directives);
-                    let stripped = stripped.with_updated_type_condition(None);
-                    pending
-                        .op_path
-                        .pushed(Arc::new(OpPathElement::InlineFragment(stripped)))
-                } else {
-                    pending.op_path.clone()
-                };
-                for sub_sel in frag_sel.selection_set.selections.values().rev().cloned() {
-                    state.push_pending(
-                        pending
-                            .fork(sub_sel)
-                            .with_op_path(child_op_path.clone())
-                            .with_defer(child_defer_ref.clone()),
-                    );
-                }
-                return Ok(true);
-            }
+        let Selection::InlineFragment(frag_sel) = &pending.selection else {
+            return Ok(false);
+        };
+        let Some(type_cond) = &frag_sel.inline_fragment.type_condition_position else {
+            return Ok(false);
+        };
+        if !self.is_vacuous_type_condition(pending.query_graph_node, type_cond)? {
+            return Ok(false);
         }
-        Ok(false)
+        trace!(
+            type_condition = %type_cond,
+            "vacuous type condition, treating as pass-through",
+        );
+        let child_defer_ref =
+            extract_defer_label(&frag_sel.inline_fragment).or_else(|| pending.defer_ref.clone());
+        // The condition is dropped; any other directives still gate the
+        // children, so they ride the op path on a condition-less fragment.
+        let stripped = strip_defer_directive(&frag_sel.inline_fragment);
+        let child_op_path = if stripped.directives.is_empty() {
+            pending.op_path.clone()
+        } else {
+            pending
+                .op_path
+                .pushed(Arc::new(OpPathElement::InlineFragment(
+                    stripped.with_updated_type_condition(None),
+                )))
+        };
+        for sub_sel in frag_sel.selection_set.selections.values().rev().cloned() {
+            state.push_pending(
+                pending
+                    .fork(sub_sel)
+                    .with_op_path(child_op_path.clone())
+                    .with_defer(child_defer_ref.clone()),
+            );
+        }
+        Ok(true)
     }
 
     /// Type explosion: the condition is an abstract type whose runtime types

@@ -120,60 +120,32 @@ pub(crate) fn build_bulb_plan(
         inconsistent_abstract_types: parameters
             .abstract_types_with_inconsistent_runtime_types
             .clone(),
+        connector_index: parameters.connector_index.clone(),
         caches: field_routing::PlannerCaches::new(),
         disabled_subgraphs: parameters.disabled_subgraphs.clone(),
     };
 
     let root_qg_node = parameters.head;
     let root_node_data = query_graph.node_weight(root_qg_node)?;
-    match &root_node_data.type_ {
+    let initial = match &root_node_data.type_ {
         QueryGraphNodeType::SchemaType(pos) => {
             let root_type: CompositeTypeDefinitionPosition = pos.clone().try_into()?;
-
             let mut graph = FetchGraph::new();
             let fetch_node = graph.get_or_create_root_group(&root_node_data.source, root_type);
             let pending = root_pending_selections(selection_set, root_qg_node, fetch_node);
-            let initial = PlanState::with_graph(graph, pending);
-            run_bulb_and_finalize(
-                &search_space,
-                parameters,
-                selection_set,
-                initial,
-                root_kind,
-                naming,
-                has_defers,
-            )
+            PlanState::with_graph(graph, pending)
         }
-        QueryGraphNodeType::FederatedRootType(_) => build_bulb_plan_from_federated_root(
-            &search_space,
-            parameters,
+        // A FederatedRootType head fans out to per-subgraph roots via
+        // SubgraphEnteringTransition edges; commit_choice creates the root
+        // fetch group from the chosen subgraph, so the placeholder is unused.
+        QueryGraphNodeType::FederatedRootType(_) => PlanState::new(root_pending_selections(
             selection_set,
-            root_kind,
-            naming,
-            has_defers,
-        ),
-    }
-}
-
-/// Handle a FederatedRootType head (fans out to per-subgraph roots via
-/// `SubgraphEnteringTransition` edges): one `PendingSelection` per
-/// top-level field.
-fn build_bulb_plan_from_federated_root(
-    search_space: &FieldRoutingSearchSpace,
-    parameters: &QueryPlanningParameters,
-    selection_set: &SelectionSet,
-    root_kind: SchemaRootDefinitionKind,
-    naming: &mut OperationNaming,
-    has_defers: bool,
-) -> Result<BulbPlan, FederationError> {
-    let root_qg_node = parameters.head;
-
-    // The fetch_node placeholder is unused: commit_choice computes the
-    // actual root fetch group from the chosen subgraph.
-    let pending = root_pending_selections(selection_set, root_qg_node, NodeIndex::end());
-    let initial = PlanState::new(pending);
+            root_qg_node,
+            NodeIndex::end(),
+        )),
+    };
     run_bulb_and_finalize(
-        search_space,
+        &search_space,
         parameters,
         selection_set,
         initial,
@@ -215,9 +187,15 @@ fn run_bulb_and_finalize(
     );
 
     // Accumulate: mutation planning runs one search per top-level field and
-    // the statistics span the whole operation.
+    // the statistics span the whole operation. `evaluated_plan_count` counts
+    // terminal candidates; `evaluated_plan_paths` counts decision points
+    // expanded and scored, the beam-search analog of the exhaustive
+    // planner's evaluated-path count (both measure how much of the search
+    // space was explored).
     let evaluated = &parameters.statistics.evaluated_plan_count;
     evaluated.set(evaluated.get() + stats.evaluated_plans);
+    let evaluated_paths = &parameters.statistics.evaluated_plan_paths;
+    evaluated_paths.set(evaluated_paths.get() + stats.expansions);
 
     if matches!(stats.termination, BulbTermination::Cancelled) {
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
@@ -324,21 +302,6 @@ fn root_pending_selections(
         .selections
         .values()
         .rev()
-        .map(|sel| PendingSelection {
-            selection: sel.clone(),
-            query_graph_node: root_qg_node,
-            fetch_node,
-            op_path: Default::default(),
-            path_in_fetch: Default::default(),
-            condition: None,
-            defer_ref: None,
-            provides_anchor: None,
-            narrowing: Default::default(),
-            routing_options_memo: Default::default(),
-            parent_types: Default::default(),
-            context_anchor: Default::default(),
-            best_effort: false,
-            restrict_to: None,
-        })
+        .map(|sel| PendingSelection::root(sel.clone(), root_qg_node, fetch_node))
         .collect()
 }

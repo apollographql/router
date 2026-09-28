@@ -126,6 +126,9 @@ pub(crate) async fn build_pipeline(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
 ) -> Result<Pipeline, BoxError> {
+    // Invalid plugin config fails before telemetry starts.
+    plugins::check_plugin_configs(&configuration)?;
+
     // Bootstrap telemetry before creating any spans: on first boot the global tracer
     // provider is still the no-op bootstrap provider, so a span created earlier would
     // never be exported and every span under it would arrive as an orphan.

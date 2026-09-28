@@ -274,10 +274,7 @@ pub(super) fn handle_from_context(
         // the supergraph schema (where every field exists), but the target
         // subgraph may declare them as @external.
         let append_subgraph = state.graph.node(append_fetch_node).subgraph.clone();
-        let append_schema = search_space
-            .cached_query_graph
-            .query_graph
-            .schema_by_source(&append_subgraph)?;
+        let append_schema = search_space.qg().schema_by_source(&append_subgraph)?;
         let append_type: CompositeTypeDefinitionPosition = append_schema
             .get_type(ancestor_type.type_name())?
             .try_into()?;
@@ -333,7 +330,7 @@ pub(super) fn handle_from_context(
             cond,
         )?;
 
-        context_args.push((cond.argument_name.clone(), context_id.clone()));
+        context_args.push((cond.argument_name().clone(), context_id.clone()));
     }
 
     // The entity fetch already has the right op_path structure: just add
@@ -415,7 +412,7 @@ fn find_context_ancestor(
     // (i=0) is the declaring type itself; skip the @context match for it
     // so the field reads context from an actual ancestor, not its own type.
     for (i, ancestor_type) in parent_types_vec.iter().rev().enumerate() {
-        if i > 0 && cond.types_with_context_set.contains(ancestor_type) {
+        if i > 0 && cond.types_with_context_set().contains(ancestor_type) {
             let ancestor_idx = parent_types_vec.len() - 1 - i;
             return Ok((ancestor_type.clone(), ancestor_idx, levels_in_data_path));
         }
@@ -433,7 +430,7 @@ fn find_context_ancestor(
     }
     Err(FederationError::internal(format!(
         "@fromContext argument {} has no ancestor type with the required @context set",
-        cond.argument_coordinate,
+        cond.argument_coordinate(),
     )))
 }
 
@@ -625,7 +622,7 @@ fn add_context_renamers(
             context_fetch_node,
             renamer,
             context_id.clone(),
-            cond.argument_type.clone(),
+            cond.argument_type().clone(),
         );
     };
 

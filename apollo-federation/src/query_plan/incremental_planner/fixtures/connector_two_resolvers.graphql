@@ -1,7 +1,9 @@
-# Composed from subgraphs with hash: 3c8d5e6348df8bc13e84e433c4267632f21de0d7
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
+  @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "api", http: {baseURL: "http://api.example.com"}})
 {
   query: Query
 }
@@ -36,36 +38,32 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
-  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  CONNECTORS @join__graph(name: "connectors", url: "none")
+  GRAPHQL @join__graph(name: "graphql", url: "https://graphql")
 }
 
 scalar link__Import
 
 enum link__Purpose {
-  """
-  `SECURITY` features provide metadata necessary to securely resolve fields.
-  """
   SECURITY
-
-  """
-  `EXECUTION` features provide metadata necessary for operation execution.
-  """
   EXECUTION
 }
 
 type Query
-  @join__type(graph: SUBGRAPH1)
-  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: CONNECTORS)
+  @join__type(graph: GRAPHQL)
 {
-  t: T @join__field(graph: SUBGRAPH1)
+  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "api", http: {GET: "/users/{$args.id}"}, selection: "id name", entity: true})
+  userDetails(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "api", http: {GET: "/users/{$args.id}/details"}, selection: "id avatar", entity: true})
+  currentUser: User @join__field(graph: GRAPHQL)
 }
 
-type T
-  @join__type(graph: SUBGRAPH1, key: "id")
-  @join__type(graph: SUBGRAPH2, key: "id")
+type User
+  @join__type(graph: CONNECTORS, key: "id")
+  @join__type(graph: GRAPHQL, key: "id")
 {
   id: ID!
-  x: Int @join__field(graph: SUBGRAPH1)
-  y: Int @join__field(graph: SUBGRAPH2)
+  name: String @join__field(graph: CONNECTORS)
+  avatar: String @join__field(graph: CONNECTORS)
+  email: String @join__field(graph: GRAPHQL)
 }

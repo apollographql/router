@@ -13,7 +13,7 @@ register_plugin!("experimental", "broken", BrokenPlugin);
 struct BrokenPlugin;
 
 /// This is a broken plugin for testing purposes only.
-#[derive(JsonSchema, Deserialize)]
+#[derive(Clone, JsonSchema, Deserialize)]
 struct Config {
     /// Enable the broken plugin.
     #[serde(rename = "enabled")]
