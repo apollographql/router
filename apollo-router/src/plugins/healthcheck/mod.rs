@@ -93,23 +93,26 @@ impl Default for ReadinessConfig {
 }
 
 /// Configuration options pertaining to the health component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "HealthCheckConfig")]
 pub(crate) struct Config {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
+    #[config(default = default_health_check_listen(), skip_validate)]
     pub(crate) listen: ListenAddr,
 
     /// Set to false to disable the health check
+    #[config(default = default_health_check_enabled())]
     pub(crate) enabled: bool,
 
     /// Optionally set a custom healthcheck path
     /// Defaults to /health
+    #[config(default = default_health_check_path())]
     pub(crate) path: String,
 
     /// Optionally specify readiness configuration
+    #[config(skip_validate)]
     pub(crate) readiness: ReadinessConfig,
 }
 
@@ -130,6 +133,7 @@ fn default_health_check_path() -> String {
     "/health".to_string()
 }
 
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Config {
     #[builder]
@@ -150,12 +154,6 @@ impl Config {
             path,
             readiness: readiness.unwrap_or_default(),
         }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self::builder().build()
     }
 }
 

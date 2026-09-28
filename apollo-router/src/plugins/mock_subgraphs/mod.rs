@@ -51,7 +51,30 @@ const SUBGRAPH_CALL_COUNT_KEY: &str = "apollo::experimental_mock_subgraphs::subg
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
-type Config = HashMap<String, Arc<SubgraphConfig>>;
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(transparent)]
+struct Config(SubgraphConfigs);
+
+type SubgraphConfigs = HashMap<String, Arc<SubgraphConfig>>;
+
+// Delegate to the map so that wrapping it leaves the generated schema unchanged.
+impl schemars::JsonSchema for Config {
+    fn inline_schema() -> bool {
+        SubgraphConfigs::inline_schema()
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        SubgraphConfigs::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        SubgraphConfigs::json_schema(generator)
+    }
+}
+
+// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
+impl apollo_configuration::Validate for Config {}
+impl apollo_configuration::Configuration for Config {}
 
 /// Configuration for one subgraph for the `mock_subgraphs` plugin
 #[derive(serde::Deserialize, schemars::JsonSchema)]
@@ -120,7 +143,7 @@ impl PluginPrivate for MockSubgraphsPlugin {
         name: &str,
         _: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
-        let config = self.per_subgraph_config.get(name).cloned();
+        let config = self.per_subgraph_config.0.get(name).cloned();
         let subgraph_schema = self.subgraph_schemas[name].clone();
         tower::service_fn(move |request: subgraph::Request| {
             let config = config.clone();

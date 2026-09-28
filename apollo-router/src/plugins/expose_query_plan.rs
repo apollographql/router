@@ -48,6 +48,10 @@ enum Setting {
     Disabled,
 }
 
+// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
+impl apollo_configuration::Validate for ExposeQueryPlanConfig {}
+impl apollo_configuration::Configuration for ExposeQueryPlanConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for ExposeQueryPlan {
     type Config = ExposeQueryPlanConfig;

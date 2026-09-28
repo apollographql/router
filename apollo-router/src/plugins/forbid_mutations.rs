@@ -29,6 +29,10 @@ struct ForbidMutationsConfig(
     bool,
 );
 
+// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
+impl apollo_configuration::Validate for ForbidMutationsConfig {}
+impl apollo_configuration::Configuration for ForbidMutationsConfig {}
+
 #[async_trait::async_trait]
 impl Plugin for ForbidMutations {
     type Config = ForbidMutationsConfig;

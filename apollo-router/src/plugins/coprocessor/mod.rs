@@ -471,35 +471,36 @@ pub(super) struct SubgraphResponseConf {
 }
 
 /// Configures the externalization plugin
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "CoprocessorConfig")]
 struct Conf {
     /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
+    #[config(required)]
     url: String,
+    #[config(required, skip_validate)]
     client: Option<Client>,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
-    #[serde(default = "default_timeout")]
+    #[config(default = default_timeout(), skip_validate)]
     timeout: Duration,
     /// Response validation defaults to true
-    #[serde(default = "default_response_validation")]
+    #[config(default = default_response_validation())]
     response_validation: bool,
     /// The router stage request/response configuration
-    #[serde(default)]
+    #[config(skip_validate)]
     router: RouterStage,
     /// The supergraph stage request/response configuration
-    #[serde(default)]
+    #[config(skip_validate)]
     supergraph: supergraph::SupergraphStage,
     /// The execution stage request/response configuration
-    #[serde(default)]
+    #[config(skip_validate)]
     execution: execution::ExecutionStage,
     /// The subgraph stage request/response configuration
-    #[serde(default)]
+    #[config(skip_validate)]
     subgraph: SubgraphStages,
     /// The connector stage request/response configuration
-    #[serde(default)]
+    #[config(skip_validate)]
     connector: connector::ConnectorStages,
 }
 
