@@ -1655,6 +1655,9 @@ impl ConnectorRequestCacheService {
                             // debugger keep reporting them for the life of the entry instead of
                             // showing a clean connector until the next miss.
                             problems: entry.mapping_problems,
+                            // Always empty: a response that declared errors is never stored
+                            // (see the miss path below), so there are none to replay.
+                            declared_errors: Vec::new(),
                         },
                 };
 
@@ -1696,11 +1699,17 @@ impl ConnectorRequestCacheService {
                 };
 
                 // Store in cache if appropriate
+                // A response whose mapping declared errors (`->withError`) is not stored,
+                // matching the entity path, which skips entities with errors. The entry
+                // format has no place for them, so a hit would replay the data without
+                // the `extensions.connectorErrors` the client was sent the first time.
                 if let apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                     ref data,
                     ref problems,
+                    ref declared_errors,
                     ..
                 } = response.mapped_response
+                    && declared_errors.is_empty()
                 {
                     // Base the store decision on THIS response's own Cache-Control (parsed
                     // straight from the transport response), never on the request-wide
