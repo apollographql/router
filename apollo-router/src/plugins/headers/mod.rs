@@ -49,7 +49,7 @@ use crate::services::router;
 register_private_plugin!("apollo", "headers", Headers);
 
 /// Request-side header configuration: propagation operations + optional masking.
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct HeadersLocation {
     /// Propagate/Insert/Remove operations
@@ -63,7 +63,7 @@ struct HeadersLocation {
 
 /// Response-side header configuration. Response propagation isn't a router
 /// feature, so only masking is configurable here.
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ResponseHeadersLocation {
     /// Header masking configuration applied to response headers in logs/telemetry.
@@ -73,7 +73,7 @@ struct ResponseHeadersLocation {
 
 /// Configuration for connector headers at a specific location
 /// Connectors only have request operations - masking is inherited from parent subgraph
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorHeadersLocation {
     /// Request-side propagate/insert/remove operations
@@ -84,7 +84,7 @@ struct ConnectorHeadersLocation {
 /// Request-side connector header configuration. Mirrors the wrapped
 /// `operations:` shape used by `HeadersLocation`, so connector config doesn't
 /// drift from regular subgraph config.
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorRequestHeadersLocation {
     /// Propagate/Insert/Remove operations
@@ -92,7 +92,7 @@ struct ConnectorRequestHeadersLocation {
     operations: Vec<Operation>,
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
     Insert(Insert),
@@ -107,7 +107,7 @@ schemar_fn!(
     "Remove a header given a regex matching against the header name"
 );
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case")]
 /// Remove header
 enum Remove {
@@ -122,7 +122,7 @@ enum Remove {
     Matching(Regex),
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Insert header
@@ -135,7 +135,7 @@ enum Insert {
     FromBody(InsertFromBody),
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert static header
 struct InsertStatic {
@@ -150,7 +150,7 @@ struct InsertStatic {
     value: HeaderValue,
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert header with a value coming from context key
 struct InsertFromContext {
@@ -182,13 +182,23 @@ struct InsertFromBody {
     default: Option<HeaderValue>,
 }
 
+// `JsonPathInst` does not implement `Debug`, so the path is left out.
+impl std::fmt::Debug for InsertFromBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InsertFromBody")
+            .field("name", &self.name)
+            .field("default", &self.default)
+            .finish_non_exhaustive()
+    }
+}
+
 schemar_fn!(
     propagate_matching,
     String,
     "Remove a header given a regex matching header name"
 );
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Propagate header
@@ -220,7 +230,7 @@ enum Propagate {
 }
 
 /// Configuration for connectors (no masking - inherits from parent subgraph)
-#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorHeadersConfiguration {
     /// Options applying to all sources across all subgraphs
@@ -234,7 +244,7 @@ struct ConnectorHeadersConfiguration {
 
 /// Per-subgraph (or global) header configuration. Request configuration covers
 /// propagation + masking; response configuration covers masking only.
-#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct GlobalHeadersConfiguration {
     /// Request configuration (operations and masking)
