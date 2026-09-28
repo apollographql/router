@@ -26,6 +26,8 @@ impl Merger {
         sources: &Sources<Node<InputObjectType>>,
         dest: &InputObjectTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
+        self.hint_on_inconsistent_one_of(sources, dest);
+
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
         let added = self.add_input_fields_shallow(sources, dest)?;
@@ -163,6 +165,42 @@ impl Merger {
         }
 
         Ok(())
+    }
+
+    /// The supergraph keeps `@oneOf` if any subgraph applies it, which makes the type stricter
+    /// for clients than the subgraphs that omit it.
+    fn hint_on_inconsistent_one_of(
+        &mut self,
+        sources: &Sources<Node<InputObjectType>>,
+        dest: &InputObjectTypeDefinitionPosition,
+    ) {
+        let is_one_of = |input: &Node<InputObjectType>| input.directives.has("oneOf");
+        let defining = || sources.values().flatten();
+        if !defining().any(is_one_of) || defining().all(is_one_of) {
+            return;
+        }
+
+        self.error_reporter.report_mismatch_hint(
+            HintCode::InconsistentOneOfInputObject,
+            format!(
+                "Input object type \"{}\" is marked @oneOf in some but not all defining subgraphs: ",
+                dest.type_name
+            ),
+            dest,
+            sources,
+            &self.subgraphs,
+            |_| Some("yes".to_string()),
+            |input, _| Some(if is_one_of(input) { "yes" } else { "no" }.to_string()),
+            |_, subgraphs| {
+                format!(
+                    "it is marked @oneOf in {}",
+                    subgraphs.unwrap_or_else(|| "no subgraphs".to_string())
+                )
+            },
+            |_, subgraphs| format!(" but not in {subgraphs}"),
+            false,
+            false,
+        );
     }
 
     /// Adds a shallow copy of each field in an InputObject type to the supergraph schema. This is

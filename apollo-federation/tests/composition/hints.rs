@@ -644,6 +644,84 @@ mod union_member_inconsistencies {
     }
 }
 
+mod input_object_hints {
+    use test_log::test;
+
+    use super::*;
+
+    #[test]
+    fn hint_on_inconsistent_one_of() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).unwrap();
+        assert_has_hint(
+            &result,
+            "INCONSISTENT_ONE_OF_INPUT_OBJECT",
+            r#"Input object type "FindInput" is marked @oneOf in some but not all defining subgraphs: it is marked @oneOf in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
+        );
+    }
+
+    #[test]
+    fn no_hint_on_consistent_one_of() {
+        let subgraph1 = ServiceDefinition {
+            name: "Subgraph1",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let subgraph2 = ServiceDefinition {
+            name: "Subgraph2",
+            type_defs: r#"
+                type Query {
+                    find(input: FindInput!): String @shareable
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let result = compose_as_fed2_subgraphs(&[subgraph1, subgraph2]).unwrap();
+        assert_no_hints(&result);
+    }
+}
+
 mod enum_hints {
     use test_log::test;
 

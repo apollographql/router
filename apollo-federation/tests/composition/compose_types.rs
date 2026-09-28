@@ -679,3 +679,94 @@ fn one_of_input_object_with_different_fields_across_subgraphs() {
     }
     ");
 }
+
+#[test]
+fn one_of_input_object_errors_when_other_subgraph_makes_field_non_null() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput {
+          id: ID!
+          name: String
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    assert_composition_errors(
+        &result,
+        &[(
+            "INVALID_GRAPHQL",
+            "Error: `FindInput.id` field of a @oneOf input object must be nullable\n",
+        )],
+    );
+}
+
+#[test]
+fn one_of_input_object_drops_default_value_from_other_subgraph() {
+    let subgraph_a = ServiceDefinition {
+        name: "subgraphA",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput @oneOf {
+          id: ID
+          name: String
+        }
+        "#,
+    };
+
+    let subgraph_b = ServiceDefinition {
+        name: "subgraphB",
+        type_defs: r#"
+        type Query {
+          find(input: FindInput!): String @shareable
+        }
+
+        input FindInput {
+          id: ID
+          name: String = "default"
+        }
+        "#,
+    };
+
+    let result = compose_as_fed2_subgraphs(&[subgraph_a, subgraph_b]);
+    let supergraph = result.expect("Expected composition to succeed");
+    let find_input = coord!(FindInput)
+        .lookup(supergraph.schema().schema())
+        .expect("FindInput should exist");
+    assert!(
+        supergraph
+            .hints()
+            .iter()
+            .any(|hint| hint.code() == "INCONSISTENT_DEFAULT_VALUE_PRESENCE"),
+        "Expected a hint about the dropped default value, got: {:?}",
+        supergraph.hints()
+    );
+    assert_snapshot!(find_input, @r"
+    input FindInput @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB) @oneOf {
+      id: ID
+      name: String
+    }
+    ");
+}
