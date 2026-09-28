@@ -610,6 +610,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationConfig": {
+      "additionalProperties": false,
       "description": "Authorization plugin",
       "properties": {
         "directives": {
@@ -1934,6 +1935,7 @@ expression: "&schema"
       "type": "object"
     },
     "Conf2": {
+      "additionalProperties": false,
       "description": "The fleet detector plugin has no configuration.",
       "type": "object"
     },
@@ -1976,6 +1978,7 @@ expression: "&schema"
       "type": "object"
     },
     "Config3": {
+      "additionalProperties": false,
       "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
@@ -2006,6 +2009,7 @@ expression: "&schema"
       "type": "object"
     },
     "Config5": {
+      "additionalProperties": false,
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
