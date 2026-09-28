@@ -7,13 +7,13 @@ expression: "& metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.connector.cache_key_headers: false
+          opt.connector.cache_key_headers: true
           opt.connector.enabled: true
           opt.connector.invalidation.enabled: false
           opt.connector.ttl: true
-          opt.debug: true
+          opt.debug: false
           opt.enabled: true
-          opt.subgraph.enabled: true
-          opt.subgraph.invalidation.enabled: true
-          opt.subgraph.redis.required_to_start: true
-          opt.subgraph.ttl: true
+          opt.subgraph.enabled: false
+          opt.subgraph.invalidation.enabled: false
+          opt.subgraph.redis.required_to_start: false
+          opt.subgraph.ttl: false
