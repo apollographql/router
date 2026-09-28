@@ -1922,6 +1922,7 @@ expression: "&schema"
       ]
     },
     "Conf": {
+      "additionalProperties": false,
       "description": "Configuration for the test plugin",
       "properties": {
         "name": {
@@ -1952,6 +1953,7 @@ expression: "&schema"
       "description": "Subgraph URL mappings"
     },
     "Config": {
+      "additionalProperties": false,
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1965,6 +1967,7 @@ expression: "&schema"
       "type": "object"
     },
     "Config2": {
+      "additionalProperties": false,
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -7484,6 +7487,7 @@ expression: "&schema"
       ]
     },
     "MyTestPluginConfig": {
+      "additionalProperties": false,
       "description": "Config for the test plugin",
       "type": "object"
     },

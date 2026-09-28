@@ -4,8 +4,6 @@ use apollo_router::register_plugin;
 use apollo_router::services::execution;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -16,9 +14,10 @@ struct HelloWorld {
     configuration: Conf,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
+    #[config(required)]
     name: String, // The name of the entity you'd like to say hello to
 }
 

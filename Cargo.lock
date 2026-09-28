@@ -654,10 +654,10 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
- "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",
@@ -2714,6 +2714,7 @@ name = "external-subgraph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "bytes",
@@ -2721,7 +2722,6 @@ dependencies = [
  "http 1.5.0",
  "http-body-util",
  "multimap",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -3463,9 +3463,9 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -5747,10 +5747,10 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
