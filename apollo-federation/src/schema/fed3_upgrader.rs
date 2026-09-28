@@ -37,7 +37,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
 
     // Collect interface field deprecation status up front so we aren't
     // borrowing the schema while mutating it.
-    let iface_deprecated = collect_interface_deprecated_fields(schema);
+    let iface_non_deprecated = collect_interface_non_deprecated_fields(schema);
 
     for (type_name, ty) in &mut schema.types {
         match ty {
@@ -55,7 +55,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     &object.implements_interfaces,
                     &mut object.fields,
                     &object.name,
-                    &iface_deprecated,
+                    &iface_non_deprecated,
                     subgraph_name,
                     &sources,
                 );
@@ -74,7 +74,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     &interface.implements_interfaces,
                     &mut interface.fields,
                     &interface.name,
-                    &iface_deprecated,
+                    &iface_non_deprecated,
                     subgraph_name,
                     &sources,
                 );
@@ -87,8 +87,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     strip_deprecated_reason_null(
                         &mut hints,
                         &mut value_def.directives,
-                        type_name,
-                        &value_name,
+                        &format!("{type_name}.{value_name}"),
                         subgraph_name,
                         &sources,
                     );
@@ -102,14 +101,35 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     strip_deprecated_reason_null(
                         &mut hints,
                         &mut field_def.directives,
-                        type_name,
-                        &field_name,
+                        &format!("{type_name}.{field_name}"),
                         subgraph_name,
                         &sources,
                     );
                 }
             }
             _ => {}
+        }
+    }
+
+    for (directive_name, definition) in &mut schema.directive_definitions {
+        if !definition
+            .arguments
+            .iter()
+            .any(|arg| has_deprecated(&arg.directives))
+        {
+            continue;
+        }
+        for arg in &mut definition.make_mut().arguments {
+            let arg_name = arg.name.clone();
+            let arg_def = arg.make_mut();
+            let coordinate = format!("@{directive_name}({arg_name}:)");
+            strip_deprecated_reason_null(
+                &mut hints,
+                &mut arg_def.directives,
+                &coordinate,
+                subgraph_name,
+                &sources,
+            );
         }
     }
     hints
@@ -129,8 +149,7 @@ fn upgrade_fields_and_args(
         strip_deprecated_reason_null(
             hints,
             &mut field_def.directives,
-            type_name,
-            &field_name,
+            &format!("{type_name}.{field_name}"),
             subgraph_name,
             sources,
         );
@@ -140,8 +159,7 @@ fn upgrade_fields_and_args(
             strip_deprecated_reason_null(
                 hints,
                 &mut arg_def.directives,
-                type_name,
-                &arg_name,
+                &format!("{type_name}.{field_name}({arg_name}:)"),
                 subgraph_name,
                 sources,
             );
@@ -156,15 +174,15 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
     implements_interfaces: &IndexSet<Node<Name>>,
     fields: &mut IndexMap<Name, Node<FieldDefinition>>,
     type_name: &Name,
-    iface_deprecated: &IndexMap<Name, IndexSet<Name>>,
+    iface_non_deprecated: &IndexMap<Name, IndexSet<Name>>,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {
     for iface_name in implements_interfaces {
-        if let Some(deprecated_fields) = iface_deprecated.get(&**iface_name) {
+        if let Some(non_deprecated_fields) = iface_non_deprecated.get(&**iface_name) {
             for field in fields.values_mut() {
                 let field_name = field.name.clone();
-                if !deprecated_fields.contains(&field_name) {
+                if non_deprecated_fields.contains(&field_name) {
                     let field_def = field.make_mut();
                     strip_deprecated_without_interface(
                         hints,
@@ -181,19 +199,20 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
     }
 }
 
-/// Returns a map from interface name to the set of deprecated field names
-/// for every interface type in the schema.
-fn collect_interface_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
+/// Returns a map from interface name to the set of non-deprecated field names
+/// for every interface type in the schema. Fields the interface does not
+/// declare are absent, so their deprecation is left alone.
+fn collect_interface_non_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
     let mut result = IndexMap::default();
     for ty in schema.types.values() {
         if let ExtendedType::Interface(interface) = ty {
-            let deprecated_fields: IndexSet<_> = interface
+            let non_deprecated_fields: IndexSet<_> = interface
                 .fields
                 .iter()
-                .filter(|(_, field)| has_deprecated(&field.directives))
+                .filter(|(_, field)| !has_deprecated(&field.directives))
                 .map(|(name, _)| name.clone())
                 .collect();
-            result.insert(interface.name.clone(), deprecated_fields);
+            result.insert(interface.name.clone(), non_deprecated_fields);
         }
     }
     result
@@ -214,8 +233,7 @@ fn default_range() -> Range<LineColumn> {
 fn strip_deprecated_reason_null(
     hints: &mut Vec<CompositionHint>,
     directives: &mut DirectiveList,
-    type_name: &Name,
-    member_name: &Name,
+    coordinate: &str,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {
@@ -235,7 +253,7 @@ fn strip_deprecated_reason_null(
             hints.push(CompositionHint {
                 definition: &DEPRECATED_REASON_NULL,
                 message: format!(
-                    "Stripped `reason: null` from `@deprecated` on `{type_name}.{member_name}` \
+                    "Stripped `reason: null` from `@deprecated` on `{coordinate}` \
                      for federation 3 compatibility. Use a non-null reason or omit the argument."
                 ),
                 locations: vec![SubgraphLocation {
@@ -435,6 +453,76 @@ mod tests {
             field.directives.has("deprecated"),
             "@deprecated should be preserved when interface field is also deprecated"
         );
+    }
+
+    #[test]
+    fn preserves_deprecated_on_field_not_declared_by_interface() {
+        let sdl = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node {
+                id: ID!
+            }
+
+            type User implements Node @key(fields: "id") {
+                id: ID!
+                legacyName: String @deprecated(reason: "use displayName")
+                displayName: String
+            }
+        "#;
+        let (supergraph, hints) = compose_supergraph(sdl);
+        assert!(
+            !hints.contains(&"DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE".to_string()),
+            "Should not emit DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE, got: {hints:?}"
+        );
+
+        let schema = supergraph.schema().schema();
+        let c = coord!(User.legacyName);
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("User.legacyName should exist in schema");
+        assert!(
+            field.directives.has("deprecated"),
+            "@deprecated should be preserved on fields the interface does not declare"
+        );
+    }
+
+    #[test]
+    fn strips_deprecated_reason_null_on_directive_argument() {
+        let sdl = r#"
+            directive @cacheHint(
+                legacyScope: String @deprecated(reason: null)
+                ttl: Int
+            ) on FIELD_DEFINITION
+
+            type Query {
+                field: String @cacheHint(ttl: 1)
+            }
+        "#;
+        let mut schema =
+            apollo_compiler::Schema::parse(sdl, "test.graphql").expect("should parse test schema");
+        let hints = super::apply_fed3_upgrade(&mut schema, "test")
+            .into_iter()
+            .map(|h| h.message)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            hints,
+            vec![
+                "Stripped `reason: null` from `@deprecated` on `@cacheHint(legacyScope:)` for \
+                 federation 3 compatibility. Use a non-null reason or omit the argument."
+                    .to_string(),
+            ]
+        );
+        let deprecated = schema.directive_definitions["cacheHint"]
+            .argument_by_name("legacyScope")
+            .and_then(|arg| arg.directives.get("deprecated"))
+            .expect("@cacheHint(legacyScope:) should stay deprecated");
+        assert!(deprecated.specified_argument_by_name("reason").is_none());
     }
 
     #[test]
