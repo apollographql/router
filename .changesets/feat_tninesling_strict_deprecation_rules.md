@@ -1,4 +1,4 @@
-### Add `supergraph.strict_deprecation_rules` to accept supergraphs with invalid `@deprecated` usages ([PR #TBD](https://github.com/apollographql/router/pull/TBD))
+### Add `supergraph.strict_deprecation_rules` to accept supergraphs with invalid `@deprecated` usages ([PR #10311](https://github.com/apollographql/router/pull/10311))
 
 Router 3 rejects supergraphs that use `@deprecated` in ways the GraphQL September 2025 specification no longer allows. Supergraphs composed by the latest LTS composition already have these usages stripped, but older supergraphs may still contain them.
 
@@ -14,4 +14,4 @@ supergraph:
   strict_deprecation_rules: false
 ```
 
-By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/TBD
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10311
