@@ -206,3 +206,76 @@ async fn test_validate_default_values_false_allows_startup_with_connectors() -> 
     router.graceful_shutdown().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_invalid_deprecated_fails_startup_by_default() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config("supergraph: {}")
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "supergraph_with_invalid_deprecated.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message(
+            "field `Product.name` is deprecated but implements the non-deprecated interface field `Node.name`",
+        )
+        .await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_lax_deprecation_rules_allow_startup() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              strict_deprecation_rules: false
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "supergraph_with_invalid_deprecated.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message("Stripped `reason: null` from `@deprecated` on `Product.legacyId`")
+        .await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_lax_deprecation_rules_still_reject_required_input_values() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              strict_deprecation_rules: false
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "supergraph_with_deprecated_required_input_values.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message(
+            "Required argument Query.products(legacyRegion:) cannot be deprecated.",
+        )
+        .await;
+    Ok(())
+}

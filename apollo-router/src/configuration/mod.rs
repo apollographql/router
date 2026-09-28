@@ -933,6 +933,12 @@ pub(crate) struct Supergraph {
     /// Whether to validate default values in the supergraph schema.
     /// Default: true
     pub(crate) validate_default_values: bool,
+
+    /// Whether to reject `@deprecated` usages that are invalid under the GraphQL September 2025
+    /// spec. When false, they are stripped from the supergraph schema before validating it, as
+    /// the latest LTS composition already does.
+    /// Default: true
+    pub(crate) strict_deprecation_rules: bool,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -964,6 +970,7 @@ impl Supergraph {
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
         validate_default_values: Option<bool>,
+        strict_deprecation_rules: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -982,6 +989,7 @@ impl Supergraph {
                 .unwrap_or_else(default_strict_variable_validation),
             redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
             validate_default_values: validate_default_values.unwrap_or(true),
+            strict_deprecation_rules: strict_deprecation_rules.unwrap_or(true),
         }
     }
 }
@@ -1004,6 +1012,7 @@ impl Supergraph {
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
         validate_default_values: Option<bool>,
+        strict_deprecation_rules: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -1022,6 +1031,7 @@ impl Supergraph {
                 .unwrap_or_else(default_strict_variable_validation),
             redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
             validate_default_values: validate_default_values.unwrap_or(true),
+            strict_deprecation_rules: strict_deprecation_rules.unwrap_or(true),
         }
     }
 }

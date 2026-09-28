@@ -557,6 +557,11 @@ impl InstrumentData {
             "$.supergraph[?(@.validate_default_values == false)]"
         );
 
+        populate_config_instrument!(
+            apollo.router.config.supergraph.strict_deprecation_rules,
+            "$.supergraph[?(@.strict_deprecation_rules == false)]"
+        );
+
         // We need to update the entry we just made because the selected strategy is a named object in the config.
         // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
         if let Some((_, demand_control_attributes)) =

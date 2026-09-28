@@ -222,6 +222,12 @@ impl CompositionHint {
     }
 }
 
+/// Strip `@deprecated` usages that are invalid under the GraphQL September 2025 spec from a
+/// supergraph composed before composition started doing this itself. Returns one hint per change.
+pub fn strip_invalid_deprecated_directives(schema: &mut Schema) -> Vec<CompositionHint> {
+    crate::schema::fed3_upgrader::apply_fed3_upgrade(schema, "supergraph")
+}
+
 #[derive(Clone, Debug)]
 pub enum HintLevel {
     Warn,

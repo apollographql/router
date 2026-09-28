@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "& metrics.non_zero()"
+---
+- name: apollo.router.config.supergraph.strict_deprecation_rules
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}
+- name: apollo.router.config.supergraph.validate_default_values
+  data:
+    datapoints:
+      - value: 1
+        attributes: {}

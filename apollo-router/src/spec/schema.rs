@@ -48,6 +48,29 @@ pub(crate) struct Schema {
     pub(crate) launch_id: Option<Arc<String>>,
 }
 
+/// Returns the SDL unchanged if nothing was stripped, so the schema ID only changes for
+/// supergraphs that would otherwise fail validation. SDL that fails to build is also returned
+/// unchanged, leaving the normal parse path to report the error.
+fn strip_invalid_deprecated_directives(raw_sdl: Arc<SchemaState>) -> Arc<SchemaState> {
+    let Ok(mut schema) = apollo_compiler::Schema::builder()
+        .parse(&raw_sdl.sdl, "schema.graphql")
+        .build()
+    else {
+        return raw_sdl;
+    };
+    let hints = apollo_federation::supergraph::strip_invalid_deprecated_directives(&mut schema);
+    if hints.is_empty() {
+        return raw_sdl;
+    }
+    for hint in &hints {
+        tracing::warn!(code = hint.code(), "{}", hint.message());
+    }
+    Arc::new(SchemaState {
+        sdl: schema.to_string(),
+        launch_id: raw_sdl.launch_id.clone(),
+    })
+}
+
 /// Wrapper type to distinguish from `Schema::definitions` for the supergraph schema
 #[derive(Debug)]
 pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
@@ -66,6 +89,14 @@ impl Schema {
         let api_schema_options = ApiSchemaOptions {
             include_defer: config.supergraph.defer_support,
             ..Default::default()
+        };
+
+        // Stripping happens before connector expansion and every other parse of the SDL, since
+        // each of them validates the schema and would reject these usages.
+        let raw_sdl = if !config.supergraph.strict_deprecation_rules {
+            strip_invalid_deprecated_directives(raw_sdl)
+        } else {
+            raw_sdl
         };
 
         let validate_default_values = config.supergraph.validate_default_values;
@@ -811,6 +842,101 @@ mod tests {
                 "23bcf0ea13a4e0429c942bba59573ba70b8d6970d73ad00c5230d08788bb1ba2".to_string()
             );
         }
+    }
+
+    #[test]
+    fn invalid_deprecated_rejected_by_default() {
+        let sdl = include_str!("../../tests/fixtures/supergraph_with_invalid_deprecated.graphql");
+        let result = Schema::parse(sdl, &Default::default());
+        assert!(result.is_err(), "expected an error, got: {result:?}");
+    }
+
+    #[test]
+    fn lax_deprecation_rules_allow_startup() {
+        let sdl = include_str!("../../tests/fixtures/supergraph_with_invalid_deprecated.graphql");
+        let config = Configuration::builder()
+            .supergraph(
+                crate::configuration::Supergraph::builder()
+                    .strict_deprecation_rules(false)
+                    .build(),
+            )
+            .build()
+            .expect("should build configuration");
+        let schema = Schema::parse(sdl, &config).expect("should parse after stripping");
+
+        let product = schema
+            .supergraph_schema()
+            .get_object("Product")
+            .expect("Product should exist");
+        let name = product
+            .fields
+            .get("name")
+            .expect("Product.name should exist");
+        assert!(!name.directives.has("deprecated"));
+        let legacy_id = product
+            .fields
+            .get("legacyId")
+            .expect("Product.legacyId should exist");
+        let deprecated = legacy_id
+            .directives
+            .get("deprecated")
+            .expect("Product.legacyId should stay deprecated");
+        assert!(deprecated.specified_argument_by_name("reason").is_none());
+        assert!(!schema.raw_sdl.contains("reason: null"));
+
+        let deprecated = schema
+            .supergraph_schema()
+            .directive_definitions
+            .get("cacheHint")
+            .and_then(|definition| definition.argument_by_name("legacyScope"))
+            .and_then(|arg| arg.directives.get("deprecated"))
+            .expect("@cacheHint(legacyScope:) should stay deprecated");
+        assert!(deprecated.specified_argument_by_name("reason").is_none());
+    }
+
+    #[test]
+    fn lax_deprecation_rules_still_reject_required_input_values() {
+        let sdl = include_str!(
+            "../../tests/fixtures/supergraph_with_deprecated_required_input_values.graphql"
+        );
+        let config = Configuration::builder()
+            .supergraph(
+                crate::configuration::Supergraph::builder()
+                    .strict_deprecation_rules(false)
+                    .build(),
+            )
+            .build()
+            .expect("should build configuration");
+        let error = Schema::parse(sdl, &config)
+            .expect_err("required input values must not be deprecated")
+            .to_string();
+        for coordinate in [
+            "ProductFilter.legacyCategory",
+            "Query.products(legacyRegion:)",
+            "@cacheHint(legacyTtl:)",
+        ] {
+            assert!(
+                error.contains(&format!(
+                    "Required argument {coordinate} cannot be deprecated."
+                )),
+                "missing {coordinate} in: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn lax_deprecation_rules_leave_valid_sdl_untouched() {
+        let sdl = include_str!("../testdata/minimal_supergraph.graphql");
+        let config = Configuration::builder()
+            .supergraph(
+                crate::configuration::Supergraph::builder()
+                    .strict_deprecation_rules(false)
+                    .build(),
+            )
+            .build()
+            .expect("should build configuration");
+        let schema = Schema::parse(sdl, &config).expect("should parse");
+        assert_eq!(schema.raw_sdl.as_str(), sdl);
     }
 
     // test for https://github.com/apollographql/federation/pull/1769

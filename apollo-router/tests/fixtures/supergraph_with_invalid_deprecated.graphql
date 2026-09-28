@@ -1,0 +1,43 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+directive @cacheHint(ttl: Int, legacyScope: String @deprecated(reason: null)) on FIELD_DEFINITION
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+enum join__Graph {
+  PRODUCTS @join__graph(name: "products", url: "http://localhost:4005/products")
+}
+
+interface Node @join__type(graph: PRODUCTS) {
+  id: ID!
+  name: String
+}
+
+type Product implements Node @join__type(graph: PRODUCTS, key: "id") @join__implements(graph: PRODUCTS, interface: "Node") {
+  id: ID!
+  name: String @deprecated(reason: "use displayName")
+  displayName: String
+  legacyId: ID @deprecated(reason: null)
+}
+
+type Query @join__type(graph: PRODUCTS) {
+  node(id: ID!): Node @join__field(graph: PRODUCTS)
+}

@@ -11719,6 +11719,11 @@ expression: "&schema"
           "description": "Redact query validation errors to prevent potential information disclosure about the schema structure.\nWhen enabled, detailed validation errors are replaced with a generic \"invalid query\" message.\nDefault: false",
           "type": "boolean"
         },
+        "strict_deprecation_rules": {
+          "default": true,
+          "description": "Whether to reject `@deprecated` usages that are invalid under the GraphQL September 2025\nspec. When false, they are stripped from the supergraph schema before validating it, as\nthe latest LTS composition already does.\nDefault: true",
+          "type": "boolean"
+        },
         "strict_variable_validation": {
           "allOf": [
             {
@@ -13324,6 +13329,7 @@ expression: "&schema"
           "warmed_up_queries": null
         },
         "redact_query_validation_errors": false,
+        "strict_deprecation_rules": true,
         "strict_variable_validation": "enforce",
         "validate_default_values": true
       },
