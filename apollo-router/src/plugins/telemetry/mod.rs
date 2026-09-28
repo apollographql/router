@@ -2303,6 +2303,15 @@ mod tests {
     }
 
     async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
+        scrape_prometheus(plugin)
+            .await
+            .split('\n')
+            .filter(|l| l.contains("bucket"))
+            .sorted()
+            .join("\n")
+    }
+
+    async fn scrape_prometheus(plugin: &dyn DynPlugin) -> String {
         let web_endpoint = plugin
             .web_endpoints()
             .into_iter()
@@ -2320,11 +2329,7 @@ mod tests {
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
-        String::from_utf8_lossy(&body)
-            .split('\n')
-            .filter(|l| l.contains("bucket"))
-            .sorted()
-            .join("\n")
+        String::from_utf8_lossy(&body).into_owned()
     }
 
     async fn make_supergraph_request(plugin: &dyn DynPlugin) {
