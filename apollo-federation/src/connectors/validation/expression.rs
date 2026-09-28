@@ -1140,6 +1140,10 @@ mod tests {
         Shape::bool([])
     )]
     #[case::missing_array_literal_element("$([$([])->first])->first->eq(1)", Shape::unknown([]))]
+    // An argument that is always missing gives no value from connect/v0.5,
+    // but the usual result shape before it.
+    #[case::missing_argument_in_bool_context("$(1)->eq($([])->first)", Shape::bool([]))]
+    #[case::missing_boolean_argument("$(true)->and($([])->first)", Shape::bool([]))]
     fn result_shapes_change_only_from_v0_5(#[case] selection: &str, #[case] expected: Shape) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4] {
             validate_with_context(selection, expected.clone(), spec)
@@ -1147,6 +1151,30 @@ mod tests {
         }
         validate_with_context(selection, expected, ConnectSpec::V0_5)
             .expect_err("result shape mirrors the runtime from connect/v0.5");
+    }
+
+    // `->or` on true and `->and` on false return their input without
+    // evaluating any argument, so a missing argument does not make the result
+    // missing, in any version.
+    #[rstest]
+    #[case::or_true_missing_eq(r#"$(true)->or($args.string->eq($([])->first))"#)]
+    #[case::and_false_missing_eq(r#"$(false)->and($args.string->eq($([])->first))"#)]
+    #[case::or_true_missing("$(true)->or($([])->first)")]
+    #[case::and_false_missing("$(false)->and($([])->first)")]
+    fn short_circuited_missing_arguments_stay_bool(#[case] selection: &str) {
+        let (value, runtime_errors) = JSONSelection::parse_with_spec(selection, ConnectSpec::V0_4)
+            .expect("selection parses")
+            .apply_to(&serde_json_bytes::json!({}));
+        assert!(
+            matches!(value, Some(serde_json_bytes::Value::Bool(_))),
+            "runtime value: {value:?}"
+        );
+        assert!(runtime_errors.is_empty(), "{runtime_errors:?}");
+
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, Shape::bool([]), spec)
+                .expect("expression is a boolean for this spec version");
+        }
     }
 
     #[rstest]

@@ -18,7 +18,7 @@ use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::or_missing;
-use crate::connectors::json_selection::methods::common::present_part;
+use crate::connectors::json_selection::methods::common::present_arg;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -353,7 +353,7 @@ fn get_shape(
     let index_shape =
         index_literal.compute_output_shape(context, input_shape.clone(), dollar_shape);
     let maybe_missing = may_be_missing(&index_shape);
-    let Some(index_shape) = present_part(&index_shape) else {
+    let Some(index_shape) = present_arg(context, &index_shape) else {
         // The method produces no value when its index argument has none.
         return Shape::none();
     };

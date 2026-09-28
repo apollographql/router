@@ -125,6 +125,20 @@ pub(crate) fn present_part(shape: &Shape) -> Option<Shape> {
     }
 }
 
+/// Like [`present_part`], for the argument of a method that produces no value
+/// when that argument has none.
+///
+/// From `connect/v0.5`, an argument that is always missing gives `None`, and
+/// the method should return `Shape::none()`. Before that, the method's result
+/// shape must stay what it was, so an always-missing argument is treated as
+/// `Unknown` instead. That way the call is accepted without changing its
+/// result shape.
+pub(crate) fn present_arg(context: &ShapeContext, shape: &Shape) -> Option<Shape> {
+    present_part(shape).or_else(|| {
+        (context.spec() < ConnectSpec::V0_5).then(|| Shape::unknown(shape.locations().cloned()))
+    })
+}
+
 /// Returns true if `shape` is `None` or a union that includes `None`.
 pub(crate) fn may_be_missing(shape: &Shape) -> bool {
     match shape.case() {

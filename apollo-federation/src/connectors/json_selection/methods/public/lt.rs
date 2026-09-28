@@ -14,7 +14,7 @@ use crate::connectors::json_selection::methods::common::is_comparable_shape_comb
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::connectors::json_selection::methods::common::or_missing;
-use crate::connectors::json_selection::methods::common::present_part;
+use crate::connectors::json_selection::methods::common::present_arg;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(LtMethod, lt_method, lt_shape);
@@ -124,7 +124,7 @@ fn lt_shape(
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     let maybe_missing = may_be_missing(&arg_shape);
-    let Some(arg_shape) = present_part(&arg_shape) else {
+    let Some(arg_shape) = present_arg(context, &arg_shape) else {
         // The method produces no value when its argument has none.
         return Shape::none();
     };
