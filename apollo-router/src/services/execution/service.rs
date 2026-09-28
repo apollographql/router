@@ -397,9 +397,12 @@ impl ExecutionService {
 
                 response.errors.retain(|error| match &error.path {
                     None => true,
-                    Some(error_path) => {
-                        query.contains_error_path(&response.label, error_path, variables_set)
-                    }
+                    Some(error_path) => query.contains_error_path(
+                        &response.label,
+                        response.path.as_ref(),
+                        error_path,
+                        variables_set,
+                    ),
                 });
 
                 response.label = rewrite_defer_label(&response);
@@ -476,8 +479,12 @@ impl ExecutionService {
                     .filter(|error| match &error.path {
                         None => false,
                         Some(error_path) => {
-                            query.contains_error_path(&response.label, error_path, variables_set)
-                                && error_path_matches_response_path(error_path, &path)
+                            query.contains_error_path(
+                                &response.label,
+                                response.path.as_ref(),
+                                error_path,
+                                variables_set,
+                            ) && error_path_matches_response_path(error_path, &path)
                         }
                     })
                     .cloned()

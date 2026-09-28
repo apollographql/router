@@ -437,7 +437,7 @@ interface HasNodes {
 type MySpecialNode implements Node & HasNodes {
   id: ID!
   value: String
-  nodes: [Node]
+  nodes: [Node!]!
 }
 type Query {
   nodes: [Node]
