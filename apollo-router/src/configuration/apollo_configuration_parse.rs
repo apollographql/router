@@ -20,23 +20,10 @@ use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 
-/// Reports every plugin whose config could not be deserialized, at its section of the document.
+/// Reports every plugin whose config is invalid, at its section of the document.
 impl apollo_configuration::Validate for Configuration {
-    fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
-        for error in self.plugin_configs.errors() {
-            report_at(
-                errors.inner(),
-                &error.section,
-                error.to_configuration_error().to_string(),
-            );
-        }
-    }
-}
-
-fn report_at(mut errors: ErrorCollector<'_>, path: &[String], message: String) {
-    match path.split_first() {
-        Some((segment, rest)) => report_at(errors.nest(segment.as_str()), rest, message),
-        None => errors.report_simple(message),
+    fn validate<'a>(&self, errors: ErrorCollector<'a>) {
+        apollo_configuration::Validate::validate(&*self.plugin_configs, errors);
     }
 }
 
@@ -729,6 +716,92 @@ mod tests {
         assert!(error.contains("apollo.subscription"), "{error}");
         assert!(error.contains("[3:3]"), "{error}");
         assert!(error.contains("[6:3]"), "{error}");
+    }
+
+    /// A test plugin whose custom rule rejects a `name` that the schema accepts.
+    mod validated_plugin {
+        use apollo_configuration::ErrorCollector;
+        use apollo_configuration::configuration;
+        use tower::BoxError;
+
+        use crate::plugin::Plugin;
+        use crate::plugin::PluginInit;
+
+        /// A test plugin with a custom validation rule.
+        #[configuration(validate = reject_reserved_name)]
+        pub(super) struct ValidatedConfig {
+            /// Any name except `reserved`.
+            name: String,
+        }
+
+        fn reject_reserved_name(config: &ValidatedConfig, mut errors: ErrorCollector<'_>) {
+            if config.name == "reserved" {
+                errors
+                    .nest("name")
+                    .report_simple("the name `reserved` is not allowed");
+            }
+        }
+
+        struct ValidatedPlugin;
+
+        #[async_trait::async_trait]
+        impl Plugin for ValidatedPlugin {
+            type Config = ValidatedConfig;
+
+            async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+                Ok(Self)
+            }
+        }
+
+        register_plugin!("test", "validated", ValidatedPlugin);
+    }
+
+    /// A plugin's own validation rules run while the configuration is parsed, and their errors
+    /// quote the plugin's section of the file.
+    #[test]
+    fn plugin_validation_rules_reject_schema_valid_values_at_their_section() {
+        let text = "# operator comment\nplugins:\n  test.validated:\n    name: reserved\n";
+
+        let error = parse_configuration(text, ExternalValues::default(), Migration::None)
+            .expect_err("the plugin's rule rejects the name")
+            .to_string();
+
+        assert!(
+            error.contains("the name `reserved` is not allowed"),
+            "{error}"
+        );
+        assert!(error.contains("[4:11]"), "{error}");
+        assert!(error.contains("name: reserved"), "{error}");
+    }
+
+    #[test]
+    fn plugin_validation_rules_accept_other_values() {
+        let config = parse_configuration(
+            "plugins:\n  test.validated:\n    name: allowed\n",
+            ExternalValues::default(),
+            Migration::None,
+        )
+        .expect("the plugin's rule accepts the name");
+
+        assert!(config.plugin_configs.user("test.validated").is_some());
+    }
+
+    /// Validation rules and deserialization failures in different plugins are all reported.
+    #[test]
+    fn every_plugin_failing_validation_is_reported() {
+        let text = "traffic_shaping:\n  router:\n    timeout: not-a-duration\nplugins:\n  test.validated:\n    name: reserved\n";
+
+        let error = parse_configuration(text, ExternalValues::default(), Migration::None)
+            .expect_err("both plugins' config is invalid")
+            .to_string();
+
+        assert!(error.contains("apollo.traffic_shaping"), "{error}");
+        assert!(error.contains("[2:3]"), "{error}");
+        assert!(
+            error.contains("the name `reserved` is not allowed"),
+            "{error}"
+        );
+        assert!(error.contains("[6:11]"), "{error}");
     }
 
     /// A migrated document that still fails schema validation falls back to validating the

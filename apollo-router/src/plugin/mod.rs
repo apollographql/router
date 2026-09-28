@@ -28,23 +28,25 @@ use std::task::Context;
 use std::task::Poll;
 
 use ::serde::Deserialize;
-use ::serde::de::DeserializeOwned;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
-/// The crate whose `Configuration` trait every built-in plugin's `Config` implements.
+/// The crate whose `Configuration` trait every plugin's `Config` must implement.
 ///
-/// Re-exported so that a config type deriving `serde::Deserialize` and `schemars::JsonSchema` can
-/// implement `apollo_configuration::Configuration` and `apollo_configuration::Validate` without
-/// depending on `apollo-configuration`; its `#[configuration]` attribute needs that dependency.
-/// The router does not yet run `Validate` rules when it loads plugin configuration; parse-time
-/// validation arrives in a later change.
+/// Declare a plugin's `Config` with its `#[configuration]` attribute, which needs a direct
+/// dependency on `apollo-configuration`. The re-export lets a type the attribute can't express,
+/// such as a tuple struct deriving `serde::Deserialize` and `schemars::JsonSchema`, implement
+/// `apollo_configuration::Configuration` and `apollo_configuration::Validate` by hand without that
+/// dependency. A plugin `Config`'s `Validate` rules run while the router configuration is parsed,
+/// and their errors point at the plugin's section.
 pub use apollo_configuration;
+use apollo_configuration::Configuration;
+use apollo_configuration::ErrorCollector;
+use apollo_configuration::Validate;
 use async_trait::async_trait;
 pub use enabled::Enabled;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use schemars::JsonSchema;
 use schemars::SchemaGenerator;
 use serde_json::Value;
 use tower::BoxError;
@@ -66,6 +68,8 @@ use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
 type ConfigFactory = fn(serde_json::Value) -> Result<PluginConfig, BoxError>;
+
+type ValidateFactory = fn(&PluginConfig, ErrorCollector<'_>);
 
 type InstanceFactory =
     fn(PluginInit<PluginConfig>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
@@ -329,6 +333,7 @@ pub struct PluginFactory {
     pub(crate) name: String,
     pub(crate) hidden_from_config_json_schema: bool,
     config_factory: ConfigFactory,
+    validate_factory: ValidateFactory,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
@@ -368,6 +373,12 @@ impl PluginFactory {
                 let config: P::Config = serde_json::from_value(value)?;
                 Ok(PluginConfig(Arc::new(config)))
             },
+            validate_factory: |config, errors| {
+                // `config_factory` made this config, so it is always a `P::Config`.
+                if let Some(config) = config.downcast_ref::<P::Config>() {
+                    config.validate(errors);
+                }
+            },
             instance_factory: |init| {
                 Box::pin(async move {
                     let init = init.try_map_config(|config| config.typed())?;
@@ -384,6 +395,12 @@ impl PluginFactory {
     /// when the configuration is parsed.
     pub(crate) fn parse_config(&self, config: serde_json::Value) -> Result<PluginConfig, BoxError> {
         (self.config_factory)(config)
+    }
+
+    /// Runs the [`Validate`] rules of config deserialized by [`Self::parse_config`], reporting
+    /// errors at the location `errors` points to.
+    pub(crate) fn validate_config(&self, config: &PluginConfig, errors: ErrorCollector<'_>) {
+        (self.validate_factory)(config, errors)
     }
 
     /// Constructs the plugin from config deserialized by [`Self::parse_config`].
@@ -436,14 +453,17 @@ pub(crate) fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static {
     /// The configuration for this plugin.
-    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    /// Declare it with `#[apollo_configuration::configuration]`. Implement [`Validate`] and
+    /// [`Configuration`] by hand only where the attribute can't express the type, such as a
+    /// tuple struct. Use `()` for a plugin without configuration.
     ///
     /// If a plugin is [registered][crate::register_plugin],
-    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
-    /// The contents of this section are deserialized into this `Config` type
-    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
+    /// The contents of this section are deserialized into this `Config` type and its
+    /// [`Validate`] rules run while the router configuration is parsed, so their errors point at
+    /// this section. The config is then passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: Configuration + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -513,14 +533,17 @@ pub trait Plugin: Send + Sync + 'static {
 #[async_trait]
 pub trait PluginUnstable: Send + Sync + 'static {
     /// The configuration for this plugin.
-    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    /// Declare it with `#[apollo_configuration::configuration]`. Implement [`Validate`] and
+    /// [`Configuration`] by hand only where the attribute can't express the type, such as a
+    /// tuple struct. Use `()` for a plugin without configuration.
     ///
     /// If a plugin is [registered][crate::register_plugin],
-    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
-    /// The contents of this section are deserialized into this `Config` type
-    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
+    /// The contents of this section are deserialized into this `Config` type and its
+    /// [`Validate`] rules run while the router configuration is parsed, so their errors point at
+    /// this section. The config is then passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: Configuration + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -697,14 +720,17 @@ where
 #[async_trait]
 pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// The configuration for this plugin.
-    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    /// Declare it with `#[apollo_configuration::configuration]`. Implement [`Validate`] and
+    /// [`Configuration`] by hand only where the attribute can't express the type, such as a
+    /// tuple struct. Use `()` for a plugin without configuration.
     ///
     /// If a plugin is [registered][crate::register_plugin],
-    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
-    /// The contents of this section are deserialized into this `Config` type
-    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Clone + Send + Sync + 'static;
+    /// The contents of this section are deserialized into this `Config` type and its
+    /// [`Validate`] rules run while the router configuration is parsed, so their errors point at
+    /// this section. The config is then passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: Configuration + Clone + Send + Sync + 'static;
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
 
@@ -1103,5 +1129,32 @@ impl Service<router::Request> for Handler {
 impl From<router::BoxCloneService> for Handler {
     fn from(original: router::BoxCloneService) -> Self {
         Self::new(original)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct UnitPlugin;
+
+    #[async_trait]
+    impl Plugin for UnitPlugin {
+        type Config = ();
+
+        async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            Ok(Self)
+        }
+    }
+
+    /// `type Config = ()` plugins load from a `null` section, which is how `plugin_name:` parses.
+    #[tokio::test]
+    async fn plugins_without_config_load() {
+        let factory = PluginFactory::new::<UnitPlugin>("test", "unit");
+
+        factory
+            .create_instance_without_schema(&Value::Null)
+            .await
+            .expect("a null section is a valid `()` config");
     }
 }

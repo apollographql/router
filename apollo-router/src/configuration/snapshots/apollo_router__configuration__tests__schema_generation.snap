@@ -7804,6 +7804,9 @@ expression: "&schema"
         },
         "test.records_previous_config": {
           "$ref": "#/definitions/Conf"
+        },
+        "test.validated": {
+          "$ref": "#/definitions/ValidatedConfig"
         }
       },
       "type": [
@@ -12755,6 +12758,18 @@ expression: "&schema"
             }
           ],
           "description": "Batch processor config for Apollo usage report metrics."
+        }
+      },
+      "type": "object"
+    },
+    "ValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test plugin with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
+          "type": "string"
         }
       },
       "type": "object"

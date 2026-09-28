@@ -1,7 +1,9 @@
 //! Plugin config deserialized when the configuration is parsed.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
+use apollo_configuration::ErrorCollector;
+use apollo_configuration::Validate;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -14,11 +16,13 @@ use crate::plugin::plugins;
 /// Every configured plugin's config, deserialized once for construction.
 ///
 /// Invalid config is kept as errors rather than failing deserialization, so configuration parsing
-/// can report every one of them against its section of the document.
+/// can report every one of them against its section of the document. Validating the configs
+/// (see the [`Validate`] impl) runs each plugin's own rules at its section.
 #[derive(Debug, Default)]
 pub(crate) struct PluginConfigs {
-    /// Built-in plugins, keyed by full name such as `apollo.telemetry`.
-    apollo: HashMap<String, ParsedPlugin>,
+    /// Built-in plugins, keyed by full name such as `apollo.telemetry`. Ordered, so validation
+    /// reports errors in the same order every time.
+    apollo: BTreeMap<String, ParsedPlugin>,
     /// User plugins, in the order the configuration lists them.
     user: Vec<(String, ParsedPlugin)>,
     /// User plugin sections that name no registered plugin.
@@ -31,6 +35,8 @@ pub(crate) struct PluginConfigs {
 pub(crate) struct ParsedPlugin {
     pub(crate) factory: &'static PluginFactory,
     pub(crate) config: PluginConfig,
+    /// Where the plugin's section is in the document, such as `["plugins", "acme.auth"]`.
+    section: Vec<String>,
 }
 
 /// A plugin whose config could not be deserialized.
@@ -101,7 +107,11 @@ impl PluginConfigs {
         config: &Value,
     ) -> Option<ParsedPlugin> {
         match factory.parse_config(config.clone()) {
-            Ok(config) => Some(ParsedPlugin { factory, config }),
+            Ok(config) => Some(ParsedPlugin {
+                factory,
+                config,
+                section,
+            }),
             Err(error) => {
                 self.errors.push(PluginConfigError {
                     plugin: factory.name.clone(),
@@ -150,6 +160,39 @@ impl PluginConfigs {
             Some(error) => Err(error.to_configuration_error()),
             None => Ok(self),
         }
+    }
+}
+
+/// Reports each plugin whose config could not be deserialized, and runs every other plugin's
+/// [`Validate`] rules, at the plugin's section of the document.
+impl Validate for PluginConfigs {
+    fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
+        for error in &self.errors {
+            at_section(errors.inner(), &error.section, |mut errors| {
+                errors.report_simple(error.to_configuration_error())
+            });
+        }
+        let parsed = self
+            .apollo
+            .values()
+            .chain(self.user.iter().map(|(_, parsed)| parsed));
+        for parsed in parsed {
+            at_section(errors.inner(), &parsed.section, |errors| {
+                parsed.factory.validate_config(&parsed.config, errors)
+            });
+        }
+    }
+}
+
+/// Calls `report` with a collector for the value at `section`.
+fn at_section(
+    mut errors: ErrorCollector<'_>,
+    section: &[String],
+    report: impl FnOnce(ErrorCollector<'_>),
+) {
+    match section.split_first() {
+        Some((key, rest)) => at_section(errors.nest(key.as_str()), rest, report),
+        None => report(errors),
     }
 }
 

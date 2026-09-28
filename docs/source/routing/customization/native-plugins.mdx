@@ -61,7 +61,27 @@ struct Conf {
 >
 > Your configuration must also be `Send`, `Sync` and `'static`.
 
-If your plugin's section is a bare `true` or `false`, such as `my_plugin: true`, use `apollo_router::plugin::Enabled` as its configuration instead of declaring a struct. The router also re-exports the crate as `apollo_router::plugin::apollo_configuration`, so a configuration that derives `Deserialize` and `JsonSchema` itself can implement `apollo_configuration::Configuration` by hand without the extra dependency.
+A plugin's `Config` must implement `apollo_configuration::Configuration`, so native plugin configuration uses apollo-configuration and its `#[configuration]` attribute. The router parses and validates each plugin's section while it parses its configuration. To reject values the schema allows, add a validation function. It runs at parse time, and its errors are reported at your plugin's section of the file:
+
+```rust title="hello_world.rs"
+use apollo_configuration::ErrorCollector;
+
+#[apollo_configuration::configuration(validate = validate_conf)]
+struct Conf {
+    #[config(required)]
+    name: String,
+}
+
+fn validate_conf(conf: &Conf, mut errors: ErrorCollector<'_>) {
+    if conf.name.is_empty() {
+        errors.nest("name").report_simple("name must not be empty");
+    }
+}
+```
+
+If your plugin's section is a bare `true` or `false`, such as `my_plugin: true`, use `apollo_router::plugin::Enabled` as its configuration instead of declaring a struct. A plugin without configuration can use `type Config = ();`.
+
+If the attribute can't express your configuration type, for example a tuple struct, derive `Clone`, `Deserialize` and `JsonSchema` yourself and implement `Validate` and `Configuration` by hand. The router re-exports the crate as `apollo_router::plugin::apollo_configuration`, so these impls don't need the extra dependency.
 
 Then define the plugin itself and specify the configuration as an associated type:
 
