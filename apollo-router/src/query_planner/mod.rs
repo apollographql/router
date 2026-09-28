@@ -57,6 +57,12 @@ pub(crate) fn build_subgraph_schemas(planner: &QueryPlanner) -> Arc<SubgraphSche
     for (service_name, subgraph_name) in planner.connector_index().service_subgraphs() {
         if let Some(schema) = schemas.get(subgraph_name).cloned() {
             schemas.insert(service_name.to_string(), schema);
+        } else {
+            tracing::error!(
+                service_name,
+                subgraph_name,
+                "connector references a subgraph unknown to the query planner"
+            );
         }
     }
     Arc::new(schemas)
@@ -85,6 +91,12 @@ fn hashed_subgraph_schemas(planner: &QueryPlanner) -> Arc<HashedSubgraphSchemas>
     for (service_name, subgraph_name) in planner.connector_index().service_subgraphs() {
         if let Some(schema) = schemas.get(subgraph_name).cloned() {
             schemas.insert(service_name.to_string(), schema);
+        } else {
+            tracing::error!(
+                service_name,
+                subgraph_name,
+                "connector references a subgraph unknown to the query planner"
+            );
         }
     }
     Arc::new(schemas)
