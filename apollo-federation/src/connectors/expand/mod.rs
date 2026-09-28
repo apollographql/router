@@ -48,7 +48,8 @@ pub enum ExpansionResult {
 
 /// Build the `Connectors` index by parsing connector directives from the
 /// supergraph, without creating virtual subgraphs or re-merging the schema.
-/// Used when the incremental planner handles connectors natively.
+/// Used when the incremental planner handles connectors natively via
+/// `FetchProtocol::Connector`.
 pub fn build_connectors_without_expansion(
     supergraph_str: &str,
 ) -> Result<Option<Connectors>, FederationError> {

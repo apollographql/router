@@ -165,8 +165,7 @@ pub(crate) struct FetchNode {
     /// @fromContext variable definitions added to the subgraph operation.
     pub(crate) context_variables: Vec<(Name, Node<apollo_compiler::ast::Type>)>,
     /// When set, this fetch is backed by a connector rather than a GraphQL
-    /// subgraph endpoint. Plan builder names the fetch after the connector's
-    /// synthetic service name.
+    /// subgraph endpoint. Plan builder maps this to `FetchProtocol::Connector`.
     pub(crate) connector: Option<Arc<crate::connectors::Connector>>,
     /// Pipeline depth: longest incoming dependency chain. Maintained
     /// incrementally by FetchGraph to avoid per-call toposorts.
