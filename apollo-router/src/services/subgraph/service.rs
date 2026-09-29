@@ -817,7 +817,9 @@ mod tests {
             enabled: true,
             mode: SubscriptionModeConfig {
                 callback: Some(CallbackMode {
-                    public_url: Url::parse("http://localhost:4000/testcallback").unwrap(),
+                    public_url: Url::parse("http://localhost:4000/testcallback")
+                        .unwrap()
+                        .into(),
                     listen: None,
                     path: Some("/testcallback".to_string()),
                     subgraphs: vec![String::from("testbis")].into_iter().collect(),
@@ -2244,7 +2246,7 @@ mod tests {
             && let Some(ws) = passthrough.subgraphs.get_mut("test")
         {
             ws.max_reconnect_attempts = max_reconnect_attempts;
-            ws.reconnect_delay = Some(reconnect_delay);
+            ws.reconnect_delay = Some(reconnect_delay.into());
         }
         config
     }
