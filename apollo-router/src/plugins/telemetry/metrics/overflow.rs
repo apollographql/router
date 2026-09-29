@@ -8,10 +8,15 @@
 //! Push exporters (OTLP, Apollo) are checked on every export. The Prometheus exporter serves
 //! scrapes from its own internal collector, which never calls back into a reader wrapper, so the
 //! Prometheus endpoint passes each scrape to [`OverflowMetricReader`] to check.
+//!
+//! Each meter provider must count an overflow once. The metrics builder decides which wrapper
+//! counts for the public meter provider; see [`OverflowCounting`].
 
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::Value;
@@ -33,23 +38,56 @@ const OTEL_METRIC_OVERFLOW_KEY: &str = "otel.metric.overflow";
 const PROMETHEUS_OVERFLOW_LABEL: &str = "otel_metric_overflow";
 const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardinality_overflow";
 
+/// Whether an [`OverflowMetricExporter`] counts the overflow it sees.
+///
+/// Shared with the metrics builder, which enables it once every exporter is configured, so it
+/// can choose a single counting source for a meter provider. Disabled by default.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OverflowCounting(Arc<AtomicBool>);
+
+impl OverflowCounting {
+    pub(crate) fn enabled() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+
+    pub(crate) fn enable(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
 /// Wrapper for push metric exporters that detects cardinality overflow.
 pub(crate) struct OverflowMetricExporter<T> {
     inner: T,
+    counting: OverflowCounting,
 }
 
 impl<T: Clone> Clone for OverflowMetricExporter<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            counting: self.counting.clone(),
         }
     }
 }
 
 impl<T> OverflowMetricExporter<T> {
-    /// Create a new overflow-detecting wrapper for push-based exporters.
+    /// Create a new overflow-detecting wrapper for push-based exporters that always counts.
     pub(crate) fn new_push(inner: T) -> Self {
-        Self { inner }
+        Self::with_counting(inner, OverflowCounting::enabled())
+    }
+
+    /// Create a wrapper that counts only while `counting` is enabled.
+    pub(crate) fn with_counting(inner: T, counting: OverflowCounting) -> Self {
+        Self { inner, counting }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn counts_overflow(&self) -> bool {
+        self.counting.is_enabled()
     }
 }
 
@@ -57,6 +95,7 @@ impl<T: Debug> Debug for OverflowMetricExporter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OverflowMetricExporter")
             .field("inner", &self.inner)
+            .field("counting", &self.counting.is_enabled())
             .finish()
     }
 }
@@ -67,7 +106,9 @@ impl<T: PushMetricExporter> PushMetricExporter for OverflowMetricExporter<T> {
         &self,
         metrics: &ResourceMetrics,
     ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        overflowing_metric_names(metrics).for_each(record_overflow);
+        if self.counting.is_enabled() {
+            overflowing_metric_names(metrics).for_each(record_overflow);
+        }
         self.inner.export(metrics)
     }
 
@@ -550,6 +591,50 @@ mod tests {
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 u64,
                 "metric.name" = CARDINALITY_OVERFLOW_METRIC
+            );
+        }
+        .with_metrics()
+        .await
+    }
+
+    #[tokio::test]
+    async fn push_exporter_counts_only_when_enabled() {
+        async {
+            let reader = ClonableManualReader::default();
+            let provider = SdkMeterProvider::builder()
+                .with_reader(reader.clone())
+                .with_resource(Resource::builder_empty().build())
+                .with_view(|instrument: &opentelemetry_sdk::metrics::Instrument| {
+                    (instrument.name() == "test.push.overflow.metric").then(|| {
+                        Stream::builder()
+                            .with_cardinality_limit(2)
+                            .build()
+                            .expect("valid stream")
+                    })
+                })
+                .build();
+            overflow(&provider, "test.push.overflow.metric");
+            let mut resource_metrics = ResourceMetrics::default();
+            reader.collect(&mut resource_metrics).unwrap();
+
+            let counting = OverflowCounting::default();
+            let exporter = OverflowMetricExporter::with_counting(
+                InMemoryMetricExporter::default(),
+                counting.clone(),
+            );
+            exporter.export(&resource_metrics).await.unwrap();
+            assert_counter_not_exists!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                u64,
+                "metric.name" = "test.push.overflow.metric"
+            );
+
+            counting.enable();
+            exporter.export(&resource_metrics).await.unwrap();
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                1,
+                "metric.name" = "test.push.overflow.metric"
             );
         }
         .with_metrics()

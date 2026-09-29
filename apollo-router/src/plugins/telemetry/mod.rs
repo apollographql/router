@@ -3511,10 +3511,11 @@ mod tests {
         .await;
     }
 
-    /// When OTLP is also configured, its exporter already counts overflow on the public meter
-    /// provider, so Prometheus scrapes must not count it a second time.
+    /// When OTLP is also configured, Prometheus scrapes still count overflow on the public meter
+    /// provider. The OTLP exporter doesn't; the integration tests check that by value across real
+    /// OTLP exports, which run outside this test's task-local meter provider.
     #[tokio::test(flavor = "multi_thread")]
-    async fn it_test_prometheus_metrics_cardinality_overflow_not_counted_by_scrape_with_otlp() {
+    async fn it_test_prometheus_metrics_cardinality_overflow_counted_by_scrape_with_otlp() {
         let _guard = TEST.lock().await;
         async {
             let collector = wiremock::MockServer::start().await;
@@ -3533,14 +3534,15 @@ mod tests {
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
 
-            for _ in 0..2 {
-                let scrape = scrape_prometheus(plugin.as_ref()).await;
-                assert!(
-                    scrape.contains(r#"otel_metric_overflow="true""#),
-                    "expected an overflow series in:\n{scrape}"
-                );
-                assert_eq!(cardinality_overflow_lines(&scrape), Vec::<&str>::new());
-            }
+            let first = scrape_prometheus(plugin.as_ref()).await;
+            assert!(
+                first.contains(r#"otel_metric_overflow="true""#),
+                "expected an overflow series in:\n{first}"
+            );
+            assert_eq!(cardinality_overflow_lines(&first), Vec::<&str>::new());
+
+            let second = scrape_prometheus(plugin.as_ref()).await;
+            assert_single_cardinality_overflow_series(&second, "apollo.test.histo", 1);
         }
         .with_metrics()
         .await;

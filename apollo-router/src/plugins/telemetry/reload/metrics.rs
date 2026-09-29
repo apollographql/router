@@ -40,6 +40,8 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::InstrumentNameMatcher;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::OverflowCounting;
+use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusRegistry;
 
 /// Trait for metric exporters to contribute to meter provider construction
@@ -62,8 +64,9 @@ pub(crate) struct MetricsBuilder<'a> {
     providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
     prometheus_registry: Option<PrometheusRegistry>,
-    /// Set when a push exporter on the public meter provider already counts cardinality overflow.
-    public_overflow_counted_by_push: bool,
+    /// Overflow counting switches of the public meter provider's push exporters, in configuration
+    /// order.
+    public_push_overflow_counting: Vec<OverflowCounting>,
     metrics_common: &'a MetricsCommon,
     resource: Resource,
 }
@@ -76,16 +79,17 @@ impl<'a> MetricsBuilder<'a> {
         HashMap<MeterProviderType, FilterMeterProvider>,
         Sender,
     ) {
-        let mut prometheus_registry = self.prometheus_registry;
-        // Count each overflow once: if a push exporter already counts overflow on the public
-        // meter provider, Prometheus scrapes must not count it again.
-        if self.public_overflow_counted_by_push
-            && let Some(prometheus_registry) = &mut prometheus_registry
+        // Count each overflow on the public meter provider once. Prometheus scrapes read cumulative
+        // state, so they see every overflow a push exporter could, including one that a delta
+        // exporter's per-interval state never reaches. Without Prometheus, the first push exporter
+        // counts.
+        if self.prometheus_registry.is_none()
+            && let Some(counting) = self.public_push_overflow_counting.first()
         {
-            prometheus_registry.overflow_reader = None;
+            counting.enable();
         }
         (
-            prometheus_registry,
+            self.prometheus_registry,
             self.meter_provider_builders
                 .into_iter()
                 .map(|(k, v)| {
@@ -128,7 +132,7 @@ impl<'a> MetricsBuilder<'a> {
             resource,
             apollo_metrics_sender: Sender::default(),
             prometheus_registry: None,
-            public_overflow_counted_by_push: false,
+            public_push_overflow_counting: Vec::new(),
             metrics_common: &config.exporters.metrics.common,
         }
     }
@@ -142,10 +146,12 @@ impl<'a> MetricsBuilder<'a> {
         self.prometheus_registry = Some(prometheus_registry);
         self
     }
-    /// Record that a push exporter on the public meter provider counts cardinality overflow.
-    pub(crate) fn with_public_overflow_counted_by_push(&mut self) -> &mut Self {
-        self.public_overflow_counted_by_push = true;
-        self
+    /// Wrap a push exporter for the public meter provider in cardinality overflow detection.
+    /// Whether it counts is decided by [`Self::build`], so that each overflow is counted once.
+    pub(crate) fn public_overflow_exporter<T>(&mut self, exporter: T) -> OverflowMetricExporter<T> {
+        let counting = OverflowCounting::default();
+        self.public_push_overflow_counting.push(counting.clone());
+        OverflowMetricExporter::with_counting(exporter, counting)
     }
     pub(crate) fn with_apollo_metrics_sender(
         &mut self,
@@ -270,6 +276,53 @@ fn resolve_view(
         None => default_view,
     };
     Some(view.into_stream())
+}
+
+#[cfg(test)]
+mod overflow_counting_tests {
+    use opentelemetry_sdk::metrics::InMemoryMetricExporter;
+
+    use super::*;
+    use crate::plugins::telemetry::metrics::prometheus;
+
+    fn prometheus_config() -> prometheus::Config {
+        prometheus::Config {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn first_public_push_exporter_counts_without_prometheus() {
+        let conf = Conf::default();
+        let mut builder = MetricsBuilder::new(&conf);
+        let first = builder.public_overflow_exporter(InMemoryMetricExporter::default());
+        let second = builder.public_overflow_exporter(InMemoryMetricExporter::default());
+        builder.build();
+
+        assert!(first.counts_overflow());
+        assert!(!second.counts_overflow());
+    }
+
+    #[test]
+    fn prometheus_counts_instead_of_public_push_exporters() {
+        // Configuration order must not matter.
+        for prometheus_first in [true, false] {
+            let conf = Conf::default();
+            let mut builder = MetricsBuilder::new(&conf);
+            if prometheus_first {
+                builder.configure(&prometheus_config()).unwrap();
+            }
+            let push = builder.public_overflow_exporter(InMemoryMetricExporter::default());
+            if !prometheus_first {
+                builder.configure(&prometheus_config()).unwrap();
+            }
+            let (prometheus_registry, _, _) = builder.build();
+
+            assert!(prometheus_registry.is_some());
+            assert!(!push.counts_overflow());
+        }
+    }
 }
 
 #[cfg(test)]

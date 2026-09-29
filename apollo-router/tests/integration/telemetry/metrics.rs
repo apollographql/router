@@ -1180,27 +1180,8 @@ async fn test_prometheus_cardinality_overflow_counter() {
     router.graceful_shutdown().await;
 }
 
-/// With Prometheus and OTLP both enabled, the OTLP exporter counts the overflow
-/// and the Prometheus endpoint shows exactly that one series.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_prometheus_and_otlp_cardinality_overflow_counter_single_series() {
-    let mock_server = mock_otlp_server(0..).await;
-    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
-        .replace("<otel-collector-endpoint>", &mock_server.uri());
-    let mut router = IntegrationTest::builder().config(&config).build().await;
-
-    router.start().await;
-    router.assert_started().await;
-    overflow_request_duration(&mut router).await;
-
-    // OTLP counts on its export interval, so wait for its first count to reach Prometheus.
-    // Scrapes must not count as well; that is covered by the telemetry plugin unit tests.
-    router
-        .assert_metrics_contains(
-            r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration",otel_scope_name="apollo/router"} <any>"#,
-            None,
-        )
-        .await;
+/// The value of the single `cardinality_overflow` series for `http.server.request.duration`.
+async fn request_duration_overflow_count(router: &IntegrationTest) -> u64 {
     let metrics = router
         .get_metrics_response()
         .await
@@ -1214,10 +1195,90 @@ async fn test_prometheus_and_otlp_cardinality_overflow_counter_single_series() {
         1,
         "expected one counter series in:\n{metrics}"
     );
+    let (series, value) = counter[0].rsplit_once(' ').unwrap();
     assert!(
-        counter[0].contains(r#"metric_name="http.server.request.duration""#),
-        "{counter:?}"
+        series.contains(r#"metric_name="http.server.request.duration""#),
+        "{series}"
     );
+    value.parse().unwrap()
+}
+
+async fn otlp_metric_exports(collector: &MockServer) -> usize {
+    collector
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .filter(|request| request.url.path() == "/metrics")
+        .count()
+}
+
+async fn wait_for_otlp_metric_exports(collector: &MockServer, exports: usize) {
+    let target = otlp_metric_exports(collector).await + exports;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while otlp_metric_exports(collector).await < target {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("OTLP exporter did not export");
+}
+
+/// With Prometheus and OTLP both enabled, overflow is counted once per scrape and never by the
+/// OTLP exports that run between scrapes.
+async fn assert_counted_once_per_scrape(router: &IntegrationTest, collector: &MockServer) {
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration",otel_scope_name="apollo/router"} <any>"#,
+            None,
+        )
+        .await;
+    let before = request_duration_overflow_count(router).await;
+    wait_for_otlp_metric_exports(collector, 3).await;
+    let after = request_duration_overflow_count(router).await;
+    assert_eq!(
+        after,
+        before + 1,
+        "only the scrape in between should count; OTLP exports must not"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_and_otlp_cardinality_overflow_counted_once() {
+    let collector = mock_otlp_server(0..).await;
+    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
+        .replace("<otel-collector-endpoint>", &collector.uri());
+    let mut router = IntegrationTest::builder().config(&config).build().await;
+
+    router.start().await;
+    router.assert_started().await;
+    overflow_request_duration(&mut router).await;
+    assert_counted_once_per_scrape(&router, &collector).await;
+
+    router.graceful_shutdown().await;
+}
+
+/// A delta OTLP exporter resets its state on every export, so with one request per interval its
+/// own pipeline never overflows. Prometheus's cumulative state does, and the scrape counts it.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_prometheus_and_delta_otlp_cardinality_overflow_counted_once() {
+    let collector = mock_otlp_server(0..).await;
+    let config = include_str!("fixtures/prometheus_otlp_cardinality_overflow.router.yaml")
+        .replace("<otel-collector-endpoint>", &collector.uri())
+        .replace(
+            "protocol: http",
+            "protocol: http\n        temporality: delta",
+        );
+    let mut router = IntegrationTest::builder().config(&config).build().await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    wait_for_otlp_metric_exports(&collector, 2).await;
+    router
+        .execute_query(Query::default().with_bad_query())
+        .await;
+    assert_counted_once_per_scrape(&router, &collector).await;
 
     router.graceful_shutdown().await;
 }

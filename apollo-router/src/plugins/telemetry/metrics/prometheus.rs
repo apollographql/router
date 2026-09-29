@@ -88,7 +88,7 @@ impl MetricsConfigurator for Config {
         builder.with_reader(MeterProviderType::Public, reader.clone());
         builder.with_prometheus_registry(PrometheusRegistry {
             registry,
-            overflow_reader: Some(reader),
+            overflow_reader: reader,
         });
 
         Ok(())
@@ -100,9 +100,9 @@ impl MetricsConfigurator for Config {
 #[derive(Clone, Debug)]
 pub(crate) struct PrometheusRegistry {
     pub(crate) registry: Registry,
-    /// Present when scrapes are responsible for counting cardinality overflow on the public meter
-    /// provider. `None` when a push exporter on the same provider already counts it.
-    pub(crate) overflow_reader: Option<OverflowMetricReader<PrometheusExporter>>,
+    /// Counts cardinality overflow on the public meter provider from each scrape. While
+    /// Prometheus is configured, it is the provider's only counting source.
+    pub(crate) overflow_reader: OverflowMetricReader<PrometheusExporter>,
 }
 
 pub(crate) struct PrometheusService {
@@ -127,9 +127,9 @@ impl Service<router::Request> for PrometheusService {
         Box::pin(async move {
             let metric_families = registry.registry.gather();
             // As with the push exporters, the counter shows up from the next collection.
-            if let Some(reader) = &registry.overflow_reader {
-                reader.report_cardinality_overflow(&metric_families);
-            }
+            registry
+                .overflow_reader
+                .report_cardinality_overflow(&metric_families);
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
