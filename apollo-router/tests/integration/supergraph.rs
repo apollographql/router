@@ -190,6 +190,10 @@ async fn test_validate_default_values_false_allows_startup_with_connectors() -> 
             r#"
             supergraph:
               validate_default_values: false
+              query_planning:
+                # Covers the connector expansion path of the legacy planner.
+                incremental_planner:
+                  enabled: false
             "#,
         )
         .supergraph(PathBuf::from_iter([
