@@ -363,7 +363,7 @@ async fn mutation_should_work_over_post() {
             "products",
             MockSubgraph::builder()
                 .with_json(
-                    serde_json::json!({"query": "mutation { createProduct(name: \"Bob\", upc: \"8\") { __typename upc name } }"}),
+                    serde_json::json!({"query": "mutation { createProduct(name: \"Bob\", upc: \"8\") { __typename name upc } }"}),
                     serde_json::json!({"data": {"createProduct": {"__typename": "Product", "upc": "8", "name": "Bob"}}}),
                 )
                 .build(),
@@ -1262,14 +1262,14 @@ async fn defer_default_variable() {
         .expect("expecting valid request");
 
     // Second branch: `if: false` ⇒ no defer, single accounts query for
-    // `me { id name }`.
+    // `me { name id }`.
     let mocks = {
         let mut s = starstuff_mocks_empty();
         s.insert(
             "accounts",
             MockSubgraph::builder()
                 .with_json(
-                    serde_json::json!({"query": "query X__accounts__0 { me { id name } }", "operationName": "X__accounts__0"}),
+                    serde_json::json!({"query": "query X__accounts__0 { me { name id } }", "operationName": "X__accounts__0"}),
                     serde_json::json!({"data": {"me": {"id": "1", "name": "Ada Lovelace"}}}),
                 )
                 .build(),
@@ -1551,7 +1551,7 @@ fn starstuff_mocks_for_top_products_with_reviews_and_authors() -> MockedSubgraph
         "products",
         MockSubgraph::builder()
             .with_json(
-                serde_json::json!({"query": "{ topProducts { __typename upc name } }"}),
+                serde_json::json!({"query": "{ topProducts { __typename name upc } }"}),
                 serde_json::json!({"data": {
                     "topProducts": [
                         {"__typename": "Product", "upc": "1", "name": "Table"},
