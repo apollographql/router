@@ -1312,8 +1312,24 @@ fn nested_plugin_sections_reject_unknown_keys() {
             "lgo",
         ),
         (
+            "authorization:\n  directives:\n    enabeld: false\n",
+            "enabeld",
+        ),
+        (
             "coprocessor:\n  url: http://127.0.0.1:8081\n  router:\n    reqest: {}\n",
             "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  supergraph:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  execution:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  connector:\n    alll: {}\n",
+            "alll",
         ),
     ] {
         assert_rejects_unknown_key(yaml, key);
