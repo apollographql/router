@@ -388,7 +388,7 @@ async fn get_connector_router_service(
         );
 
         // `Post` has entity connectors but no @key, which the incremental
-        // planner cannot route to yet.
+        // planner does not route to.
         obj.insert(
             "supergraph".to_string(),
             serde_json::json!({
