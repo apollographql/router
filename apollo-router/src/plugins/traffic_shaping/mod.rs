@@ -32,6 +32,7 @@ use tower::timeout::error::Elapsed;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
+use crate::configuration::shared::without_default;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -65,12 +66,6 @@ fn deserialize_pool_idle_timeout<'de, D: serde::Deserializer<'de>>(
 
 fn resolve_pool_idle_timeout(pool_idle_timeout: PoolIdleTimeout) -> Option<Duration> {
     pool_idle_timeout.unwrap_or_else(default_pool_idle_timeout)
-}
-
-/// Drops the schema `default`: an omitted value inherits from `all`, and the `null` schemars would
-/// emit means "disable".
-fn without_default(schema: &mut schemars::Schema) {
-    schema.remove("default");
 }
 
 /// Traffic shaping options

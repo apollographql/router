@@ -28,8 +28,9 @@ pub(crate) struct Client {
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,
 
     #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    #[schemars(with = "Option<String>", transform = without_default)]
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    /// Defaults to 15 seconds; `null` disables idle eviction.
     pub(crate) pool_idle_timeout: Option<Duration>,
 
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
@@ -74,6 +75,12 @@ impl Default for Client {
     fn default() -> Self {
         Self::builder().build()
     }
+}
+
+/// Removes a field's schema `default`, for `pool_idle_timeout` fields whose generated default
+/// would be misleading: a `{secs, nanos}` object, or `null`, which means "disable".
+pub(crate) fn without_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
 }
 
 /// Returns the hardcoded default pool idle timeout for keep-alive sockets in a client's connection

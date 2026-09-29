@@ -1031,11 +1031,7 @@ expression: "&schema"
           ]
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\nDefaults to 15 seconds; `null` disables idle eviction.",
           "type": [
             "string",
             "null"
