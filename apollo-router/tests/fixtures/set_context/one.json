@@ -2,7 +2,7 @@
   "mocks": [
     {
       "request": {
-        "query": "query Query__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+        "query": "query Query__Subgraph1__0{t{__typename id u{__typename id} prop}}",
         "operationName": "Query__Subgraph1__0"
       },
       "response": {
@@ -21,7 +21,7 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__0{t{__typename prop id uList{__typename id}}}",
+        "query": "query Query__Subgraph1__0{t{id uList{__typename id} prop}}",
         "operationName": "Query__Subgraph1__0"
       },
       "response": {
@@ -50,7 +50,7 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
+        "query": "query QueryLL__Subgraph1__0{tList{id uList{__typename id} prop}}",
         "operationName": "QueryLL__Subgraph1__0"
       },
       "response": {
@@ -84,7 +84,7 @@
     },
     {
       "request": {
-        "query": "query QueryUnion__Subgraph1__0{k{__typename ...on A{__typename prop v{__typename id}}...on B{__typename prop v{__typename id}}}}",
+        "query": "query QueryUnion__Subgraph1__0{k{__typename ...on A{v{__typename id} prop}...on B{prop v{__typename id}}}}",
         "operationName": "QueryUnion__Subgraph1__0"
       },
       "response": {
@@ -231,7 +231,7 @@
     },
     {
       "request": {
-        "query": "query Query_type_mismatch__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+        "query": "query Query_type_mismatch__Subgraph1__0{t{id u{__typename id} prop}}",
         "operationName": "Query_type_mismatch__Subgraph1__0"
       },
       "response": {

@@ -28,11 +28,11 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "kind": "Fetch",
-              "operation": "query set_context_no_typenames_rust_qp__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operation": "query set_context_no_typenames_rust_qp__Subgraph1__0 { t { id u { __typename id } prop } }",
               "operationKind": "query",
               "operationName": "set_context_no_typenames_rust_qp__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "5dd7507d687520d340fae14d319b9bdd8824ee6fde28042981bdf50ca1905474",
+              "schemaAwareHash": "1c043fa49a8e4d5e91595e9b90dcba0cce73adc457e9a2acb847c66a0e5ff176",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -92,7 +92,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          id\n          u {\n            __typename\n            id\n          }\n          prop\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

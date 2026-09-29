@@ -2,7 +2,7 @@
     "mocks": [
       {
         "request": {
-          "query": "query Query_fetch_failure__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+          "query": "query Query_fetch_failure__Subgraph1__0{t{id u{__typename id} prop}}",
           "operationName": "Query_fetch_failure__Subgraph1__0"
         },
         "response": {

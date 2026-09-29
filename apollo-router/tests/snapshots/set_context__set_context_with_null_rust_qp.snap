@@ -22,14 +22,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "query Query_Null_Param__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operation": "query Query_Null_Param__Subgraph1__0 { t { id u { __typename id } prop } }",
               "operationName": "Query_Null_Param__Subgraph1__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "77eac1cc310bce67a20fc913685be1a70e0cf1590271b09241b2fbfb8369d3d4",
+              "schemaAwareHash": "c42b1302850463be322af88689db200aef20cbdae2131b7c7989260f13d0f08f",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -92,7 +92,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          id\n          u {\n            __typename\n            id\n          }\n          prop\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

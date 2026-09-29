@@ -44,17 +44,58 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "kind": "Fetch",
-              "operation": "query Query_fetch_failure__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operation": "query Query_fetch_failure__Subgraph1__0 { t { id u { __typename id } prop } }",
               "operationKind": "query",
               "operationName": "Query_fetch_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "95f47f644db47c463750714f6d830cc1b14f2ba2d7662cad6f4a7db08b68bff5",
+              "schemaAwareHash": "01b286a29f73915aacbaf003e4e9c96633ac4428754f7af0e9a8a14b73eaca7a",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
             {
               "kind": "Parallel",
               "nodes": [
+                {
+                  "kind": "Flatten",
+                  "node": {
+                    "authorization": {
+                      "is_authenticated": false,
+                      "policies": [],
+                      "scopes": []
+                    },
+                    "contextRewrites": null,
+                    "id": null,
+                    "inputRewrites": null,
+                    "kind": "Fetch",
+                    "operation": "query Query_fetch_failure__Subgraph2__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on U { b } } }",
+                    "operationKind": "query",
+                    "operationName": "Query_fetch_failure__Subgraph2__1",
+                    "outputRewrites": null,
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ],
+                        "typeCondition": "U"
+                      }
+                    ],
+                    "schemaAwareHash": "9c49dee65ff4f4ce1f9d21d088e325e0a14061bbaae6f1462e098920197ae352",
+                    "serviceName": "Subgraph2",
+                    "variableUsages": []
+                  },
+                  "path": [
+                    "t",
+                    "u"
+                  ]
+                },
                 {
                   "kind": "Flatten",
                   "node": {
@@ -77,9 +118,9 @@ expression: response
                     "id": null,
                     "inputRewrites": null,
                     "kind": "Fetch",
-                    "operation": "query Query_fetch_failure__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
+                    "operation": "query Query_fetch_failure__Subgraph1__2($representations: [_Any!]!, $contextualArgument_1_0: String) { _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0) } } }",
                     "operationKind": "query",
-                    "operationName": "Query_fetch_failure__Subgraph1__1",
+                    "operationName": "Query_fetch_failure__Subgraph1__2",
                     "outputRewrites": null,
                     "requires": [
                       {
@@ -97,52 +138,11 @@ expression: response
                         "typeCondition": "U"
                       }
                     ],
-                    "schemaAwareHash": "11fe8f745d00c891aac690824866876093db3efb69dca49a2684b6122e3075aa",
+                    "schemaAwareHash": "ccfabd23bd5ad299cb5299ce1395e4f1b3bf2c10b228090106f8cef7311eb526",
                     "serviceName": "Subgraph1",
                     "variableUsages": [
                       "contextualArgument_1_0"
                     ]
-                  },
-                  "path": [
-                    "t",
-                    "u"
-                  ]
-                },
-                {
-                  "kind": "Flatten",
-                  "node": {
-                    "authorization": {
-                      "is_authenticated": false,
-                      "policies": [],
-                      "scopes": []
-                    },
-                    "contextRewrites": null,
-                    "id": null,
-                    "inputRewrites": null,
-                    "kind": "Fetch",
-                    "operation": "query Query_fetch_failure__Subgraph2__2($representations: [_Any!]!) { _entities(representations: $representations) { ... on U { b } } }",
-                    "operationKind": "query",
-                    "operationName": "Query_fetch_failure__Subgraph2__2",
-                    "outputRewrites": null,
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ],
-                        "typeCondition": "U"
-                      }
-                    ],
-                    "schemaAwareHash": "e803b0533a4a30f4a1443d12981ef43ba44c9e5922e7fe663e198e9ad01fc1d7",
-                    "serviceName": "Subgraph2",
-                    "variableUsages": []
                   },
                   "path": [
                     "t",
@@ -154,7 +154,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \"t.u\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on U {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on U {\n              field(a: $contextualArgument_1_0)\n            }\n          }\n        },\n      },\n      Flatten(path: \"t.u\") {\n        Fetch(service: \"Subgraph2\") {\n          {\n            ... on U {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on U {\n              b\n            }\n          }\n        },\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          id\n          u {\n            __typename\n            id\n          }\n          prop\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \"t.u\") {\n        Fetch(service: \"Subgraph2\") {\n          {\n            ... on U {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on U {\n              b\n            }\n          }\n        },\n      },\n      Flatten(path: \"t.u\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on U {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on U {\n              field(a: $contextualArgument_1_0)\n            }\n          }\n        },\n      },\n    },\n  },\n}"
     },
     "valueCompletion": [
       {

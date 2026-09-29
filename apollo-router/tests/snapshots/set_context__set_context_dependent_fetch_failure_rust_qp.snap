@@ -48,11 +48,11 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "kind": "Fetch",
-              "operation": "query Query_fetch_dependent_failure__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operation": "query Query_fetch_dependent_failure__Subgraph1__0 { t { id u { __typename id } prop } }",
               "operationKind": "query",
               "operationName": "Query_fetch_dependent_failure__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "738d49618a5ad544321c84c9d144eb2e633dd31a63be087d765101fa0b6676b5",
+              "schemaAwareHash": "fd37c5ac106fe5b4953d25aa0ebc97f58db25eed852fb5fa52554c0bc228e938",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -112,7 +112,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          id\n          u {\n            __typename\n            id\n          }\n          prop\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     },
     "valueCompletion": [
       {

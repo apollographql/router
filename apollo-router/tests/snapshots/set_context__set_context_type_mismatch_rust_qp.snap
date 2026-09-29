@@ -28,11 +28,11 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "kind": "Fetch",
-              "operation": "query Query_type_mismatch__Subgraph1__0 { t { __typename prop id u { __typename id } } }",
+              "operation": "query Query_type_mismatch__Subgraph1__0 { t { id u { __typename id } prop } }",
               "operationKind": "query",
               "operationName": "Query_type_mismatch__Subgraph1__0",
               "outputRewrites": null,
-              "schemaAwareHash": "9a3533e0e801c0516873a5797141938d6cffd24dbaccfd1338b0c88d958cbaa5",
+              "schemaAwareHash": "ff5a84c6d26acbe82e5503aebcad8c7a8aaf9348583bdd1b198d729e15557a99",
               "serviceName": "Subgraph1",
               "variableUsages": []
             },
@@ -92,7 +92,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          id\n          u {\n            __typename\n            id\n          }\n          prop\n        }\n      }\n    },\n    Flatten(path: \"t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }
