@@ -14,8 +14,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::schema::SchemaDefinition;
@@ -94,6 +92,24 @@ pub(crate) fn compute_subgraph_metadata(
     )
 }
 pub(crate) mod type_and_directive_specification;
+
+/// Directives the GraphQL spec defines.
+///
+/// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
+/// the end user redefined these directives, we consider them built-in.
+///
+/// Matched by name rather than by `Node::is_built_in`, which only reports whether a
+/// definition came from `FileId::BUILT_IN`: a schema that spells one of these out
+/// explicitly gets a definition that check no longer recognises.
+pub(crate) static GRAPHQL_BUILT_IN_DIRECTIVES: [&str; 7] = [
+    "skip",
+    "include",
+    "deprecated",
+    "specifiedBy",
+    "defer",
+    "stream",
+    "oneOf",
+];
 
 /// A GraphQL schema with federation data.
 #[derive(Clone, Debug)]
@@ -226,7 +242,7 @@ impl FederationSchema {
                 .members
                 .iter()
                 .map(|t| ObjectTypeDefinitionPosition {
-                    type_name: t.name.clone(),
+                    type_name: Name::clone(t),
                 })
                 .collect::<IndexSet<_>>(),
         })
@@ -1179,7 +1195,7 @@ pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema Component<Directive>,
+    schema_directive: &'schema Node<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
@@ -1207,7 +1223,7 @@ impl<'schema> KeyDirective<'schema> {
     }
 
     /// The `@key` application as it appears in the AST, for reporting source locations against.
-    pub(crate) fn schema_directive(&self) -> &'schema Component<Directive> {
+    pub(crate) fn schema_directive(&self) -> &'schema Node<Directive> {
         self.schema_directive
     }
 }
@@ -1431,18 +1447,17 @@ impl From<ValidFederationSchema> for FederationSchema {
 }
 
 pub(crate) trait SchemaElement {
-    /// Iterates over the origins of the schema element.
-    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+    /// Iterates over the extension IDs of the schema element.
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>>;
 
     /// Returns true in the first tuple element if `self` has a definition.
     /// Returns a set of extension IDs in the second tuple element, if any.
     fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
         let mut extensions = IndexSet::default();
         let mut has_definition = false;
-        for origin in self.iter_origins() {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
+        for extension_id in self.iter_extension_ids() {
+            if let Some(id) = extension_id {
+                extensions.insert(id);
             } else {
                 has_definition = true;
             }
@@ -1458,28 +1473,29 @@ pub(crate) trait SchemaElement {
         !self.extensions().is_empty()
     }
 
-    fn origin_to_use(&self) -> ComponentOrigin {
+    fn origin_extension_id(&self) -> Option<ExtensionId> {
         let (has_definition, extensions) = self.definition_and_extensions();
         // Use extension origin only when extensions exist but no definition does
         // (i.e., only extension elements are populated). Otherwise, use definition.
         // For more details, see the comments in the `add_to_schema` method.
-        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
-        if !has_definition && let Some(first_extension) = extensions.first() {
-            return ComponentOrigin::Extension((*first_extension).clone());
+        // Note: Use an arbitrary extension, since no defined ordering between origins.
+        if !has_definition {
+            extensions.first().map(|id| (*id).clone())
+        } else {
+            None
         }
-        ComponentOrigin::Definition
     }
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
-        self.iter_origins()
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>> {
+        SchemaDefinition::iter_extension_ids(self)
     }
 }
 
 impl SchemaElement for ExtendedType {
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
-        self.iter_origins()
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>> {
+        ExtendedType::iter_extension_ids(self)
     }
 }
 

@@ -179,9 +179,9 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apollo-compiler"
-version = "2.0.0-beta.0"
+version = "2.0.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f6d0efa38a950a9429c90ccb422a68f4a382e5b67abd5ff9a6b8885d787c84"
+checksum = "031ad1ba5d073dc231b63bfac51cea2f180f4280c41b766f4d6db0f57474841f"
 dependencies = [
  "ahash",
  "apollo-parser",
@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.6.3"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49088c936ee0616b3a5ebb63ca6a6bc10c4ef3f870ec5110e8243eeb199d5af1"
+checksum = "58a4a9eeabea42bbebf42bed269e8835a5156d2c51fb226a348ce35ce61d7d0a"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration-macros"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e0d0e71a1635bf089d3d064d0ff89ae559b4fd422d51465287e57960049c26"
+checksum = "9ed325d2ea016db94bc53f2f1e88984c1acb2e410fbf5efd1d4a3109c5864eb6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -430,6 +430,7 @@ dependencies = [
  "hyper-util",
  "hyperlocal",
  "indexmap 2.14.2",
+ "indoc",
  "insta",
  "itertools 0.15.0",
  "itoa",
@@ -562,9 +563,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.17.0-beta.0"
+version = "0.17.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c75e0aa74f34bd906db5b991ef9e4d8ea5c85011f333affd2ca11684366395b7"
+checksum = "431d7e72bc8589eccda45efffff858332e5cde5f19d104662f4cbdbaa1246532"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
@@ -653,10 +654,10 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
- "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",
@@ -667,9 +668,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.4.47"
+version = "0.4.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef217a77a86a6e3dab9a5b3c81dc445b603fe743a90c1cb10a2f2144628d8cfa"
+checksum = "fb61aea1a7def73ee7c350a184f0e70b32c182344e2e75bf70c9b621b83417fd"
 dependencies = [
  "compression-codecs",
  "compression-core",
@@ -957,9 +958,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sigv4"
-version = "1.5.1"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "723c2234ad7511ceef63eab016b7ba6ff7c55590fefb96fa8467af014a07309f"
+checksum = "31d955e76ff96acd555bf06fa0fa6d5bf9335fa84ae7c64481b20ae61d231f70"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-http",
@@ -1693,9 +1694,9 @@ dependencies = [
 
 [[package]]
 name = "compression-codecs"
-version = "0.4.42"
+version = "0.4.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "257c7085cbb71be72d8fb97edff08b03d86d5d9f2222b9cc34a6bec87093bc10"
+checksum = "bef16c47ba2797aa6a909cc37d39911f3a6743811fe7408ac0b0cc0276b656e9"
 dependencies = [
  "brotli",
  "compression-core",
@@ -2687,7 +2688,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2713,6 +2714,7 @@ name = "external-subgraph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "bytes",
@@ -2720,7 +2722,6 @@ dependencies = [
  "http 1.5.0",
  "http-body-util",
  "multimap",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -3462,9 +3463,9 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -3771,7 +3772,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3955,6 +3956,15 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
+]
+
+[[package]]
+name = "indoc"
+version = "2.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -5737,10 +5747,10 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -7494,7 +7504,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

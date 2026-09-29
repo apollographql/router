@@ -1,7 +1,7 @@
 //! Validates `@source` directives
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::schema::Component;
 use hashbrown::HashMap;
 
 use super::coordinates::SourceDirectiveCoordinate;
@@ -29,7 +29,7 @@ use crate::connectors::validation::http::url::validate_url_scheme;
 /// A `@source` directive along with any errors related to it.
 pub(super) struct SourceDirective<'schema> {
     pub(crate) name: SourceName,
-    directive: &'schema Component<Directive>,
+    directive: &'schema Node<Directive>,
     base_url: Option<BaseUrl>,
     url_properties: Option<UrlProperties<'schema>>,
     headers: Option<Headers<'schema>>,
@@ -56,7 +56,7 @@ impl<'schema> SourceDirective<'schema> {
             valid_source_names
                 .entry(directive.name.as_str())
                 .or_insert_with(Vec::new)
-                .extend(directive.directive.node.line_column_range(&schema.sources));
+                .extend(directive.directive.line_column_range(&schema.sources));
         }
         for (name, locations) in valid_source_names {
             if locations.len() > 1 {
@@ -71,7 +71,7 @@ impl<'schema> SourceDirective<'schema> {
     }
 
     fn from_directive(
-        directive: &'schema Component<Directive>,
+        directive: &'schema Node<Directive>,
         schema: &'schema SchemaInfo<'schema>,
     ) -> (Option<SourceDirective<'schema>>, Vec<Message>) {
         let mut messages = Vec::new();

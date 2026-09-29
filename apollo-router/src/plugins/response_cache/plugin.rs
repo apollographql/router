@@ -196,38 +196,38 @@ impl From<Storage> for StorageInterface {
 }
 
 /// Configuration for response caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[serde(rename_all = "snake_case")]
 pub(crate) struct Config {
     /// Enable or disable the response caching feature
-    #[serde(default)]
     pub(crate) enabled: bool,
 
     /// Enable debug mode for the debugger
-    #[serde(default)]
     debug: bool,
 
     /// Whether to include a Cache-Control header in the supergraph response sent to clients.
     /// When set to false, the router will not set a Cache-Control header on the client response,
     /// while all internal caching behavior (TTL calculations, Redis storage, cache debugger) remains unchanged.
     /// Defaults to true for backward compatibility.
-    #[serde(default = "default_include_cache_control_header_on_router_response")]
+    #[config(default = default_include_cache_control_header_on_router_response())]
     include_cache_control_header_on_router_response: bool,
 
     /// Configure invalidation per subgraph
+    #[config(required, skip_validate)]
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Global invalidation configuration
+    #[config(skip_validate)]
     invalidation: Option<InvalidationEndpointConfig>,
 
     /// Buffer size for known private queries (default: 2048)
-    #[serde(default = "default_lru_private_queries_size")]
+    #[config(default = default_lru_private_queries_size())]
     private_queries_buffer_size: NonZeroUsize,
 
     /// Propagation of aggregated response_cache cache tags to the supergraph response.
     /// Off by default; opt in to surface cache tags to a CDN for tag-based purging. See
     /// `CdnInvalidationConfig` for the individual fields.
-    #[serde(default)]
+    #[config(skip_validate)]
     pub(crate) cdn_invalidation: CdnInvalidationConfig,
 }
 
@@ -383,7 +383,7 @@ impl PluginPrivate for ResponseCache {
             .schema_definition
             .query
             .as_ref()
-            .map(|q| q.name.to_string());
+            .map(|q| q.to_string());
 
         if init.config.subgraph.all.ttl.is_none()
             && init

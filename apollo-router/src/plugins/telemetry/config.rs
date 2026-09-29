@@ -58,17 +58,19 @@ where
 impl<T> GenericWith<T> for T where Self: Sized {}
 
 /// Telemetry configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
+    #[config(skip_validate)]
     pub(crate) apollo: apollo::Config,
 
     /// Instrumentation configuration
+    #[config(skip_validate)]
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
+    #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }
 
@@ -951,44 +953,31 @@ impl Conf {
         Ok(())
     }
 
+    /// The telemetry config, when the configuration has a `telemetry` section.
+    fn configured(configuration: &Configuration) -> Option<&Conf> {
+        configuration.typed_plugin_config("apollo.telemetry")
+    }
+
     pub(crate) fn metrics_reference_mode(
         configuration: &Configuration,
     ) -> ApolloMetricsReferenceMode {
-        match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.metrics_reference_mode,
-                    _ => ApolloMetricsReferenceMode::default(),
-                }
-            }
-            _ => ApolloMetricsReferenceMode::default(),
-        }
+        Self::configured(configuration)
+            .map(|conf| conf.apollo.metrics_reference_mode)
+            .unwrap_or_default()
     }
 
     pub(crate) fn signature_normalization_algorithm(
         configuration: &Configuration,
     ) -> ApolloSignatureNormalizationAlgorithm {
-        match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.signature_normalization_algorithm,
-                    _ => ApolloSignatureNormalizationAlgorithm::default(),
-                }
-            }
-            _ => ApolloSignatureNormalizationAlgorithm::default(),
-        }
+        Self::configured(configuration)
+            .map(|conf| conf.apollo.signature_normalization_algorithm.clone())
+            .unwrap_or_default()
     }
 
     pub(crate) fn apollo(configuration: &Configuration) -> ApolloTelemetryConfig {
-        match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo,
-                    _ => ApolloTelemetryConfig::default(),
-                }
-            }
-            _ => ApolloTelemetryConfig::default(),
-        }
+        Self::configured(configuration)
+            .map(|conf| conf.apollo.clone())
+            .unwrap_or_default()
     }
 }
 

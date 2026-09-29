@@ -158,16 +158,18 @@ pub(crate) enum Mode {
 }
 
 /// Demand control configuration
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) struct DemandControlConfig {
     /// Enable demand control
+    #[config(required)]
     enabled: bool,
     /// The mode that the demand control plugin should operate in.
     /// - Measure: The plugin will measure the cost of incoming requests but not reject them.
     /// - Enforce: The plugin will enforce the cost of incoming requests and reject them if the algorithm indicates that they should be rejected.
+    #[config(required, skip_validate)]
     mode: Mode,
     /// The strategy used to reject requests.
+    #[config(required, skip_validate)]
     strategy: StrategyConfig,
 }
 

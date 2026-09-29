@@ -13,8 +13,6 @@ use async_trait::async_trait;
 use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
 use regex::Regex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::json;
 use tower::BoxError;
 use tower::Service;
@@ -344,7 +342,7 @@ macro_rules! make_plugin {
 
             use super::*;
 
-            #[derive(Deserialize, JsonSchema)]
+            #[apollo_configuration::configuration]
             pub(super) struct Config {}
 
             /// Dummy plugin (for testing purposes only)
