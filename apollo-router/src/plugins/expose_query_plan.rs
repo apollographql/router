@@ -191,7 +191,7 @@ mod tests {
 
         let product_mocks = vec![
             (
-                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
+                r#"{"query":"query TopProducts__products__0($first:Int){topProducts(first:$first){__typename name upc}}","operationName":"TopProducts__products__0","variables":{"first":2}}"#,
                 r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
             ),
             (
