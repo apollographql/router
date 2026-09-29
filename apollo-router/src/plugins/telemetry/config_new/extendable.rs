@@ -277,7 +277,7 @@ where
     A: Default + Selectors<Request, Response, EventResponse>,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
-    pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         if let Some(Stage::Request) = &restricted_stage {
             for (name, custom) in &self.custom {
                 if !custom.is_active(Stage::Request) {

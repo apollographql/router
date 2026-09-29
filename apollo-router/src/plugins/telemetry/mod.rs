@@ -265,7 +265,7 @@ impl PluginPrivate for Telemetry {
         }
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
-        if let Err(err) = config.instrumentation.validate() {
+        if let Err(err) = config.instrumentation.validate_selectors() {
             ::tracing::warn!(
                 "Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events"
             );
