@@ -84,7 +84,7 @@ pub(crate) trait ResponseVisitor {
         for selection in &selection_set.selections {
             match selection {
                 apollo_compiler::executable::Selection::Field(inner_field) => {
-                    if let Some(value) = fields.get(inner_field.name.as_str()) {
+                    if let Some(value) = fields.get(inner_field.response_name().as_str()) {
                         self.visit_field(
                             request,
                             variables,
@@ -185,6 +185,26 @@ mod tests {
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response, &Default::default());
         insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
+    }
+
+    #[test]
+    fn test_visit_response_with_aliases() {
+        let schema_str = include_str!("fixtures/federated_ships_schema.graphql");
+        let schema = Schema::parse_and_validate(schema_str, "").unwrap();
+        let request =
+            ExecutableDocument::parse(&schema, "{ myShips: ships { shipName: name } }", "")
+                .unwrap();
+        let response = Response::from_bytes(Bytes::from_static(
+            br#"{"data":{"myShips":[{"shipName":"Ship1"},{"shipName":"Ship2"}]}}"#,
+        ))
+        .unwrap();
+
+        let mut visitor = FieldCounter::new();
+        visitor.visit(&request, &response, &Default::default());
+        assert_eq!(
+            visitor.counts,
+            HashMap::from([("ships".to_string(), 1), ("name".to_string(), 2)])
+        );
     }
 
     struct FieldCounter {
