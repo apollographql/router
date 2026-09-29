@@ -51,28 +51,15 @@ const SUBGRAPH_CALL_COUNT_KEY: &str = "apollo::experimental_mock_subgraphs::subg
 /// ```
 //
 // If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
-#[derive(Clone, Default, serde::Deserialize)]
+#[derive(Clone, Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(transparent)]
+#[schemars(inline)]
 struct Config(SubgraphConfigs);
 
 type SubgraphConfigs = HashMap<String, Arc<SubgraphConfig>>;
 
-// Delegate to the map so that wrapping it leaves the generated schema unchanged.
-impl schemars::JsonSchema for Config {
-    fn inline_schema() -> bool {
-        SubgraphConfigs::inline_schema()
-    }
-
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        SubgraphConfigs::schema_name()
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        SubgraphConfigs::json_schema(generator)
-    }
-}
-
-// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
+// `#[configuration]` does not support tuple structs yet, and a named struct would change the YAML:
+// subgraph names are the section's own keys. So this implements the traits by hand.
 impl apollo_configuration::Validate for Config {}
 impl apollo_configuration::Configuration for Config {}
 

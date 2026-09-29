@@ -13033,6 +13033,7 @@ expression: "&schema"
       "additionalProperties": {
         "$ref": "#/definitions/SubgraphConfig"
       },
+      "description": "Configuration for the `mock_subgraphs` plugin\n\n\nExample `router.yaml`:\n\n```yaml\nexperimental_mock_subgraphs:\n  subgraph1_name:\n    headers:\n      cache-control: public\n    query:\n      rootField:\n        subField: \"value\"\n        __cacheTags: [\"rootField\"]\n    entities:\n      - __typename: Something\n        id: 4\n        field: [42, 7]\n        __cacheTags: [\"something-4\"]\n```",
       "type": "object"
     },
     "^response_cache$": {
