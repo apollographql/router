@@ -150,7 +150,7 @@ fn default_buckets() -> Vec<f64> {
 #[derive(PartialEq)]
 pub(crate) struct MetricView {
     /// The instrument name you're targeting
-    #[config(required)]
+    #[config(required, validate = validate_view_name)]
     pub(crate) name: String,
     /// Rename the metric to this name
     ///
@@ -177,6 +177,14 @@ pub(crate) struct MetricView {
     /// Overrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.
     /// If neither this nor the global limit is set, the OTel SDK default of 2000 applies.
     pub(crate) cardinality_limit: Option<NonZeroU32>,
+}
+
+/// Rejects a view name that isn't a valid instrument name pattern, such as an unclosed `[`, so the
+/// error points at the name instead of surfacing when the metrics pipeline is built.
+fn validate_view_name(name: &str, mut errors: apollo_configuration::ErrorCollector<'_>) {
+    if let Err(error) = InstrumentNameMatcher::new(name) {
+        errors.report_simple(error);
+    }
 }
 
 impl MetricView {
@@ -1064,6 +1072,31 @@ mod tests {
             .name_matcher()
             .expect_err("unbalanced bracket must be rejected");
         assert!(error.to_string().contains("request.[cs"));
+    }
+
+    /// A view name that isn't a valid pattern fails the configuration parse, at the name's key.
+    #[test]
+    fn metric_view_names_are_validated_when_the_configuration_is_parsed() {
+        let parse = |name: &str| {
+            crate::configuration::parse_configuration(
+                &format!(
+                    "telemetry:\n  exporters:\n    metrics:\n      common:\n        views:\n          - name: \"{name}\"\n"
+                ),
+                crate::configuration::expansion::Expansion::builder().build(),
+                crate::configuration::Migration::None,
+            )
+        };
+
+        let error = parse("request.[cs")
+            .expect_err("an unclosed bracket is not a valid pattern")
+            .to_string();
+        assert!(
+            error.contains("invalid metric view name `request.[cs`"),
+            "{error}"
+        );
+        assert!(error.contains("[6:19]"), "{error}");
+
+        parse("request.*").expect("a valid pattern parses");
     }
 
     #[test]
