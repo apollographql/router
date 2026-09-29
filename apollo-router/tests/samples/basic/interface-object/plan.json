@@ -10,7 +10,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf__accounts__0 { i { __typename id x ... on A { a } ... on B { b } } }",
+                                    "query": "query TestItf__accounts__0 { i { __typename ... on A { a } ... on B { b } x id } }",
                                     "operationName": "TestItf__accounts__0"
                                 }
                             },
@@ -143,7 +143,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf2__accounts__0 { req { __typename id i { __typename id x } } }",
+                                    "query": "query TestItf2__accounts__0 { req { __typename id __require_0_i: i { __typename x id } } }",
                                     "operationName": "TestItf2__accounts__0"
                                 }
                             },
@@ -153,7 +153,7 @@
                                         "req": {
                                             "__typename": "C",
                                             "id": "1",
-                                            "i": {
+                                            "__require_0_i": {
                                                 "__typename": "A",
                                                 "id": "1",
                                                 "x": 1
