@@ -1,8 +1,8 @@
-### Native plugin configuration must use apollo-configuration
+### Native plugin configuration must use `apollo-configuration`
 
-The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `apollo_configuration::Configuration + Clone + Send + Sync + 'static`, in place of `JsonSchema + DeserializeOwned`. Each plugin's configuration is parsed and validated in the same pass as the router's configuration. A plugin's validation rules run at parse time, so a value they reject fails startup or reload with an error at that value's line in the file, and every rule failure is reported. A value that can't be deserialized is also reported at its line; parsing stops at the first such value. A `Configuration` built with serde, such as `serde_yaml::from_str`, is checked the same way, against the router's schema and every plugin's rules.
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `apollo_configuration::Configuration + Clone + Send + Sync + 'static`, in place of `JsonSchema + DeserializeOwned`. The router parses and validates each plugin's configuration in the same pass as its own configuration. A plugin's validation rules run at parse time, so a value they reject fails startup or reload with an error at that value's line in the file, and the router reports every rule failure. The router also reports a value it can't deserialize at its line, and stops at the first such value. The router checks a `Configuration` built with serde, such as `serde_yaml::from_str`, the same way, against its schema and every plugin's rules.
 
-To migrate, add `apollo-configuration` as a dependency (the same version as the router) and declare your configuration with its `#[configuration]` attribute:
+To migrate, add `apollo-configuration` as a dependency (the same version as the router) and define your configuration with its `#[configuration]` attribute:
 
 ```rust
 #[apollo_configuration::configuration(validate = validate_conf)]
@@ -18,6 +18,6 @@ fn validate_conf(conf: &Conf, mut errors: apollo_configuration::ErrorCollector<'
 }
 ```
 
-The `validate` argument is optional. Where the attribute can't express a type, such as a tuple struct, implement `Validate` and `Configuration` by hand; the router re-exports the crate as `apollo_router::plugin::apollo_configuration`. A section that is a bare `true` or `false` can use `apollo_router::plugin::Enabled`. `type Config = ()` keeps working.
+The `validate` argument is optional. Where the attribute can't express a type, such as a tuple struct, implement `Validate` and `Configuration` manually; the router re-exports the crate as `apollo_router::plugin::apollo_configuration`. A section that is a bare `true` or `false` can use `apollo_router::plugin::Enabled`. `type Config = ()` keeps working.
 
 By [@BrynCooke](https://github.com/BrynCooke)
