@@ -45,8 +45,7 @@ async fn basic_batch() {
         "query { users { id name username } }",
         Default::default(),
         Some(serde_json_bytes::json!({
-            "expose_query_plan": true,
-            "supergraph": { "query_planning": { "incremental_planner": { "enabled": false } } }
+            "expose_query_plan": true
         })),
         |req| {
             req.router_request
@@ -212,7 +211,7 @@ async fn connect_on_type() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        super::legacy_planner_config(),
+        None,
         |_| {},
         None,
     )

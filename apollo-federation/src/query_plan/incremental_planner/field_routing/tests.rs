@@ -3355,6 +3355,46 @@ fn connector_interface_object_with_mixed_implementation_fragment() {
     "###);
 }
 
+const CONNECTOR_BATCH_SCHEMA: &str = include_str!("../fixtures/connector_batch.graphql");
+
+/// Fields the root connector does not select are resolved by the batch
+/// connector on the type, even though the type has no @key.
+#[test]
+fn connector_batch_resolves_fields_outside_root_selection() {
+    let plan_str =
+        plan_query_with_router_specs(CONNECTOR_BATCH_SCHEMA, "{ users { id name username } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_users_0") {
+          {
+            users {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "connectors_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                username
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 
