@@ -9,6 +9,7 @@ use tracing::trace;
 
 use crate::error::CompositionError;
 use crate::error::FederationError;
+use crate::error::HasLocations;
 use crate::error::SubgraphLocation;
 use crate::merger::hints::HintCode;
 use crate::merger::merge::Merger;
@@ -26,6 +27,8 @@ impl Merger {
         sources: &Sources<Node<InputObjectType>>,
         dest: &InputObjectTypeDefinitionPosition,
     ) -> Result<(), FederationError> {
+        self.hint_on_inconsistent_one_of(sources, dest);
+
         // Like for other inputs, we add all the fields found in any subgraphs initially as a simple mean to have a complete list of
         // field to iterate over, but we will remove those that are not in all subgraphs.
         let added = self.add_input_fields_shallow(sources, dest)?;
@@ -46,6 +49,7 @@ impl Merger {
                     });
                 continue;
             }
+            self.validate_one_of_field_nullability(sources, &dest_field, &subgraph_fields)?;
 
             let is_inaccessible = self
                 .inaccessible_directive_name_in_supergraph
@@ -162,6 +166,91 @@ impl Merger {
             });
         }
 
+        Ok(())
+    }
+
+    /// The supergraph keeps `@oneOf` if any subgraph applies it, which makes the type stricter
+    /// for clients than the subgraphs that omit it.
+    fn hint_on_inconsistent_one_of(
+        &mut self,
+        sources: &Sources<Node<InputObjectType>>,
+        dest: &InputObjectTypeDefinitionPosition,
+    ) {
+        let is_one_of = |input: &Node<InputObjectType>| input.directives.has("oneOf");
+        let defining = || sources.values().flatten();
+        if !defining().any(is_one_of) || defining().all(is_one_of) {
+            return;
+        }
+
+        self.error_reporter.report_mismatch_hint(
+            HintCode::InconsistentOneOfInputObject,
+            format!(
+                "Input object type \"{}\" is marked @oneOf in some but not all defining subgraphs: ",
+                dest.type_name
+            ),
+            dest,
+            sources,
+            &self.subgraphs,
+            |_| Some("yes".to_string()),
+            |input, _| Some(if is_one_of(input) { "yes" } else { "no" }.to_string()),
+            |_, subgraphs| {
+                format!(
+                    "it is marked @oneOf in {}",
+                    subgraphs.unwrap_or_else(|| "no subgraphs".to_string())
+                )
+            },
+            |_, subgraphs| {
+                format!(
+                    " but not in {subgraphs}, so clients must provide exactly one field of this type, even for fields resolved by {subgraphs}"
+                )
+            },
+            false,
+            false,
+        );
+    }
+
+    /// Merged input field types take the strictest declaration, so a non-null field from a
+    /// subgraph without `@oneOf` would make the merged `@oneOf` type invalid.
+    fn validate_one_of_field_nullability(
+        &mut self,
+        sources: &Sources<Node<InputObjectType>>,
+        dest_field: &InputObjectFieldDefinitionPosition,
+        subgraph_fields: &Sources<InputObjectFieldDefinitionPosition>,
+    ) -> Result<(), FederationError> {
+        if !dest_field.get(self.merged.schema())?.ty.is_non_null() {
+            return Ok(());
+        }
+        let one_of_subgraphs = sources
+            .iter()
+            .filter(|(_, source)| source.as_ref().is_some_and(|input| input.is_one_of()))
+            .map(|(idx, _)| &self.names[*idx])
+            .collect::<Vec<_>>();
+        if one_of_subgraphs.is_empty() {
+            return Ok(());
+        }
+
+        let mut non_null_subgraphs = Vec::new();
+        let mut locations = Vec::new();
+        for (idx, field) in subgraph_fields {
+            let Some(field) = field else {
+                continue;
+            };
+            let subgraph = &self.subgraphs[*idx];
+            if field.get(subgraph.schema().schema())?.ty.is_non_null() {
+                non_null_subgraphs.push(&subgraph.name);
+                locations.extend(field.locations(subgraph));
+            }
+        }
+        self.error_reporter
+            .add_error(CompositionError::InputFieldMergeFailed {
+                message: format!(
+                    "Failed to merge input field \"{dest_field}\": it is non-nullable in {}, but \"{}\" is marked @oneOf in {} and fields of a @oneOf input object must be nullable.",
+                    human_readable_subgraph_names(non_null_subgraphs.into_iter()),
+                    dest_field.type_name,
+                    human_readable_subgraph_names(one_of_subgraphs.into_iter()),
+                ),
+                locations,
+            });
         Ok(())
     }
 
