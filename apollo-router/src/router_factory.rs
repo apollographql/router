@@ -549,7 +549,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
     let schema = Arc::new(Schema::parse(schema, &config).unwrap());
 
     let is_telemetry_disabled = false;
-    let service = YamlRouterFactory::default()
+    let service = YamlRouterFactory
         .create(
             is_telemetry_disabled,
             Arc::new(config),
@@ -1064,7 +1064,7 @@ mod test {
         let schema = Schema::parse(schema, &config)?;
 
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(config),
@@ -1251,7 +1251,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -1320,7 +1320,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -1406,7 +1406,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -1500,7 +1500,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -1575,7 +1575,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -1663,7 +1663,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),
@@ -1752,7 +1752,7 @@ mod test {
          *  - the router factory runs (including the plugin inits gated by the license)
          * */
         let is_telemetry_disabled = false;
-        let service = YamlRouterFactory::default()
+        let service = YamlRouterFactory
             .create(
                 is_telemetry_disabled,
                 Arc::new(router_config),

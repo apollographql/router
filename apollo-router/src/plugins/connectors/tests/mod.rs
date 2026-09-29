@@ -2363,7 +2363,7 @@ async fn execute(
     let subgraph_uri = format!("{uri}/graphql");
 
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
-    let mut factory = YamlRouterFactory::default();
+    let mut factory = YamlRouterFactory;
 
     let common_config = json!({
         "include_subgraph_errors": { "all": true },
