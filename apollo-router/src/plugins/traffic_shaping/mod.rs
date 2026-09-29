@@ -408,21 +408,6 @@ impl PluginPrivate for TrafficShaping {
             .boxed_clone()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        ServiceBuilder::new()
-            .layer(self.subgraph_admission_layer(name))
-            .layer(self.subgraph_timeout_layer(name))
-            .layer(self.subgraph_deduplication_layer(name))
-            .layer(self.subgraph_compression_layer(name))
-            .layer(self.subgraph_backpressure_buffer_layer(name))
-            .service(service)
-            .boxed_clone()
-    }
-
     fn connector_request_service(
         &self,
         service: connector::request_service::BoxCloneService,
@@ -702,6 +687,9 @@ fn rate_limit_error() -> graphql::Error {
 }
 
 register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
+
+#[cfg(test)]
+mod placement_tests;
 
 #[cfg(test)]
 mod test {
@@ -1003,39 +991,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_add_correct_headers_for_compression() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        subgraphs:
-            test:
-                compression: gzip
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = SubgraphRequest::fake_builder().build();
-
-        let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&CONTENT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip")
-            );
-
-            req
-        });
-
-        let _response = plugin
-            .subgraph_service("test", test_service.boxed_clone())
-            .oneshot(request)
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
     async fn it_adds_correct_headers_for_compression_for_connector() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
@@ -1197,66 +1152,6 @@ mod test {
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
             },
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_rate_limit_subgraph_requests() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        subgraphs:
-            test:
-                global_rate_limit:
-                    capacity: 1
-                    interval: 100ms
-                timeout: 500ms
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-
-        let test_service = MockSubgraph::new(hashmap! {
-            graphql::Request::default() => graphql::Response::default()
-        });
-
-        let mut svc = plugin.subgraph_service("test", test_service.boxed_clone());
-
-        assert!(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(SubgraphRequest::fake_builder().build())
-                .await
-                .unwrap()
-                .response
-                .body()
-                .errors
-                .is_empty()
-        );
-        let response = svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(SubgraphRequest::fake_builder().build())
-            .await
-            .expect("it responded");
-
-        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        assert!(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(SubgraphRequest::fake_builder().build())
-                .await
-                .unwrap()
-                .response
-                .body()
-                .errors
-                .is_empty()
         );
     }
 
