@@ -31,6 +31,7 @@ use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
+use crate::schema::fed3_upgrader::InterfaceDeprecations;
 use crate::schema::field_set::FieldSetValidation;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
@@ -1003,10 +1004,12 @@ pub fn upgrade_subgraphs_if_necessary(
     // subgraph gets its own back once it reaches `Validated`; whatever is left over belongs to a
     // subgraph that failed on the way there, and is reported with the errors.
     let mut fed3_hints: IndexMap<String, Vec<CompositionHint>> = IndexMap::default();
+    let interfaces =
+        InterfaceDeprecations::collect(subgraphs.iter().map(|sg| sg.schema().schema()));
     let subgraphs = subgraphs
         .into_iter()
         .filter_map(|mut sg| {
-            let upgrade_hints = sg.apply_fed3_upgrade();
+            let upgrade_hints = sg.apply_fed3_upgrade(&interfaces);
             if !upgrade_hints.is_empty() {
                 fed3_hints.insert(sg.name.clone(), upgrade_hints);
             }

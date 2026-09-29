@@ -29,15 +29,15 @@ use crate::supergraph::CompositionHint;
 /// 2. `@deprecated` on an implementing field whose corresponding interface
 ///    field is *not* deprecated — disallowed by the 2025 spec. The directive
 ///    is stripped from the implementing field.
-pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Vec<CompositionHint> {
+pub(crate) fn apply_fed3_upgrade(
+    schema: &mut Schema,
+    subgraph_name: &str,
+    interfaces: &InterfaceDeprecations,
+) -> Vec<CompositionHint> {
     let mut hints = Vec::new();
 
     // Clone the source map before mutating types — it's Arc-backed so this is cheap.
     let sources = schema.sources.clone();
-
-    // Collect interface field deprecation status up front so we aren't
-    // borrowing the schema while mutating it.
-    let iface_non_deprecated = collect_interface_non_deprecated_fields(schema);
 
     for (type_name, ty) in &mut schema.types {
         match ty {
@@ -52,10 +52,9 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                 );
                 strip_deprecated_on_non_deprecated_interface_fields(
                     &mut hints,
-                    &object.implements_interfaces,
                     &mut object.fields,
                     &object.name,
-                    &iface_non_deprecated,
+                    interfaces,
                     subgraph_name,
                     &sources,
                 );
@@ -71,10 +70,9 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                 );
                 strip_deprecated_on_non_deprecated_interface_fields(
                     &mut hints,
-                    &interface.implements_interfaces,
                     &mut interface.fields,
                     &interface.name,
-                    &iface_non_deprecated,
+                    interfaces,
                     subgraph_name,
                     &sources,
                 );
@@ -167,19 +165,21 @@ fn upgrade_fields_and_args(
     }
 }
 
-/// For each interface this type implements, strip `@deprecated` from fields
-/// where the corresponding interface field is not deprecated.
+/// For each interface this type implements in any subgraph, strip `@deprecated` from fields where
+/// the corresponding interface field is not deprecated.
 fn strip_deprecated_on_non_deprecated_interface_fields(
     hints: &mut Vec<CompositionHint>,
-    implements_interfaces: &IndexSet<Node<Name>>,
     fields: &mut IndexMap<Name, Node<FieldDefinition>>,
     type_name: &Name,
-    iface_non_deprecated: &IndexMap<Name, IndexSet<Name>>,
+    interfaces: &InterfaceDeprecations,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {
-    for iface_name in implements_interfaces {
-        if let Some(non_deprecated_fields) = iface_non_deprecated.get(&**iface_name) {
+    let Some(implemented) = interfaces.implements.get(type_name) else {
+        return;
+    };
+    for iface_name in implemented {
+        if let Some(non_deprecated_fields) = interfaces.non_deprecated_fields.get(iface_name) {
             for field in fields.values_mut() {
                 let field_name = field.name.clone();
                 if non_deprecated_fields.contains(&field_name) {
@@ -199,23 +199,81 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
     }
 }
 
-/// Returns a map from interface name to the set of non-deprecated field names
-/// for every interface type in the schema. Fields the interface does not
-/// declare are absent, so their deprecation is left alone.
-fn collect_interface_non_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
-    let mut result = IndexMap::default();
-    for ty in schema.types.values() {
-        if let ExtendedType::Interface(interface) = ty {
-            let non_deprecated_fields: IndexSet<_> = interface
-                .fields
-                .iter()
-                .filter(|(_, field)| !has_deprecated(&field.directives))
-                .map(|(name, _)| name.clone())
-                .collect();
-            result.insert(interface.name.clone(), non_deprecated_fields);
+/// Interface field deprecation and `implements` relationships, as they will be once the
+/// subgraphs are merged.
+///
+/// A subgraph can implement an interface whose fields are declared in another subgraph, or
+/// through an `@interfaceObject`, so deciding whether an implementing field's `@deprecated` is
+/// valid needs every subgraph at once.
+#[derive(Debug, Default)]
+pub(crate) struct InterfaceDeprecations {
+    /// Interface fields declared in some subgraph and deprecated in none, by interface name.
+    non_deprecated_fields: IndexMap<Name, IndexSet<Name>>,
+    /// Interfaces each object or interface type implements in any subgraph, by type name.
+    implements: IndexMap<Name, IndexSet<Name>>,
+}
+
+impl InterfaceDeprecations {
+    pub(crate) fn collect<'a>(schemas: impl IntoIterator<Item = &'a Schema> + Clone) -> Self {
+        let interface_names: IndexSet<&Name> = schemas
+            .clone()
+            .into_iter()
+            .flat_map(|schema| schema.types.iter())
+            .filter(|(_, ty)| matches!(ty, ExtendedType::Interface(_)))
+            .map(|(name, _)| name)
+            .collect();
+
+        let mut declared: IndexMap<Name, IndexSet<Name>> = IndexMap::default();
+        let mut deprecated: IndexMap<Name, IndexSet<Name>> = IndexMap::default();
+        let mut implements: IndexMap<Name, IndexSet<Name>> = IndexMap::default();
+        for schema in schemas {
+            for (type_name, ty) in &schema.types {
+                let (fields, implements_interfaces) = match ty {
+                    ExtendedType::Object(object) => (&object.fields, &object.implements_interfaces),
+                    ExtendedType::Interface(interface) => {
+                        (&interface.fields, &interface.implements_interfaces)
+                    }
+                    _ => continue,
+                };
+                implements
+                    .entry(type_name.clone())
+                    .or_default()
+                    .extend(implements_interfaces.iter().map(|i| (**i).clone()));
+                // An object type sharing an interface's name is an `@interfaceObject`, and its
+                // fields become fields of that interface.
+                if !interface_names.contains(type_name) {
+                    continue;
+                }
+                for (field_name, field) in fields {
+                    declared
+                        .entry(type_name.clone())
+                        .or_default()
+                        .insert(field_name.clone());
+                    if has_deprecated(&field.directives) {
+                        deprecated
+                            .entry(type_name.clone())
+                            .or_default()
+                            .insert(field_name.clone());
+                    }
+                }
+            }
+        }
+
+        // Merging keeps `@deprecated` if any subgraph applies it.
+        let non_deprecated_fields = declared
+            .into_iter()
+            .map(|(iface, mut fields)| {
+                if let Some(deprecated) = deprecated.get(&iface) {
+                    fields.retain(|field| !deprecated.contains(field));
+                }
+                (iface, fields)
+            })
+            .collect();
+        Self {
+            non_deprecated_fields,
+            implements,
         }
     }
-    result
 }
 
 /// Returns true if the directive list contains any `@deprecated` application.
@@ -506,7 +564,8 @@ mod tests {
         "#;
         let mut schema =
             apollo_compiler::Schema::parse(sdl, "test.graphql").expect("should parse test schema");
-        let hints = super::apply_fed3_upgrade(&mut schema, "test")
+        let interfaces = super::InterfaceDeprecations::collect([&schema]);
+        let hints = super::apply_fed3_upgrade(&mut schema, "test", &interfaces)
             .into_iter()
             .map(|h| h.message)
             .collect::<Vec<_>>();
@@ -758,5 +817,188 @@ mod tests {
             reason_null_hints, 2,
             "Expected one DEPRECATED_REASON_NULL hint per subgraph, got: {hint_codes:?}"
         );
+    }
+
+    /// Composes the subgraphs and returns the supergraph API schema's validation result, so a
+    /// test fails if composition leaves behind a construct the 2025 spec rejects.
+    fn compose_and_validate(subgraphs: &[(&str, &str)]) -> Result<(), String> {
+        let subgraphs = subgraphs
+            .iter()
+            .map(|(name, sdl)| {
+                Subgraph::parse(name, &format!("http://{name}"), sdl)
+                    .expect("should parse test subgraph")
+            })
+            .collect();
+        let result = crate::composition::compose(subgraphs, CompositionOptions::default())
+            .map_err(|e| format!("composition failed: {e:?}"))?;
+        let sdl = result.schema().schema().to_string();
+        apollo_compiler::Schema::parse_and_validate(&sdl, "supergraph.graphql")
+            .map(|_| ())
+            .map_err(|e| format!("{}\n\n{sdl}", e.errors))
+    }
+
+    #[test]
+    fn cross_subgraph_interface_field_declared_elsewhere() {
+        let a = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node {
+                id: ID!
+                name: String
+            }
+        "#;
+        let b = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            interface Node {
+                id: ID!
+            }
+
+            type User implements Node @key(fields: "id") {
+                id: ID!
+                name: String @deprecated(reason: "use displayName")
+                displayName: String
+            }
+        "#;
+        compose_and_validate(&[("a", a), ("b", b)]).unwrap();
+    }
+
+    #[test]
+    fn cross_subgraph_interface_field_deprecated_in_one_subgraph_only() {
+        let a = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node {
+                id: ID!
+                name: String
+            }
+        "#;
+        let b = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            interface Node {
+                id: ID!
+                name: String @deprecated(reason: "use displayName")
+            }
+
+            type User implements Node @key(fields: "id") {
+                id: ID!
+                name: String @deprecated(reason: "use displayName")
+                displayName: String
+            }
+        "#;
+        compose_and_validate(&[("a", a), ("b", b)]).unwrap();
+    }
+
+    #[test]
+    fn cross_subgraph_implementing_type_split_across_subgraphs() {
+        let a = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node {
+                id: ID!
+                name: String
+            }
+
+            type User implements Node @key(fields: "id") {
+                id: ID!
+                name: String @shareable
+            }
+        "#;
+        let b = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            type User @key(fields: "id") {
+                id: ID!
+                name: String @shareable @deprecated(reason: "use displayName")
+                displayName: String
+            }
+        "#;
+        compose_and_validate(&[("a", a), ("b", b)]).unwrap();
+    }
+
+    #[test]
+    fn cross_subgraph_interface_object() {
+        let a = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node @key(fields: "id") {
+                id: ID!
+            }
+
+            type User implements Node @key(fields: "id") {
+                id: ID!
+                name: String @shareable @deprecated(reason: "use displayName")
+            }
+        "#;
+        let b = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@interfaceObject", "@shareable"])
+
+            type Node @key(fields: "id") @interfaceObject {
+                id: ID!
+                name: String @shareable
+            }
+        "#;
+        compose_and_validate(&[("a", a), ("b", b)]).unwrap();
+    }
+
+    #[test]
+    fn cross_subgraph_interface_implementing_interface() {
+        let a = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node {
+                id: ID!
+                name: String
+            }
+        "#;
+        let b = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable"])
+
+            interface Node {
+                id: ID!
+            }
+
+            interface Named implements Node {
+                id: ID!
+                name: String @deprecated(reason: "use displayName")
+            }
+
+            type User implements Node & Named @key(fields: "id") {
+                id: ID!
+                name: String @deprecated(reason: "use displayName")
+            }
+        "#;
+        compose_and_validate(&[("a", a), ("b", b)]).unwrap();
     }
 }
