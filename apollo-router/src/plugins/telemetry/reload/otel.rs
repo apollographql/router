@@ -88,6 +88,9 @@ pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<T
 pub(in crate::plugins::telemetry) struct TracerHandle {
     tracer: ReloadTracer<Tracer>,
     tracer_provider: Mutex<Option<SdkTracerProvider>>,
+    /// Runs once, part-way through the next install, so that tests can pause it there.
+    #[cfg(test)]
+    after_tracer_reload: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl TracerHandle {
@@ -98,6 +101,8 @@ impl TracerHandle {
                     .tracer_with_scope(InstrumentationScope::builder("noop").build()),
             ),
             tracer_provider: Mutex::default(),
+            #[cfg(test)]
+            after_tracer_reload: Mutex::default(),
         }
     }
 
@@ -108,11 +113,23 @@ impl TracerHandle {
         &self,
         tracer_provider: SdkTracerProvider,
     ) -> Option<SdkTracerProvider> {
+        // Holding the lock for the whole install keeps concurrent installs from interleaving, so
+        // the hot tracer, the recorded provider and the global always end up on the same provider.
+        // Spans read the hot tracer through its own lock and never wait on this one. The lock is
+        // released on return, before the caller shuts the replaced provider down.
+        let mut installed = self.tracer_provider.lock();
         let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
             .with_version(env!("CARGO_PKG_VERSION"))
             .build();
         self.tracer.reload(tracer_provider.tracer_with_scope(scope));
-        let replaced = self.tracer_provider.lock().replace(tracer_provider.clone());
+        #[cfg(test)]
+        {
+            let after_tracer_reload = self.after_tracer_reload.lock().take();
+            if let Some(after_tracer_reload) = after_tracer_reload {
+                after_tracer_reload();
+            }
+        }
+        let replaced = installed.replace(tracer_provider.clone());
 
         // `set_tracer_provider` drops the provider it replaces rather than returning it. We still
         // hold the replaced provider, so that drop cannot trigger its shutdown, but block_in_place
@@ -331,5 +348,119 @@ impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
                 &value_set,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    use opentelemetry::trace::Tracer as _;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::trace::Span;
+    use opentelemetry_sdk::trace::SpanData;
+    use opentelemetry_sdk::trace::SpanProcessor;
+
+    use super::*;
+
+    #[derive(Debug, Default)]
+    struct Counts {
+        ended: AtomicUsize,
+        shutdowns: AtomicUsize,
+    }
+
+    #[derive(Debug)]
+    struct CountingProcessor(Arc<Counts>);
+
+    impl SpanProcessor for CountingProcessor {
+        fn on_start(&self, _span: &mut Span, _cx: &Context) {}
+
+        fn on_end(&self, _span: SpanData) {
+            self.0.ended.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
+            self.0.shutdowns.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn counting_tracer_provider() -> (SdkTracerProvider, Arc<Counts>) {
+        let counts = Arc::new(Counts::default());
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_span_processor(CountingProcessor(counts.clone()))
+            .build();
+        (tracer_provider, counts)
+    }
+
+    #[test]
+    fn concurrent_installs_leave_the_hot_tracer_on_the_live_provider() {
+        // Fails the test if the second install never starts; it never lets the first one resume.
+        const WATCHDOG: Duration = Duration::from_secs(30);
+
+        // A local handle rather than the process-wide one, which is only set by the executable.
+        let hot_tracer = Arc::new(TracerHandle::new());
+        let (first, first_counts) = counting_tracer_provider();
+        let (second, second_counts) = counting_tracer_provider();
+
+        // Pause the first install after it hot-swaps the tracer. While it is paused, start the
+        // second install on another thread and wait until it is about to install. The first install
+        // must still hold the install lock at that point, so the second can only run after it.
+        let second_install = Arc::new(Mutex::new(None));
+        let paused = hot_tracer.clone();
+        let second_install_slot = second_install.clone();
+        *hot_tracer.after_tracer_reload.lock() = Some(Box::new(move || {
+            let (installing_tx, installing_rx) = mpsc::channel();
+            let installer = paused.clone();
+            *second_install_slot.lock() = Some(thread::spawn(move || {
+                installing_tx.send(()).expect("the controller is waiting");
+                installer.install(second)
+            }));
+            installing_rx
+                .recv_timeout(WATCHDOG)
+                .expect("the second install never started");
+            assert!(
+                paused.tracer_provider.is_locked(),
+                "the paused install must hold the install lock"
+            );
+        }));
+
+        let replaced_by_first = hot_tracer.install(first);
+        let replaced_by_second = second_install
+            .lock()
+            .take()
+            .expect("the second install was started")
+            .join()
+            .expect("the second install completed");
+
+        // Retire every provider an install handed back, as activations do.
+        for retired in [replaced_by_first, replaced_by_second]
+            .into_iter()
+            .flatten()
+        {
+            retired
+                .shutdown()
+                .expect("retired provider shuts down once");
+        }
+
+        // The subscriber's hot tracer must still export through a live provider.
+        hot_tracer.tracer.start("after both installs");
+        assert_eq!(
+            second_counts.ended.load(Ordering::SeqCst),
+            1,
+            "the hot tracer must use the provider installed last"
+        );
+        assert_eq!(second_counts.shutdowns.load(Ordering::SeqCst), 0);
+        assert_eq!(first_counts.shutdowns.load(Ordering::SeqCst), 1);
+        assert!(hot_tracer.take_tracer_provider().is_some());
     }
 }
