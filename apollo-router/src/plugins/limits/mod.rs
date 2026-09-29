@@ -40,21 +40,22 @@ use crate::services::subgraph;
 #[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
     /// Limits that apply to inbound requests to the router.
-    #[config(skip_validate)]
     pub(crate) router: RouterLimitsConfig,
 
     /// Limits that apply to outbound subgraph responses.
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
     #[config(skip_validate)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphLimits>,
 
     /// Limits that apply to outbound connector responses.
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
     #[config(skip_validate)]
     pub(crate) connector: ConnectorConfiguration<ConnectorLimits>,
 }
 
 /// Limits that apply to inbound requests to the router.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "RouterLimitsConfig")]
 pub(crate) struct RouterLimitsConfig {
     /// If set, requests with operations deeper than this maximum
@@ -115,6 +116,7 @@ pub(crate) struct RouterLimitsConfig {
     /// fragment spreads in an operation. This protects against extremely large or
     /// deeply nested operations that could consume excessive resources during
     /// query planning. Default: 10000000 (10 million).
+    #[config(default = 10_000_000)]
     pub(crate) max_recursive_selections: u32,
 
     /// If set to true (which is the default is dev mode),
@@ -124,13 +126,19 @@ pub(crate) struct RouterLimitsConfig {
 
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
     /// default: 500
+    // This is `apollo-parser`'s default, which protects against stack overflow
+    // but is still very high for "reasonable" queries.
+    // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
+    #[config(default = 500)]
     pub(crate) parser_max_recursion: usize,
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
+    #[config(default = 15_000)]
     pub(crate) parser_max_tokens: usize,
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
+    #[config(default = 2_000_000)]
     pub(crate) http_max_request_bytes: usize,
 
     /// Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.
@@ -142,6 +150,8 @@ pub(crate) struct RouterLimitsConfig {
     /// Limit the maximum buffer size for the HTTP1 connection.
     ///
     /// Default is ~400kib.
+    // ByteSize has no Validate impl.
+    #[config(skip_validate)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
 
@@ -149,6 +159,8 @@ pub(crate) struct RouterLimitsConfig {
     ///
     /// If router receives more headers than allowed size of the header list, it responds to the client with
     /// "431 Request Header Fields Too Large".
+    // ByteSize has no Validate impl.
+    #[config(skip_validate)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) http2_max_headers_list_bytes: Option<ByteSize>,
 
@@ -157,34 +169,8 @@ pub(crate) struct RouterLimitsConfig {
     /// error with `{ message: "Maximum introspection depth exceeded" }`
     /// when nested fields exceed the limit.
     /// Default: true
+    #[config(default = true)]
     pub(crate) introspection_max_depth: bool,
-}
-
-impl Default for RouterLimitsConfig {
-    fn default() -> Self {
-        Self {
-            // These limits are opt-in
-            max_depth: None,
-            max_height: None,
-            max_root_fields: None,
-            max_aliases: None,
-
-            max_recursive_selections: 10_000_000,
-            warn_only: false,
-            http_max_request_bytes: 2_000_000,
-            http1_max_request_headers: None,
-            http1_max_request_buf_size: None,
-            http2_max_headers_list_bytes: None,
-            parser_max_tokens: 15_000,
-
-            // This is `apollo-parser`'s default, which protects against stack overflow
-            // but is still very high for "reasonable" queries.
-            // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
-            parser_max_recursion: 500,
-
-            introspection_max_depth: true,
-        }
-    }
 }
 
 /// Per-subgraph response size limits.
