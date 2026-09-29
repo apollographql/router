@@ -1968,7 +1968,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             IndexMap::default();
         let mut external_fields_to_update: IndexMap<ObjectFieldDefinitionPosition, DirectiveList> =
             IndexMap::default();
-        let mut conflicting_signature_errors = Vec::new();
+        let mut conflicting_field_errors = Vec::new();
 
         let access_control_directive_names: IndexSet<Name> = self
             .access_control_directives_in_supergraph
@@ -2045,45 +2045,32 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                 if self
                                     .is_field_provided_by_an_interface_object(intf_field_name, intf)
                                 {
-                                    // The field may also be provided through @interfaceObject for other interfaces
-                                    // of this type (from different subgraphs). Since we only copy the definition
-                                    // from the first such interface, all of them have to agree on the field
-                                    // signature. Otherwise, the result would depend on the order of the `implements`
-                                    // clause, and query planning could pick an @interfaceObject whose field does not
-                                    // accept the requested arguments.
-                                    // We check the (cheap) signature first, and only then whether it is provided
-                                    // through @interfaceObject (which requires scanning all subgraphs).
-                                    let conflicting: Vec<_> = object
+                                    // The field must not also be provided through @interfaceObject for other
+                                    // interfaces of this type (from different subgraphs). Since we only copy the
+                                    // definition from the first such interface, the result would depend on the
+                                    // order of the `implements` clause, and query planning could pick an
+                                    // @interfaceObject whose field definition does not match.
+                                    let other_providing_interfaces: Vec<_> = object
                                         .implements_interfaces
                                         .iter()
-                                        .filter(|other| *other != intf)
-                                        .filter_map(|other| {
-                                            let field = self
-                                                .merged
-                                                .schema()
-                                                .get_interface(other)?
-                                                .fields
-                                                .get(intf_field_name)?;
-                                            (!same_field_signature(field, intf_field)
+                                        .filter(|other| {
+                                            *other != intf
                                                 && self.is_field_provided_by_an_interface_object(
                                                     intf_field_name,
                                                     other,
-                                                ))
-                                            .then_some((other, field))
+                                                )
                                         })
                                         .collect();
-                                    if !conflicting.is_empty() {
-                                        let signatures = std::iter::once((intf, intf_field))
-                                            .chain(conflicting)
-                                            .map(|(itf, field)| {
-                                                format!("\"{itf}.{}\"", field_signature(field))
-                                            });
-                                        conflicting_signature_errors.push(
+                                    if !other_providing_interfaces.is_empty() {
+                                        let interfaces = std::iter::once(intf)
+                                            .chain(other_providing_interfaces)
+                                            .map(|itf| format!("\"{itf}\""));
+                                        conflicting_field_errors.push(
                                             CompositionError::InterfaceObjectUsageError {
                                                 message: format!(
-                                                    "Field \"{candidate_field}\" is provided through @interfaceObject by multiple interfaces of \"{name}\" with different definitions: {}. All @interfaceObject types providing the same field of an implementation type must define it with the same arguments and type.",
+                                                    "Field \"{candidate_field}\" is provided through @interfaceObject by multiple interfaces of \"{name}\": {}. A field of an implementation type can only be provided through a single @interfaceObject type.",
                                                     join_strings(
-                                                        signatures,
+                                                        interfaces,
                                                         JoinStringsOptions::default()
                                                     ),
                                                 ),
@@ -2125,7 +2112,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             }
         }
 
-        for error in conflicting_signature_errors {
+        for error in conflicting_field_errors {
             self.error_reporter.add_error(error);
         }
 
@@ -2966,29 +2953,4 @@ where
         mapped_sources.insert(idx, f(idx, source));
     }
     mapped_sources
-}
-
-/// Whether two field definitions have the same type and arguments (ignoring argument order,
-/// descriptions and directives).
-fn same_field_signature(a: &FieldDefinition, b: &FieldDefinition) -> bool {
-    a.ty == b.ty
-        && a.arguments.len() == b.arguments.len()
-        && a.arguments.iter().all(|arg| {
-            b.argument_by_name(&arg.name)
-                .is_some_and(|other| other.ty == arg.ty && other.default_value == arg.default_value)
-        })
-}
-
-/// Prints the field name, arguments and type of a field definition, e.g. `f(a: Int = 1): Int`.
-fn field_signature(field: &FieldDefinition) -> String {
-    let args = if field.arguments.is_empty() {
-        String::new()
-    } else {
-        let args = field.arguments.iter().map(|arg| match &arg.default_value {
-            Some(default) => format!("{}: {} = {default}", arg.name, arg.ty),
-            None => format!("{}: {}", arg.name, arg.ty),
-        });
-        format!("({})", args.collect::<Vec<_>>().join(", "))
-    };
-    format!("{}{args}: {}", field.name, field.ty)
 }

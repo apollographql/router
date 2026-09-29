@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
+use apollo_federation::composition::CompositionFailure;
 use apollo_federation::subgraph::typestate::Subgraph;
+use apollo_federation::supergraph::Satisfiable;
+use apollo_federation::supergraph::Supergraph;
 use insta::assert_snapshot;
 use test_log::test;
 
@@ -1149,37 +1152,42 @@ fn subgraphs_with_interface_objects_in_different_subgraphs(
     ]
 }
 
+fn compose_three_subgraphs(
+    [a, b, c]: &[String; 3],
+) -> Result<Supergraph<Satisfiable>, CompositionFailure> {
+    compose_as_fed2_subgraphs(&[
+        ServiceDefinition {
+            name: "subgraphA",
+            type_defs: a,
+        },
+        ServiceDefinition {
+            name: "subgraphB",
+            type_defs: b,
+        },
+        ServiceDefinition {
+            name: "subgraphC",
+            type_defs: c,
+        },
+    ])
+}
+
 #[test]
-fn interface_object_errors_on_conflicting_field_definitions_regardless_of_implements_order() {
-    for (implements, expected_signatures) in [
-        ("I1 & I2", r#""I1.f(a: Int): Int" and "I2.f: Int""#),
-        ("I2 & I1", r#""I2.f: Int" and "I1.f(a: Int): Int""#),
+fn interface_object_errors_on_field_provided_by_multiple_interface_objects() {
+    for (implements, i1_field, i2_field, expected_interfaces) in [
+        // conflicting definitions, regardless of the `implements` order
+        ("I1 & I2", "f(a: Int): Int", "f: Int", r#""I1" and "I2""#),
+        ("I2 & I1", "f(a: Int): Int", "f: Int", r#""I2" and "I1""#),
+        // identical definitions
+        ("I1 & I2", "f: Int", "f: Int", r#""I1" and "I2""#),
     ] {
-        let [a, b, c] = subgraphs_with_interface_objects_in_different_subgraphs(
-            implements,
-            "f(a: Int): Int",
-            "f: Int",
-        );
-        let result = compose_as_fed2_subgraphs(&[
-            ServiceDefinition {
-                name: "subgraphA",
-                type_defs: &a,
-            },
-            ServiceDefinition {
-                name: "subgraphB",
-                type_defs: &b,
-            },
-            ServiceDefinition {
-                name: "subgraphC",
-                type_defs: &c,
-            },
-        ]);
+        let subgraphs =
+            subgraphs_with_interface_objects_in_different_subgraphs(implements, i1_field, i2_field);
         assert_composition_errors(
-            &result,
+            &compose_three_subgraphs(&subgraphs),
             &[(
                 "INTERFACE_OBJECT_USAGE_ERROR",
                 &format!(
-                    r#"Field "A.f" is provided through @interfaceObject by multiple interfaces of "A" with different definitions: {expected_signatures}. All @interfaceObject types providing the same field of an implementation type must define it with the same arguments and type."#
+                    r#"Field "A.f" is provided through @interfaceObject by multiple interfaces of "A": {expected_interfaces}. A field of an implementation type can only be provided through a single @interfaceObject type."#
                 ),
             )],
         );
@@ -1187,34 +1195,36 @@ fn interface_object_errors_on_conflicting_field_definitions_regardless_of_implem
 }
 
 #[test]
-fn interface_object_composes_identical_field_definitions_from_multiple_interfaces() {
-    for implements in ["I1 & I2", "I2 & I1"] {
-        let [a, b, c] = subgraphs_with_interface_objects_in_different_subgraphs(
-            implements,
-            "f(a: Int = 1): Int",
-            "f(a: Int = 1): Int",
-        );
-        let result = compose_as_fed2_subgraphs(&[
-            ServiceDefinition {
-                name: "subgraphA",
-                type_defs: &a,
-            },
-            ServiceDefinition {
-                name: "subgraphB",
-                type_defs: &b,
-            },
-            ServiceDefinition {
-                name: "subgraphC",
-                type_defs: &c,
-            },
-        ]);
-        let supergraph = result.expect("composition should succeed");
-        let a_type = supergraph
-            .schema()
-            .schema()
-            .get_object("A")
-            .expect("A should be in the supergraph");
-        let f = a_type.fields.get("f").expect("A.f should be added");
-        assert_eq!(f.to_string(), "f(a: Int = 1): Int @join__field");
-    }
+fn interface_object_errors_on_field_provided_by_multiple_interface_objects_in_same_subgraph() {
+    let subgraphs = [
+        r#"
+        type Query { i1: I1 }
+        interface I1 @key(fields: "id") { id: ID! }
+        interface I2 @key(fields: "id") { id: ID! }
+        type A implements I1 & I2 @key(fields: "id") { id: ID! }
+        "#
+        .to_string(),
+        r#"
+        type I1 @interfaceObject @key(fields: "id") { id: ID! f: Int @shareable }
+        type I2 @interfaceObject @key(fields: "id") { id: ID! f: Int @shareable }
+        "#
+        .to_string(),
+        r#"
+        type Query { unused: Int @shareable }
+        "#
+        .to_string(),
+    ];
+    assert_composition_errors(
+        &compose_three_subgraphs(&subgraphs),
+        &[
+            (
+                "INTERFACE_OBJECT_USAGE_ERROR",
+                r#"[subgraphB] @interfaceObject types "I1" and "I2" in subgraph "subgraphB" share implementation type "A". Each @interfaceObject type in a subgraph must have a disjoint set of implementations."#,
+            ),
+            (
+                "INTERFACE_OBJECT_USAGE_ERROR",
+                r#"Field "A.f" is provided through @interfaceObject by multiple interfaces of "A": "I1" and "I2". A field of an implementation type can only be provided through a single @interfaceObject type."#,
+            ),
+        ],
+    );
 }
