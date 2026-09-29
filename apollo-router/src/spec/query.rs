@@ -140,6 +140,11 @@ impl Query {
                     match self.subselections.get(&SubSelectionKey {
                         defer_label: response.label.clone(),
                         defer_conditions,
+                        defer_path: response
+                            .path
+                            .as_ref()
+                            .map(subselections::defer_path_from_response_path)
+                            .unwrap_or_default(),
                     }) {
                         Some(subselection) => {
                             let mut output =
@@ -553,7 +558,12 @@ impl Query {
                 _ => field_type,
             };
 
-<<<<<<< HEAD
+            // The spec's `CollectFields` step 1: "if visitedFragments is not provided,
+            // initialize it to the empty set". Each object gets a fresh set, so a
+            // fragment applied on a nested object can neither suppress nor be
+            // suppressed by the same fragment on an ancestor.
+            let mut visited_fragments = HashSet::new();
+
             if self
                 .apply_selection_set(
                     selection_set,
@@ -562,26 +572,10 @@ impl Query {
                     output_object,
                     path,
                     current_type,
+                    &mut visited_fragments,
                 )
                 .is_err()
             {
-=======
-            // The spec's `CollectFields` step 1: "if visitedFragments is not provided,
-            // initialize it to the empty set". Each object gets a fresh set, so a
-            // fragment applied on a nested object can neither suppress nor be
-            // suppressed by the same fragment on an ancestor.
-            let mut visited_fragments = HashSet::new();
-
-            if let Err(err) = self.apply_selection_set(
-                selection_set,
-                parameters,
-                input_object,
-                output_object,
-                path,
-                current_type,
-                &mut visited_fragments,
-            ) {
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                 parameters.nullified.push(Path::from_response_slice(path));
                 *output = Value::Null;
             }
@@ -953,8 +947,6 @@ impl Query {
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
-<<<<<<< HEAD
-=======
         // Track which named fragments have already been applied to the root object
         // — the spec's `visitedFragments` (CollectFields, step 1: "if
         // visitedFragments is not provided, initialize it to the empty set").
@@ -986,7 +978,6 @@ impl Query {
         path: &mut Vec<ResponsePathElement<'b>>,
         visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
         for selection in selection_set {
             match selection {
                 Selection::Field {
@@ -1069,25 +1060,18 @@ impl Query {
                         || parameters.schema.is_subtype(type_condition, root_type_name);
 
                     if is_apply {
-<<<<<<< HEAD
-                        self.apply_root_selection_set(
-=======
                         // Inline fragments collect fields into the same object, so
                         // they share `visited_fragments` with their parent — an
                         // anonymous `... on T { ...Frag }` wrapper still
                         // de-duplicates `...Frag` (CollectFields step 3.c.iv).
                         self.apply_root_selection_set_cached(
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                             root_type_name,
                             selection_set,
                             parameters,
                             input,
                             output,
                             path,
-<<<<<<< HEAD
-=======
                             visited_fragments,
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                         )?;
                     }
                 }
@@ -1102,8 +1086,6 @@ impl Query {
                         continue;
                     }
 
-<<<<<<< HEAD
-=======
                     // Skip if we have already applied this named fragment to the root
                     // object. The first application wrote every reachable field; a
                     // second application would write the same values, so it is safe
@@ -1115,7 +1097,6 @@ impl Query {
                         continue;
                     }
 
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                     if let Some(Fragment {
                         type_condition,
                         selection_set,
@@ -1127,17 +1108,14 @@ impl Query {
                             || parameters.schema.is_subtype(type_condition, root_type_name);
 
                         if is_apply {
-                            self.apply_root_selection_set(
+                            self.apply_root_selection_set_cached(
                                 root_type_name,
                                 selection_set,
                                 parameters,
                                 input,
                                 output,
                                 path,
-<<<<<<< HEAD
-=======
                                 visited_fragments,
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
                             )?;
                         }
                     } else {
@@ -1243,12 +1221,16 @@ impl Query {
     pub(crate) fn contains_error_path(
         &self,
         label: &Option<String>,
+        response_path: Option<&Path>,
         path: &Path,
         defer_conditions: BooleanValues,
     ) -> bool {
         let selection_set = match self.subselections.get(&SubSelectionKey {
             defer_label: label.clone(),
             defer_conditions,
+            defer_path: response_path
+                .map(subselections::defer_path_from_response_path)
+                .unwrap_or_default(),
         }) {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,

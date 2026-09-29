@@ -5934,6 +5934,74 @@ fn skip_and_include() {
             },
         }})
         .test();
+
+    // same fragment name with complementary @skip/@include on each spread;
+    // a skipped spread must not prevent the active spread from executing
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($v: Boolean!) {
+            get {
+                id
+                ...test @skip(if: $v)
+                ...test @include(if: $v)
+            }
+        }
+
+        fragment test on Product {
+            name
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "v": true
+        }})
+        .expected(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($v: Boolean!) {
+            get {
+                id
+                ...test @skip(if: $v)
+                ...test @include(if: $v)
+            }
+        }
+
+        fragment test on Product {
+            name
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "v": false
+        }})
+        .expected(json! {{
+            "get": {
+                "id": "a",
+                "name": "Chair",
+            },
+        }})
+        .test();
 }
 
 #[test]
@@ -6790,6 +6858,7 @@ fn test_error_path_works_across_inline_fragments() {
 
     assert!(query.contains_error_path(
         &None,
+        None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField"),
         BooleanValues { bits: 0 }
     ));
@@ -7333,8 +7402,6 @@ fn reformat_response_data_fragment_semantic_null_not_overwritten() {
         }))
         .test();
 }
-<<<<<<< HEAD
-=======
 
 // ---------------------------------------------------------------------------
 // Fragment-caching tests for `apply_root_selection_set`
@@ -7853,9 +7920,10 @@ fn reformat_response_parent_fragment_does_not_contaminate_child_dedup() {
 // deduplication cache were removed. These count fragment *applications*
 // instead, and fail if the cache stops working.
 //
-// The counter is `response.errors`: a nullable field that the fragment selects
-// but the response omits pushes exactly one "Missing field" coercion error per
-// visit (see `emit_missing_field`), and unlike a written field that error is
+// The counter is `response.errors`: a `[Int]` field whose response contains an
+// invalid element pushes exactly one "Invalid value found for the type Int"
+// coercion error per visit. Because the output list itself stays non-null,
+// every visit re-enters `format_list`, so unlike a written scalar that error is
 // not idempotent. So `errors.len()` is the number of times the fragment body
 // was actually applied.
 // ---------------------------------------------------------------------------
@@ -7864,28 +7932,28 @@ const VISIT_COUNT_SCHEMA: &str = "
     type Query {
         node: Node
         nodes: [Node]
-        absent: String
+        bad: [Int]
     }
     type Node {
-        a: String  b: String  c: String
+        a: String  b: String  bad: [Int]
     }
 ";
 
 #[test]
 fn fragment_applied_once_per_object_root() {
-    // Three spreads of F at the root, F selects `c` which the response omits.
+    // Three spreads of F at the root, F selects `bad` whose element is invalid.
     // Cached: one application, one error. Uncached: three errors.
     FormatTest::builder()
         .schema(VISIT_COUNT_SCHEMA)
         .query(
             "query { ...F ...F ...F }
-            fragment F on Query { node { a } absent }",
+            fragment F on Query { node { a } bad }",
         )
-        .response(json!({ "node": {"a": "1"} }))
-        .expected(json!({ "node": {"a": "1"}, "absent": null }))
+        .response(json!({ "node": {"a": "1"}, "bad": ["x"] }))
+        .expected(json!({ "node": {"a": "1"}, "bad": [null] }))
         .expected_errors(json!([{
-            "message": "Missing field",
-            "path": ["absent"],
+            "message": "Invalid value found for the type Int",
+            "path": ["bad", 0],
             "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
         }]))
         .test();
@@ -7899,13 +7967,13 @@ fn fragment_applied_once_per_object_nested() {
         .schema(VISIT_COUNT_SCHEMA)
         .query(
             "query { node { ...F ...F ...F } }
-            fragment F on Node { a c }",
+            fragment F on Node { a bad }",
         )
-        .response(json!({ "node": {"a": "1"} }))
-        .expected(json!({ "node": {"a": "1", "c": null} }))
+        .response(json!({ "node": {"a": "1", "bad": ["x"]} }))
+        .expected(json!({ "node": {"a": "1", "bad": [null]} }))
         .expected_errors(json!([{
-            "message": "Missing field",
-            "path": ["node", "c"],
+            "message": "Invalid value found for the type Int",
+            "path": ["node", "bad", 0],
             "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
         }]))
         .test();
@@ -7918,7 +7986,7 @@ fn exponential_fragment_chain_applies_leaf_once() {
     FormatTest::builder()
         .schema(VISIT_COUNT_SCHEMA)
         .query(
-            "fragment L0 on Node { a c }
+            "fragment L0 on Node { a bad }
             fragment L1 on Node { ...L0 ...L0 }
             fragment L2 on Node { ...L1 ...L1 }
             fragment L3 on Node { ...L2 ...L2 }
@@ -7930,11 +7998,11 @@ fn exponential_fragment_chain_applies_leaf_once() {
             fragment L9 on Node { ...L8 ...L8 }
             query { node { ...L9 } }",
         )
-        .response(json!({ "node": {"a": "1"} }))
-        .expected(json!({ "node": {"a": "1", "c": null} }))
+        .response(json!({ "node": {"a": "1", "bad": ["x"]} }))
+        .expected(json!({ "node": {"a": "1", "bad": [null]} }))
         .expected_errors(json!([{
-            "message": "Missing field",
-            "path": ["node", "c"],
+            "message": "Invalid value found for the type Int",
+            "path": ["node", "bad", 0],
             "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
         }]))
         .test();
@@ -7949,33 +8017,36 @@ fn fragment_applied_once_per_list_element() {
         .schema(VISIT_COUNT_SCHEMA)
         .query(
             "query { nodes { ...F ...F } }
-            fragment F on Node { a c }",
+            fragment F on Node { a bad }",
         )
-        .response(json!({ "nodes": [{"a": "1"}, {"a": "2"}, {"a": "3"}] }))
+        .response(json!({ "nodes": [
+            {"a": "1", "bad": ["x"]},
+            {"a": "2", "bad": ["x"]},
+            {"a": "3", "bad": ["x"]}
+        ] }))
         .expected(json!({
             "nodes": [
-                {"a": "1", "c": null},
-                {"a": "2", "c": null},
-                {"a": "3", "c": null}
+                {"a": "1", "bad": [null]},
+                {"a": "2", "bad": [null]},
+                {"a": "3", "bad": [null]}
             ]
         }))
         .expected_errors(json!([
             {
-                "message": "Missing field",
-                "path": ["nodes", 0, "c"],
+                "message": "Invalid value found for the type Int",
+                "path": ["nodes", 0, "bad", 0],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Missing field",
-                "path": ["nodes", 1, "c"],
+                "message": "Invalid value found for the type Int",
+                "path": ["nodes", 1, "bad", 0],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             },
             {
-                "message": "Missing field",
-                "path": ["nodes", 2, "c"],
+                "message": "Invalid value found for the type Int",
+                "path": ["nodes", 2, "bad", 0],
                 "extensions": { "code": "RESPONSE_VALIDATION_FAILED" }
             }
         ]))
         .test();
 }
->>>>>>> bded25d (perf: add caching to `Query::apply_selection_set` (#9592))
