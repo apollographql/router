@@ -14,7 +14,6 @@ use serde::Serializer;
 use serde::de::DeserializeSeed;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::ser::SerializeMap;
 
 use super::APOLLO_PLUGIN_PREFIX;
 use super::ConfigurationError;
@@ -82,16 +81,16 @@ impl ApolloPlugins {
     }
 }
 
-// Typed plugin config has no common `Serialize` bound, so a serialized `Configuration` has no
-// plugin sections. The retained document holds the values each section was parsed from.
-impl Serialize for ApolloPlugins {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_map(Some(0))?.end()
-    }
-}
-
+/// Only the empty default serializes, as `null`, for the schema's default. Typed plugin config
+/// has no common `Serialize` bound, so `Configuration` serializes its plugin sections from the
+/// retained document instead.
 impl Serialize for UserPlugins {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if !self.sections.is_empty() {
+            return Err(serde::ser::Error::custom(
+                "typed plugin config cannot be serialized; serialize the Configuration instead",
+            ));
+        }
         serializer.serialize_none()
     }
 }

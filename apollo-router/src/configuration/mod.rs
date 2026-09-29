@@ -169,7 +169,7 @@ impl From<proteus::parser::Error> for ConfigurationError {
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 // Every way in goes through `ConfigurationParser`, so the configuration is checked against
 // Router's schema and every plugin's validation rules.
-#[derive(Clone, Derivative, Serialize, JsonSchema)]
+#[derive(Clone, Derivative, JsonSchema)]
 #[derivative(Debug)]
 // We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
 pub struct Configuration {
@@ -275,6 +275,73 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         let document = Value::deserialize(deserializer)?;
         let text = serde_json::to_string(&document).map_err(serde::de::Error::custom)?;
         apollo_configuration_parse::parse_as_written(&text).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Serializes the typed settings as before, and each plugin section as the retained document
+/// holds it, because typed plugin config has no common `Serialize` bound. A plugin section with
+/// no retained value, as in a configuration assembled in code, is an error rather than being
+/// left out.
+impl Serialize for Configuration {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Serialized<'a> {
+            reload: &'a Reload,
+            health_check: &'a HealthCheck,
+            sandbox: &'a Sandbox,
+            homepage: &'a Homepage,
+            server: &'a Server,
+            supergraph: &'a Supergraph,
+            cors: &'a Cors,
+            tls: &'a Tls,
+            apq: &'a Apq,
+            persisted_queries: &'a PersistedQueries,
+            limits: &'a limits::Config,
+            plugins: Option<&'a Value>,
+            #[serde(flatten)]
+            apollo_plugins: BTreeMap<&'a str, &'a Value>,
+            batching: &'a Batching,
+            experimental_type_conditioned_fetching: bool,
+            experimental_hoist_orphan_errors: &'a SubgraphConfiguration<HoistOrphanErrors>,
+        }
+
+        let section = |name: &str| {
+            self.document_section(name).ok_or_else(|| {
+                serde::ser::Error::custom(format!(
+                    "the `{name}` plugin section has no retained value to serialize"
+                ))
+            })
+        };
+        let mut apollo_plugins = BTreeMap::new();
+        for (name, _) in self.apollo_plugins.iter() {
+            // These plugins run with the typed top-level settings serialized above.
+            if name != "limits" && name != "health_check" {
+                apollo_plugins.insert(name, section(name)?);
+            }
+        }
+        let plugins = match self.plugins.iter().next() {
+            Some(_) => Some(section("plugins")?),
+            None => self.document_section("plugins"),
+        };
+        Serialized {
+            reload: &self.reload,
+            health_check: &self.health_check,
+            sandbox: &self.sandbox,
+            homepage: &self.homepage,
+            server: &self.server,
+            supergraph: &self.supergraph,
+            cors: &self.cors,
+            tls: &self.tls,
+            apq: &self.apq,
+            persisted_queries: &self.persisted_queries,
+            limits: &self.limits,
+            plugins,
+            apollo_plugins,
+            batching: &self.batching,
+            experimental_type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+            experimental_hoist_orphan_errors: &self.experimental_hoist_orphan_errors,
+        }
+        .serialize(serializer)
     }
 }
 

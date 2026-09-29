@@ -168,21 +168,7 @@ fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
     // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
     let default = serde_json::to_value(parse("").expect("the default configuration is valid"))
         .expect("Configuration serializes");
-    let mut value = serde_json::to_value(config).expect("Configuration serializes");
-    // Plugin config is typed and does not serialize; compare the sections it was parsed from.
-    let object = value
-        .as_object_mut()
-        .expect("Configuration serializes to an object");
-    for (name, _) in config.apollo_plugins.iter() {
-        if let Some(section) = config.document_section(name) {
-            object
-                .entry(name.to_string())
-                .or_insert_with(|| section.clone());
-        }
-    }
-    if let Some(plugins) = config.document_section("plugins") {
-        object.insert("plugins".to_string(), plugins.clone());
-    }
+    let value = serde_json::to_value(config).expect("Configuration serializes");
     let mut changes = BTreeMap::new();
     walk(Some(&default), &value, &mut String::new(), &mut changes);
     changes
