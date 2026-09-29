@@ -3,6 +3,7 @@ use std::ops::ControlFlow;
 use anyhow::Result;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
+use apollo_router::plugin::Enabled;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
@@ -15,12 +16,12 @@ use tower::ServiceExt;
 #[derive(Debug)]
 struct ExposeReferencedFieldsByType {
     #[allow(dead_code)]
-    configuration: bool,
+    configuration: Enabled,
 }
 
 #[async_trait::async_trait]
 impl Plugin for ExposeReferencedFieldsByType {
-    type Config = bool;
+    type Config = Enabled;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {

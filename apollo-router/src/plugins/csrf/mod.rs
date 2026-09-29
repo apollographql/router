@@ -5,8 +5,6 @@ use std::sync::Arc;
 use http::HeaderMap;
 use http::StatusCode;
 use http::header;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -19,9 +17,7 @@ use crate::services::router;
 /// CSRF protection configuration.
 ///
 /// See <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.
-#[derive(Deserialize, Debug, Clone, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
 pub(crate) struct CSRFConfig {
     /// The CSRF plugin is enabled by default.
     ///
@@ -36,6 +32,7 @@ pub(crate) struct CSRFConfig {
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
     ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    #[config(default = apollo_custom_preflight_headers())]
     required_headers: Arc<Vec<String>>,
 }
 
@@ -44,15 +41,6 @@ fn apollo_custom_preflight_headers() -> Arc<Vec<String>> {
         "x-apollo-operation-name".to_string(),
         "apollo-require-preflight".to_string(),
     ])
-}
-
-impl Default for CSRFConfig {
-    fn default() -> Self {
-        Self {
-            unsafe_disabled: false,
-            required_headers: apollo_custom_preflight_headers(),
-        }
-    }
 }
 
 static NON_PREFLIGHTED_CONTENT_TYPES: &[&str] = &[

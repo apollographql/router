@@ -259,20 +259,23 @@ struct RouterShaping {
     timeout: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "TrafficShapingConfig")]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
 /// Configuration for the traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
+    #[config(skip_validate)]
     router: Option<RouterShaping>,
     /// Applied on all subgraphs
+    #[config(skip_validate)]
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
+    #[config(skip_validate)]
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
+    #[config(skip_validate)]
     connector: ConnectorsShapingConfig,
 }
 
