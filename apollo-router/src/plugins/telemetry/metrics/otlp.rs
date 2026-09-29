@@ -39,7 +39,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         builder.with_reader(
             MeterProviderType::Public,
             PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
-                .with_interval(config.batch_processor.scheduled_delay)
+                .with_interval(*config.batch_processor.scheduled_delay)
                 .build(),
         );
 
@@ -77,7 +77,7 @@ impl super::super::otlp::Config {
             .with_tonic()
             .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
 
         if let Some(endpoint) = endpoint_opt {
@@ -100,7 +100,7 @@ impl super::super::otlp::Config {
             .with_http()
             .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
 
         if let Some(endpoint) = endpoint_opt {

@@ -7,8 +7,6 @@ use opentelemetry_prometheus::ResourceSelector;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower_service::Service;
 
@@ -21,8 +19,8 @@ use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
 
 /// Prometheus configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 #[schemars(rename = "PrometheusMetricsConfig")]
 pub(crate) struct Config {
     /// Set to true to enable
@@ -30,17 +28,23 @@ pub(crate) struct Config {
     /// resource_selector is used to select which resource to export with every metrics.
     pub(crate) resource_selector: ResourceSelectorConfig,
     /// The listen address
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
+    #[config(
+        default = ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr")),
+        skip_validate
+    )]
     pub(crate) listen: ListenAddr,
     /// The path where prometheus will be exposed
+    #[config(default = "/metrics".to_string())]
     pub(crate) path: String,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, Default, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 pub(crate) enum ResourceSelectorConfig {
     /// Export all resource attributes with every metrics.
     All,
-    #[default]
+    #[config(default)]
     /// Do not export any resource attributes with every metrics.
     None,
 }
@@ -50,17 +54,6 @@ impl From<ResourceSelectorConfig> for ResourceSelector {
         match value {
             ResourceSelectorConfig::All => ResourceSelector::All,
             ResourceSelectorConfig::None => ResourceSelector::None,
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            resource_selector: ResourceSelectorConfig::default(),
-            listen: ListenAddr::SocketAddr("127.0.0.1:9090".parse().expect("valid listenAddr")),
-            path: "/metrics".to_string(),
         }
     }
 }

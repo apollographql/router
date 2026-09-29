@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::num::NonZeroU32;
 
 use derivative::Derivative;
-use http::HeaderName;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
@@ -20,7 +19,6 @@ use tower::BoxError;
 
 use super::*;
 use crate::Configuration;
-use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
@@ -67,8 +65,6 @@ pub(crate) struct Conf {
     pub(crate) apollo: apollo::Config,
 
     /// Instrumentation configuration
-    // Exporters' nested types don't use the configuration attribute, so they have no Validate impl.
-    #[config(skip_validate)]
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
@@ -78,8 +74,8 @@ pub(crate) struct Conf {
 }
 
 /// Exporter configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct Exporters {
     /// Logging configuration
     pub(crate) logging: config_new::logging::Logging,
@@ -110,8 +106,8 @@ impl Instrumentation {
 }
 
 /// Metrics configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct Metrics {
     /// Common metrics configuration across all exporters
     pub(crate) common: MetricsCommon,
@@ -121,16 +117,20 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: metrics::prometheus::Config,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct MetricsCommon {
     /// Set a service.name resource in your metrics
     pub(crate) service_name: Option<String>,
     /// Set a service.namespace attribute in your metrics
     pub(crate) service_namespace: Option<String>,
     /// The Open Telemetry resource
+    // BTreeMap has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) resource: BTreeMap<String, AttributeValue>,
     /// Custom buckets for all histograms
+    // f64 has no Validate impl.
+    #[config(default = default_buckets(), skip_validate)]
     pub(crate) buckets: Vec<f64>,
     /// Views applied on metrics
     pub(crate) views: Vec<MetricView>,
@@ -140,25 +140,17 @@ pub(crate) struct MetricsCommon {
     pub(crate) cardinality_limit: Option<NonZeroU32>,
 }
 
-impl Default for MetricsCommon {
-    fn default() -> Self {
-        Self {
-            service_name: None,
-            service_namespace: None,
-            resource: BTreeMap::new(),
-            views: Vec::with_capacity(0),
-            buckets: vec![
-                0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-            ],
-            cardinality_limit: None,
-        }
-    }
+fn default_buckets() -> Vec<f64> {
+    vec![
+        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+    ]
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct MetricView {
     /// The instrument name you're targeting
+    #[config(required)]
     pub(crate) name: String,
     /// Rename the metric to this name
     ///
@@ -177,6 +169,8 @@ pub(crate) struct MetricView {
     /// Any attribute recorded for the instrument with a key not in this set will be
     /// dropped. If the set is empty, all attributes will be dropped, if `None` all
     /// attributes will be kept.
+    // HashSet has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) allowed_attribute_keys: Option<HashSet<String>>,
     /// Maximum number of distinct attribute combinations (cardinality) for this instrument.
     ///
@@ -316,22 +310,26 @@ impl InstrumentNameMatcher {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum MetricAggregation {
     /// An aggregation that summarizes a set of measurements as an histogram with
     /// explicitly defined buckets.
-    Histogram { buckets: Vec<f64> },
+    Histogram {
+        // f64 has no Validate impl.
+        #[config(required, skip_validate)]
+        buckets: Vec<f64>,
+    },
     /// Simply drop the metrics matching this view
     Drop,
 }
 
 /// Tracing configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct Tracing {
     /// A way to expose trace id in response headers
-    #[serde(default, alias = "experimental_response_trace_id")]
+    #[serde(alias = "experimental_response_trace_id")]
     pub(crate) response_trace_id: ExposeTraceId,
     /// Propagation configuration
     pub(crate) propagation: Propagation,
@@ -361,26 +359,25 @@ impl Tracing {
     }
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
     pub(crate) enabled: bool,
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
     #[schemars(with = "Option<String>")]
-    #[serde(deserialize_with = "deserialize_option_header_name")]
-    pub(crate) header_name: Option<HeaderName>,
+    pub(crate) header_name: Option<apollo_configuration::types::HeaderName>,
     /// Format of the trace ID in response headers
     pub(crate) format: TraceIdFormat,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq)]
 pub(crate) enum TraceIdFormat {
     /// Format the Trace ID as a hexadecimal number
     ///
     /// (e.g. Trace ID 16 -> 00000000000000000000000000000010)
-    #[default]
+    #[config(default)]
     Hexadecimal,
     /// Format the Trace ID as a hexadecimal number
     ///
@@ -438,8 +435,8 @@ pub(crate) enum ApolloMetricsReferenceMode {
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
     pub(crate) request: RequestPropagation,
@@ -453,21 +450,20 @@ pub(crate) struct Propagation {
     pub(crate) aws_xray: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Default, PartialEq)]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
+    #[config(required)]
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_option_header_name")]
-    pub(crate) header_name: Option<HeaderName>,
+    pub(crate) header_name: Option<apollo_configuration::types::HeaderName>,
 
     /// The trace ID format that will be used when propagating to subgraph services.
-    #[serde(default)]
     pub(crate) format: TraceIdFormat,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 #[non_exhaustive]
 pub(crate) struct TracingCommon {
     /// The trace service name
@@ -475,23 +471,32 @@ pub(crate) struct TracingCommon {
     /// The trace service namespace
     pub(crate) service_namespace: Option<String>,
     /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
+    #[config(default = default_sampler())]
     pub(crate) sampler: SamplerOption,
     /// Use datadog agent sampling. This means that all spans will be sent to the Datadog agent
     /// and the `sampling.priority` attribute will be used to control if the span will then be sent to Datadog
     pub(crate) preview_datadog_agent_sampling: Option<bool>,
     /// Whether to use parent based sampling
+    #[config(default = true)]
     pub(crate) parent_based_sampler: bool,
     /// The maximum events per span before discarding
+    #[config(default = SpanLimits::default().max_events_per_span)]
     pub(crate) max_events_per_span: u32,
     /// The maximum attributes per span before discarding
+    #[config(default = SpanLimits::default().max_attributes_per_span)]
     pub(crate) max_attributes_per_span: u32,
     /// The maximum links per span before discarding
+    #[config(default = SpanLimits::default().max_links_per_span)]
     pub(crate) max_links_per_span: u32,
     /// The maximum attributes per event before discarding
+    #[config(default = SpanLimits::default().max_attributes_per_event)]
     pub(crate) max_attributes_per_event: u32,
     /// The maximum attributes per link before discarding
+    #[config(default = SpanLimits::default().max_attributes_per_link)]
     pub(crate) max_attributes_per_link: u32,
     /// The Open Telemetry resource
+    // BTreeMap has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) resource: BTreeMap<String, AttributeValue>,
 }
 
@@ -519,46 +524,8 @@ impl ConfigResource for MetricsCommon {
     }
 }
 
-fn default_parent_based_sampler() -> bool {
-    true
-}
-
 fn default_sampler() -> SamplerOption {
     SamplerOption::Always(Sampler::AlwaysOn)
-}
-
-impl Default for TracingCommon {
-    fn default() -> Self {
-        Self {
-            service_name: Default::default(),
-            service_namespace: Default::default(),
-            sampler: default_sampler(),
-            preview_datadog_agent_sampling: None,
-            parent_based_sampler: default_parent_based_sampler(),
-            max_events_per_span: default_max_events_per_span(),
-            max_attributes_per_span: default_max_attributes_per_span(),
-            max_links_per_span: default_max_links_per_span(),
-            max_attributes_per_event: default_max_attributes_per_event(),
-            max_attributes_per_link: default_max_attributes_per_link(),
-            resource: Default::default(),
-        }
-    }
-}
-
-fn default_max_events_per_span() -> u32 {
-    SpanLimits::default().max_events_per_span
-}
-fn default_max_attributes_per_span() -> u32 {
-    SpanLimits::default().max_attributes_per_span
-}
-fn default_max_links_per_span() -> u32 {
-    SpanLimits::default().max_links_per_span
-}
-fn default_max_attributes_per_event() -> u32 {
-    SpanLimits::default().max_attributes_per_event
-}
-fn default_max_attributes_per_link() -> u32 {
-    SpanLimits::default().max_attributes_per_link
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -577,6 +544,10 @@ pub enum AttributeValue {
     #[allow(private_interfaces)]
     Array(AttributeArray),
 }
+
+// The configuration attribute can't validate the F64 variant because f64 has no Validate impl.
+// Attribute values are scalars with no nested rules.
+impl apollo_configuration::Validate for AttributeValue {}
 
 impl AttributeValue {
     pub(crate) fn as_f64(&self) -> Option<f64> {
@@ -767,8 +738,12 @@ pub(crate) enum SamplerOption {
     Always(Sampler),
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+// The configuration attribute can't validate the TraceIdRatioBased variant because f64 has no
+// Validate impl. Neither variant has nested rules.
+impl apollo_configuration::Validate for SamplerOption {}
+
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum Sampler {
     /// Always sample
     AlwaysOn,
