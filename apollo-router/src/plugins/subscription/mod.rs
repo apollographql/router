@@ -58,22 +58,26 @@ pub(crate) struct Subscription {
 }
 
 /// Subscriptions configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct SubscriptionConfig {
     /// Enable subscription
+    #[config(default = true)]
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
+    #[config(skip_validate)]
     pub(crate) mode: SubscriptionModeConfig,
     /// Configure subgraph subscription deduplication
+    #[config(skip_validate)]
     pub(crate) deduplication: SubgraphConfiguration<DeduplicationConfig>,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
     /// Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "Option<String>", default)]
+    #[config(skip_validate)]
     pub(crate) max_lifetime: Option<Duration>,
 }
 
@@ -105,19 +109,6 @@ impl Default for DeduplicationConfig {
             enabled: true,
             ignored_headers: Default::default(),
             ignore_auth_context: false,
-        }
-    }
-}
-
-impl Default for SubscriptionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mode: Default::default(),
-            deduplication: SubgraphConfiguration::default(),
-            max_opened_subscriptions: None,
-            queue_capacity: None,
-            max_lifetime: None,
         }
     }
 }

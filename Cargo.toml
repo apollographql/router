@@ -49,6 +49,7 @@ debug = 1
 [workspace.dependencies]
 ahash = "0.8.11"
 apollo-compiler = "=2.0.0-beta.1"
+apollo-configuration = "0.7.1"
 apollo-parser = "=0.9.0-beta.0"
 apollo-smith = "=0.17.0-beta.1"
 async-trait = "0.1.77"

@@ -58,17 +58,19 @@ where
 impl<T> GenericWith<T> for T where Self: Sized {}
 
 /// Telemetry configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
+    #[config(skip_validate)]
     pub(crate) apollo: apollo::Config,
 
     /// Instrumentation configuration
+    #[config(skip_validate)]
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
+    #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }
 

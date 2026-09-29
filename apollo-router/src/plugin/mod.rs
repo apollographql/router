@@ -14,6 +14,7 @@
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
+mod enabled;
 pub mod serde;
 #[macro_use]
 pub mod test;
@@ -30,7 +31,16 @@ use ::serde::Deserialize;
 use ::serde::de::DeserializeOwned;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+/// The crate whose `Configuration` trait every built-in plugin's `Config` implements.
+///
+/// Re-exported so that a config type deriving `serde::Deserialize` and `schemars::JsonSchema` can
+/// implement `apollo_configuration::Configuration` and `apollo_configuration::Validate` without
+/// depending on `apollo-configuration`; its `#[configuration]` attribute needs that dependency.
+/// The router does not yet run `Validate` rules when it loads plugin configuration; parse-time
+/// validation arrives in a later change.
+pub use apollo_configuration;
 use async_trait::async_trait;
+pub use enabled::Enabled;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;

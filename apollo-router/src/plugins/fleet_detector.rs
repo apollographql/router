@@ -11,8 +11,6 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use sysinfo::System;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -37,7 +35,7 @@ const OFFICIAL_HELM_CHART: &str = "official_helm_chart";
 const OPERATOR: &str = "operator";
 
 /// The fleet detector plugin has no configuration.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {}
 
 #[derive(Debug)]
