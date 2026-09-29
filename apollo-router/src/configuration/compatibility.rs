@@ -168,7 +168,21 @@ fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
     // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
     let default = serde_json::to_value(parse("").expect("the default configuration is valid"))
         .expect("Configuration serializes");
-    let value = serde_json::to_value(config).expect("Configuration serializes");
+    let mut value = serde_json::to_value(config).expect("Configuration serializes");
+    // Plugin config is typed and does not serialize; compare the sections it was parsed from.
+    let object = value
+        .as_object_mut()
+        .expect("Configuration serializes to an object");
+    for (name, _) in config.apollo_plugins.iter() {
+        if let Some(section) = config.document_section(name) {
+            object
+                .entry(name.to_string())
+                .or_insert_with(|| section.clone());
+        }
+    }
+    if let Some(plugins) = config.document_section("plugins") {
+        object.insert("plugins".to_string(), plugins.clone());
+    }
     let mut changes = BTreeMap::new();
     walk(Some(&default), &value, &mut String::new(), &mut changes);
     changes
@@ -281,10 +295,10 @@ fn validated_yaml_carries_expansion_and_overrides_for_usage_selectors() {
         1,
         "the usage gauge for `apollo.router.config.persisted_queries` must fire"
     );
-    assert_eq!(
-        config.apollo_plugins.plugins["subscription"]["enabled"],
-        json!(true)
-    );
+    let subscription = config
+        .typed_plugin_config::<SubscriptionConfig>("apollo.subscription")
+        .expect("the override adds a subscription section");
+    assert!(subscription.enabled);
     assert_eq!(config.raw_yaml.as_deref(), Some(text));
 }
 
@@ -327,10 +341,6 @@ fn mandatory_plugin_defaults_are_present_without_being_configured() {
 
     for plugin in ["limits", "health_check"] {
         assert!(
-            config.apollo_plugins.plugins.contains_key(plugin),
-            "the mandatory `{plugin}` plugin entry must be defaulted"
-        );
-        assert!(
             config.plugin_config(&format!("apollo.{plugin}")).is_some(),
             "the mandatory `{plugin}` plugin config must be kept"
         );
@@ -354,7 +364,7 @@ async fn typed_plugin_configs_are_retained_and_construct_plugins() {
         .typed()
         .unwrap();
     let document: SubscriptionConfig =
-        serde_json::from_value(config.apollo_plugins.plugins["subscription"].clone()).unwrap();
+        serde_json::from_value(config.document_section("subscription").unwrap().clone()).unwrap();
     assert_eq!(
         serde_json::to_value(&subscription).unwrap(),
         serde_json::to_value(&document).unwrap(),
@@ -414,8 +424,9 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 /// Intentional difference from the previous loader, which fell back to the original document
 /// only when the migrated one failed the schema check. apollo-configuration validates in one call,
 /// so a migrated document rejected after the schema check, here by a plugin's config, falls back
-/// too. Startup migration 2045 fixes the flat deduplication settings, the migrated copy then
-/// fails on the traffic shaping timeout, and so does the file as written.
+/// too. Startup migration 2045 fixes the flat deduplication settings and the migrated copy then
+/// fails on the traffic shaping timeout. The file as written fails first on the flat settings:
+/// deserialization stops at its first error, so that is the one reported.
 #[test]
 fn migrated_document_failing_plugin_config_falls_back_to_the_file() {
     let _guard = tracing_test::dispatcher_guard();
@@ -426,7 +437,8 @@ fn migrated_document_failing_plugin_config_falls_back_to_the_file() {
     .expect_err("the traffic shaping timeout is invalid")
     .to_string();
 
-    assert!(error.contains("apollo.traffic_shaping"), "{error}");
+    assert!(error.contains("apollo.subscription"), "{error}");
+    assert!(error.contains("[4:14]"), "{error}");
     // Only the operator's file has this comment; the serialized migrated copy has none.
     assert!(
         error.contains("# The schema accepts any string here"),

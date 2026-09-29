@@ -61,7 +61,7 @@ struct Conf {
 >
 > Your configuration must also be `Send`, `Sync` and `'static`.
 
-A plugin's `Config` must implement `apollo_configuration::Configuration`, so native plugin configuration uses apollo-configuration and its `#[configuration]` attribute. The router parses and validates each plugin's section while it parses its configuration. To reject values the schema allows, add a validation function. It runs at parse time, and its errors are reported at your plugin's section of the file:
+A plugin's `Config` must implement `apollo_configuration::Configuration`, so native plugin configuration uses apollo-configuration and its `#[configuration]` attribute. The router parses and validates each plugin's section while it parses its configuration. To reject values the schema allows, add a validation function. It runs at parse time, and its errors are reported at the offending value in your plugin's section of the file:
 
 ```rust title="hello_world.rs"
 use apollo_configuration::ErrorCollector;

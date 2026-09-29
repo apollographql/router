@@ -408,6 +408,7 @@ dependencies = [
  "docker_credential",
  "ecdsa 0.17.0",
  "encoding_rs",
+ "erased-serde",
  "flate2",
  "fred",
  "futures",

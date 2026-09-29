@@ -1,6 +1,6 @@
 ### Native plugin configuration must use apollo-configuration
 
-The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `apollo_configuration::Configuration + Clone + Send + Sync + 'static`, in place of `JsonSchema + DeserializeOwned`. Each plugin's configuration is parsed and validated with the router's configuration. A plugin's validation rules run at parse time, so a value they reject fails startup or reload with an error at the plugin's section of the file. Every invalid plugin is reported.
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `apollo_configuration::Configuration + Clone + Send + Sync + 'static`, in place of `JsonSchema + DeserializeOwned`. Each plugin's configuration is parsed and validated in the same pass as the router's configuration. A plugin's validation rules run at parse time, so a value they reject fails startup or reload with an error at that value's line in the file, and every rule failure is reported. A value that can't be deserialized is also reported at its line; parsing stops at the first such value. A `Configuration` built with serde, such as `serde_yaml::from_str`, is checked the same way, against the router's schema and every plugin's rules.
 
 To migrate, add `apollo-configuration` as a dependency (the same version as the router) and declare your configuration with its `#[configuration]` attribute:
 

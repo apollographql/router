@@ -1,11 +1,20 @@
-//! Plugin config deserialized when the configuration is parsed.
+//! Plugin config, deserialized with the rest of the configuration.
+//!
+//! Each plugin's section is deserialized straight from the configuration's own deserializer, so
+//! an invalid value is reported at its place in the document, and the typed config is kept for
+//! validation and plugin construction.
 
 use std::collections::BTreeMap;
+use std::fmt;
 
-use apollo_configuration::ErrorCollector;
-use apollo_configuration::Validate;
-use serde_json::Map;
-use serde_json::Value;
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
+use serde::Serializer;
+use serde::de::DeserializeSeed;
+use serde::de::MapAccess;
+use serde::de::Visitor;
+use serde::ser::SerializeMap;
 
 use super::APOLLO_PLUGIN_PREFIX;
 use super::ConfigurationError;
@@ -13,190 +22,191 @@ use crate::plugin::PluginConfig;
 use crate::plugin::PluginFactory;
 use crate::plugin::plugins;
 
-/// Every configured plugin's config, deserialized once for construction.
-///
-/// Invalid config is kept as errors rather than failing deserialization, so configuration parsing
-/// can report every one of them against its section of the document. Validating the configs
-/// (see the [`Validate`] impl) runs each plugin's own rules at its section.
-#[derive(Debug, Default)]
-pub(crate) struct PluginConfigs {
-    /// Built-in plugins, keyed by full name such as `apollo.telemetry`. Ordered, so validation
-    /// reports errors in the same order every time.
-    apollo: BTreeMap<String, ParsedPlugin>,
-    /// User plugins, in the order the configuration lists them.
-    user: Vec<(String, ParsedPlugin)>,
-    /// User plugin sections that name no registered plugin.
-    unknown: Vec<String>,
-    errors: Vec<PluginConfigError>,
-}
-
-/// A plugin's config and the factory that builds the plugin from it.
+/// A configured plugin: the factory that builds it and its typed config.
 #[derive(Clone, Debug)]
 pub(crate) struct ParsedPlugin {
     pub(crate) factory: &'static PluginFactory,
     pub(crate) config: PluginConfig,
-    /// Where the plugin's section is in the document, such as `["plugins", "acme.auth"]`.
-    section: Vec<String>,
 }
 
-/// A plugin whose config could not be deserialized.
-#[derive(Debug)]
-pub(crate) struct PluginConfigError {
-    /// The plugin's full name.
-    pub(crate) plugin: String,
-    /// Where the plugin's section is in the document, such as `["plugins", "acme.auth"]`.
-    pub(crate) section: Vec<String>,
-    pub(crate) error: String,
+/// Built-in plugin sections, keyed by short name such as `telemetry`. Ordered, so validation
+/// reports errors in the same order every time.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ApolloPlugins {
+    sections: BTreeMap<String, ParsedPlugin>,
 }
 
-impl PluginConfigError {
-    pub(crate) fn to_configuration_error(&self) -> ConfigurationError {
-        ConfigurationError::PluginConfiguration {
-            plugin: self.plugin.clone(),
-            error: self.error.clone(),
-        }
-    }
+/// User plugin sections under `plugins`, in the order the configuration lists them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct UserPlugins {
+    sections: Vec<(String, ParsedPlugin)>,
 }
 
-impl PluginConfigs {
-    /// Deserializes the built-in sections (keyed by short name) and the user plugin sections.
-    pub(crate) fn parse(
-        apollo_sections: &Map<String, Value>,
-        user_sections: &Map<String, Value>,
-    ) -> Self {
-        let mut configs = Self::default();
-        for (name, config) in apollo_sections {
-            let full_name = format!("{APOLLO_PLUGIN_PREFIX}{name}");
-            let section = vec![name.clone()];
-            match find_factory(&full_name) {
-                Some(factory) => {
-                    if let Some(parsed) = configs.parse_section(factory, section, config) {
-                        configs.apollo.insert(full_name, parsed);
-                    }
-                }
-                // The schema rejects unknown top-level keys, so a section that no plugin reads
-                // means a field is missing from `impl Deserialize for Configuration`.
-                None if name != "server" && name != "plugins" => {
-                    configs.errors.push(PluginConfigError {
-                        plugin: full_name,
-                        section,
-                        error: "no plugin reads this section".to_string(),
-                    });
-                }
-                None => {}
-            }
-        }
-        for (name, config) in user_sections {
-            let section = vec!["plugins".to_string(), name.clone()];
-            match find_factory(name) {
-                Some(factory) => {
-                    if let Some(parsed) = configs.parse_section(factory, section, config) {
-                        configs.user.push((name.clone(), parsed));
-                    }
-                }
-                None => configs.unknown.push(name.clone()),
-            }
-        }
-        configs
+impl ApolloPlugins {
+    /// The built-in plugin named `full_name`, such as `apollo.telemetry`, when it has a section.
+    pub(crate) fn get(&self, full_name: &str) -> Option<&ParsedPlugin> {
+        self.sections
+            .get(full_name.strip_prefix(APOLLO_PLUGIN_PREFIX)?)
     }
 
-    fn parse_section(
+    /// Sections by short name, in name order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &ParsedPlugin)> {
+        self.sections
+            .iter()
+            .map(|(name, parsed)| (name.as_str(), parsed))
+    }
+
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.sections.contains_key(name)
+    }
+
+    /// Sets the section `name`, such as `limits`, replacing any section already there.
+    pub(crate) fn insert(&mut self, name: &str, parsed: ParsedPlugin) {
+        self.sections.insert(name.to_string(), parsed);
+    }
+
+    /// Deserializes the value of the current map entry as the section of the built-in plugin
+    /// `name`. Returns `false`, leaving the value unread, when no built-in plugin reads it.
+    pub(crate) fn next_section<'de, A: MapAccess<'de>>(
         &mut self,
-        factory: &'static PluginFactory,
-        section: Vec<String>,
-        config: &Value,
-    ) -> Option<ParsedPlugin> {
-        match factory.parse_config(config.clone()) {
-            Ok(config) => Some(ParsedPlugin {
-                factory,
-                config,
-                section,
-            }),
-            Err(error) => {
-                self.errors.push(PluginConfigError {
-                    plugin: factory.name.clone(),
-                    section,
-                    error: error.to_string(),
-                });
-                None
+        name: &str,
+        map: &mut A,
+    ) -> Result<bool, A::Error> {
+        let Some(factory) = find_factory(&format!("{APOLLO_PLUGIN_PREFIX}{name}")) else {
+            return Ok(false);
+        };
+        let config = map.next_value_seed(SectionSeed(factory))?;
+        self.insert(name, ParsedPlugin { factory, config });
+        Ok(true)
+    }
+}
+
+// Typed plugin config has no common `Serialize` bound, so a serialized `Configuration` has no
+// plugin sections. The retained document holds the values each section was parsed from.
+impl Serialize for ApolloPlugins {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_map(Some(0))?.end()
+    }
+}
+
+impl Serialize for UserPlugins {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_none()
+    }
+}
+
+/// Built-in sections keyed by short name, as the test builders supply them.
+impl<'de> Deserialize<'de> for ApolloPlugins {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct SectionsVisitor;
+
+        impl<'de> Visitor<'de> for SectionsVisitor {
+            type Value = ApolloPlugins;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("built-in plugin sections")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut plugins = ApolloPlugins::default();
+                while let Some(name) = map.next_key::<String>()? {
+                    if !plugins.next_section(&name, &mut map)? {
+                        return Err(serde::de::Error::custom(format!(
+                            "no built-in plugin reads the `{name}` section"
+                        )));
+                    }
+                }
+                Ok(plugins)
             }
         }
-    }
 
-    /// The built-in plugin named `full_name`, such as `apollo.telemetry`, when it has a valid
-    /// section.
-    pub(crate) fn apollo(&self, full_name: &str) -> Option<&ParsedPlugin> {
-        self.apollo.get(full_name)
+        deserializer.deserialize_map(SectionsVisitor)
     }
+}
 
-    /// The user plugin named `name`, when it has a valid section.
-    pub(crate) fn user(&self, name: &str) -> Option<&ParsedPlugin> {
-        self.user
+impl UserPlugins {
+    /// The user plugin named `name`.
+    pub(crate) fn get(&self, name: &str) -> Option<&ParsedPlugin> {
+        self.sections
             .iter()
             .find(|(user_name, _)| user_name == name)
             .map(|(_, parsed)| parsed)
     }
 
-    /// User plugins with valid config, in configuration order.
-    pub(crate) fn user_plugins(&self) -> impl Iterator<Item = (&str, &ParsedPlugin)> {
-        self.user
+    /// User plugins in configuration order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &ParsedPlugin)> {
+        self.sections
             .iter()
             .map(|(name, parsed)| (name.as_str(), parsed))
     }
+}
 
-    /// User plugin sections that name no registered plugin.
-    pub(crate) fn unknown_plugins(&self) -> &[String] {
-        &self.unknown
-    }
+/// The `plugins` section: a map from registered plugin name to its config. `null` means no
+/// user plugins, as in earlier releases.
+impl<'de> Deserialize<'de> for UserPlugins {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct SectionsVisitor;
 
-    pub(crate) fn errors(&self) -> &[PluginConfigError] {
-        &self.errors
-    }
+        impl<'de> Visitor<'de> for SectionsVisitor {
+            type Value = UserPlugins;
 
-    /// Fails with the first invalid plugin's error, for configurations built in code.
-    #[cfg(test)]
-    pub(crate) fn check(self) -> Result<Self, ConfigurationError> {
-        match self.errors.first() {
-            Some(error) => Err(error.to_configuration_error()),
-            None => Ok(self),
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("plugin sections keyed by plugin name")
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(UserPlugins::default())
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(UserPlugins::default())
+            }
+
+            fn visit_some<D: Deserializer<'de>>(
+                self,
+                deserializer: D,
+            ) -> Result<Self::Value, D::Error> {
+                deserializer.deserialize_map(self)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut plugins = UserPlugins::default();
+                while let Some(name) = map.next_key::<String>()? {
+                    let factory = find_factory(&name).ok_or_else(|| {
+                        serde::de::Error::custom(ConfigurationError::PluginUnknown(name.clone()))
+                    })?;
+                    let config = map.next_value_seed(SectionSeed(factory))?;
+                    plugins
+                        .sections
+                        .push((name, ParsedPlugin { factory, config }));
+                }
+                Ok(plugins)
+            }
         }
+
+        deserializer.deserialize_option(SectionsVisitor)
     }
 }
 
-/// Reports each plugin whose config could not be deserialized, and runs every other plugin's
-/// [`Validate`] rules, at the plugin's section of the document.
-impl Validate for PluginConfigs {
-    fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
-        for error in &self.errors {
-            at_section(errors.inner(), &error.section, |mut errors| {
-                errors.report_simple(error.to_configuration_error())
-            });
-        }
-        let parsed = self
-            .apollo
-            .values()
-            .chain(self.user.iter().map(|(_, parsed)| parsed));
-        for parsed in parsed {
-            at_section(errors.inner(), &parsed.section, |errors| {
-                parsed.factory.validate_config(&parsed.config, errors)
-            });
-        }
+/// Deserializes one plugin's section with its factory, naming the plugin in the error.
+struct SectionSeed(&'static PluginFactory);
+
+impl<'de> DeserializeSeed<'de> for SectionSeed {
+    type Value = PluginConfig;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<PluginConfig, D::Error> {
+        let mut deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
+        self.0.parse_config(&mut deserializer).map_err(|error| {
+            serde::de::Error::custom(ConfigurationError::PluginConfiguration {
+                plugin: self.0.name.clone(),
+                error: error.to_string(),
+            })
+        })
     }
 }
 
-/// Calls `report` with a collector for the value at `section`.
-fn at_section(
-    mut errors: ErrorCollector<'_>,
-    section: &[String],
-    report: impl FnOnce(ErrorCollector<'_>),
-) {
-    match section.split_first() {
-        Some((key, rest)) => at_section(errors.nest(key.as_str()), rest, report),
-        None => report(errors),
-    }
-}
-
-fn find_factory(name: &str) -> Option<&'static PluginFactory> {
+pub(crate) fn find_factory(name: &str) -> Option<&'static PluginFactory> {
     plugins()
         .find(|factory| factory.name == name)
         .map(|factory| &**factory)
@@ -208,43 +218,35 @@ mod tests {
 
     use super::*;
 
-    fn sections(value: Value) -> Map<String, Value> {
-        value.as_object().expect("an object").clone()
-    }
-
-    /// A built-in section that no plugin reads is reported, except the `server` and `plugins`
-    /// keys, which are not plugin sections.
+    /// A built-in section that no plugin reads is an error.
     #[test]
     fn apollo_sections_without_a_plugin_are_errors() {
-        let configs = PluginConfigs::parse(
-            &sections(json!({ "no_such_plugin": {}, "server": {}, "plugins": {} })),
-            &Map::new(),
-        );
+        let error = ApolloPlugins::deserialize(json!({ "no_such_plugin": {} }))
+            .expect_err("no plugin reads the section")
+            .to_string();
 
-        let errors: Vec<(&str, &[String])> = configs
-            .errors()
-            .iter()
-            .map(|error| (error.plugin.as_str(), error.section.as_slice()))
-            .collect();
-        assert_eq!(
-            errors,
-            [("apollo.no_such_plugin", &["no_such_plugin".to_string()][..])]
-        );
+        assert!(error.contains("`no_such_plugin`"), "{error}");
     }
 
     /// Built-in and user plugins are looked up separately, so a user section named like a
     /// built-in plugin does not configure it.
     #[test]
     fn user_sections_do_not_answer_for_built_in_plugins() {
-        let configs = PluginConfigs::parse(
-            &Map::new(),
-            &sections(json!({ "apollo.forbid_mutations": true })),
-        );
+        let user = UserPlugins::deserialize(json!({ "apollo.forbid_mutations": true }))
+            .expect("the section names a registered plugin");
 
-        assert!(configs.apollo("apollo.forbid_mutations").is_none());
-        let parsed = configs
-            .user("apollo.forbid_mutations")
+        let parsed = user
+            .get("apollo.forbid_mutations")
             .expect("the section names a registered plugin");
         assert_eq!(parsed.factory.name, "apollo.forbid_mutations");
+    }
+
+    #[test]
+    fn unknown_user_plugins_are_errors() {
+        let error = UserPlugins::deserialize(json!({ "acme.missing": {} }))
+            .expect_err("no plugin is registered with that name")
+            .to_string();
+
+        assert!(error.contains("acme.missing"), "{error}");
     }
 }

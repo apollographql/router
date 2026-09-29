@@ -663,11 +663,10 @@ impl InstrumentData {
             "apollo.router.config.custom_plugins".to_string(),
             (
                 configuration
-                    .plugins
-                    .plugins
-                    .as_ref()
-                    .map(|configuration| {
-                        configuration
+                    .document_section("plugins")
+                    .and_then(|plugins| plugins.as_object())
+                    .map(|plugins| {
+                        plugins
                             .keys()
                             .filter(|k| !k.starts_with("cloud_router."))
                             .count()
@@ -806,10 +805,10 @@ mod test {
 
     #[test]
     fn test_custom_plugin() {
-        let mut configuration = crate::Configuration::default();
-        let mut custom_plugins = serde_json::Map::new();
-        custom_plugins.insert("name".to_string(), json!("test"));
-        configuration.plugins.plugins = Some(custom_plugins);
+        let configuration = crate::Configuration {
+            validated_yaml: Some(json!({ "plugins": { "name": "test" } })),
+            ..Default::default()
+        };
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();
@@ -818,11 +817,12 @@ mod test {
 
     #[test]
     fn test_ignore_cloud_router_plugins() {
-        let mut configuration = crate::Configuration::default();
-        let mut custom_plugins = serde_json::Map::new();
-        custom_plugins.insert("name".to_string(), json!("test"));
-        custom_plugins.insert("cloud_router.".to_string(), json!("test"));
-        configuration.plugins.plugins = Some(custom_plugins);
+        let configuration = crate::Configuration {
+            validated_yaml: Some(json!({
+                "plugins": { "name": "test", "cloud_router.": "test" }
+            })),
+            ..Default::default()
+        };
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();

@@ -1,15 +1,21 @@
 //! Parses router configuration with `apollo-configuration`.
 
+use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_configuration::ConfigError;
 use apollo_configuration::ConfigParser;
 use apollo_configuration::ErrorCollector;
+use apollo_configuration::Validate;
 use apollo_configuration::expansion::LookupError;
 use apollo_configuration::expansion::VariableProvider;
 use apollo_configuration::provenance::Injection;
 use parking_lot::Mutex;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 use serde_json::Value;
 use serde_json::json;
 
@@ -20,14 +26,160 @@ use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
 
-/// Reports every plugin whose config is invalid, at its section of the document.
-impl apollo_configuration::Validate for Configuration {
+/// Runs every plugin's validation rules, for a configuration assembled in code. Parsing runs
+/// them through `ParsedConfiguration` instead, which knows which sections the document has.
+impl Validate for Configuration {
     fn validate<'a>(&self, errors: ErrorCollector<'a>) {
-        apollo_configuration::Validate::validate(&*self.plugin_configs, errors);
+        validate_plugin_sections(self, errors, |_| true);
     }
 }
 
 impl apollo_configuration::Configuration for Configuration {}
+
+/// Runs the validation rules of each plugin section, at its path in the document: built-in
+/// sections at their top-level key and user plugins under `plugins`. Built-in sections that
+/// `in_document` rejects are skipped, as they have no location to report at.
+fn validate_plugin_sections(
+    config: &Configuration,
+    mut errors: ErrorCollector<'_>,
+    in_document: impl Fn(&str) -> bool,
+) {
+    for (name, parsed) in config.apollo_plugins.iter() {
+        if in_document(name) {
+            parsed.config.validate(errors.nest(name));
+        }
+    }
+    let mut user = errors.nest("plugins");
+    for (name, parsed) in config.plugins.iter() {
+        parsed.config.validate(user.nest(name));
+    }
+}
+
+/// Checks `value`'s validation rules outside a parse, so errors have no location.
+#[cfg(any(test, feature = "mock_subgraphs_testing"))]
+pub(crate) fn check_plugin_rules(value: &impl Validate) -> Result<(), ConfigurationError> {
+    struct ByRef<'v, V>(&'v V);
+
+    impl<V: Validate> Validate for ByRef<'_, V> {
+        fn validate<'a>(&self, errors: ErrorCollector<'a>) {
+            self.0.validate(errors)
+        }
+    }
+
+    apollo_configuration::validate(ByRef(value))
+        .map(|_| ())
+        .map_err(|errors| ConfigError::ValidationError(errors).into())
+}
+
+/// The configuration a document deserializes to, and the top-level keys it has. The keys decide
+/// which built-in sections have a location for their rules' errors: `limits` and `health_check`
+/// have a plugin section even when the document has none.
+pub(crate) struct ParsedConfiguration {
+    config: Configuration,
+    keys: BTreeSet<String>,
+}
+
+impl schemars::JsonSchema for ParsedConfiguration {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        Configuration::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        Configuration::json_schema(generator)
+    }
+}
+
+/// Reads each top-level key into its typed setting, and each built-in plugin's section with its
+/// plugin's factory, in one pass over the document. Every value is deserialized from the parser's
+/// own deserializer, so an error inside a plugin's section is reported at its line.
+impl<'de> serde::Deserialize<'de> for ParsedConfiguration {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(ConfigurationVisitor)
+    }
+}
+
+struct ConfigurationVisitor;
+
+impl<'de> Visitor<'de> for ConfigurationVisitor {
+    type Value = ParsedConfiguration;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("router configuration")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut config = Configuration::with_defaults();
+        let mut keys = BTreeSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "reload" => config.reload = map.next_value()?,
+                "health_check" => config.health_check = map.next_value()?,
+                "sandbox" => config.sandbox = map.next_value()?,
+                "homepage" => config.homepage = map.next_value()?,
+                "server" => config.server = map.next_value()?,
+                "supergraph" => config.supergraph = map.next_value()?,
+                "cors" => config.cors = map.next_value()?,
+                "tls" => config.tls = map.next_value()?,
+                "apq" => config.apq = map.next_value()?,
+                "persisted_queries" => config.persisted_queries = map.next_value()?,
+                "limits" => config.limits = map.next_value()?,
+                "plugins" => config.plugins = map.next_value()?,
+                "batching" => config.batching = map.next_value()?,
+                "experimental_type_conditioned_fetching" => {
+                    config.experimental_type_conditioned_fetching = map.next_value()?
+                }
+                "experimental_hoist_orphan_errors" => {
+                    config.experimental_hoist_orphan_errors = map.next_value()?
+                }
+                name => {
+                    if !config.apollo_plugins.next_section(name, &mut map)? {
+                        // Router's schema rejects unknown keys before deserialization.
+                        return Err(serde::de::Error::custom(format!(
+                            "no setting or built-in plugin reads the `{name}` section"
+                        )));
+                    }
+                }
+            }
+            keys.insert(key);
+        }
+        config.insert_typed_plugin_sections();
+        config.notify = Configuration::notify(&config.apollo_plugins)
+            .map_err(|error| serde::de::Error::custom(error.to_string()))?;
+        let config = config
+            .validate()
+            .map_err(|error| serde::de::Error::custom(error.to_string()))?;
+        Ok(ParsedConfiguration { config, keys })
+    }
+}
+
+/// Runs the validation rules of every plugin section the document has.
+impl Validate for ParsedConfiguration {
+    fn validate<'a>(&self, errors: ErrorCollector<'a>) {
+        validate_plugin_sections(&self.config, errors, |name| self.keys.contains(name));
+    }
+}
+
+impl apollo_configuration::Configuration for ParsedConfiguration {}
+
+/// `--dev` settings, each replacing whatever the file sets at its path.
+/// `include_subgraph_errors.all` is applied after parsing instead (see [`apply_dev_mode`]).
+const DEV_MODE_SETTINGS: [(&[&str], bool); 6] = [
+    (&["supergraph", "introspection"], true),
+    (&["sandbox", "enabled"], true),
+    (&["homepage", "enabled"], false),
+    (&["expose_query_plan"], true),
+    (
+        &[
+            "telemetry",
+            "exporters",
+            "tracing",
+            "response_trace_id",
+            "enabled",
+        ],
+        true,
+    ),
+    (&["connectors", "debug_extensions"], true),
+];
 
 const UPGRADE_GUIDE: &str =
     "https://www.apollographql.com/docs/graphos/routing/upgrade/from-router-v2";
@@ -41,7 +193,7 @@ pub(crate) enum Migration {
     /// Rust-side migration logs, for callers that report migrations themselves. Each migration's
     /// own notices (`Action::Log`) still print, as they do at startup.
     WithinMajorQuietly,
-    #[cfg(test)]
+    /// Parses the document as written, for configurations built in code.
     None,
 }
 
@@ -72,7 +224,8 @@ impl ExternalValues {
         self
     }
 
-    /// Applies the `--dev` config once the document has been migrated and parsed.
+    /// Supplies the `--dev` settings as overrides named after the flag, so they go through the
+    /// same parse as the file.
     pub(crate) fn dev_mode(mut self, dev_mode: bool) -> Self {
         self.dev_mode = dev_mode;
         self
@@ -81,6 +234,13 @@ impl ExternalValues {
     /// Builds the parsers for the typed configuration and the retained document. Both share one
     /// snapshot of the providers, so they see the same expanded values.
     pub(crate) fn into_parser(mut self) -> Result<ConfigurationParser, ConfigError> {
+        if self.dev_mode {
+            self.injections.extend(
+                DEV_MODE_SETTINGS
+                    .iter()
+                    .map(|(path, value)| Injection::cli_flag(path, Value::Bool(*value), "--dev")),
+            );
+        }
         let snapshot = self.snapshot();
         Ok(ConfigurationParser {
             config: parser_builder(&self.injections, &snapshot).build()?,
@@ -133,7 +293,7 @@ fn parser_builder<T: apollo_configuration::Configuration>(
 /// Own one parser for a sequence of configuration loads. Each load shares expansion values
 /// across validation, the retained document, and migration fallback.
 pub struct ConfigurationParser {
-    config: ConfigParser<Configuration>,
+    config: ConfigParser<ParsedConfiguration>,
     document: ConfigParser<ExpandedDocument>,
     dev_mode: bool,
     snapshot: Option<Arc<ProviderSnapshot>>,
@@ -205,8 +365,8 @@ impl ConfigurationParser {
         self.parse_with_migration(text, Migration::WithinMajor)
     }
 
-    /// Parses the original text, falling back to it if a migrated copy fails. Dev config and
-    /// sandbox checks run last. Both parsing passes and fallback share one provider snapshot.
+    /// Parses the original text, falling back to it if a migrated copy fails. Sandbox checks run
+    /// last. Both parsing passes and fallback share one provider snapshot.
     pub(crate) fn parse_with_migration(
         &mut self,
         text: &str,
@@ -238,7 +398,6 @@ impl ConfigurationParser {
             Migration::WithinMajorQuietly => {
                 upgrade_configuration(&file, false, UpgradeMode::current_minor())?
             }
-            #[cfg(test)]
             Migration::None => file.clone(),
         };
         let mut config = if migrated == file {
@@ -263,13 +422,59 @@ impl ConfigurationParser {
             }
         }?;
         if self.dev_mode {
-            config.apply_dev_mode();
+            apply_dev_mode(&mut config);
         }
         // `--dev` sets these settings, so they are checked only once it has been applied.
         config.validate_sandbox_settings()?;
         config.raw_yaml = Some(Arc::from(text));
         Ok(config)
     }
+}
+
+/// Sets `include_subgraph_errors.all: true` for `--dev`, replacing whatever the file set there,
+/// as earlier releases did. An override cannot do this: apollo-configuration refuses to replace
+/// an object with settings, and `all` can be an allow or deny list.
+fn apply_dev_mode(config: &mut Configuration) {
+    const NAME: &str = "include_subgraph_errors";
+    let factory = super::plugin_configs::find_factory(&format!("apollo.{NAME}"))
+        .expect("the include_subgraph_errors plugin is registered");
+    let current = config
+        .apollo_plugins
+        .get(&format!("apollo.{NAME}"))
+        .map(|parsed| &parsed.config);
+    let config_with_errors =
+        crate::plugins::include_subgraph_errors::with_all_errors_included(current);
+    config.apollo_plugins.insert(
+        NAME,
+        super::ParsedPlugin {
+            factory,
+            config: config_with_errors,
+        },
+    );
+    let document = config
+        .validated_yaml
+        .get_or_insert_with(|| Value::Object(Default::default()));
+    let section = &mut document[NAME];
+    if !section.is_object() {
+        *section = json!({});
+    }
+    section["all"] = Value::Bool(true);
+}
+
+/// Parses `text` as written, with no expansion, overrides, migration or `--dev`, for
+/// configurations built in code. Parses share one parser, so Router's schema is compiled once.
+pub(crate) fn parse_as_written(text: &str) -> Result<Configuration, ConfigurationError> {
+    static PARSER: OnceLock<Mutex<ConfigurationParser>> = OnceLock::new();
+    PARSER
+        .get_or_init(|| {
+            Mutex::new(
+                ExternalValues::default()
+                    .into_parser()
+                    .expect("Router's schema compiles"),
+            )
+        })
+        .lock()
+        .parse_with_migration(text, Migration::None)
 }
 
 /// Builds independent parsers for tests supplying their own inputs.
@@ -297,8 +502,11 @@ fn report_error(error: ConfigError) -> ConfigurationError {
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
 /// document shows `plugins: null` as `{}`, which means the same.
+///
+/// apollo-configuration returns the typed value only, not the expanded document it validated, so
+/// the document is read by a second parser that shares the first's provider snapshot.
 fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ConfigError> {
-    let mut config = parser.config.parse_yaml(text)?;
+    let ParsedConfiguration { mut config, .. } = parser.config.parse_yaml(text)?;
     let ExpandedDocument(mut document) = parser.document.parse_yaml(text)?;
     if let Some(plugins) = document
         .get_mut("plugins")
@@ -438,7 +646,7 @@ mod tests {
     fn null_plugins_mean_no_user_plugins() {
         let config = parse("plugins: null\n").expect("null plugin config is accepted");
 
-        assert!(config.plugins.plugins.unwrap_or_default().is_empty());
+        assert_eq!(config.plugins.iter().count(), 0);
         assert_eq!(config.validated_yaml, Some(json!({ "plugins": {} })));
     }
 
@@ -703,9 +911,10 @@ mod tests {
         .unwrap();
     }
 
-    /// Every plugin with invalid config is reported, each against its own section.
+    /// Parsing stops at the first plugin section that fails to deserialize, and reports it at the
+    /// value that failed, inside the plugin's section.
     #[test]
-    fn every_invalid_plugin_is_reported_at_its_section() {
+    fn plugin_deserialization_errors_point_at_the_value() {
         let text = "# operator comment\ntraffic_shaping:\n  router:\n    timeout: not-a-duration\nsubscription:\n  deduplication:\n    enabled: true\n";
 
         let error = parse_configuration(text, ExternalValues::default(), Migration::None)
@@ -713,12 +922,12 @@ mod tests {
             .to_string();
 
         assert!(error.contains("apollo.traffic_shaping"), "{error}");
-        assert!(error.contains("apollo.subscription"), "{error}");
-        assert!(error.contains("[3:3]"), "{error}");
-        assert!(error.contains("[6:3]"), "{error}");
+        assert!(error.contains("[4:14]"), "{error}");
+        assert!(error.contains("timeout: not-a-duration"), "{error}");
     }
 
-    /// A test plugin whose custom rule rejects a `name` that the schema accepts.
+    /// Test plugins whose custom rules reject a `name` that the schema accepts: a user plugin,
+    /// `test.validated`, and a built-in one, `test_validated`, whose rule is on a nested setting.
     mod validated_plugin {
         use apollo_configuration::ErrorCollector;
         use apollo_configuration::configuration;
@@ -726,6 +935,41 @@ mod tests {
 
         use crate::plugin::Plugin;
         use crate::plugin::PluginInit;
+
+        /// A nested setting with a custom validation rule.
+        #[configuration(validate = reject_reserved_inner_name)]
+        pub(super) struct NestedName {
+            /// Any name except `reserved`.
+            name: String,
+        }
+
+        fn reject_reserved_inner_name(config: &NestedName, mut errors: ErrorCollector<'_>) {
+            if config.name == "reserved" {
+                errors
+                    .nest("name")
+                    .report_simple("the nested name `reserved` is not allowed");
+            }
+        }
+
+        /// A test built-in plugin with a validated nested setting.
+        #[configuration]
+        pub(super) struct BuiltInValidatedConfig {
+            /// A setting with its own validation rule.
+            inner: NestedName,
+        }
+
+        struct BuiltInValidatedPlugin;
+
+        #[async_trait::async_trait]
+        impl Plugin for BuiltInValidatedPlugin {
+            type Config = BuiltInValidatedConfig;
+
+            async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+                Ok(Self)
+            }
+        }
+
+        register_plugin!("apollo", "test_validated", BuiltInValidatedPlugin);
 
         /// A test plugin with a custom validation rule.
         #[configuration(validate = reject_reserved_name)]
@@ -783,25 +1027,92 @@ mod tests {
         )
         .expect("the plugin's rule accepts the name");
 
-        assert!(config.plugin_configs.user("test.validated").is_some());
+        assert!(config.plugins.get("test.validated").is_some());
     }
 
-    /// Validation rules and deserialization failures in different plugins are all reported.
+    /// A built-in plugin's rule on a nested setting reports at that setting's line and column.
     #[test]
-    fn every_plugin_failing_validation_is_reported() {
-        let text = "traffic_shaping:\n  router:\n    timeout: not-a-duration\nplugins:\n  test.validated:\n    name: reserved\n";
+    fn built_in_plugin_rules_report_at_the_nested_setting() {
+        let text = "# operator comment\ntest_validated:\n  inner:\n    name: reserved\n";
 
         let error = parse_configuration(text, ExternalValues::default(), Migration::None)
-            .expect_err("both plugins' config is invalid")
+            .expect_err("the built-in plugin's rule rejects the name")
             .to_string();
 
-        assert!(error.contains("apollo.traffic_shaping"), "{error}");
-        assert!(error.contains("[2:3]"), "{error}");
+        assert!(
+            error.contains("the nested name `reserved` is not allowed"),
+            "{error}"
+        );
+        assert!(error.contains("[4:11]"), "{error}");
+        assert!(error.contains("name: reserved"), "{error}");
+    }
+
+    /// Every rule failure is reported, across built-in and user plugins.
+    #[test]
+    fn every_plugin_failing_validation_is_reported() {
+        let text = "test_validated:\n  inner:\n    name: reserved\nplugins:\n  test.validated:\n    name: reserved\n";
+
+        let error = parse_configuration(text, ExternalValues::default(), Migration::None)
+            .expect_err("both plugins' rules reject their names")
+            .to_string();
+
+        assert!(
+            error.contains("the nested name `reserved` is not allowed"),
+            "{error}"
+        );
+        assert!(error.contains("[3:11]"), "{error}");
         assert!(
             error.contains("the name `reserved` is not allowed"),
             "{error}"
         );
         assert!(error.contains("[6:11]"), "{error}");
+    }
+
+    /// An override reaches plugin rules through the same parse, and the rule's error names the
+    /// override rather than a line of the file. `--dev` supplies its settings this way. The
+    /// message quotes the overridden value, so apollo-configuration masks it.
+    #[test]
+    fn plugin_rules_see_overridden_values() {
+        let external = ExternalValues::default().inject([Injection::cli_flag(
+            &["plugins", "test.validated", "name"],
+            json!("reserved"),
+            "--name",
+        )]);
+
+        let error = parse_configuration(
+            "plugins:\n  test.validated:\n    name: allowed\n",
+            external,
+            Migration::None,
+        )
+        .expect_err("the overridden name is rejected")
+        .to_string();
+
+        assert!(error.contains("value failed custom validation"), "{error}");
+        assert!(error.contains("--name"), "{error}");
+    }
+
+    /// Configurations built with serde or the test builders go through the same rules.
+    #[test]
+    fn serde_and_builder_configurations_run_plugin_rules() {
+        let error = serde_yaml::from_str::<Configuration>(
+            "plugins:\n  test.validated:\n    name: reserved\n",
+        )
+        .expect_err("the plugin's rule rejects the name")
+        .to_string();
+        assert!(
+            error.contains("the name `reserved` is not allowed"),
+            "{error}"
+        );
+
+        let error = Configuration::builder()
+            .apollo_plugin("test_validated", json!({ "inner": { "name": "reserved" } }))
+            .build()
+            .expect_err("the built-in plugin's rule rejects the name")
+            .to_string();
+        assert!(
+            error.contains("the nested name `reserved` is not allowed"),
+            "{error}"
+        );
     }
 
     /// A migrated document that still fails schema validation falls back to validating the

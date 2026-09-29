@@ -137,8 +137,8 @@ fn user_plugin_config_is_deserialized_when_parsed() {
             .expect("the plugin config is valid");
 
     let plugin_config: Conf = config
-        .plugin_configs
-        .user("test.always_starts_and_stops")
+        .plugins
+        .get("test.always_starts_and_stops")
         .expect("the plugin's config is kept")
         .config
         .typed()
@@ -146,25 +146,23 @@ fn user_plugin_config_is_deserialized_when_parsed() {
     assert_eq!(plugin_config.name, "parsed once");
 }
 
-/// Construction takes user plugins from their parsed config, in configuration order, so later
-/// edits to the raw sections change nothing. A section naming no registered plugin is recorded
-/// for construction to report.
+/// Construction takes user plugins from their parsed config, in configuration order. A section
+/// naming no registered plugin is rejected while parsing, whichever way the configuration is
+/// built.
 #[test]
 fn user_plugins_are_built_from_their_parsed_config() {
-    let mut config: Configuration = serde_yaml::from_str(
-        "plugins:\n  test.always_fails_to_start:\n    name: first\n  acme.unregistered: {}\n  test.always_starts_and_stops:\n    name: second\n",
+    let config: Configuration = serde_yaml::from_str(
+        "plugins:\n  test.always_fails_to_start:\n    name: first\n  test.always_starts_and_stops:\n    name: second\n",
     )
     .expect("the user plugin sections deserialize");
-    // Construction must not read the raw sections, so removing them changes nothing below.
-    config.plugins.plugins = None;
 
-    let configs = &config.plugin_configs;
-    let names: Vec<&str> = configs.user_plugins().map(|(name, _)| name).collect();
+    let names: Vec<&str> = config.plugins.iter().map(|(name, _)| name).collect();
     assert_eq!(
         names,
         ["test.always_fails_to_start", "test.always_starts_and_stops"]
     );
-    assert_eq!(configs.unknown_plugins(), ["acme.unregistered"]);
+    serde_yaml::from_str::<Configuration>("plugins:\n  acme.unregistered: {}\n")
+        .expect_err("no plugin is registered as acme.unregistered");
 }
 
 /// On a hot reload, each plugin is built with the config it ran with before.

@@ -931,21 +931,16 @@ fn default_config_matches_parsing_an_empty_document() {
         serde_json::to_value(&default).unwrap(),
         serde_json::to_value(&parsed).unwrap()
     );
-    assert_eq!(
-        default.apollo_plugins.plugins,
-        parsed.apollo_plugins.plugins
-    );
-    assert!(!default.apollo_plugins.plugins.is_empty());
-    for name in default.apollo_plugins.plugins.keys() {
-        let full_name = format!("apollo.{name}");
-        assert!(
-            default.plugin_configs.apollo(&full_name).is_some()
-                && parsed.plugin_configs.apollo(&full_name).is_some(),
-            "{full_name} has retained config"
-        );
-    }
-    assert!(default.plugin_configs.errors().is_empty());
-    assert_eq!(default.plugin_configs.user_plugins().count(), 0);
+    let names = |config: &Configuration| -> Vec<String> {
+        config
+            .apollo_plugins
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect()
+    };
+    assert_eq!(names(&default), ["health_check", "limits"]);
+    assert_eq!(names(&default), names(&parsed));
+    assert_eq!(default.plugins.iter().count(), 0);
 }
 
 #[test]

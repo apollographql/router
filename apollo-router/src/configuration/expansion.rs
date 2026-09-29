@@ -501,7 +501,10 @@ mod test {
         assert!(config.sandbox.enabled);
         assert!(!config.homepage.enabled);
         assert!(config.plugin_config("apollo.expose_query_plan").is_some());
-        assert_eq!(config.apollo_plugins.plugins["expose_query_plan"], true);
+        assert_eq!(
+            config.typed_plugin_config::<crate::plugin::Enabled>("apollo.expose_query_plan"),
+            Some(&crate::plugin::Enabled(true))
+        );
         let document = config.validated_yaml.expect("the retained document");
         assert_eq!(document["expose_query_plan"], true);
         assert_eq!(document["sandbox"]["enabled"], true);

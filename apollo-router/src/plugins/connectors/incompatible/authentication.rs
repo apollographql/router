@@ -22,7 +22,7 @@ pub(super) struct AuthIncompatPlugin {
 
 impl AuthIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
-        let plugin_config = config.apollo_plugins.plugins.get("authentication");
+        let plugin_config = config.document_section("authentication");
         let subgraph_config = plugin_config
             .and_then(|plugin| plugin.get("subgraph"))
             .and_then(|subgraph_config| serde_json::from_value(subgraph_config.clone()).ok());

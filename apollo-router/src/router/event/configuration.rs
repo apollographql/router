@@ -146,9 +146,7 @@ impl ConfigurationSource {
                                     },
                                 )
                                 .boxed();
-                                if let Some(rhai_plugin) =
-                                    configuration.apollo_plugins.plugins.get("rhai")
-                                {
+                                if let Some(rhai_plugin) = configuration.document_section("rhai") {
                                     let scripts_path = match rhai_plugin["scripts"].as_str() {
                                         Some(path) => Path::new(path),
                                         None => Path::new("rhai"),

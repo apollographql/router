@@ -34,6 +34,7 @@ use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+#[cfg(test)]
 use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
@@ -46,7 +47,9 @@ pub(crate) use self::apollo_configuration_parse::parse_configuration;
 use self::cors::Cors;
 #[cfg(test)]
 use self::expansion::Expansion;
-use self::plugin_configs::PluginConfigs;
+pub(crate) use self::plugin_configs::ApolloPlugins;
+pub(crate) use self::plugin_configs::ParsedPlugin;
+pub(crate) use self::plugin_configs::UserPlugins;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::server::Server;
@@ -164,6 +167,8 @@ impl From<proteus::parser::Error> for ConfigurationError {
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
+// Every way in goes through `ConfigurationParser`, so the configuration is checked against
+// Router's schema and every plugin's validation rules.
 #[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
 // We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
@@ -228,10 +233,6 @@ pub struct Configuration {
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
 
-    /// Each configured plugin's config, deserialized when the configuration is parsed.
-    #[serde(skip)]
-    pub(crate) plugin_configs: Arc<PluginConfigs>,
-
     /// Uplink configuration.
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
@@ -263,109 +264,21 @@ impl PartialEq for Configuration {
     }
 }
 
-/// Deserializes each plugin's section into `plugin_configs` while the configuration itself is
-/// deserialized. Invalid plugin config is kept as errors rather than failing here, so
-/// configuration parsing can report every one of them at its section alongside the schema errors
-/// (see the `apollo_configuration::Validate` impl). A derived impl could not do this, nor copy
-/// `limits` and `health_check` into their plugin sections.
+/// Deserializes through [`ConfigurationParser`], so a configuration built with serde is checked
+/// like a file: against Router's schema and every plugin's validation rules. The document is
+/// taken as written, without migrations, overrides or `--dev`.
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        // This intermediate structure will allow us to deserialize a Configuration
-        // yet still exercise the Configuration validation function
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct AdHocConfiguration {
-            reload: Reload,
-            health_check: HealthCheck,
-            sandbox: Sandbox,
-            homepage: Homepage,
-            server: Server,
-            supergraph: Supergraph,
-            cors: Cors,
-            plugins: UserPlugins,
-            #[serde(flatten)]
-            apollo_plugins: ApolloPlugins,
-            tls: Tls,
-            apq: Apq,
-            persisted_queries: PersistedQueries,
-            limits: limits::Config,
-            batching: Batching,
-            experimental_type_conditioned_fetching: bool,
-            experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
-        }
-        let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
-
-        // Allow the limits plugin to use the configuration from the configuration struct.
-        // This means that the limits plugin will get the regular configuration via plugin init.
-        ad_hoc.apollo_plugins.plugins.insert(
-            "limits".to_string(),
-            serde_json::to_value(&ad_hoc.limits).unwrap(),
-        );
-        ad_hoc.apollo_plugins.plugins.insert(
-            "health_check".to_string(),
-            serde_json::to_value(&ad_hoc.health_check).unwrap(),
-        );
-
-        let plugin_configs = PluginConfigs::parse(
-            &ad_hoc.apollo_plugins.plugins,
-            ad_hoc.plugins.plugins.as_ref().unwrap_or(&Map::new()),
-        );
-        let notify = Configuration::notify(&plugin_configs)
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-
-        // Use a struct literal instead of a builder to ensure this is exhaustive
-        Configuration {
-            reload: ad_hoc.reload,
-            health_check: ad_hoc.health_check,
-            sandbox: ad_hoc.sandbox,
-            homepage: ad_hoc.homepage,
-            server: ad_hoc.server,
-            supergraph: ad_hoc.supergraph,
-            cors: ad_hoc.cors,
-            tls: ad_hoc.tls,
-            apq: ad_hoc.apq,
-            persisted_queries: ad_hoc.persisted_queries,
-            limits: ad_hoc.limits,
-            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
-            plugins: ad_hoc.plugins,
-            apollo_plugins: ad_hoc.apollo_plugins,
-            plugin_configs: Arc::new(plugin_configs),
-            batching: ad_hoc.batching,
-
-            // serde(skip)
-            notify,
-            uplink: None,
-            validated_yaml: None,
-            raw_yaml: None,
-        }
-        .validate()
-        .map_err(|e| serde::de::Error::custom(e.to_string()))
+        let document = Value::deserialize(deserializer)?;
+        let text = serde_json::to_string(&document).map_err(serde::de::Error::custom)?;
+        apollo_configuration_parse::parse_as_written(&text).map_err(serde::de::Error::custom)
     }
 }
 
 pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
-
-/// Sets `value` at `path` inside `document`, replacing whatever is there and creating objects
-/// along the way.
-fn set_path(document: &mut Value, path: &[&str], value: Value) {
-    let Some((key, rest)) = path.split_first() else {
-        *document = value;
-        return;
-    };
-    if !document.is_object() {
-        *document = Value::Object(Map::new());
-    }
-    let child = document
-        .as_object_mut()
-        .expect("replaced with an object above")
-        .entry(key.to_string())
-        .or_insert(Value::Null);
-    set_path(child, rest, value);
-}
 
 fn default_graphql_listen() -> ListenAddr {
     SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
@@ -393,14 +306,8 @@ impl Configuration {
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
-        let plugin_configs = PluginConfigs::parse(&apollo_plugins, &plugins).check()?;
-        let plugins = UserPlugins {
-            plugins: Some(plugins),
-        };
-        let apollo_plugins = ApolloPlugins {
-            plugins: apollo_plugins,
-        };
-        let notify = Self::notify(&plugin_configs)?;
+        let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
+        let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
             validated_yaml: Default::default(),
@@ -417,7 +324,6 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             plugins,
             apollo_plugins,
-            plugin_configs: Arc::new(plugin_configs),
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
@@ -428,7 +334,7 @@ impl Configuration {
         };
 
         conf.validate_sandbox_settings()?;
-        conf.validate()
+        conf.validate()?.with_plugin_rules_checked()
     }
 }
 
@@ -448,9 +354,59 @@ impl Configuration {
     /// The config of the built-in plugin named `full_name`, such as `apollo.telemetry`, when
     /// the configuration has a section for it.
     pub(crate) fn plugin_config(&self, full_name: &str) -> Option<&PluginConfig> {
-        self.plugin_configs
-            .apollo(full_name)
+        self.apollo_plugins
+            .get(full_name)
             .map(|parsed| &parsed.config)
+    }
+
+    /// Configuration with every setting at its default and no plugin sections, before any
+    /// document is read.
+    pub(crate) fn with_defaults() -> Self {
+        Self {
+            validated_yaml: None,
+            raw_yaml: None,
+            reload: Default::default(),
+            health_check: Default::default(),
+            sandbox: Default::default(),
+            homepage: Default::default(),
+            server: Default::default(),
+            supergraph: Default::default(),
+            cors: Default::default(),
+            tls: Default::default(),
+            apq: Default::default(),
+            persisted_queries: Default::default(),
+            limits: Default::default(),
+            plugins: Default::default(),
+            apollo_plugins: Default::default(),
+            uplink: None,
+            // Replaced once the document's subscription section, if any, has been read.
+            notify: Self::notify(&ApolloPlugins::default())
+                .expect("without a subscription section there is no config to read"),
+            batching: Default::default(),
+            experimental_type_conditioned_fetching: Default::default(),
+            experimental_hoist_orphan_errors: Default::default(),
+        }
+    }
+
+    /// Sets the `limits` and `health_check` plugin sections from the typed top-level settings
+    /// they share, so those plugins run with the values the rest of the router reads.
+    pub(crate) fn insert_typed_plugin_sections(&mut self) {
+        let sections = [
+            ("limits", PluginConfig::new(self.limits.clone())),
+            ("health_check", PluginConfig::new(self.health_check.clone())),
+        ];
+        for (name, config) in sections {
+            let factory = plugin_configs::find_factory(&format!("{APOLLO_PLUGIN_PREFIX}{name}"))
+                .expect("the limits and health_check plugins are registered");
+            self.apollo_plugins
+                .insert(name, ParsedPlugin { factory, config });
+        }
+    }
+
+    /// The section `name` of the document the configuration was parsed from, after expansion and
+    /// overrides, for code that inspects its shape rather than a plugin's typed config.
+    pub(crate) fn document_section(&self, name: &str) -> Option<&Value> {
+        self.validated_yaml.as_ref()?.get(name)
     }
 
     /// The config of the built-in plugin named `full_name` as its plugin's `Config` type, when
@@ -460,60 +416,32 @@ impl Configuration {
     }
 
     /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
-    /// when the configuration has none, and deserializes its config as parsing would have.
+    /// when the configuration has none. The section is deserialized and its plugin's rules
+    /// checked as parsing would have; no other section is touched.
     #[cfg(any(test, feature = "mock_subgraphs_testing"))]
     pub(crate) fn add_apollo_plugin_if_absent(
         &mut self,
         name: &str,
         config: impl FnOnce() -> Value,
-    ) {
-        if self.apollo_plugins.plugins.contains_key(name) {
-            return;
+    ) -> Result<(), ConfigurationError> {
+        if self.apollo_plugins.contains(name) {
+            return Ok(());
         }
-        self.apollo_plugins
-            .plugins
-            .insert(name.to_string(), config());
-        self.reparse_plugin_configs();
-    }
-
-    /// Applies the `--dev` config. Each value replaces whatever the file set at its path, as in
-    /// earlier releases, so `include_subgraph_errors.all: true` also replaces per-subgraph config
-    /// under `all`. The retained document is updated too, so licence checks and usage telemetry
-    /// see the values the router runs with.
-    pub(crate) fn apply_dev_mode(&mut self) {
-        self.supergraph.introspection = true;
-        self.sandbox.enabled = true;
-        self.homepage.enabled = false;
-        let plugin_paths = [
-            "expose_query_plan",
-            "include_subgraph_errors.all",
-            "telemetry.exporters.tracing.response_trace_id.enabled",
-            "connectors.debug_extensions",
-        ];
-        for path in plugin_paths {
-            let path: Vec<&str> = path.split('.').collect();
-            let (section, rest) = path.split_first().expect("paths are not empty");
-            let section = self
-                .apollo_plugins
-                .plugins
-                .entry(section.to_string())
-                .or_insert(Value::Null);
-            set_path(section, rest, Value::Bool(true));
-        }
-        self.reparse_plugin_configs();
-
-        let document = self
-            .validated_yaml
-            .get_or_insert_with(|| Value::Object(Map::new()));
-        let paths = plugin_paths.into_iter().map(|path| (path, true)).chain([
-            ("supergraph.introspection", true),
-            ("sandbox.enabled", true),
-            ("homepage.enabled", false),
-        ]);
-        for (path, value) in paths {
-            let path: Vec<&str> = path.split('.').collect();
-            set_path(document, &path, Value::Bool(value));
-        }
+        let section =
+            ApolloPlugins::deserialize(serde_json::json!({ name: config() })).map_err(|error| {
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid plugin configuration",
+                    error: error.to_string(),
+                }
+            })?;
+        let (_, parsed) = section
+            .iter()
+            .next()
+            .expect("the section was just deserialized");
+        let parsed = parsed.clone();
+        apollo_configuration_parse::check_plugin_rules(&parsed.config)?;
+        self.apollo_plugins.insert(name, parsed);
+        Ok(())
     }
 
     /// Checks the sandbox, homepage and introspection settings together. `--dev` sets all three,
@@ -536,21 +464,13 @@ impl Configuration {
         Ok(())
     }
 
-    /// Deserializes the plugin config again after the plugin sections have been changed in code.
-    fn reparse_plugin_configs(&mut self) {
-        self.plugin_configs = Arc::new(PluginConfigs::parse(
-            &self.apollo_plugins.plugins,
-            self.plugins.plugins.as_ref().unwrap_or(&Map::new()),
-        ));
-    }
-
     fn notify(
-        plugin_configs: &PluginConfigs,
+        apollo_plugins: &ApolloPlugins,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
         if cfg!(test) {
             return Ok(Notify::for_tests());
         }
-        let notify_queue_cap = match plugin_configs.apollo(APOLLO_SUBSCRIPTION_PLUGIN) {
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN) {
             Some(parsed) => {
                 let conf = parsed.config.typed::<SubscriptionConfig>().map_err(|err| {
                     ConfigurationError::PluginConfiguration {
@@ -620,14 +540,9 @@ impl Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
-        // Deserializing an empty document applies every default, as parsing `""` does, without
-        // compiling Router's schema. Only parsing applies `--dev`.
-        let empty = Value::Object(Map::new());
-        let mut config: Configuration =
-            serde_json::from_value(empty.clone()).expect("default configuration must be valid");
-        config.validated_yaml = Some(empty);
-        config.raw_yaml = Some(Arc::from(""));
-        config
+        // Parsing an empty document applies every default. Only startup parsing applies `--dev`.
+        apollo_configuration_parse::parse_as_written("")
+            .expect("default configuration must be valid")
     }
 }
 
@@ -653,13 +568,7 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
-        let plugin_configs = PluginConfigs::parse(&apollo_plugins, &plugins).check()?;
-        let plugins = UserPlugins {
-            plugins: Some(plugins),
-        };
-        let apollo_plugins = ApolloPlugins {
-            plugins: apollo_plugins,
-        };
+        let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
         let configuration = Self {
             validated_yaml: Default::default(),
             reload: Default::default(),
@@ -672,7 +581,6 @@ impl Configuration {
             limits: operation_limits.unwrap_or_default(),
             plugins,
             apollo_plugins,
-            plugin_configs: Arc::new(plugin_configs),
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
@@ -686,7 +594,34 @@ impl Configuration {
         };
 
         configuration.validate_sandbox_settings()?;
-        configuration.validate()
+        configuration.validate()?.with_plugin_rules_checked()
+    }
+}
+
+#[cfg(test)]
+impl Configuration {
+    /// Deserializes the test builders' plugin sections as parsing does.
+    fn plugin_sections(
+        apollo_plugins: Map<String, Value>,
+        plugins: Map<String, Value>,
+    ) -> Result<(ApolloPlugins, UserPlugins), ConfigurationError> {
+        let invalid = |error: serde_json::Error| ConfigurationError::InvalidConfiguration {
+            message: "invalid plugin configuration",
+            error: error.to_string(),
+        };
+        Ok((
+            ApolloPlugins::deserialize(Value::Object(apollo_plugins)).map_err(invalid)?,
+            UserPlugins::deserialize(Value::Object(plugins)).map_err(invalid)?,
+        ))
+    }
+
+    /// Runs every plugin's validation rules, for configurations the test builders assemble from
+    /// typed values rather than a document. Errors have no location.
+    fn with_plugin_rules_checked(mut self) -> Result<Self, ConfigurationError> {
+        // Built-in sections the builders do not take as a section read the typed field.
+        self.insert_typed_plugin_sections();
+        apollo_configuration_parse::check_plugin_rules(&self)?;
+        Ok(self)
     }
 }
 
@@ -804,12 +739,6 @@ fn gen_schema(
 /// These plugins are processed prior to user plugins. Also, their configuration
 /// is "hoisted" to the top level of the config rather than being processed
 /// under "plugins" as for user plugins.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(transparent)]
-pub(crate) struct ApolloPlugins {
-    pub(crate) plugins: Map<String, Value>,
-}
-
 impl JsonSchema for ApolloPlugins {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         stringify!(Plugins).into()
@@ -843,12 +772,6 @@ impl JsonSchema for ApolloPlugins {
 ///
 /// These plugins are compiled into a router by and their configuration is performed
 /// under the "plugins" section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(transparent)]
-pub(crate) struct UserPlugins {
-    pub(crate) plugins: Option<Map<String, Value>>,
-}
-
 impl JsonSchema for UserPlugins {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         stringify!(Plugins).into()

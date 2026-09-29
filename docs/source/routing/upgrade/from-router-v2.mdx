@@ -112,7 +112,7 @@ The router checks its configuration more thoroughly at startup and on reload, so
 
 The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `apollo_configuration::Configuration + Clone + Send + Sync + 'static`, in place of `JsonSchema + DeserializeOwned`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins).
 
-The router parses its configuration with the [`apollo-configuration`](https://crates.io/crates/apollo-configuration) crate, and each plugin's configuration is now parsed and validated in the same step. Validation rules that a plugin declares run at parse time. A value they reject fails startup or reload with an error at the plugin's section of the file, alongside any other invalid plugin.
+The router parses its configuration with the [`apollo-configuration`](https://crates.io/crates/apollo-configuration) crate, and each plugin's configuration is now parsed and validated in the same step. Validation rules that a plugin declares run at parse time. A value they reject fails startup or reload with an error at that value's line in the file, alongside every other rule failure. A `Configuration` deserialized with serde in tests is checked the same way.
 
 **Upgrade steps**:
 
