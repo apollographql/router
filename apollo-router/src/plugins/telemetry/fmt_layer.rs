@@ -659,9 +659,15 @@ connector:
                 serde_json::from_str(&raw).expect("output should be valid JSON");
 
             assert_eq!(parsed["keys"], "{[1, 2]: true}");
-            assert_eq!(
-                parsed["serialization_errors"],
-                serde_json::json!({ "keys": "key must be a string" }),
+            // Only check that a reason is present: its wording belongs to serde_json.
+            let errors = parsed["serialization_errors"]
+                .as_object()
+                .unwrap_or_else(|| panic!("expected a serialization_errors object; got: {raw}"));
+            assert_eq!(errors.len(), 1, "got: {raw}");
+            assert!(
+                errors["keys"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.is_empty()),
                 "the fallback should record why conversion failed; got: {raw}"
             );
             assert_eq!(parsed["code"], 43);
