@@ -133,6 +133,15 @@ fn default_health_check_path() -> String {
     "/health".to_string()
 }
 
+/// Web endpoint paths must start with `/`, but users may write `path: health`.
+fn normalize_path(path: String) -> String {
+    if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    }
+}
+
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl Config {
@@ -143,15 +152,10 @@ impl Config {
         path: Option<String>,
         readiness: Option<ReadinessConfig>,
     ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
             enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
+            path: normalize_path(path.unwrap_or_else(default_health_check_path)),
             readiness: readiness.unwrap_or_default(),
         }
     }
@@ -169,7 +173,9 @@ struct HealthCheck {
 impl PluginPrivate for HealthCheck {
     type Config = Config;
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(mut init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        init.config.path = normalize_path(init.config.path);
+
         // We always do the work to track readiness and liveness because we
         // need that data to implement our `router_service`. We only log out
         // our health tracing message if our health check is enabled.
@@ -536,6 +542,33 @@ mod test {
             false,
         )
         .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_health_check_adds_missing_leading_slash_to_path() {
+        let listen_addr: ListenAddr = SocketAddr::from_str("127.0.0.1:8088").unwrap().into();
+        let (endpoint, _pipeline_svc, _test_harness) = get_axum_router(
+            listen_addr,
+            "health_check:\n  path: healthz\n",
+            StatusCode::OK,
+        )
+        .await;
+
+        // Routing a path without a leading `/` would panic in axum.
+        let mut axum_router = endpoint.expect("endpoint must exist").into_router();
+        let request = http::Request::builder()
+            .uri("http://127.0.0.1:8088/healthz")
+            .body(http_body_util::Empty::new())
+            .expect("valid request");
+        let response = axum_router
+            .as_service()
+            .ready()
+            .await
+            .expect("readied")
+            .call(request)
+            .await
+            .expect("called");
+        assert_health_response(response, StatusCode::OK, r#"{"status":"UP"}"#).await;
     }
 
     // Helper to build a fresh health?ready= request
