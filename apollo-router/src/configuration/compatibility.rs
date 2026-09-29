@@ -422,34 +422,34 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 }
 
 /// Intentional difference from the previous loader, which fell back to the original document
-/// only when the migrated one failed the schema check. apollo-configuration validates in one call,
-/// so a migrated document rejected after the schema check, here by a plugin's config, falls back
-/// too. Startup migration 2045 fixes the flat deduplication settings and the migrated copy then
-/// fails on the traffic shaping timeout. The file as written fails first on the flat settings:
-/// deserialization stops at its first error, so that is the one reported.
+/// when the migrated one failed the schema check. Once migration succeeds, the migrated copy is
+/// loaded and its errors are reported. Startup migration 2045 fixes the flat deduplication
+/// settings, so the error is the traffic shaping timeout, not the settings migration fixed.
 #[test]
-fn migrated_document_failing_plugin_config_falls_back_to_the_file() {
+fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
     let _guard = tracing_test::dispatcher_guard();
 
     let error = parse(include_str!(
-        "testdata/compat/fallback_after_plugin_config_error.yaml"
+        "testdata/compat/plugin_config_error_after_migration.yaml"
     ))
     .expect_err("the traffic shaping timeout is invalid")
     .to_string();
 
-    assert!(error.contains("apollo.subscription"), "{error}");
-    assert!(error.contains("[4:14]"), "{error}");
-    // Only the operator's file has this comment; the serialized migrated copy has none.
-    assert!(
-        error.contains("# The schema accepts any string here"),
-        "the diagnostic should quote the operator's file: {error}"
-    );
+    assert!(error.contains("apollo.traffic_shaping"), "{error}");
+    assert!(error.contains("timeout: not-a-duration"), "{error}");
+    assert!(!error.contains("apollo.subscription"), "{error}");
     tracing_test::logs_assert(|lines| {
+        if let Some(line) = lines
+            .iter()
+            .find(|line| line.contains("could not be upgraded automatically"))
+        {
+            return Err(format!("the file must not be loaded instead: {line}"));
+        }
         lines
             .iter()
-            .any(|line| line.contains("could not be upgraded automatically"))
+            .any(|line| line.contains("refer to the upgraded configuration"))
             .then_some(())
-            .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
+            .ok_or_else(|| "the warning must say which document the errors refer to".into())
     })
     .unwrap();
 }

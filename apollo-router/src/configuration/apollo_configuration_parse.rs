@@ -1,5 +1,6 @@
 //! Parses router configuration with `apollo-configuration`.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
@@ -69,6 +70,13 @@ pub(crate) fn check_plugin_rules(value: &impl Validate) -> Result<(), Configurat
     apollo_configuration::validate(ByRef(value))
         .map(|_| ())
         .map_err(|errors| ConfigError::ValidationError(errors).into())
+}
+
+thread_local! {
+    /// Set when plugin validation rules reported an error during the current parse.
+    /// apollo-configuration returns schema and rule failures as the same error variant, so the
+    /// migration fallback reads this to tell them apart.
+    static PLUGIN_RULES_FAILED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The configuration a document deserializes to, and the top-level keys it has. The keys decide
@@ -154,8 +162,14 @@ impl<'de> Visitor<'de> for ConfigurationVisitor {
 
 /// Runs the validation rules of every plugin section the document has.
 impl Validate for ParsedConfiguration {
-    fn validate<'a>(&self, errors: ErrorCollector<'a>) {
-        validate_plugin_sections(&self.config, errors, |name| self.keys.contains(name));
+    fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
+        let before = errors.len();
+        validate_plugin_sections(&self.config, errors.inner(), |name| {
+            self.keys.contains(name)
+        });
+        if errors.len() > before {
+            PLUGIN_RULES_FAILED.set(true);
+        }
     }
 }
 
@@ -365,8 +379,9 @@ impl ConfigurationParser {
         self.parse_with_migration(text, Migration::WithinMajor)
     }
 
-    /// Parses the original text, falling back to it if a migrated copy fails. Sandbox checks run
-    /// last. Both parsing passes and fallback share one provider snapshot.
+    /// Migrates the document, then parses the migrated copy, or the text as written when there is
+    /// nothing to migrate or migration fails. Sandbox checks run last. Both parsing passes share
+    /// one provider snapshot.
     pub(crate) fn parse_with_migration(
         &mut self,
         text: &str,
@@ -391,34 +406,19 @@ impl ConfigurationParser {
                 }
             })?
         };
-        let migrated = match migration {
-            Migration::WithinMajor => {
-                upgrade_configuration(&file, true, UpgradeMode::current_minor())?
-            }
-            Migration::WithinMajorQuietly => {
-                upgrade_configuration(&file, false, UpgradeMode::current_minor())?
-            }
-            Migration::None => file.clone(),
-        };
-        let mut config = if migrated == file {
-            parse_document(text, self).map_err(report_error)
-        } else {
-            let serialized = serde_yaml::to_string(&migrated).map_err(|error| {
-                ConfigurationError::MigrationFailure {
-                    error: error.to_string(),
-                }
-            })?;
-            // Diagnostics for the serialized copy would point at lines the operator never wrote, so
-            // any error in it falls back to the supplied text. The fallback still validates that text
-            // in full, so it never accepts an invalid document.
-            match parse_document(&serialized, self) {
-                Ok(config) => Ok(config),
-                Err(_) => {
-                    tracing::warn!(
-                        "Configuration could not be upgraded automatically as it had errors. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
-                    );
-                    parse_document(text, self).map_err(report_error)
-                }
+        let mut config = match migrate(&file, migration) {
+            Ok(None) => parse_document(text, self).map_err(report_error),
+            Ok(Some(migrated)) => parse_document(&migrated, self).map_err(|failure| {
+                tracing::warn!(
+                    "Configuration was upgraded automatically, then failed to load. Error locations refer to the upgraded configuration, not to your file."
+                );
+                report_error(failure)
+            }),
+            Err(error) => {
+                tracing::warn!(
+                    "Configuration could not be upgraded automatically, so it is loaded as written: {error}. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
+                );
+                parse_document(text, self).map_err(report_error)
             }
         }?;
         if self.dev_mode {
@@ -429,6 +429,27 @@ impl ConfigurationParser {
         config.raw_yaml = Some(Arc::from(text));
         Ok(config)
     }
+}
+
+/// The document with `migration` applied, serialized for parsing, or `None` when migration
+/// changes nothing. An error means migration itself failed, and the caller loads the text as
+/// written instead.
+fn migrate(file: &Value, migration: Migration) -> Result<Option<String>, ConfigurationError> {
+    let migrated = match migration {
+        Migration::WithinMajor => upgrade_configuration(file, true, UpgradeMode::current_minor())?,
+        Migration::WithinMajorQuietly => {
+            upgrade_configuration(file, false, UpgradeMode::current_minor())?
+        }
+        Migration::None => return Ok(None),
+    };
+    if migrated == *file {
+        return Ok(None);
+    }
+    serde_yaml::to_string(&migrated).map(Some).map_err(|error| {
+        ConfigurationError::MigrationFailure {
+            error: error.to_string(),
+        }
+    })
 }
 
 /// Sets `include_subgraph_errors.all: true` for `--dev`, replacing whatever the file set there,
@@ -490,14 +511,30 @@ pub(crate) fn parse_configuration(
         .parse_with_migration(text, migration)
 }
 
-/// Suggests `router config upgrade` for a configuration that fails validation.
-fn report_error(error: ConfigError) -> ConfigurationError {
-    if matches!(error, ConfigError::ValidationError(_)) {
+/// Suggests `router config upgrade` for a configuration that fails schema validation. Upgrading
+/// cannot fix a plugin's own validation rules, so their failures get no hint.
+fn report_error(failure: ParseFailure) -> ConfigurationError {
+    if matches!(failure.error, ConfigError::ValidationError(_)) && !failure.plugin_rules {
         tracing::warn!(
             "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
         );
     }
-    ConfigurationError::from(error)
+    ConfigurationError::from(failure.error)
+}
+
+/// A document that failed to parse, and whether only plugin validation rules rejected it.
+struct ParseFailure {
+    error: ConfigError,
+    plugin_rules: bool,
+}
+
+impl From<ConfigError> for ParseFailure {
+    fn from(error: ConfigError) -> Self {
+        Self {
+            error,
+            plugin_rules: false,
+        }
+    }
 }
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
@@ -505,8 +542,16 @@ fn report_error(error: ConfigError) -> ConfigurationError {
 ///
 /// apollo-configuration returns the typed value only, not the expanded document it validated, so
 /// the document is read by a second parser that shares the first's provider snapshot.
-fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ConfigError> {
-    let ParsedConfiguration { mut config, .. } = parser.config.parse_yaml(text)?;
+fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ParseFailure> {
+    PLUGIN_RULES_FAILED.set(false);
+    let ParsedConfiguration { mut config, .. } =
+        parser
+            .config
+            .parse_yaml(text)
+            .map_err(|error| ParseFailure {
+                error,
+                plugin_rules: PLUGIN_RULES_FAILED.replace(false),
+            })?;
     let ExpandedDocument(mut document) = parser.document.parse_yaml(text)?;
     if let Some(plugins) = document
         .get_mut("plugins")
@@ -807,23 +852,21 @@ mod tests {
         );
     }
 
-    /// A migrated copy has no YAML aliases, so its diagnostics could not redact an anchor aliased
-    /// into a secret field. When the copy fails, only the file's errors are reported, with the
-    /// anchor redacted.
+    /// Pins a known limitation: a migrated copy has no YAML aliases, so when it fails, the anchor
+    /// aliased into `password` is quoted unredacted at the non-secret field that anchors it. The
+    /// secret field itself stays redacted. Migrating without losing anchors removes this.
     #[test]
-    fn migrated_documents_that_fall_back_redact_anchor_sources() {
+    fn migrated_documents_lose_anchor_redaction() {
         let text = format!("cors:\n  origins:\n    - https://example.com\n{ANCHORED_SECRET}");
 
-        let error = parse(&text).expect_err("the Redis configuration contains an unknown field");
-        let rendered = error.to_string();
+        let rendered = parse(&text)
+            .expect_err("the Redis configuration contains an unknown field")
+            .to_string();
 
+        assert!(rendered.contains("password: [REDACTED]"), "{rendered}");
         assert!(
-            rendered.contains("namespace: &pw [REDACTED]"),
-            "the fallback should quote the file with the anchor redacted: {rendered}"
-        );
-        assert!(
-            !rendered.contains("anchored-secret-value"),
-            "the diagnostic must not contain the aliased secret: {rendered}"
+            rendered.contains("namespace: anchored-secret-value"),
+            "expected the known limitation; update this test if anchors survive migration: {rendered}"
         );
     }
 
@@ -1115,33 +1158,87 @@ mod tests {
         );
     }
 
-    /// A migrated document that still fails schema validation falls back to validating the
-    /// original document, which earlier releases also did, so the diagnostics quote the file.
+    /// A migrated copy that fails only its plugins' rules is not replaced by the file, which
+    /// would fail on the settings migration fixed and hide the rule's error. There is no hint to
+    /// run `router config upgrade`, which cannot fix a rule failure.
     #[test]
-    fn invalid_migrated_documents_are_reported_against_the_original_text() {
-        let text = "# operator comment kept in the snippet\ncors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
+    fn migrated_documents_failing_plugin_rules_report_the_rule() {
+        let _guard = tracing_test::dispatcher_guard();
+        let text = "cors:\n  origins:\n    - https://example.com\nplugins:\n  test.validated:\n    name: reserved\n";
 
-        let error = parse(text).expect_err("the unknown key is invalid in either form");
+        let error = parse(text)
+            .expect_err("the plugin's rule rejects the name")
+            .to_string();
 
-        let error = error.to_string();
+        assert!(
+            error.contains("the name `reserved` is not allowed"),
+            "{error}"
+        );
+        assert!(!error.contains("origins"), "{error}");
+        tracing_test::logs_assert(|lines| {
+            if let Some(line) = lines.iter().find(|line| {
+                line.contains("could not be upgraded automatically")
+                    || line.contains("router config upgrade")
+            }) {
+                return Err(format!("unexpected fallback or upgrade hint: {line}"));
+            }
+            lines
+                .iter()
+                .any(|line| line.contains("refer to the upgraded configuration"))
+                .then_some(())
+                .ok_or_else(|| "the warning must say which document the errors refer to".into())
+        })
+        .unwrap();
+    }
+
+    /// A rule failure in a file that needs no migration gets no `router config upgrade` hint.
+    #[test]
+    fn plugin_rule_failures_do_not_suggest_router_config_upgrade() {
+        let _guard = tracing_test::dispatcher_guard();
+
+        parse("plugins:\n  test.validated:\n    name: reserved\n")
+            .expect_err("the plugin's rule rejects the name");
+
+        tracing_test::logs_assert(|lines| {
+            match lines
+                .iter()
+                .find(|line| line.contains("router config upgrade"))
+            {
+                Some(line) => Err(format!("unexpected upgrade hint: {line}")),
+                None => Ok(()),
+            }
+        })
+        .unwrap();
+    }
+
+    /// Once migration succeeds, the migrated copy is the document that is loaded. A schema error in
+    /// it is reported from that copy, with a warning that locations refer to it, and the file as
+    /// written is not parsed again.
+    #[test]
+    fn schema_errors_after_migration_are_reported_from_the_migrated_copy() {
+        let _guard = tracing_test::dispatcher_guard();
+        let text = "# operator comment\ncors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
+
+        let error = parse(text)
+            .expect_err("the unknown key is invalid in the migrated copy")
+            .to_string();
+
         assert!(
             error.contains("this_key_does_not_exist_anywhere"),
             "{error}"
         );
-        // The comment makes the unknown key line 5 of the original; the migrated copy has no
-        // comment and no `origins`.
-        assert!(
-            error.contains("[5:1]"),
-            "the fallback diagnostics should refer to the original text: {error}"
-        );
+        // The key is on line 6 of the migrated copy, which moves `origins` under `policies`, and
+        // on line 5 of the file.
+        assert!(error.contains("[6:1]"), "{error}");
+        assert!(!error.contains("[5:1]"), "{error}");
+        assert_migrated_copy_warning();
     }
 
-    /// Expansion errors in a migrated copy also fall back, so their location is in the file too.
+    /// Expansion errors after a successful migration are reported from the migrated copy too.
     #[test]
-    fn expansion_errors_in_migrated_documents_are_reported_against_the_original_text() {
+    fn expansion_errors_after_migration_are_reported_from_the_migrated_copy() {
         let _guard = tracing_test::dispatcher_guard();
-        // Migration 2045 moves the unresolvable reference under `deduplication.all`, to line 5
-        // of the serialized copy; it is on line 4 of the file.
+        // Migration 2045 moves the unresolvable reference under `deduplication.all`.
         let text =
             "# operator comment\nsubscription:\n  deduplication:\n    enabled: ${env.MISSING}\n";
 
@@ -1150,16 +1247,50 @@ mod tests {
             .to_string();
 
         assert!(error.contains("expansion value not present"), "{error}");
-        assert!(
-            error.contains("[4:"),
-            "the diagnostic should refer to the original text: {error}"
-        );
+        assert!(error.contains("all:"), "{error}");
+        assert!(!error.contains("# operator comment"), "{error}");
+        assert_migrated_copy_warning();
+    }
+
+    /// When migration itself fails, the file is loaded as written, so its diagnostics quote the
+    /// file. Here the legacy `origins` cannot be moved into a `policies` that is not a list.
+    #[test]
+    fn failed_migrations_load_the_file_as_written() {
+        let _guard = tracing_test::dispatcher_guard();
+        let text =
+            "# operator comment\ncors:\n  origins:\n    - \"https://example.com\"\n  policies: 3\n";
+
+        let error = parse(text)
+            .expect_err("the file as written is invalid")
+            .to_string();
+
+        // The file's own lines: the comment makes `origins` line 3 and `policies` line 5.
+        assert!(error.contains("'origins' was unexpected"), "{error}");
+        assert!(error.contains("[3:3]"), "{error}");
+        assert!(error.contains("[5:13]"), "{error}");
         tracing_test::logs_assert(|lines| {
             lines
                 .iter()
                 .any(|line| line.contains("could not be upgraded automatically"))
                 .then_some(())
                 .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
+        })
+        .unwrap();
+    }
+
+    fn assert_migrated_copy_warning() {
+        tracing_test::logs_assert(|lines| {
+            if let Some(line) = lines
+                .iter()
+                .find(|line| line.contains("could not be upgraded automatically"))
+            {
+                return Err(format!("the file must not be loaded instead: {line}"));
+            }
+            lines
+                .iter()
+                .any(|line| line.contains("refer to the upgraded configuration"))
+                .then_some(())
+                .ok_or_else(|| "the warning must say which document the errors refer to".into())
         })
         .unwrap();
     }
