@@ -184,6 +184,13 @@ pub(crate) fn missing_as_null(context: &ShapeContext, shape: Shape) -> Shape {
     if context.spec() < ConnectSpec::V0_5 {
         return shape;
     }
+    missing_element_as_null(&shape)
+}
+
+/// Like [`missing_as_null`], in every version, for shape logic that needs to
+/// know what an array element will be at runtime without changing any result
+/// shape.
+pub(crate) fn missing_element_as_null(shape: &Shape) -> Shape {
     let locations = shape.locations().cloned();
     match shape.case() {
         ShapeCase::None => Shape::null(locations),

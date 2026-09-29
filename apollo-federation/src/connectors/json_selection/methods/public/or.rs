@@ -120,20 +120,19 @@ fn or_shape(
         );
     }
 
-    // At runtime, a true input gives true without evaluating any argument, so
-    // a missing argument cannot make the result missing.
-    let short_circuits = matches!(input_shape.case(), ShapeCase::Bool(Some(true)));
+    // At runtime, a true input gives true without evaluating any argument,
+    // so no argument can make the result missing or report an error.
+    if matches!(input_shape.case(), ShapeCase::Bool(Some(true))) {
+        return Shape::bool(method_name.shape_location(context.source_id()));
+    }
 
     let mut maybe_missing = false;
     if let Some(MethodArgs { args, .. }) = method_args {
         for (i, arg) in args.iter().enumerate() {
             let arg_shape =
                 arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-            maybe_missing |= !short_circuits && may_be_missing(&arg_shape);
+            maybe_missing |= may_be_missing(&arg_shape);
             let Some(arg_shape) = present_arg(context, &arg_shape) else {
-                if short_circuits {
-                    continue;
-                }
                 // The method produces no value when an argument has none.
                 return Shape::none();
             };

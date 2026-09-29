@@ -5,6 +5,7 @@ use shape::ShapeCase;
 
 use crate::connectors::ApplyToError;
 use crate::connectors::json_selection::ShapeContext;
+use crate::connectors::json_selection::helpers::missing_element_as_null;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -28,6 +29,9 @@ pub(crate) fn is_comparable_shape_combination(shape1: &Shape, shape2: &Shape) ->
 /// well as `Unknown`, even though they could turn out to be fine. It also
 /// requires every member of a union to satisfy the contract, while a method
 /// call can still succeed at runtime if any one of them does.
+///
+/// Array elements that may have no value are checked as `null`, since that is
+/// what they are at runtime (see `missing_element_as_null`).
 ///
 /// Shape functions use this to avoid denying a call that some combination of
 /// argument values could make succeed at runtime.
@@ -81,11 +85,21 @@ pub(crate) fn could_satisfy(contract: &Shape, shape: &Shape) -> bool {
                     None if contract_tail.is_none() => return true,
                     None => contract_tail,
                 };
-                let received = prefix.get(i).unwrap_or(tail);
-                could_satisfy(expected, received)
+                let received = match prefix.get(i) {
+                    // At runtime, an array element with no value is `null`.
+                    Some(item) => missing_element_as_null(item),
+                    // A `None` tail means there are no more elements, so there
+                    // is no element here to satisfy the contract.
+                    None if tail.is_none() => tail.clone(),
+                    // Otherwise any element here has the tail's shape.
+                    None => missing_element_as_null(tail),
+                };
+                could_satisfy(expected, &received)
             });
             items_could
-                && (contract_tail.is_none() || tail.is_none() || could_satisfy(contract_tail, tail))
+                && (contract_tail.is_none()
+                    || tail.is_none()
+                    || could_satisfy(contract_tail, &missing_element_as_null(tail)))
         }
         (
             ShapeCase::Object {
@@ -114,6 +128,10 @@ pub(crate) fn could_satisfy(contract: &Shape, shape: &Shape) -> bool {
 /// when one of their arguments produces no value. Shape logic mirrors that by
 /// checking only the present part of an argument shape, and adding `None` to
 /// the result shape (see [`or_missing`]) when the argument may be missing.
+///
+/// Related helpers: [`present_arg`] is this for an argument, keeping result
+/// shapes unchanged before `connect/v0.5`, and [`compared_element`] is this for
+/// an array element compared by `->in` or `->contains`, also skipping `null`.
 pub(crate) fn present_part(shape: &Shape) -> Option<Shape> {
     match shape.case() {
         ShapeCase::None => None,
@@ -123,6 +141,19 @@ pub(crate) fn present_part(shape: &Shape) -> Option<Shape> {
         )),
         _ => Some(shape.clone()),
     }
+}
+
+/// Returns the part of an array element shape that `->in` and `->contains`
+/// should check against the value they look for, or `None` to skip it.
+///
+/// At runtime these methods compare with `==` and never report an error for
+/// an element of another type, so the same-type check only catches likely
+/// mistakes. An element with no value is skipped, and a `null` element simply
+/// doesn't match. From `connect/v0.5`, an array literal element with no value
+/// has the shape `null` (see `missing_as_null`), so skipping `null` also keeps
+/// those elements accepted there.
+pub(crate) fn compared_element(shape: &Shape) -> Option<Shape> {
+    present_part(shape).filter(|shape| !shape.is_null())
 }
 
 /// Like [`present_part`], for the argument of a method that produces no value
@@ -139,25 +170,78 @@ pub(crate) fn present_arg(context: &ShapeContext, shape: &Shape) -> Option<Shape
     })
 }
 
-/// Carries any error in `arg_shape` over to `result`, for methods whose output
-/// does not include the argument's own shape (like a `->filter` condition).
+/// Carries the errors anywhere in `arg_shapes` over to `result`, for the
+/// arguments of a `->` method call (see `ShapeContext::compute_method_shape`).
 ///
 /// [`could_satisfy`] looks through an error to its `partial` shape, so an
-/// argument like `$(1)->gt("x")` (an error with a `Bool` partial) passes the
-/// argument check. Without this, its error would be dropped along with the
-/// argument shape, and validation would never report it. Chained errors are
-/// kept, with `result` as the innermost partial.
-pub(crate) fn with_arg_error(arg_shape: &Shape, result: Shape) -> Shape {
-    match arg_shape.case() {
-        ShapeCase::Error(shape::Error { message, partial }) => Shape::error_with_partial(
-            message.clone(),
-            match partial {
-                Some(partial) => with_arg_error(partial, result),
-                None => result,
-            },
-            arg_shape.locations().cloned(),
-        ),
-        _ => result,
+/// argument like `$(1)->gt("x")` (an error with a `Bool` partial) passes a
+/// method's argument check, and a method that builds its result without the
+/// argument's shape would otherwise drop the error. Errors are collected from
+/// error chains, union and intersection members, array elements and object
+/// fields, like `$(true)->match([true, $(1)->gt("x")])`, which has the shape
+/// `One<Error<Bool>, None>`, or `[$(1)->gt("x")]`.
+///
+/// Each error becomes a layer around `result`, first error outermost, and
+/// errors `result` already contains (from methods like `->echo`, whose result
+/// includes the argument's shape) are skipped.
+pub(crate) fn with_arg_errors<'a>(
+    arg_shapes: impl IntoIterator<Item = &'a Shape>,
+    result: Shape,
+) -> Shape {
+    let mut errors = Vec::new();
+    for arg_shape in arg_shapes {
+        collect_errors(arg_shape, &mut errors);
+    }
+    if errors.is_empty() {
+        return result;
+    }
+
+    let mut existing = Vec::new();
+    collect_errors(&result, &mut existing);
+    errors
+        .into_iter()
+        .rev()
+        .filter(|error| !existing.contains(error))
+        .fold(result, |result, error| match error.case() {
+            ShapeCase::Error(shape::Error { message, .. }) => {
+                Shape::error_with_partial(message.clone(), result, error.locations().cloned())
+            }
+            _ => result,
+        })
+}
+
+/// Adds each distinct error anywhere in `shape` to `errors`, as an error shape
+/// with no partial. Errors are compared by message, since shapes compare
+/// equal regardless of their locations. `Name` references are not followed,
+/// so an error only reachable through one is not collected.
+fn collect_errors(shape: &Shape, errors: &mut Vec<Shape>) {
+    match shape.case() {
+        ShapeCase::Error(shape::Error { message, partial }) => {
+            let error = Shape::error(message.clone(), shape.locations().cloned());
+            if !errors.contains(&error) {
+                errors.push(error);
+            }
+            if let Some(partial) = partial {
+                collect_errors(partial, errors);
+            }
+        }
+        ShapeCase::One(members) => members
+            .iter()
+            .for_each(|member| collect_errors(member, errors)),
+        ShapeCase::All(members) => members
+            .iter()
+            .for_each(|member| collect_errors(member, errors)),
+        ShapeCase::Array { prefix, tail } => {
+            prefix.iter().for_each(|item| collect_errors(item, errors));
+            collect_errors(tail, errors);
+        }
+        ShapeCase::Object { fields, rest } => {
+            fields
+                .values()
+                .for_each(|field| collect_errors(field, errors));
+            collect_errors(rest, errors);
+        }
+        _ => {}
     }
 }
 
@@ -422,6 +506,15 @@ mod tests {
             []
         )
     )]
+    // An array element with no value is `null` at runtime.
+    #[case::tuple_with_missing_element(
+        scalar_list(),
+        Shape::tuple([Shape::none(), Shape::string([])], [])
+    )]
+    #[case::list_of_maybe_missing(
+        scalar_list(),
+        Shape::list(Shape::one([Shape::string([]), Shape::none()], []), [])
+    )]
     fn test_could_satisfy_positive_cases(#[case] contract: Shape, #[case] shape: Shape) {
         assert!(could_satisfy(&contract, &shape));
     }
@@ -491,5 +584,134 @@ mod tests {
     fn test_is_same_type_comparison_negative_cases(#[case] a: Shape, #[case] b: Shape) {
         assert!(!is_same_type_comparison(&a, &b));
         assert!(!is_same_type_comparison(&b, &a));
+    }
+
+    #[rstest::rstest]
+    #[case::missing(Shape::none())]
+    #[case::null(Shape::null([]))]
+    #[case::missing_or_null(Shape::one([Shape::none(), Shape::null([])], []))]
+    fn test_compared_element_skips(#[case] element: Shape) {
+        assert_eq!(compared_element(&element), None);
+    }
+
+    #[rstest::rstest]
+    #[case::string(Shape::string([]), Shape::string([]))]
+    #[case::maybe_missing(
+        Shape::one([Shape::string([]), Shape::none()], []),
+        Shape::string([])
+    )]
+    #[case::maybe_null(
+        Shape::one([Shape::string([]), Shape::null([])], []),
+        Shape::one([Shape::string([]), Shape::null([])], [])
+    )]
+    fn test_compared_element_keeps(#[case] element: Shape, #[case] expected: Shape) {
+        assert_eq!(compared_element(&element), Some(expected));
+    }
+
+    fn arg_error(message: &str) -> Shape {
+        Shape::error_with_partial(message, Shape::bool([]), [])
+    }
+
+    #[rstest::rstest]
+    #[case::no_error(Shape::bool([]), vec![])]
+    #[case::top_level(arg_error("a"), vec!["a"])]
+    #[case::union_member(Shape::one([arg_error("a"), Shape::none()], []), vec!["a"])]
+    #[case::intersection_member(
+        Shape::all([Shape::bool([]), arg_error("a")], []),
+        vec!["a"]
+    )]
+    #[case::several_members(
+        Shape::one([arg_error("a"), Shape::bool([]), arg_error("b")], []),
+        vec!["a", "b"]
+    )]
+    #[case::nested(
+        Shape::error_with_partial("a", Shape::one([arg_error("b"), Shape::none()], []), []),
+        vec!["a", "b"]
+    )]
+    #[case::array_element(Shape::tuple([Shape::bool([]), arg_error("a")], []), vec!["a"])]
+    #[case::array_tail(Shape::list(arg_error("a"), []), vec!["a"])]
+    #[case::object_field(
+        Shape::record([("f".to_string(), arg_error("a"))].into_iter().collect(), []),
+        vec!["a"]
+    )]
+    #[case::repeated(Shape::tuple([arg_error("a"), arg_error("a")], []), vec!["a"])]
+    fn test_with_arg_errors(#[case] arg_shape: Shape, #[case] expected: Vec<&str>) {
+        let (messages, result) = unwrap_errors(with_arg_errors([&arg_shape], Shape::string([])));
+        assert_eq!(messages, expected);
+        assert_eq!(
+            result,
+            Shape::string([]),
+            "the result is the innermost partial"
+        );
+    }
+
+    #[test]
+    fn test_with_arg_errors_several_args() {
+        let args = [arg_error("a"), Shape::bool([]), arg_error("b")];
+        let (messages, _) = unwrap_errors(with_arg_errors(&args, Shape::string([])));
+        assert_eq!(messages, vec!["a", "b"]);
+    }
+
+    // Errors the result already contains, like the argument shape `->echo`
+    // returns, are not added again.
+    #[rstest::rstest]
+    #[case::same_shape(arg_error("a"), arg_error("a"))]
+    #[case::inside_result(
+        arg_error("a"),
+        Shape::one([Shape::string([]), arg_error("a")], [])
+    )]
+    fn test_with_arg_errors_skips_existing(#[case] arg_shape: Shape, #[case] result: Shape) {
+        assert_eq!(with_arg_errors([&arg_shape], result.clone()), result);
+    }
+
+    // Argument errors are added around a method's result only when the result
+    // doesn't already contain them, and only once. `chain` is the number of
+    // errors around the innermost result, which for `->echo` is the echoed
+    // argument's own error.
+    #[rstest::rstest]
+    #[case::echo(r#"$->echo($(1)->gt("x"))"#, 1)]
+    #[case::echo_array(r#"$->echo([$(1)->gt("x")])"#, 0)]
+    #[case::match_value(r#"$(1)->match([1, $(1)->gt("x")], [@, true])"#, 0)]
+    #[case::map_body(r#"$([1])->map($(1)->gt("x"))"#, 0)]
+    #[case::nested_echo(r#"$->echo($->echo($(1)->gt("x")))"#, 1)]
+    #[case::and(r#"$(true)->and($(1)->gt("x"))"#, 1)]
+    #[case::and_nested(r#"$(true)->and($(true)->and($(1)->gt("x")))"#, 1)]
+    #[case::and_repeated_arg(r#"$(true)->and($(1)->gt("x"), $(1)->gt("x"))"#, 1)]
+    fn test_argument_errors_are_not_duplicated(#[case] selection: &str, #[case] chain: usize) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            let shape = crate::selection!(selection, spec).shape();
+            let (messages, inner) = unwrap_errors(shape.clone());
+            let mut inner_errors = vec![];
+            collect_errors(&inner, &mut inner_errors);
+            let inner_messages: Vec<_> = inner_errors
+                .iter()
+                .filter_map(|error| match error.case() {
+                    ShapeCase::Error(shape::Error { message, .. }) => Some(message.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            assert_eq!(messages.len(), chain, "{spec:?}: {}", shape.pretty_print());
+            assert!(
+                messages
+                    .iter()
+                    .all(|message| !inner_messages.contains(message)),
+                "{spec:?}: an error around the result is also inside it: {}",
+                shape.pretty_print()
+            );
+        }
+    }
+
+    /// Unwraps the chain of errors around a shape, returning their messages,
+    /// outermost first, and the innermost partial.
+    fn unwrap_errors(mut shape: Shape) -> (Vec<String>, Shape) {
+        let mut messages = vec![];
+        while let ShapeCase::Error(shape::Error { message, partial }) = shape.case() {
+            messages.push(message.clone());
+            shape = partial
+                .clone()
+                .expect("errors keep the result as a partial");
+        }
+        (messages, shape)
     }
 }
