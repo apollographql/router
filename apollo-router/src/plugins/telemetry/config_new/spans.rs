@@ -1,6 +1,3 @@
-use schemars::JsonSchema;
-use serde::Deserialize;
-
 use super::connector::spans::ConnectorSpans;
 use super::http_client::spans::HttpClientSpans;
 use super::router::spans::RouterSpans;
@@ -10,8 +7,7 @@ use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Spans {
     /// The attributes to include by default in spans based on their level as specified in the otel semantic conventions and Apollo documentation.
     pub(crate) default_attribute_requirement_level: DefaultAttributeRequirementLevel,

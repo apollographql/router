@@ -65,8 +65,6 @@ pub(crate) struct Conf {
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
-    // Instrumentation's nested types don't use the configuration attribute, so they have no Validate impl.
-    #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }
 
@@ -83,8 +81,7 @@ pub(crate) struct Exporters {
 }
 
 /// Instrumentation configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Instrumentation {
     /// Event configuration
     pub(crate) events: config_new::events::Events,

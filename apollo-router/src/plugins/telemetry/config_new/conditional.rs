@@ -93,6 +93,20 @@ where
     }
 }
 
+// The configuration attribute doesn't support generic types, and Conditional's hand-written
+// Deserialize separates the condition from the selector's keys. This forwards validation to both.
+impl<Att> apollo_configuration::Validate for Conditional<Att>
+where
+    Att: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        self.selector.validate(errors.inner());
+        if let Some(condition) = &self.condition {
+            condition.lock().validate(errors.nest("condition"));
+        }
+    }
+}
+
 impl<Att> DefaultForLevel for Conditional<Att>
 where
     Att: DefaultForLevel,

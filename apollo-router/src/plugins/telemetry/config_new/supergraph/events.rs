@@ -1,11 +1,8 @@
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::selectors::SupergraphSelector;
@@ -137,8 +134,7 @@ pub(crate) struct SupergraphEventResponse {
     pub(crate) condition: Arc<Condition<SupergraphSelector>>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SupergraphEventsConfig {
     /// Log the supergraph request
     pub(crate) request: StandardEventConfig<SupergraphSelector>,

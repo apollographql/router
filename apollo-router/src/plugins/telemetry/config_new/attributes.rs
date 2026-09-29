@@ -1,8 +1,4 @@
-use std::fmt::Debug;
-
 use opentelemetry::Key;
-use schemars::JsonSchema;
-use serde::Deserialize;
 
 pub(crate) const HTTP_REQUEST_RESEND_COUNT: Key = Key::from_static_str("http.request.resend_count");
 
@@ -24,23 +20,27 @@ pub(crate) const HTTP_RESPONSE_STATUS: Key = Key::from_static_str("http.response
 pub(crate) const HTTP_RESPONSE_VERSION: Key = Key::from_static_str("http.response.version");
 pub(crate) const HTTP_RESPONSE_BODY: Key = Key::from_static_str("http.response.body");
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default, Copy)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy)]
 pub(crate) enum DefaultAttributeRequirementLevel {
     /// No default attributes set on spans, you have to set it one by one in the configuration to enable some attributes
     None,
     /// Attributes that are marked as required in otel semantic conventions and apollo documentation will be included (default)
-    #[default]
+    #[config(default)]
     Required,
     /// Attributes that are marked as required or recommended in otel semantic conventions and apollo documentation will be included
     Recommended,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum StandardAttribute {
     Bool(bool),
-    Aliased { alias: String },
+    Aliased {
+        #[config(required)]
+        alias: String,
+    },
 }
 
 impl StandardAttribute {

@@ -1,11 +1,8 @@
-use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::selectors::SubgraphSelector;
@@ -89,8 +86,7 @@ pub(crate) struct SubgraphEventRequest {
     pub(crate) condition: Arc<Mutex<Condition<SubgraphSelector>>>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SubgraphEventsConfig {
     /// Log the subgraph request
     pub(crate) request: StandardEventConfig<SubgraphSelector>,

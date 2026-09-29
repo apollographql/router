@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::net::SocketAddr;
 
 use http::Uri;
@@ -14,8 +13,6 @@ use opentelemetry_semantic_conventions::trace::URL_PATH;
 use opentelemetry_semantic_conventions::trace::URL_QUERY;
 use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -34,9 +31,8 @@ use crate::services::router::Request;
 
 /// Attributes for Http servers
 /// See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
+#[apollo_configuration::configuration]
 #[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpServerAttributes {
     /// Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name.
     /// Examples:

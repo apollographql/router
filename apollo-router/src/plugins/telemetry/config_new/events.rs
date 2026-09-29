@@ -34,8 +34,7 @@ use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSele
 use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 
 /// Events are
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct Events {
     /// Router service events
     router: Extendable<RouterEventsConfig, Event<RouterAttributes, RouterSelector>>,
@@ -171,13 +170,26 @@ where
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[schemars(rename = "StandardEventConfig{T}")]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub(crate) enum StandardEventConfig<T> {
     Level(EventLevelConfig),
     Conditional {
         level: EventLevelConfig,
         condition: Condition<T>,
     },
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// condition. The enum is untagged, so the condition sits directly under the event's key.
+impl<T> apollo_configuration::Validate for StandardEventConfig<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        if let Self::Conditional { condition, .. } = self {
+            condition.validate(errors.nest("condition"));
+        }
+    }
 }
 
 impl<T: Selector> StandardEventConfig<T> {
@@ -220,13 +232,13 @@ impl<T: Clone> StandardEvent<T> {
 
 /// Log level configuration for events. Use "off" to not log the event, or a level name to log the
 /// event at that level and above.
-#[derive(Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Copy)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Copy)]
 pub(crate) enum EventLevelConfig {
     Info,
     Warn,
     Error,
-    #[default]
+    #[config(default)]
     Off,
 }
 
@@ -252,6 +264,7 @@ impl EventLevel {
 /// The event has an implicit `type` attribute that matches the name of the event in the yaml
 /// and a message that can be used to provide additional information.
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Event<A, E>
 where
     A: Default + Debug,
@@ -275,6 +288,19 @@ where
     pub(super) condition: Condition<E>,
 }
 
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// event's attributes and condition. Its other fields are scalars.
+impl<A, E> apollo_configuration::Validate for Event<A, E>
+where
+    A: Default + Debug + apollo_configuration::Validate,
+    E: Debug + apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        self.attributes.validate(errors.nest("attributes"));
+        self.condition.validate(errors.nest("condition"));
+    }
+}
+
 impl<A, E, Request, Response, EventResponse> Event<A, E>
 where
     A: Selectors<Request, Response, EventResponse> + Default + Debug,
@@ -289,8 +315,8 @@ where
 }
 
 /// When to trigger the event.
-#[derive(Deserialize, JsonSchema, Clone, Debug, Copy, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 pub(crate) enum EventOn {
     /// Log the event on request
     Request,

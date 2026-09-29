@@ -1,7 +1,3 @@
-use std::fmt::Debug;
-
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::selectors::SubgraphSelector;
@@ -19,8 +15,7 @@ use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttribu
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SubgraphInstrumentsConfig {
     /// Histogram of client request duration
     #[serde(rename = "http.client.request.duration")]

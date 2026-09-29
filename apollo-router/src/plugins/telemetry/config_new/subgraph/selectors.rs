@@ -32,8 +32,8 @@ use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::subgraph;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum SubgraphValue {
     Standard(Standard),
     Custom(Box<SubgraphSelector>),
@@ -48,8 +48,8 @@ impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum SubgraphQuery {
     /// The raw query kind.
     String,
@@ -240,6 +240,11 @@ pub(crate) enum SubgraphSelector {
         context_id: bool,
     },
 }
+
+// SubgraphSelector can't take the configuration attribute: its response error selectors hold a
+// JsonPathInst, which has no Debug impl for the macro's derive, nor a Validate impl. Its other
+// fields are scalars with no nested rules.
+impl apollo_configuration::Validate for SubgraphSelector {}
 
 impl Selector for SubgraphSelector {
     type Request = subgraph::Request;

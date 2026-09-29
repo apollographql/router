@@ -2,8 +2,6 @@ use std::fmt::Debug;
 
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::selectors::RouterSelector;
@@ -116,8 +114,7 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct RouterEventsConfig {
     /// Log the router request
     pub(crate) request: StandardEventConfig<RouterSelector>,
