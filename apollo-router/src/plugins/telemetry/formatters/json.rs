@@ -340,12 +340,26 @@ impl field::Visit for EventFieldCollector {
     ///
     /// Only compiled when the build sets `--cfg tracing_unstable`, which is what makes
     /// `record_value` exist on `field::Visit` in the first place.
+    ///
+    /// A value with no JSON representation falls back to its Debug string, and a sibling
+    /// `<name>_serialization_error` field records why. The error goes in the log line rather
+    /// than a separate event because emitting an event from inside the formatter can recurse.
     #[cfg(tracing_unstable)]
     fn record_value(&mut self, field: &Field, value: valuable::Value<'_>) {
         let name = field_name(field);
-        let json = serde_json::to_value(valuable_serde::Serializable::new(value))
-            .unwrap_or_else(|_| serde_json::Value::from(format!("{value:?}")));
-        self.fields.push((name.to_owned(), json));
+        match serde_json::to_value(valuable_serde::Serializable::new(value)) {
+            Ok(json) => self.fields.push((name.to_owned(), json)),
+            Err(error) => {
+                self.fields.push((
+                    name.to_owned(),
+                    serde_json::Value::from(format!("{value:?}")),
+                ));
+                self.fields.push((
+                    format!("{name}_serialization_error"),
+                    serde_json::Value::from(error.to_string()),
+                ));
+            }
+        }
     }
 }
 

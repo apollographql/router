@@ -659,6 +659,10 @@ connector:
                 serde_json::from_str(&raw).expect("output should be valid JSON");
 
             assert_eq!(parsed["keys"], "{[1, 2]: true}");
+            assert_eq!(
+                parsed["keys_serialization_error"], "key must be a string",
+                "the fallback should record why conversion failed; got: {raw}"
+            );
             assert_eq!(parsed["code"], 43);
             assert_eq!(parsed["message"], "still logged");
         }
