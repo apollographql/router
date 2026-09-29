@@ -60,6 +60,10 @@ that type must also satisfy the `@oneOf` rules: its fields must be nullable,
 and default values of that type must specify exactly one non-null field.
 Composition reports violations against the subgraph that declares them.
 
+The supergraph doesn't record which subgraphs applied `@oneOf`, so
+subgraphs extracted from it mark the type `@oneOf` in every subgraph that
+defines it.
+
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10124>
 
 ## 🐛 Fixes

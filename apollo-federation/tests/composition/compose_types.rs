@@ -964,3 +964,36 @@ fn one_of_input_object_errors_when_no_fields_are_shared() {
         )],
     );
 }
+
+#[test]
+fn one_of_input_object_is_extracted_to_every_subgraph_defining_it() {
+    let result = compose_with_one_of_find_input(
+        r#"
+        type Query {
+          search(input: FindInput): String
+        }
+
+        input FindInput {
+          id: ID
+          name: String
+        }
+        "#,
+    );
+    let supergraph = result.expect("Expected composition to succeed");
+    let subgraphs = apollo_federation::Supergraph::new(&supergraph.schema().schema().to_string())
+        .expect("supergraph should parse")
+        .extract_subgraphs()
+        .expect("subgraphs should extract");
+    for name in ["subgraphA", "subgraphB"] {
+        let subgraph = subgraphs.get(name).expect("subgraph should be extracted");
+        let find_input = subgraph
+            .schema
+            .schema()
+            .get_input_object("FindInput")
+            .expect("FindInput should exist");
+        assert!(
+            find_input.is_one_of(),
+            "FindInput should be @oneOf in {name}"
+        );
+    }
+}
