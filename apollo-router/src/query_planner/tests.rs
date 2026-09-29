@@ -1676,7 +1676,7 @@ async fn typename_propagation2() {
             ).build()),
             ("node_relay_subgraph", MockSubgraph::builder().with_json(
                 serde_json::json! {{
-                    "query": "query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id}}}",
+                    "query": "query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{id}}}",
                     "operationName": "QueryBook__node_relay_subgraph__2",
                     "variables": {
                         "representations": [{
@@ -1694,7 +1694,7 @@ async fn typename_propagation2() {
                 } }},
             ).with_json(
                 serde_json::json! {{
-                    "query": "query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id}}}",
+                    "query": "query QueryBook__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{id}}}",
                     "operationName": "QueryBook__node_relay_subgraph__2",
                     "variables": {
                         "representations": [{
@@ -1795,7 +1795,7 @@ async fn typename_propagation3() {
             ).build()),
             ("node_relay_subgraph", MockSubgraph::builder().with_json(
                 serde_json::json! {{
-                    "query": "query QueryBook2__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{__typename id author{id}}}}",
+                    "query": "query QueryBook2__node_relay_subgraph__2($representations:[_Any!]!){_entities(representations:$representations){...on Book{id author{id}}}}",
                     "operationName": "QueryBook2__node_relay_subgraph__2",
                     "variables": {
                         "representations": [{
