@@ -4,4 +4,4 @@ The `authorization`, `fleet_detector`, `enhanced_client_awareness` and `progress
 
 To migrate, run `router config validate` and correct or remove any unknown key it reports in these sections.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10305
