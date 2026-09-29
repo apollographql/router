@@ -73,7 +73,7 @@ impl ApolloOtlpExporter {
                 SpanExporterBuilder::new()
                     .with_tonic()
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_endpoint(endpoint.to_string())
                     .with_metadata(metadata)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
@@ -90,7 +90,7 @@ impl ApolloOtlpExporter {
                 headers.insert("x-api-key".to_string(), apollo_key.to_string());
                 SpanExporterBuilder::new()
                     .with_http()
-                    .with_timeout(batch_config.max_export_timeout)
+                    .with_timeout(*batch_config.max_export_timeout)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)
                     .with_endpoint(endpoint_str)

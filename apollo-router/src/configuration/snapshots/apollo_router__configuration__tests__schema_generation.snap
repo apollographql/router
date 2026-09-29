@@ -684,6 +684,7 @@ expression: "&schema"
       "type": "object"
     },
     "BatchProcessorConfig": {
+      "additionalProperties": false,
       "description": "Batch processor configuration",
       "properties": {
         "max_concurrent_exports": {
@@ -701,10 +702,7 @@ expression: "&schema"
           "type": "integer"
         },
         "max_export_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 30
-          },
+          "default": "30s",
           "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
           "type": "string"
         },
@@ -716,10 +714,7 @@ expression: "&schema"
           "type": "integer"
         },
         "scheduled_delay": {
-          "default": {
-            "nanos": 0,
-            "secs": 5
-          },
+          "default": "5s",
           "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
           "type": "string"
         }
@@ -4133,6 +4128,7 @@ expression: "&schema"
           "description": "Format of the trace ID in response headers"
         },
         "header_name": {
+          "default": null,
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
           "type": [
             "string",
@@ -7244,6 +7240,7 @@ expression: "&schema"
           "description": "New aggregation settings to set"
         },
         "allowed_attribute_keys": {
+          "default": null,
           "description": "An allow-list of attribute keys that will be preserved for the instrument.\n\nAny attribute recorded for the instrument with a key not in this set will be\ndropped. If the set is empty, all attributes will be dropped, if `None` all\nattributes will be kept.",
           "items": {
             "type": "string"
@@ -7255,6 +7252,7 @@ expression: "&schema"
           "uniqueItems": true
         },
         "cardinality_limit": {
+          "default": null,
           "description": "Maximum number of distinct attribute combinations (cardinality) for this instrument.\n\nOverrides the global `cardinality_limit` from `MetricsCommon` for this specific metric.\nIf neither this nor the global limit is set, the OTel SDK default of 2000 applies.",
           "format": "uint32",
           "minimum": 1,
@@ -7264,6 +7262,7 @@ expression: "&schema"
           ]
         },
         "description": {
+          "default": null,
           "description": "New description to set to the instrument",
           "type": [
             "string",
@@ -7275,6 +7274,7 @@ expression: "&schema"
           "type": "string"
         },
         "rename": {
+          "default": null,
           "description": "Rename the metric to this name\n\nThis allows you to customize metric names for both OTLP and Prometheus exporters.\nNote: Prometheus will apply additional transformations (dots to underscores, unit suffixes).\nApollo metrics are not affected by this rename - they will retain original names.",
           "type": [
             "string",
@@ -7282,6 +7282,7 @@ expression: "&schema"
           ]
         },
         "unit": {
+          "default": null,
           "description": "New unit to set to the instrument",
           "type": [
             "string",
@@ -8321,10 +8322,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "interval": {
-          "default": {
-            "nanos": 0,
-            "secs": 1
-          },
+          "default": "1s",
           "description": "Interval for rate limiting",
           "type": "string"
         }
