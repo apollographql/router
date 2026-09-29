@@ -95,7 +95,7 @@ async fn basic_batch() {
                   "inputRewrites": null,
                   "outputRewrites": null,
                   "contextRewrites": null,
-                  "schemaAwareHash": "04e75a043e515a3c38b02c3e26a2e73ae009191d6e2bd1d0a0f207df011e9280",
+                  "schemaAwareHash": "06f13360df01fd3bda2d08493f01e743bb965914877f69d2dd4f9ee3fa56ca84",
                   "authorization": {
                     "is_authenticated": false,
                     "scopes": [],
@@ -128,14 +128,14 @@ async fn basic_batch() {
                       }
                     ],
                     "variableUsages": [],
-                    "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { name username } } }",
+                    "operation": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on User { username name } } }",
                     "operationName": null,
                     "operationKind": "query",
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "3db3129f45bca54cbf34a3a818a9d19d45110ec9d489530c244994f5e949a411",
+                    "schemaAwareHash": "937e3ffec926702aeeeecb1c2d154361ccfa79d9abf57e682cab9dec3cba75f3",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -146,7 +146,7 @@ async fn basic_batch() {
               ]
             }
           },
-          "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"connectors.json http: GET /users\") {\n      {\n        users {\n          __typename\n          id\n        }\n      }\n    },\n    Flatten(path: \"users.@\") {\n      Fetch(service: \"[BATCH] connectors.json http: POST /users-batch\") {\n        {\n          ... on User {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on User {\n            name\n            username\n          }\n        }\n      },\n    },\n  },\n}"
+          "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"connectors.json http: GET /users\") {\n      {\n        users {\n          __typename\n          id\n        }\n      }\n    },\n    Flatten(path: \"users.@\") {\n      Fetch(service: \"[BATCH] connectors.json http: POST /users-batch\") {\n        {\n          ... on User {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on User {\n            username\n            name\n          }\n        }\n      },\n    },\n  },\n}"
         }
       }
     }
