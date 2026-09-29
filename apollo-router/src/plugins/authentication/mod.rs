@@ -9,15 +9,12 @@ use std::time::Duration;
 
 use error::AuthenticationError;
 use error::Error;
-use http::HeaderName;
-use http::HeaderValue;
 use http::StatusCode;
 use http::header;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::decode_header;
 use once_cell::sync::Lazy;
 use reqwest::Client;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
@@ -34,8 +31,6 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::plugin::serde::deserialize_header_name;
-use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::connector::ConnectorAuth;
 use crate::plugins::authentication::error::ErrorContext;
 use crate::plugins::authentication::jwks::Audiences;
@@ -82,30 +77,34 @@ struct AuthenticationPlugin {
 // TODO: in the next major version, rename these values to snake_case (`continue`, `error`,
 // `redacted_error`). This is the only config option in the router whose values are PascalCase; every
 // other one is snake_case. It needs a config migration, so it can't ship in a patch release.
-#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 enum OnError {
+    // The macro renames variants to snake_case; these keep the PascalCase values.
+    #[serde(rename = "Continue")]
     Continue,
+    #[serde(rename = "Error")]
     Error,
-    #[default]
+    #[config(default)]
+    #[serde(rename = "RedactedError")]
     RedactedError,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(serde_derive_default::Default)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
+    #[config(required)]
     jwks: Vec<JwksConf>,
     /// HTTP header expected to contain JWT
-    #[serde(default = "default_header_name")]
+    #[config(default = default_header_name())]
     header_name: String,
     /// Header value prefix
-    #[serde(default = "default_header_value_prefix")]
+    #[config(default = default_header_value_prefix())]
     header_value_prefix: String,
     /// Whether to ignore any mismatched prefixes
-    #[serde(default)]
     ignore_other_prefixes: bool,
     /// Alternative sources to extract the JWT
-    #[serde(default)]
     sources: Vec<Source>,
     /// Control the behavior when an error occurs during the authentication process.
     ///
@@ -119,74 +118,73 @@ struct JWTConf {
     ///   HTTP 403 error, and the response contains the details of the validation failure.
     /// * When set to `Continue`, requests that fail JWT authentication will continue to be
     ///   processed by the router, but without the JWT claims in the context.
-    #[serde(default)]
     on_error: OnError,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 struct JwksConf {
     /// Retrieve the JWK Set
+    #[config(required)]
     url: String,
     /// Polling interval for each JWKS endpoint in human-readable format; defaults to 60s
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_poll_interval"
-    )]
+    #[config(default = default_poll_interval().into())]
     #[schemars(with = "String", default = "default_poll_interval")]
-    poll_interval: Duration,
+    poll_interval: apollo_configuration::types::Duration,
     /// Expected issuers for tokens verified by that JWKS
     ///
     /// If not specified, the issuer will not be checked.
+    // HashSet has no Validate impl, and apollo-configuration has no set type.
+    #[config(skip_validate)]
     issuers: Option<Issuers>,
     /// Expected audiences for tokens verified by that JWKS
     ///
     /// If not specified, the audience will not be checked.
+    // HashSet has no Validate impl, and apollo-configuration has no set type.
+    #[config(skip_validate)]
     audiences: Option<Audiences>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
     #[schemars(with = "Option<Vec<String>>", default)]
-    #[serde(default)]
+    // jsonwebtoken's Algorithm has no Validate impl.
+    #[config(skip_validate)]
     algorithms: Option<Vec<Algorithm>>,
     /// Allow tokens without an `exp` claim for this JWKS.
     ///
     /// Expired tokens with `exp` are still rejected.
     /// Enable only when required by your issuer and with strict issuer/audience constraints.
     #[schemars(default)]
-    #[serde(default)]
     allow_missing_exp: bool,
     /// List of headers to add to the JWKS request
-    #[serde(default)]
     headers: Vec<Header>,
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
 /// Insert a header
 struct Header {
     /// The name of the header
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_header_name")]
-    name: HeaderName,
+    #[config(required)]
+    name: apollo_configuration::types::HeaderName,
 
     /// The value for the header
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_header_value")]
-    value: HeaderValue,
+    #[config(required)]
+    value: apollo_configuration::types::HeaderValue,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "lowercase", tag = "type")]
+#[apollo_configuration::configuration]
+#[serde(tag = "type")]
 enum Source {
     Header {
         /// HTTP header expected to contain JWT
-        #[serde(default = "default_header_name")]
+        #[config(default = default_header_name())]
         name: String,
         /// Header value prefix
-        #[serde(default = "default_header_value_prefix")]
+        #[config(default = default_header_value_prefix())]
         value_prefix: String,
     },
     Cookie {
         /// Name of the cookie containing the JWT
+        #[config(required)]
         name: String,
     },
 }
@@ -205,24 +203,21 @@ impl Source {
 #[schemars(rename = "AuthenticationConfig")]
 struct Conf {
     /// Router configuration
-    #[config(skip_validate)]
     router: Option<RouterConf>,
     /// Subgraph configuration
-    #[config(skip_validate)]
     subgraph: Option<subgraph::Config>,
     /// Connector configuration
-    #[config(skip_validate)]
     connector: Option<connector::Config>,
 }
 
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "AuthenticationRouterConfig")]
 struct RouterConf {
     /// The JWT configuration
+    #[config(required)]
     jwt: JWTConf,
 }
 
@@ -392,7 +387,7 @@ impl AuthenticationPlugin {
                     .algorithms
                     .as_ref()
                     .map(|algs| algs.iter().cloned().collect()),
-                poll_interval: jwks_conf.poll_interval,
+                poll_interval: *jwks_conf.poll_interval,
                 allow_missing_exp: jwks_conf.allow_missing_exp,
                 headers: jwks_conf.headers.clone(),
             });
