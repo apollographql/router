@@ -337,7 +337,7 @@ impl Drop for Activation {
 /// be called from a blocking thread.
 fn shutdown(tracer_provider: SdkTracerProvider) {
     if let Err(error) = tracer_provider.shutdown() {
-        tracing::debug!(%error, "failed to shut down tracer provider");
+        tracing::warn!(%error, "failed to shut down tracer provider");
     }
 }
 

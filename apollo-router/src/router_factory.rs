@@ -275,7 +275,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
     async fn shutdown(&mut self) {
         let tracer_provider = self.tracer_provider.clone();
         if let Err(error) = tokio::task::spawn_blocking(move || tracer_provider.shutdown()).await {
-            tracing::error!(%error, "failed to shut down tracer provider");
+            tracing::warn!(%error, "failed to shut down tracer provider");
         }
     }
 }
