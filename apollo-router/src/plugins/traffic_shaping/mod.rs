@@ -71,7 +71,7 @@ fn resolve_pool_idle_timeout(pool_idle_timeout: PoolIdleTimeout) -> Option<Durat
 }
 
 /// Traffic shaping options
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Shaping {
     /// Enable query deduplication
@@ -160,7 +160,7 @@ impl Merge for Shaping {
 }
 
 // this is a wrapper struct to add subgraph specific options over Shaping
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SubgraphShaping {
     #[serde(flatten)]
@@ -187,7 +187,7 @@ struct ConnectorsShapingConfig {
     sources: HashMap<String, ConnectorShaping>,
 }
 
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ConnectorShaping {
     /// Enable compression for connectors (available compressions are deflate, br, gzip)
@@ -594,19 +594,12 @@ impl TrafficShaping {
         &self,
         service_name: &str,
     ) -> crate::configuration::shared::Client {
-        let config = Self::merge_config(
+        Self::merge_config(
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
+        .map(|config| config.shaping.into())
         .unwrap_or_default()
-        .shaping;
-        crate::configuration::shared::Client {
-            experimental_http2: config.experimental_http2,
-            dns_resolution_strategy: config.dns_resolution_strategy,
-            pool_idle_timeout: resolve_pool_idle_timeout(config.pool_idle_timeout),
-            experimental_http2_keep_alive_interval: config.experimental_http2_keep_alive_interval,
-            experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
-        }
     }
 
     pub(crate) fn connector_client_config(
@@ -614,14 +607,32 @@ impl TrafficShaping {
         source_name: &str,
     ) -> crate::configuration::shared::Client {
         let source_config = self.config.connector.sources.get(source_name).cloned();
-        let config = Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
-            .unwrap_or_default();
-        crate::configuration::shared::Client {
-            experimental_http2: config.experimental_http2,
-            dns_resolution_strategy: config.dns_resolution_strategy,
-            pool_idle_timeout: resolve_pool_idle_timeout(config.pool_idle_timeout),
-            experimental_http2_keep_alive_interval: config.experimental_http2_keep_alive_interval,
-            experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
+        Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
+            .map(Into::into)
+            .unwrap_or_default()
+    }
+}
+
+impl From<Shaping> for crate::configuration::shared::Client {
+    fn from(shaping: Shaping) -> Self {
+        Self {
+            experimental_http2: shaping.experimental_http2,
+            dns_resolution_strategy: shaping.dns_resolution_strategy,
+            pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
+            experimental_http2_keep_alive_interval: shaping.experimental_http2_keep_alive_interval,
+            experimental_http2_keep_alive_timeout: shaping.experimental_http2_keep_alive_timeout,
+        }
+    }
+}
+
+impl From<ConnectorShaping> for crate::configuration::shared::Client {
+    fn from(shaping: ConnectorShaping) -> Self {
+        Self {
+            experimental_http2: shaping.experimental_http2,
+            dns_resolution_strategy: shaping.dns_resolution_strategy,
+            pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
+            experimental_http2_keep_alive_interval: shaping.experimental_http2_keep_alive_interval,
+            experimental_http2_keep_alive_timeout: shaping.experimental_http2_keep_alive_timeout,
         }
     }
 }
@@ -1421,6 +1432,8 @@ mod test {
         subgraphs:
           explicit_value:
             pool_idle_timeout: 10s
+          explicit_null:
+            pool_idle_timeout: null
           omitted:
             experimental_http2: enable
         router:
@@ -1439,6 +1452,14 @@ mod test {
                 .pool_idle_timeout,
             Some(Duration::from_secs(10)),
             "subgraph-specific override should win"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction instead of using the default"
         );
 
         assert!(
@@ -1547,10 +1568,14 @@ mod test {
         subgraphs:
           products:
             pool_idle_timeout: 2s
+          explicit_null:
+            pool_idle_timeout: null
         connector:
           sources:
             my_source:
               pool_idle_timeout: 3s
+            explicit_null:
+              pool_idle_timeout: null
         "#,
         )
         .unwrap();
@@ -1574,6 +1599,13 @@ mod test {
         );
         assert_eq!(
             shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null must not fall through to the default"
+        );
+        assert_eq!(
+            shaping_config
                 .connector_client_config("my_source")
                 .pool_idle_timeout,
             Some(Duration::from_secs(3)),
@@ -1584,6 +1616,13 @@ mod test {
                 .pool_idle_timeout,
             default_pool_idle_timeout(),
             "a source with no block and no all block should use the default"
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null must not fall through to the default"
         );
     }
 
