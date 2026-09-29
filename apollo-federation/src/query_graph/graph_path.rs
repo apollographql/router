@@ -1067,17 +1067,17 @@ where
             let tail_schema = self.graph.schema_by_source(&tail_weight.source)?;
             let tail_schema_definition = &tail_schema.schema().schema_definition;
             if let Some(query_type_name) = &tail_schema_definition.query
-                && tail_type_pos.type_name() == &query_type_name.name
+                && tail_type_pos.type_name() == &**query_type_name
             {
                 continue;
             }
             if let Some(mutation_type_name) = &tail_schema_definition.mutation
-                && tail_type_pos.type_name() == &mutation_type_name.name
+                && tail_type_pos.type_name() == &**mutation_type_name
             {
                 continue;
             }
             if let Some(subscription_type_name) = &tail_schema_definition.subscription
-                && tail_type_pos.type_name() == &subscription_type_name.name
+                && tail_type_pos.type_name() == &**subscription_type_name
             {
                 continue;
             }
@@ -1203,7 +1203,7 @@ where
                                     .get(supergraph_schema.schema())?
                                     .implements_interfaces
                                     .iter()
-                                    .any(|item| &item.name == pos.type_name()) =>
+                                    .any(|item| &**item == pos.type_name()) =>
                             {
                                 return Ok(true);
                             }
@@ -1213,7 +1213,7 @@ where
                                 .get(supergraph_schema.schema())?
                                 .implements_interfaces
                                 .iter()
-                                .any(|item| &item.name == pos.type_name()) =>
+                                .any(|item| &**item == pos.type_name()) =>
                             {
                                 return Ok(true);
                             }
@@ -1227,7 +1227,7 @@ where
                                 .get(supergraph_schema.schema())?
                                 .members
                                 .iter()
-                                .any(|item| &item.name == parent_type_in_supergraph.type_name())
+                                .any(|item| &**item == parent_type_in_supergraph.type_name())
                         {
                             return Ok(true);
                         }
