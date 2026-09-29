@@ -182,7 +182,11 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
     ) -> Result<Self::RouterFactory, BoxError>;
 
     /// Releases state that outlives individual routers. Called once when the state machine stops,
-    /// after its last router has been dropped.
+    /// whether cleanly or because of an error.
+    ///
+    /// This does not wait for every retired pipeline. Connections from before a failed reload
+    /// attempt are not tracked, and a fatal reload error stops the router without draining it, so
+    /// spans that those pipelines end after this call are dropped.
     async fn shutdown(&mut self) {}
 }
 
