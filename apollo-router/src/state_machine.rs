@@ -927,9 +927,6 @@ where
                 break;
             }
         }
-        // Release what the factory keeps across routers, such as the installed tracer provider.
-        // This runs whether the router stopped cleanly or because of an error.
-        self.router_configurator.shutdown().await;
         tracing::info!("stopped");
 
         match state {
@@ -2114,85 +2111,6 @@ mod tests {
             Err(ApolloRouterError::ServiceCreationError(_))
         );
         assert_eq!(shutdown_receivers.0.lock().len(), 0);
-    }
-
-    /// Delegates router creation to a mock and counts calls to `shutdown`.
-    struct CountShutdowns {
-        delegate: MockMyRouterConfigurator,
-        shutdowns: Arc<std::sync::atomic::AtomicUsize>,
-    }
-
-    #[async_trait::async_trait]
-    impl RouterSuperServiceFactory for CountShutdowns {
-        type RouterFactory = MockMyRouterFactory;
-
-        async fn create<'a>(
-            &'a mut self,
-            is_telemetry_disabled: bool,
-            configuration: Arc<Configuration>,
-            schema: Arc<Schema>,
-            previous_router: Option<&'a MockMyRouterFactory>,
-            extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-            license: Arc<LicenseState>,
-        ) -> Result<MockMyRouterFactory, BoxError> {
-            self.delegate
-                .create(
-                    is_telemetry_disabled,
-                    configuration,
-                    schema,
-                    previous_router,
-                    extra_plugins,
-                    license,
-                )
-                .await
-        }
-
-        async fn shutdown(&mut self) {
-            self.shutdowns
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    #[test(tokio::test)]
-    #[rstest]
-    #[case::stopped(Ok(()))]
-    #[case::errored(Err(()))]
-    async fn router_factory_is_shut_down_when_the_state_machine_stops(
-        #[case] outcome: Result<(), ()>,
-    ) {
-        let mut delegate = MockMyRouterConfigurator::new();
-        delegate
-            .expect_create()
-            .times(1)
-            .returning(move |_, _, _, _, _, _| {
-                if outcome.is_ok() {
-                    let mut router = MockMyRouterFactory::new();
-                    router.expect_clone().return_once(MockMyRouterFactory::new);
-                    router.expect_web_endpoints().returning(MultiMap::new);
-                    Ok(router)
-                } else {
-                    Err(BoxError::from("error"))
-                }
-            });
-        let shutdowns = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let router_factory = CountShutdowns {
-            delegate,
-            shutdowns: shutdowns.clone(),
-        };
-        let (server_factory, _) = create_mock_server_factory(usize::from(outcome.is_ok()));
-
-        let state_machine = StateMachine::new(false, server_factory, router_factory);
-        let result = state_machine
-            .process_events(stream::iter(vec![
-                UpdateConfiguration(Arc::new(Configuration::builder().build().unwrap())),
-                UpdateSchema(example_schema()),
-                UpdateLicense(Default::default()),
-                Shutdown,
-            ]))
-            .await;
-
-        assert_eq!(result.is_ok(), outcome.is_ok());
-        assert_eq!(shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test(tokio::test)]

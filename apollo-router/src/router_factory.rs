@@ -29,9 +29,6 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
 use crate::plugins::subscription::notification::Notify;
-use crate::plugins::telemetry::Telemetry;
-use crate::plugins::telemetry::reload::activation::TracerProviderHandle;
-use crate::plugins::telemetry::reload::activation::TracerProviderOwner;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -180,24 +177,11 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
         license: Arc<LicenseState>,
     ) -> Result<Self::RouterFactory, BoxError>;
-
-    /// Releases state that outlives individual routers. Called once when the state machine stops,
-    /// whether cleanly or because of an error.
-    ///
-    /// This does not wait for every retired pipeline. Connections from before a failed reload
-    /// attempt are not tracked, and a fatal reload error stops the router without draining it, so
-    /// spans that those pipelines end after this call are dropped.
-    async fn shutdown(&mut self) {}
 }
 
 /// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlRouterFactory {
-    /// The tracer provider installed by the routers this factory creates. Every plugin this factory
-    /// creates is given its handle, so each telemetry plugin retires the previous provider when it
-    /// installs a new one. Dropping the factory shuts down the installed provider.
-    tracer_provider: TracerProviderOwner,
-}
+pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
 impl RouterSuperServiceFactory for YamlRouterFactory {
@@ -250,12 +234,14 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .license(license.clone())
                     .full_config(configuration.validated_yaml.clone())
                     .and_original_config_yaml(configuration.raw_yaml.clone())
-                    .build()
-                    .with_tracer_provider(self.tracer_provider.handle().clone());
+                    .build();
 
                 match factory.create_instance(telemetry_init).await {
                     Ok(plugin) => {
-                        if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
+                        if let Some(telemetry) = plugin
+                            .as_any()
+                            .downcast_ref::<crate::plugins::telemetry::Telemetry>()
+                        {
                             telemetry.activate();
                         }
                         initial_telemetry_plugin = Some(plugin);
@@ -266,7 +252,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         let router_span = tracing::info_span!(STARTING_SPAN_NAME);
-        self.inner_create(
+        Self.inner_create(
             configuration,
             schema,
             previous_router,
@@ -276,25 +262,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         )
         .instrument(router_span)
         .await
-    }
-
-    async fn shutdown(&mut self) {
-        let tracer_provider = self.tracer_provider.handle().clone();
-        if let Err(error) = tokio::task::spawn_blocking(move || tracer_provider.shutdown()).await {
-            tracing::warn!(%error, "failed to shut down tracer provider");
-        }
-    }
-}
-
-#[cfg(test)]
-impl YamlRouterFactory {
-    /// A factory whose routers have already installed `tracer_provider`.
-    pub(crate) fn with_installed_tracer_provider(
-        tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
-    ) -> Self {
-        Self {
-            tracer_provider: TracerProviderOwner::installed(tracer_provider),
-        }
     }
 }
 
@@ -404,7 +371,6 @@ impl YamlRouterFactory {
                 extra_plugins,
                 license,
                 previous_router,
-                self.tracer_provider.handle(),
             )
             .instrument(span)
             .await?
@@ -618,7 +584,6 @@ pub(crate) async fn add_plugin(
     license: Arc<LicenseState>,
     full_config: Option<Value>,
     original_config_yaml: Option<Arc<str>>,
-    tracer_provider: &TracerProviderHandle,
 ) {
     let plugin_init = PluginInit::builder()
         .config(plugin_config.clone())
@@ -632,8 +597,7 @@ pub(crate) async fn add_plugin(
         .license(license)
         .and_full_config(full_config)
         .and_original_config_yaml(original_config_yaml)
-        .build()
-        .with_tracer_provider(tracer_provider.clone());
+        .build();
 
     match factory.create_instance(plugin_init).await {
         Ok(plugin) => {
@@ -646,7 +610,6 @@ pub(crate) async fn add_plugin(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -655,7 +618,6 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
     previous_router: Option<&crate::services::router::service::RouterCreator>,
-    tracer_provider: &TracerProviderHandle,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone().into_inner();
@@ -726,7 +688,6 @@ pub(crate) async fn create_plugins(
                 license.clone(),
                 $maybe_full_config,
                 configuration.raw_yaml.clone(),
-                tracer_provider,
             )
             .await;
         }};

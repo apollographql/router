@@ -34,7 +34,6 @@ async fn test_diagnostics() {
         license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
         full_config: None,
         raw_yaml: Some(Arc::from("test_config")),
-        tracer_provider: Default::default(),
     };
 
     let result = DiagnosticsPlugin::new(init).await;
@@ -71,7 +70,6 @@ async fn test_diagnostics_disabled() {
         license: Arc::new(crate::uplink::license_enforcement::LicenseState::Unlicensed),
         full_config: None,
         raw_yaml: Some(Arc::from("test_config")),
-        tracer_provider: Default::default(),
     };
 
     let result = DiagnosticsPlugin::new(init).await;

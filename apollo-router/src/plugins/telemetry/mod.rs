@@ -51,7 +51,6 @@ use parking_lot::RwLock;
 use rand::RngExt as _;
 use regex::Regex;
 use reload::activation::Activation;
-use reload::activation::TracerProviderHandle;
 use reload::tracing::TracingConfigurator;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -246,8 +245,6 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<Option<Activation>>,
-    /// The router's handle to the tracer provider it has installed, which activation updates.
-    installed_tracer_provider: TracerProviderHandle,
     enabled_features: EnabledFeatures,
 }
 
@@ -391,7 +388,6 @@ impl PluginPrivate for Telemetry {
             supergraph_schema_id: init.supergraph_schema_id,
             field_level_instrumentation_ratio,
             activation: Mutex::new(Some(activation)),
-            installed_tracer_provider: init.tracer_provider,
             builtin_instruments: RwLock::new(create_builtin_instruments(
                 &config.instrumentation.instruments,
             )),
@@ -1381,7 +1377,7 @@ impl PluginPrivate for Telemetry {
         // activation called multiple times during startup due to telemetry needed to be initialized before
         // plugins are initialized
         if let Some(activation) = self.activation.lock().take() {
-            activation.commit(&self.installed_tracer_provider);
+            activation.commit();
             // The reason this exist here is that these instruments use the global meter provider when created.
             // In future, we should directly use the meter provider from activation rather than the global
             // meter provider, this will eliminate the brittle sequencing of instrument creation.

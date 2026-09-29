@@ -31,6 +31,7 @@ use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
+use crate::plugins::telemetry::reload::otel::shutdown_installed_tracer_provider;
 use crate::registry::OciConfig;
 use crate::registry::should_use_ssl;
 use crate::registry::validate_oci_reference;
@@ -450,8 +451,8 @@ impl Executable {
 
         if apollo_telemetry_initialized {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
-            // The router's state machine has already shut down its tracer provider.
             tokio::task::spawn_blocking(move || {
+                shutdown_installed_tracer_provider();
                 if let Err(error) = meter_provider_internal().shutdown() {
                     tracing::error!(%error, "Failed to shut down OTel meter provider cleanly");
                 }

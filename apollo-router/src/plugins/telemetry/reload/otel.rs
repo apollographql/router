@@ -6,7 +6,8 @@
 //! ## Global State
 //!
 //! OpenTelemetry requires global state for tracer providers and propagators. This module maintains:
-//! - **Tracer handle** ([`OPENTELEMETRY_TRACER_HANDLE`]) - Allows hot-swapping the active tracer
+//! - **Tracer handle** ([`OPENTELEMETRY_TRACER_HANDLE`]) - Allows hot-swapping the active tracer,
+//!   and keeps the tracer provider it came from
 //! - **Format layer handle** ([`FMT_LAYER_HANDLE`]) - Allows hot-swapping the logging format
 //!
 //! These handles are set once during initialization and then used to reload components when
@@ -39,7 +40,10 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::trace::Tracer;
+use parking_lot::Mutex;
+use tokio::task::block_in_place;
 use tower::BoxError;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
@@ -50,6 +54,7 @@ use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
 use crate::plugins::telemetry::fmt_layer::FmtLayer;
 use crate::plugins::telemetry::formatters::json::Json;
@@ -69,9 +74,59 @@ pub(in crate::plugins::telemetry) type LayeredTracer =
 ///
 /// This handle allows the activation phase to swap in a new tracer without rebuilding
 /// the entire tracing subscriber stack.
-pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
-> = OnceCell::new();
+pub(in crate::plugins::telemetry) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<TracerHandle> =
+    OnceCell::new();
+
+/// The tracer the subscriber exports through, together with the tracer provider it came from.
+///
+/// The global OpenTelemetry API does not hand back the provider it replaces, so the provider is
+/// kept here, next to the tracer it feeds. Every tracer and span holds a clone of its provider, and
+/// the SDK shuts a provider down when its last clone is dropped. A span still being exported when
+/// the provider is replaced could otherwise run that blocking shutdown on an async worker, so
+/// whoever installs a provider is handed the one it replaces and must shut it down explicitly, off
+/// the async workers.
+pub(in crate::plugins::telemetry) struct TracerHandle {
+    tracer: ReloadTracer<Tracer>,
+    tracer_provider: Mutex<Option<SdkTracerProvider>>,
+}
+
+impl TracerHandle {
+    pub(in crate::plugins::telemetry) fn new() -> Self {
+        Self {
+            tracer: ReloadTracer::new(
+                SdkTracerProvider::default()
+                    .tracer_with_scope(InstrumentationScope::builder("noop").build()),
+            ),
+            tracer_provider: Mutex::default(),
+        }
+    }
+
+    /// Installs `tracer_provider`: hot-swaps a tracer built from it into the tracing subscriber and
+    /// makes it the global provider. Returns the provider it replaces, which the caller MUST shut
+    /// down off the async workers.
+    pub(in crate::plugins::telemetry) fn install(
+        &self,
+        tracer_provider: SdkTracerProvider,
+    ) -> Option<SdkTracerProvider> {
+        let scope = InstrumentationScope::builder(GLOBAL_TRACER_NAME)
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .build();
+        self.tracer.reload(tracer_provider.tracer_with_scope(scope));
+        let replaced = self.tracer_provider.lock().replace(tracer_provider.clone());
+
+        // `set_tracer_provider` drops the provider it replaces rather than returning it. We still
+        // hold the replaced provider, so that drop cannot trigger its shutdown, but block_in_place
+        // keeps the worker safe if the global held the last reference to a provider installed
+        // elsewhere.
+        block_in_place(move || opentelemetry::global::set_tracer_provider(tracer_provider));
+        replaced
+    }
+
+    /// Takes the installed tracer provider, for example to shut it down at exit.
+    pub(in crate::plugins::telemetry) fn take_tracer_provider(&self) -> Option<SdkTracerProvider> {
+        self.tracer_provider.lock().take()
+    }
+}
 
 /// Global handle for hot-reloading the logging format layer
 ///
@@ -82,11 +137,8 @@ static FMT_LAYER_HANDLE: OnceCell<
 > = OnceCell::new();
 
 pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
-    let hot_tracer = ReloadTracer::new(
-        opentelemetry_sdk::trace::SdkTracerProvider::default()
-            .tracer_with_scope(InstrumentationScope::builder("noop").build()),
-    );
-    let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
+    let hot_tracer = TracerHandle::new();
+    let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.tracer.clone());
 
     // We choose json or plain based on tty
     let fmt = if std::io::stdout().is_terminal() {
@@ -136,6 +188,27 @@ pub(in crate::plugins::telemetry) fn reload_fmt(
     }
 }
 
+/// Shuts down the tracer provider the router has installed, flushing its pending spans.
+///
+/// This blocks until the provider's span processors have shut down, so it MUST be called from a
+/// blocking thread.
+pub(crate) fn shutdown_installed_tracer_provider() {
+    if let Some(tracer_provider) = OPENTELEMETRY_TRACER_HANDLE
+        .get()
+        .and_then(TracerHandle::take_tracer_provider)
+    {
+        shutdown_tracer_provider(tracer_provider);
+    }
+}
+
+/// Shuts down a tracer provider. This blocks until its span processors have shut down, so it MUST
+/// be called from a blocking thread.
+pub(in crate::plugins::telemetry) fn shutdown_tracer_provider(tracer_provider: SdkTracerProvider) {
+    if let Err(error) = tracer_provider.shutdown() {
+        tracing::warn!(%error, "failed to shut down tracer provider");
+    }
+}
+
 pub(crate) fn apollo_opentelemetry_initialized() -> bool {
     OPENTELEMETRY_TRACER_HANDLE.get().is_some()
 }
@@ -147,7 +220,9 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
 // sampling bit set to false
 pub(crate) fn prepare_context(context: Context) -> Context {
     if !context.span().span_context().is_valid()
-        && let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
+        && let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE
+            .get()
+            .map(|handle| &handle.tracer)
     {
         let span_context = SpanContext::new(
             tracer.new_trace_id(),
