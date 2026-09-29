@@ -6,8 +6,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use rstest::rstest;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::json;
 use tower_http::BoxError;
 
@@ -46,9 +44,11 @@ const OSS_PLUGINS: &[&str] = &[
 struct AlwaysStartsAndStopsPlugin {}
 
 /// Configuration for the test plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
+#[derive(Default)]
 struct Conf {
     /// The name of the test
+    #[config(required)]
     name: String,
 }
 

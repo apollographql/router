@@ -20,7 +20,6 @@ use rhai::FuncArgs;
 use rhai::Instant;
 use rhai::Scope;
 use rhai::Shared;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -56,11 +55,11 @@ fn default_intern_strings() -> bool {
 }
 
 /// Configuration for the Rhai Plugin
-#[derive(Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
     /// The directory where Rhai scripts can be found
+    #[config(skip_validate)]
     scripts: Option<PathBuf>,
     /// The main entry point for Rhai script evaluation
     main: Option<String>,
@@ -73,7 +72,7 @@ pub(crate) struct Conf {
     /// for workloads with many concurrent Rhai executions.
     ///
     /// Defaults to `true`.
-    #[serde(default = "default_intern_strings")]
+    #[config(default = default_intern_strings())]
     intern_strings: bool,
 }
 

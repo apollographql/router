@@ -44,6 +44,7 @@ use crate::link::link_spec_definition::LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::schema::FederationSchema;
@@ -561,6 +562,17 @@ impl Subgraph<Expanded> {
         })
     }
 
+    /// Transitions from Expanded to Upgraded by upgrading the subgraph's federation spec `@link` to
+    /// the given federation version.
+    pub(crate) fn into_federation_version(
+        self,
+        version: &Version,
+    ) -> Result<Subgraph<Upgraded>, FederationError> {
+        let mut subgraph = self.assume_upgraded();
+        subgraph.upgrade_federation_version(version)?;
+        Ok(subgraph)
+    }
+
     /// Transitions from Expanded to Upgraded skipping the actual upgrade process.
     pub fn assume_upgraded(self) -> Subgraph<Upgraded> {
         Subgraph {
@@ -660,8 +672,8 @@ impl Subgraph<Upgraded> {
     pub fn validate(self) -> Result<Subgraph<Validated>, CompositionFailure> {
         tracing::debug!("Subgraph<Upgraded>: validate `{}`", self.name);
         // See the note in `Subgraph::<Expanded>::validate`. A connectors subgraph is necessarily
-        // fed2 and so does not normally reach this state, but running here keeps the two paths into
-        // `Validated` equivalent.
+        // fed2, so it only reaches this state when it is upgraded to fed3; running here keeps the
+        // two paths into `Validated` equivalent.
         let hints = ConnectorsBlueprint::on_validation(&self)?;
         let schema = validate_subgraph_schema(self.state.schema)
             .map_err(|err| SubgraphError::new_without_locations(self.name.clone(), err))?;
@@ -688,11 +700,31 @@ impl Subgraph<Upgraded> {
         })
     }
 
+    /// Upgrades the subgraph's federation spec `@link` to the given federation version.
+    pub(crate) fn upgrade_federation_version(
+        &mut self,
+        version: &Version,
+    ) -> Result<(), FederationError> {
+        self.state.metadata = upgrade_federation_version(&mut self.state.schema, version)?;
+        Ok(())
+    }
+
     pub fn normalize_root_types(&mut self) -> Result<(), SubgraphError> {
         normalize_root_types_in_subgraph_schema(&mut self.state.schema, &mut self.state.metadata)
             .map_err(|e| SubgraphError::new_without_locations(self.name.clone(), e))?;
         Ok(())
     }
+}
+
+fn upgrade_federation_version(
+    schema: &mut FederationSchema,
+    version: &Version,
+) -> Result<SubgraphMetadata, FederationError> {
+    schema.upgrade_federation_link(version)?;
+    schema
+        .subgraph_metadata()
+        .cloned()
+        .ok_or_else(|| internal_error!("Unable to detect federation version used in subgraph"))
 }
 
 fn default_operation_name(op_type: &OperationType) -> Name {

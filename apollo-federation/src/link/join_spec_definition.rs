@@ -1252,6 +1252,7 @@ impl SpecDefinition for JoinSpecDefinition {
 ///  - 0.3: adds the `isInterfaceObject` argument to `@join__type`, and make the `graph` in `@join__field` skippable.
 ///  - 0.4: adds the optional `overrideLabel` argument to `@join_field` for progressive override.
 ///  - 0.5: adds the `contextArguments` argument to `@join_field` for setting context.
+///  - 0.6: the version used with federation 3.0. Currently identical to 0.5.
 pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
     LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::join_identity());
@@ -1274,6 +1275,10 @@ pub(crate) static JOIN_VERSIONS: LazyLock<SpecDefinitions<JoinSpecDefinition>> =
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 5 },
             Version { major: 2, minor: 8 },
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 6 },
+            Version { major: 3, minor: 0 },
         ));
         definitions
     });

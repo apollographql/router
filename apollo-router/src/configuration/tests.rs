@@ -1277,6 +1277,49 @@ fn test_deserialize_derive_default() {
     }
 }
 
+/// Parses `yaml`, which must fail because of the unknown `key`, and checks that the error names it.
+fn assert_rejects_unknown_key(yaml: &str, key: &str) {
+    let error = Configuration::from_str(yaml)
+        .expect_err("the section contains an unknown key")
+        .to_string();
+    assert!(error.contains(key), "{error}");
+}
+
+#[test]
+fn authorization_rejects_unknown_keys() {
+    assert_rejects_unknown_key(
+        "authorization:\n  require_authentcation: true\n",
+        "require_authentcation",
+    );
+}
+
+#[test]
+fn fleet_detector_rejects_unknown_keys() {
+    assert_rejects_unknown_key("fleet_detector:\n  enabeld: false\n", "enabeld");
+}
+
+#[test]
+fn enhanced_client_awareness_rejects_unknown_keys() {
+    assert_rejects_unknown_key("enhanced_client_awareness:\n  enabeld: false\n", "enabeld");
+}
+
+#[test]
+fn progressive_override_rejects_unknown_keys() {
+    assert_rejects_unknown_key("progressive_override:\n  enabeld: false\n", "enabeld");
+}
+
+#[test]
+fn settingless_plugin_sections_accept_empty_and_omitted_sections() {
+    for yaml in [
+        "",
+        "fleet_detector: {}\n",
+        "enhanced_client_awareness: {}\n",
+        "progressive_override: {}\n",
+    ] {
+        Configuration::from_str(yaml).unwrap_or_else(|error| panic!("{yaml:?}: {error}"));
+    }
+}
+
 #[test]
 fn it_defaults_health_check_configuration() {
     let conf = Configuration::default();
