@@ -615,29 +615,26 @@ impl TrafficShaping {
     }
 }
 
-impl From<Shaping> for crate::configuration::shared::Client {
-    fn from(shaping: Shaping) -> Self {
-        Self {
-            experimental_http2: shaping.experimental_http2,
-            dns_resolution_strategy: shaping.dns_resolution_strategy,
-            pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
-            experimental_http2_keep_alive_interval: shaping.experimental_http2_keep_alive_interval,
-            experimental_http2_keep_alive_timeout: shaping.experimental_http2_keep_alive_timeout,
+/// Subgraph and connector blocks share the client fields, so one body converts both.
+macro_rules! impl_client_from_shaping {
+    ($($shaping:ty),+) => {$(
+        impl From<$shaping> for crate::configuration::shared::Client {
+            fn from(shaping: $shaping) -> Self {
+                Self {
+                    experimental_http2: shaping.experimental_http2,
+                    dns_resolution_strategy: shaping.dns_resolution_strategy,
+                    pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
+                    experimental_http2_keep_alive_interval: shaping
+                        .experimental_http2_keep_alive_interval,
+                    experimental_http2_keep_alive_timeout: shaping
+                        .experimental_http2_keep_alive_timeout,
+                }
+            }
         }
-    }
+    )+};
 }
 
-impl From<ConnectorShaping> for crate::configuration::shared::Client {
-    fn from(shaping: ConnectorShaping) -> Self {
-        Self {
-            experimental_http2: shaping.experimental_http2,
-            dns_resolution_strategy: shaping.dns_resolution_strategy,
-            pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
-            experimental_http2_keep_alive_interval: shaping.experimental_http2_keep_alive_interval,
-            experimental_http2_keep_alive_timeout: shaping.experimental_http2_keep_alive_timeout,
-        }
-    }
-}
+impl_client_from_shaping!(Shaping, ConnectorShaping);
 
 fn concurrency_limit_error() -> graphql::Error {
     graphql::Error::builder()
