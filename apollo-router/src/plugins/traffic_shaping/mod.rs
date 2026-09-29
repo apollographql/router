@@ -53,11 +53,8 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
-/// A `pool_idle_timeout` as written in one traffic shaping block.
-///
-/// `None` means the block omits it, so the value is inherited from the `all` block or, failing
-/// that, [`default_pool_idle_timeout`]. `Some(None)` is an explicit `null`, which disables idle
-/// eviction.
+/// `pool_idle_timeout` as written in one block: `None` if omitted (inherit from `all`, then
+/// [`default_pool_idle_timeout`]), `Some(None)` for `null` (no idle eviction).
 type PoolIdleTimeout = Option<Option<Duration>>;
 
 fn deserialize_pool_idle_timeout<'de, D: serde::Deserializer<'de>>(
@@ -70,9 +67,8 @@ fn resolve_pool_idle_timeout(pool_idle_timeout: PoolIdleTimeout) -> Option<Durat
     pool_idle_timeout.unwrap_or_else(default_pool_idle_timeout)
 }
 
-/// Removes `default` from a field's schema. An omitted `pool_idle_timeout` inherits from the `all`
-/// block, so no single value is its default, and the `null` schemars would otherwise show means
-/// "disable idle eviction".
+/// Drops the schema `default`: an omitted value inherits from `all`, and the `null` schemars would
+/// emit means "disable".
 fn without_default(schema: &mut schemars::Schema) {
     schema.remove("default");
 }
@@ -96,11 +92,8 @@ struct Shaping {
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
-    ///
-    /// A `subgraphs.<name>` block that omits it inherits the value from `all`; if neither sets
-    /// it, the default is 15 seconds. Set it to `null` to disable idle eviction. A per-subgraph
-    /// `null` disables eviction for that subgraph even when `all` sets a value (it used to be
-    /// ignored in favor of `all`).
+    /// Defaults to 15 seconds; `null` disables idle eviction. A `subgraphs.<name>` block that
+    /// omits it uses the value from `all`.
     #[serde(deserialize_with = "deserialize_pool_idle_timeout", default)]
     #[schemars(with = "Option<String>", transform = without_default)]
     pool_idle_timeout: PoolIdleTimeout,
@@ -215,11 +208,8 @@ struct ConnectorShaping {
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
-    ///
-    /// A `sources.<name>` block that omits it inherits the value from `connector.all`; if
-    /// neither sets it, the default is 15 seconds. Set it to `null` to disable idle eviction. A
-    /// per-source `null` disables eviction for that source even when `connector.all` sets a
-    /// value (it used to be ignored in favor of `connector.all`).
+    /// Defaults to 15 seconds; `null` disables idle eviction. A `sources.<name>` block that omits
+    /// it uses the value from `connector.all`.
     #[serde(deserialize_with = "deserialize_pool_idle_timeout", default)]
     #[schemars(with = "Option<String>", transform = without_default)]
     pool_idle_timeout: PoolIdleTimeout,

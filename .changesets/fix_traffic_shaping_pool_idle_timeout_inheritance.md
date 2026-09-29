@@ -1,12 +1,10 @@
 ### Apply the documented `pool_idle_timeout` default and inherit it from `traffic_shaping.all`
 
-`pool_idle_timeout` now resolves the way the traffic shaping documentation describes, for both subgraphs and connector sources:
+`pool_idle_timeout` now resolves as documented:
 
-- A `subgraphs.<name>` or `connector.sources.<name>` block that doesn't set `pool_idle_timeout` inherits the value from the matching `all` block. Previously, any such block silently replaced `all.pool_idle_timeout` with 15s.
-- Without an `all` block, a subgraph or source that isn't configured uses the 15s default. Previously its pooled connections never expired.
-- An explicit `pool_idle_timeout: null` in a per-subgraph or per-source block disables idle eviction for it. Previously it was ignored in favor of the `all` block's value.
-
-The same 15s default now also applies to a coprocessor configured without a `client` block. Previously, its pooled connections never expired either; a `client` block, even an empty one, already got 15s.
+- A `subgraphs.<name>` or `connector.sources.<name>` block that omits it uses the value from `all` (or `connector.all`). Previously it got 15s.
+- Subgraphs and connector sources with no matching block and no `all` block, and coprocessors with no `client` block, get the 15s default. Previously their idle connections never expired.
+- `null` in a per-subgraph or per-source block disables idle eviction for it. Previously the `all` value was used.
 
 ```yaml
 traffic_shaping:

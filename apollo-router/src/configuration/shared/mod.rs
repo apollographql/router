@@ -50,8 +50,7 @@ pub(crate) struct Client {
     pub(crate) experimental_http2_keep_alive_timeout: Option<Duration>,
 }
 
-// Implemented by hand so that a missing `client` block gets the same pool idle timeout as an
-// empty one, rather than `None` (no idle eviction).
+// Matches deserializing an empty `client` block, including the 15s pool idle timeout.
 impl Default for Client {
     fn default() -> Self {
         Self {
