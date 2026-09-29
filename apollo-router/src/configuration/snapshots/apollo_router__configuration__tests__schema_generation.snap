@@ -9596,6 +9596,7 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "concurrency_limit": {
+          "default": null,
           "description": "The global concurrency limit",
           "format": "uint",
           "minimum": 0,
@@ -11499,6 +11500,7 @@ expression: "&schema"
           "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)"
         },
         "deduplicate_query": {
+          "default": null,
           "description": "Enable query deduplication",
           "type": [
             "boolean",

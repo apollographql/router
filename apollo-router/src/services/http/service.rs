@@ -6,7 +6,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
 
-use ::serde::Deserialize;
 use bytes::Buf;
 use futures::future::BoxFuture;
 use http::HeaderValue;
@@ -26,7 +25,6 @@ use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
 use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
-use schemars::JsonSchema;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -179,8 +177,8 @@ type MixedClient = HTTPClient;
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
-#[serde(rename_all = "lowercase")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Copy)]
 pub(crate) enum Compression {
     /// gzip
     Gzip,
