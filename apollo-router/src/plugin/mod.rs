@@ -19,8 +19,6 @@ pub mod serde;
 #[macro_use]
 pub mod test;
 
-pub use enabled::Enabled;
-
 use std::any::TypeId;
 use std::fmt;
 #[cfg(test)]
@@ -42,6 +40,7 @@ use apollo_compiler::validation::Valid;
 /// validation arrives in a later change.
 pub use apollo_configuration;
 use async_trait::async_trait;
+pub use enabled::Enabled;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
