@@ -134,8 +134,8 @@ pub(crate) struct OverflowMetricReader<T> {
     overflowing: Arc<Mutex<OverflowingMetrics>>,
 }
 
-/// The overflowing metrics found by the last collect, keyed by the scraped families that showed
-/// overflow at the time.
+/// The overflowing metrics found by the last collect that accounted for every overflowing scraped
+/// family, keyed by those families.
 #[derive(Debug, Default)]
 struct OverflowingMetrics {
     families: Vec<String>,
@@ -170,10 +170,15 @@ impl<T: MetricReader> OverflowMetricReader<T> {
     /// Increment the overflow counter for every metric that has overflowed in a scrape.
     ///
     /// Scraped families carry Prometheus names, but the counter reports OpenTelemetry instrument
-    /// names, as the push exporters do. Those are read by collecting from the wrapped reader, which
-    /// with cumulative temporality doesn't reset the aggregation state. The result is reused
-    /// until the set of overflowing families changes, so a persistent overflow doesn't collect
-    /// twice on every scrape.
+    /// names, as the push exporters do. Those are read by collecting from the wrapped reader. The
+    /// names are cached until the set of overflowing families changes, so a persistent overflow
+    /// doesn't collect twice on every scrape.
+    ///
+    /// The collect is a second snapshot and can disagree with the scrape. Cumulative sums and
+    /// histograms keep their state, but an observable gauge reports only what its callback
+    /// observed in that collection. So the names are cached only when the collect found an
+    /// overflowing instrument for every overflowing family. Otherwise the names it did find are
+    /// counted and the next scrape collects again.
     pub(crate) fn report_cardinality_overflow(&self, scrape: &[MetricFamily]) {
         let families: Vec<&str> = scrape
             .iter()
@@ -191,11 +196,23 @@ impl<T: MetricReader> OverflowMetricReader<T> {
                 tracing::debug!("could not collect metrics to check cardinality overflow: {err}");
                 return;
             }
+            let mut metric_names: Vec<String> = overflowing_metric_names(&rm)
+                .map(ToString::to_string)
+                .collect();
+            metric_names.sort_unstable();
+            metric_names.dedup();
+            // Our own counter stays in the list, since it has a scraped family too;
+            // `record_overflow` skips it.
+            if metric_names.len() != families.len() {
+                metric_names
+                    .iter()
+                    .map(String::as_str)
+                    .for_each(record_overflow);
+                return;
+            }
             *overflowing = OverflowingMetrics {
                 families: families.iter().map(ToString::to_string).collect(),
-                metric_names: overflowing_metric_names(&rm)
-                    .map(ToString::to_string)
-                    .collect(),
+                metric_names,
             };
         }
         overflowing
@@ -232,19 +249,20 @@ impl<T: MetricReader> MetricReader for OverflowMetricReader<T> {
     }
 }
 
-/// Names of the metrics that have overflow data points, excluding our own overflow counter to
-/// avoid recursion.
+/// Names of the metrics that have overflow data points.
 fn overflowing_metric_names(metrics: &ResourceMetrics) -> impl Iterator<Item = &str> {
     metrics
         .scope_metrics()
         .flat_map(|scope_metrics| scope_metrics.metrics())
-        .filter(|metric| {
-            metric.name() != CARDINALITY_OVERFLOW_METRIC && has_overflow_data_point(metric)
-        })
+        .filter(|metric| has_overflow_data_point(metric))
         .map(Metric::name)
 }
 
+/// Count an overflow of `metric_name`, except of our own overflow counter, to avoid recursion.
 fn record_overflow(metric_name: &str) {
+    if metric_name == CARDINALITY_OVERFLOW_METRIC {
+        return;
+    }
     u64_counter_with_unit!(
         "apollo.router.telemetry.metrics.cardinality_overflow",
         "Counts metrics that have exceeded their cardinality limit",
@@ -530,6 +548,100 @@ mod tests {
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 1,
                 "metric.name" = "test.pull.second"
+            );
+        }
+        .with_metrics()
+        .await
+    }
+
+    #[tokio::test]
+    async fn pull_reader_collects_again_while_some_scraped_families_are_unresolved() {
+        async {
+            let reader = OverflowMetricReader::new(ClonableManualReader::default());
+            let provider = overflowing_provider(reader.clone());
+            overflow(&provider, "test.pull.first");
+            let scrape = [
+                scraped_family("test_pull_first_total", true),
+                scraped_family("test_pull_second_total", true),
+            ];
+
+            // The collect finds only one of the two scraped overflows: it is counted, and nothing
+            // is cached.
+            reader.report_cardinality_overflow(&scrape);
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                1,
+                "metric.name" = "test.pull.first"
+            );
+
+            // The next scrape collects again and finds both.
+            overflow(&provider, "test.pull.second");
+            reader.report_cardinality_overflow(&scrape);
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                2,
+                "metric.name" = "test.pull.first"
+            );
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                1,
+                "metric.name" = "test.pull.second"
+            );
+        }
+        .with_metrics()
+        .await
+    }
+
+    /// An observable gauge reports only what its callback observed in that collection, so the
+    /// scrape and the reader's own collect can disagree. Here the gauge shows three attribute sets
+    /// (past its limit of two) to the scrape, one to the reader's collect, then three again. The
+    /// persistent overflow must still be counted once the collect sees it.
+    #[tokio::test]
+    async fn pull_reader_retries_when_collect_misses_a_scraped_overflow() {
+        async {
+            let registry = prometheus::Registry::new();
+            let exporter = opentelemetry_prometheus::exporter()
+                .with_registry(registry.clone())
+                .build()
+                .unwrap();
+            let reader = OverflowMetricReader::new(exporter);
+            let provider = SdkMeterProvider::builder()
+                .with_reader(reader.clone())
+                .with_resource(Resource::builder_empty().build())
+                .with_view(|instrument: &opentelemetry_sdk::metrics::Instrument| {
+                    (instrument.name() == "test.pull.gauge").then(|| {
+                        Stream::builder()
+                            .with_cardinality_limit(2)
+                            .build()
+                            .expect("valid stream")
+                    })
+                })
+                .build();
+            let collections = std::sync::atomic::AtomicUsize::new(0);
+            let _gauge = provider
+                .meter("test")
+                .u64_observable_gauge("test.pull.gauge")
+                .with_callback(move |observer| {
+                    let collection = collections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    // Collection 0 is the first scrape and 1 the reader's collect after it.
+                    let observed = if collection == 1 { 1 } else { 3 };
+                    for item in 0..observed {
+                        observer.observe(1, &[KeyValue::new("item", item)]);
+                    }
+                })
+                .build();
+
+            for _ in 0..3 {
+                let scrape = registry.gather();
+                assert!(scrape.iter().any(family_has_overflow));
+                reader.report_cardinality_overflow(&scrape);
+            }
+            // The first scrape's collect missed the overflow; the second resolved it and the third
+            // reused that.
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                2,
+                "metric.name" = "test.pull.gauge"
             );
         }
         .with_metrics()
