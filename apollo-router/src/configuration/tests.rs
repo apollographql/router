@@ -1306,10 +1306,16 @@ fn progressive_override_rejects_unknown_keys() {
 /// keys too. Each case is a section that accepted, and ignored, unknown keys before.
 #[test]
 fn nested_plugin_sections_reject_unknown_keys() {
-    for (yaml, key) in [(
-        "authorization:\n  directives:\n    errors:\n      lgo: false\n",
-        "lgo",
-    )] {
+    for (yaml, key) in [
+        (
+            "authorization:\n  directives:\n    errors:\n      lgo: false\n",
+            "lgo",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  router:\n    reqest: {}\n",
+            "reqest",
+        ),
+    ] {
         assert_rejects_unknown_key(yaml, key);
     }
 }
