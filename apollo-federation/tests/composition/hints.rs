@@ -1,4 +1,5 @@
 use apollo_federation::supergraph::CompositionHint;
+use apollo_federation::supergraph::HintLevel;
 use apollo_federation::supergraph::Satisfiable;
 use apollo_federation::supergraph::Supergraph;
 
@@ -683,8 +684,14 @@ mod input_object_hints {
         assert_has_hint(
             &result,
             "INCONSISTENT_ONE_OF_INPUT_OBJECT",
-            r#"Input object type "FindInput" is marked @oneOf in some but not all defining subgraphs: it is marked @oneOf in subgraph "Subgraph1" but not in subgraph "Subgraph2"."#,
+            r#"Input object type "FindInput" is marked @oneOf in some but not all defining subgraphs: it is marked @oneOf in subgraph "Subgraph1" but not in subgraph "Subgraph2", so clients must provide exactly one field of this type, even for fields resolved by subgraph "Subgraph2"."#,
         );
+        let hint = result
+            .hints()
+            .iter()
+            .find(|hint| hint.code() == "INCONSISTENT_ONE_OF_INPUT_OBJECT")
+            .expect("expected @oneOf hint");
+        assert!(matches!(hint.level(), HintLevel::Warn));
     }
 
     #[test]

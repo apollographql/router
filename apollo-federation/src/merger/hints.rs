@@ -215,7 +215,7 @@ pub(crate) static INCONSISTENT_ONE_OF_INPUT_OBJECT: LazyLock<HintCodeDefinition>
     LazyLock::new(|| {
         HintCodeDefinition::new(
             "INCONSISTENT_ONE_OF_INPUT_OBJECT",
-            HintLevel::Info,
+            HintLevel::Warn,
             "Input object type is marked @oneOf in some but not all subgraphs",
         )
     });

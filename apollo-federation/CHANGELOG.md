@@ -53,7 +53,12 @@ The `@oneOf` directive on input object types is now preserved during
 composition. If any subgraph marks an input type with `@oneOf`, the
 supergraph will include `@oneOf` on that type. Subgraphs are not
 required to agree on whether `@oneOf` is present, but composition emits an
-`INCONSISTENT_ONE_OF_INPUT_OBJECT` hint when they disagree.
+`INCONSISTENT_ONE_OF_INPUT_OBJECT` warning when they disagree.
+
+Once any subgraph applies `@oneOf` to a type, the other subgraphs' uses of
+that type must also satisfy the `@oneOf` rules: its fields must be nullable,
+and default values of that type must specify exactly one non-null field.
+Composition reports violations against the subgraph that declares them.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10124>
 
