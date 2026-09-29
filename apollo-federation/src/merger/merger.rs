@@ -2051,9 +2051,12 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                     // signature. Otherwise, the result would depend on the order of the `implements`
                                     // clause, and query planning could pick an @interfaceObject whose field does not
                                     // accept the requested arguments.
-                                    let providers: Vec<_> = object
+                                    // We check the (cheap) signature first, and only then whether it is provided
+                                    // through @interfaceObject (which requires scanning all subgraphs).
+                                    let conflicting: Vec<_> = object
                                         .implements_interfaces
                                         .iter()
+                                        .filter(|other| *other != intf)
                                         .filter_map(|other| {
                                             let field = self
                                                 .merged
@@ -2061,20 +2064,20 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                                 .get_interface(other)?
                                                 .fields
                                                 .get(intf_field_name)?;
-                                            self.is_field_provided_by_an_interface_object(
-                                                intf_field_name,
-                                                other,
-                                            )
+                                            (!same_field_signature(field, intf_field)
+                                                && self.is_field_provided_by_an_interface_object(
+                                                    intf_field_name,
+                                                    other,
+                                                ))
                                             .then_some((other, field))
                                         })
                                         .collect();
-                                    if providers
-                                        .iter()
-                                        .any(|(_, field)| !same_field_signature(field, intf_field))
-                                    {
-                                        let signatures = providers.iter().map(|(itf, field)| {
-                                            format!("\"{itf}.{}\"", field_signature(field))
-                                        });
+                                    if !conflicting.is_empty() {
+                                        let signatures = std::iter::once((intf, intf_field))
+                                            .chain(conflicting)
+                                            .map(|(itf, field)| {
+                                                format!("\"{itf}.{}\"", field_signature(field))
+                                            });
                                         conflicting_signature_errors.push(
                                             CompositionError::InterfaceObjectUsageError {
                                                 message: format!(
