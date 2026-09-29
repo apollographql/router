@@ -2362,12 +2362,6 @@ impl OpPath {
         self.len() == 0
     }
 
-    pub(crate) fn strip_prefix(&self, maybe_prefix: &Self) -> Option<Self> {
-        self.0
-            .strip_prefix(&*maybe_prefix.0)
-            .map(|slice| Self(slice.to_vec()))
-    }
-
     pub(crate) fn with_pushed(&self, element: Arc<OpPathElement>) -> Self {
         let mut new = self.0.clone();
         new.push(element);

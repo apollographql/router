@@ -120,8 +120,6 @@ mock_async_service!(HttpClient, HyperRequest<Body>, HyperResponse<Body>);
 // defined above is part of the public API
 // TODO Router 2: remove this type and replace HttpClientService
 #[cfg(test)]
-pub(crate) use internal::MockInternalHttpClientService;
-#[cfg(test)]
 mod internal {
     use futures::Future;
 

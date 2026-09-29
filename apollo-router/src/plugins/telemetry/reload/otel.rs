@@ -100,9 +100,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> anyhow::Result<()> {
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
         .get_or_try_init(move || {
-            // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
             // filter opentelemetry internal logs to warn level (OTel 0.31 emits INFO logs for provider setup)
-            let log_level = format!("{log_level},salsa=error,opentelemetry=warn");
+            let log_level = format!("{log_level},opentelemetry=warn");
             tracing::debug!("Running the router with log level set to {log_level}");
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once

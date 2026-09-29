@@ -77,37 +77,46 @@ fn jwt_error_to_reason(jwt_err: &JWTError) -> &'static str {
 }
 
 impl AuthenticationError {
-    pub(super) fn as_context_object(&self) -> ErrorContext {
-        let (code, reason) = match self {
-            AuthenticationError::CannotConvertToString => ("CANNOT_CONVERT_TO_STRING", None),
-            AuthenticationError::InvalidJWTPrefix(_, _) => ("INVALID_PREFIX", None),
-            AuthenticationError::MissingJWTToken(_, _) => ("MISSING_JWT", None),
-            AuthenticationError::InvalidHeader(_, jwt_err) => {
-                ("INVALID_HEADER", Some(jwt_error_to_reason(jwt_err).into()))
-            }
-            AuthenticationError::CannotCreateDecodingKey(jwt_err) => (
-                "CANNOT_CREATE_DECODING_KEY",
-                Some(jwt_error_to_reason(jwt_err).into()),
-            ),
-            AuthenticationError::JWKHasNoAlgorithm => ("JWK_HAS_NO_ALGORITHM", None),
-            AuthenticationError::CannotDecodeJWT(jwt_err) => (
-                "CANNOT_DECODE_JWT",
-                Some(jwt_error_to_reason(jwt_err).into()),
-            ),
+    /// A stable, machine-readable code for this failure. Unlike [`Self::to_string`], this never
+    /// contains details of the token or of the router's configuration, so it is safe to report
+    /// even when the client-facing message is redacted.
+    pub(super) fn code(&self) -> &'static str {
+        match self {
+            AuthenticationError::CannotConvertToString => "CANNOT_CONVERT_TO_STRING",
+            AuthenticationError::InvalidJWTPrefix(_, _) => "INVALID_PREFIX",
+            AuthenticationError::MissingJWTToken(_, _) => "MISSING_JWT",
+            AuthenticationError::InvalidHeader(_, _) => "INVALID_HEADER",
+            AuthenticationError::CannotCreateDecodingKey(_) => "CANNOT_CREATE_DECODING_KEY",
+            AuthenticationError::JWKHasNoAlgorithm => "JWK_HAS_NO_ALGORITHM",
+            AuthenticationError::CannotDecodeJWT(_) => "CANNOT_DECODE_JWT",
             AuthenticationError::CannotInsertClaimsIntoContext(_) => {
-                ("CANNOT_INSERT_CLAIMS_INTO_CONTEXT", None)
+                "CANNOT_INSERT_CLAIMS_INTO_CONTEXT"
             }
-            AuthenticationError::CannotFindKID(_) => ("CANNOT_FIND_KID", None),
-            AuthenticationError::CannotFindSuitableKey(_, _) => ("CANNOT_FIND_SUITABLE_KEY", None),
-            AuthenticationError::InvalidIssuer { .. } => ("INVALID_ISSUER", None),
-            AuthenticationError::InvalidAudience { .. } => ("INVALID_AUDIENCE", None),
-            AuthenticationError::UnsupportedKeyAlgorithm(_) => ("UNSUPPORTED_KEY_ALGORITHM", None),
-        };
+            AuthenticationError::CannotFindKID(_) => "CANNOT_FIND_KID",
+            AuthenticationError::CannotFindSuitableKey(_, _) => "CANNOT_FIND_SUITABLE_KEY",
+            AuthenticationError::InvalidIssuer { .. } => "INVALID_ISSUER",
+            AuthenticationError::InvalidAudience { .. } => "INVALID_AUDIENCE",
+            AuthenticationError::UnsupportedKeyAlgorithm(_) => "UNSUPPORTED_KEY_ALGORITHM",
+        }
+    }
 
+    /// The underlying `jsonwebtoken` failure kind, for the variants that wrap one.
+    fn reason(&self) -> Option<String> {
+        match self {
+            AuthenticationError::InvalidHeader(_, jwt_err)
+            | AuthenticationError::CannotCreateDecodingKey(jwt_err)
+            | AuthenticationError::CannotDecodeJWT(jwt_err) => {
+                Some(jwt_error_to_reason(jwt_err).into())
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn as_context_object(&self) -> ErrorContext {
         ErrorContext {
             message: self.to_string(),
-            code: code.into(),
-            reason,
+            code: self.code().into(),
+            reason: self.reason(),
         }
     }
 }

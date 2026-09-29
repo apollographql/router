@@ -672,7 +672,6 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
@@ -863,6 +862,7 @@ mod test {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
         let key = ResponseKey::RootField {
@@ -1250,20 +1250,23 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let mut mock_service = MockRouterService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
 
-        mock_service.expect_call().times(0..3).returning(|_| {
-            Ok(RouterResponse::fake_builder()
-                .data(json!({ "test": 1234_u32 }))
-                .build()
-                .unwrap())
+        // First and third requests pass through; the second is rate-limited by the plugin and
+        // never reaches the inner service.
+        let driver = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (_req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(
+                    RouterResponse::fake_builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .build()
+                        .unwrap(),
+                );
+            }
         });
-        mock_service
-            .expect_clone()
-            .returning(MockRouterService::new);
 
-        // let mut svc = plugin.router_service(mock_service.clone().boxed());
-        let mut svc = plugin.router_service(mock_service.boxed());
+        let mut svc = plugin.router_service(mock.boxed());
 
         let response: RouterResponse = svc
             .ready()
@@ -1303,6 +1306,7 @@ mod test {
             .await
             .unwrap();
         assert_eq!(StatusCode::OK, response.response.status());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

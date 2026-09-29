@@ -41,6 +41,10 @@ pub(crate) struct FetchRequest {
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) current_dir: Path,
+    /// Whether this fetch is part of the deferred portion of an `@defer` query
+    /// plan. Propagated to `subgraph::Request` so telemetry selectors can split
+    /// primary vs deferred fetches.
+    pub(crate) is_deferred: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -55,6 +59,7 @@ impl FetchRequest {
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
         current_dir: Path,
+        is_deferred: bool,
     ) -> Self {
         Self {
             context,
@@ -62,6 +67,7 @@ impl FetchRequest {
             supergraph_request,
             variables,
             current_dir,
+            is_deferred,
         }
     }
 }

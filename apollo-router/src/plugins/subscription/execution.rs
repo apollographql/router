@@ -357,7 +357,7 @@ async fn dispatch_subscription_event(
     context: Context,
     mut val: graphql::Response,
     sender: mpsc::Sender<Response>,
-) -> Result<(), SendError<Response>> {
+) -> Result<(), SendError<Box<Response>>> {
     let start = Instant::now();
     let span = Span::current();
     let res = match query_plan {
@@ -395,12 +395,18 @@ async fn dispatch_subscription_event(
                 val.errors.append(&mut next_response.errors);
                 next_response.errors = val.errors;
 
-                sender.send(next_response).await
+                sender
+                    .send(next_response)
+                    .await
+                    .map_err(|SendError(unboxed)| SendError(Box::new(unboxed)))
             } else {
                 Ok(())
             }
         }
-        None => sender.send(val).await,
+        None => sender
+            .send(val)
+            .await
+            .map_err(|SendError(unboxed)| SendError(Box::new(unboxed))),
     };
     span.record(
         APOLLO_PRIVATE_DURATION_NS,

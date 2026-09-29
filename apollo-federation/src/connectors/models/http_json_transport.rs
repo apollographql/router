@@ -224,7 +224,7 @@ impl HttpJsonTransport {
         let query = query.into_string();
 
         uri_parts.path_and_query = Some(match (path.is_empty(), query.is_empty()) {
-            (true, true) => PathAndQuery::from_static(""),
+            (true, true) => PathAndQuery::from_static("/"),
             (true, false) => PathAndQuery::try_from(format!("?{query}"))?,
             (false, true) => PathAndQuery::try_from(path)?,
             (false, false) => PathAndQuery::try_from(format!("{path}?{query}"))?,

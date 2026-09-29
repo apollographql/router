@@ -16,7 +16,6 @@ use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::process::Command;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -199,72 +198,6 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
         .await
         .unwrap();
     Ok(())
-}
-
-async fn command_output(command: &mut Command) -> String {
-    let output = command.output().await.unwrap();
-    let success = output.status.success();
-    let exit_code = output.status.code();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    format!(
-        "Success: {success:?}\n\
-        Exit code: {exit_code:?}\n\
-        stderr:\n\
-        {stderr}\n\
-        stdout:\n\
-        {stdout}"
-    )
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_cli_config_experimental() {
-    insta::assert_snapshot!(
-        command_output(
-            Command::new(IntegrationTest::router_location())
-                .arg("config")
-                .arg("experimental")
-                .env("RUST_BACKTRACE", "") // Avoid "RUST_BACKTRACE=full detected" log on CI
-        )
-        .await
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_cli_config_preview() {
-    insta::assert_snapshot!(
-        command_output(
-            Command::new(IntegrationTest::router_location())
-                .arg("config")
-                .arg("preview")
-                .env("RUST_BACKTRACE", "") // Avoid "RUST_BACKTRACE=full detected" log on CI
-        )
-        .await
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_experimental_notice() {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "
-            telemetry:
-              exporters:
-                tracing:
-                  experimental_response_trace_id:
-                    enabled: true
-            ",
-        )
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    router
-        .wait_for_log_message(
-            "You're using some \\\"experimental\\\" features of the Apollo Router",
-        )
-        .await;
-    router.graceful_shutdown().await;
 }
 
 const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";

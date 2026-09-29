@@ -137,11 +137,15 @@ pub(crate) fn plan_response_shape_with_schema(schema_str: &str, op_str: &str) ->
         .collect();
     let context = AnalysisContext::new(supergraph_schema.clone(), &subgraphs_by_name);
     let plan_rs = interpret_query_plan(&context, &root_type, &query_plan).unwrap();
-    let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
-    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    // Same comparison as `check_plan`.
     assert!(
-        compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs)
-            .is_ok()
+        compare_response_shapes_in_supergraph(
+            supergraph_schema,
+            &subgraphs_by_name,
+            &op_rs,
+            &plan_rs
+        )
+        .is_ok()
     );
 
     plan_rs

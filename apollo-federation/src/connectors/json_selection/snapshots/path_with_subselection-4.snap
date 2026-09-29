@@ -7,6 +7,6 @@ Err(
         message: "SubSelection cannot contain multiple elements if it contains an anonymous NamedSelection",
         fragment: "\n            id\n            created\n            choices->first.message\n            model\n        ",
         offset: 0,
-        spec: V0_3,
+        spec: V0_4,
     },
 )

@@ -555,6 +555,7 @@ fn filter_stream(
 ) -> ReceiverStream<Response> {
     let (mut sender, receiver) = mpsc::channel(10);
 
+    // XXX(@goto-bus-stop): we ignore the error here, doesn't seem great?
     tokio::task::spawn(async move {
         let mut seen_last_message =
             consume_responses(first, &mut stream, &mut sender, stream_mode).await?;
@@ -571,10 +572,10 @@ fn filter_stream(
                 StreamMode::Defer => Response::builder().has_next(false).build(),
                 StreamMode::Subscription => Response::builder().subscribed(false).build(),
             };
-            sender.send(res).await?;
+            sender.send(res).await.map_err(|_| SendError(()))?;
         }
 
-        Ok::<_, SendError<Response>>(())
+        Ok::<_, SendError<()>>(())
     });
 
     receiver.into()
@@ -586,7 +587,7 @@ async fn consume_responses(
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
     stream_mode: StreamMode,
-) -> Result<bool, SendError<Response>> {
+) -> Result<bool, SendError<()>> {
     loop {
         match stream.try_recv() {
             Err(err) => {
@@ -594,7 +595,10 @@ async fn consume_responses(
                     // no messages available, but the channel is not closed
                     // this means more deferred responses can come
                     TryRecvError::Empty => {
-                        sender.send(current_response).await?;
+                        sender
+                            .send(current_response)
+                            .await
+                            .map_err(|_| SendError(()))?;
                         return Ok(false);
                     }
                     // the channel is closed
@@ -606,7 +610,10 @@ async fn consume_responses(
                             StreamMode::Subscription => current_response.subscribed = Some(false),
                         }
 
-                        sender.send(current_response).await?;
+                        sender
+                            .send(current_response)
+                            .await
+                            .map_err(|_| SendError(()))?;
                         return Ok(true);
                     }
                 }
@@ -614,7 +621,10 @@ async fn consume_responses(
             // there might be other deferred responses after this one,
             // so we should call `try_next` again
             Ok(response) => {
-                sender.send(current_response).await?;
+                sender
+                    .send(current_response)
+                    .await
+                    .map_err(|_| SendError(()))?;
                 current_response = response;
             }
         }

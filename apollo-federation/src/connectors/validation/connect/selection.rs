@@ -199,9 +199,10 @@ impl<'schema> Selection<'schema> {
 
                 for concrete_type_ref in concrete_type_refs {
                     // Use the new shape-based walk method for each concrete type
-                    match validator.walk_selection_with_shape(concrete_type_ref, &shape) {
-                        Ok(mut fields) => all_resolved_fields.append(&mut fields),
-                        Err(err) => return Err(err),
+                    {
+                        let mut fields =
+                            validator.walk_selection_with_shape(concrete_type_ref, &shape)?;
+                        all_resolved_fields.append(&mut fields)
                     }
                 }
 
@@ -523,7 +524,7 @@ impl<'schema> SelectionValidator<'schema> {
                     code: Code::CircularReference,
                     message: format!(
                         "Circular reference detected in {coordinate}: type `{type_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.coordinate,
+                        coordinate = self.coordinate,
                         selection_path = self
                             .path_with_root()
                             .map(|part| match part {
@@ -658,7 +659,7 @@ impl<'schema> SelectionValidator<'schema> {
                                 code: Code::ConnectorsFieldWithArguments,
                                 message: format!(
                                     "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
-                                    coordinate = &self.coordinate,
+                                    coordinate = self.coordinate,
                                     parent_type = type_ref.name(),
                                     field_name = field_name,
                                 ),
@@ -683,8 +684,48 @@ impl<'schema> SelectionValidator<'schema> {
                                     // Valid: object field with subselection
                                     self.walk_selection_with_shape(field_type_ref, field_shape)?;
                                 }
+                                (ExtendedType::Union(union_type), true) => {
+                                    // Expand union to concrete member types and
+                                    // validate against each, mirroring the top-level
+                                    // expansion in type_check_shape_based.
+                                    let concrete_refs: Vec<_> = union_type
+                                        .members
+                                        .iter()
+                                        .filter_map(|member_name| {
+                                            SchemaTypeRef::new(self.schema, member_name)
+                                        })
+                                        .collect();
+                                    for concrete_ref in concrete_refs {
+                                        self.walk_selection_with_shape(concrete_ref, field_shape)?;
+                                    }
+                                }
+                                (ExtendedType::Interface(interface_type), true) => {
+                                    // Expand interface to concrete implementing
+                                    // types and validate against each.
+                                    let concrete_refs: Vec<_> = self
+                                        .schema
+                                        .types
+                                        .values()
+                                        .filter_map(|t| {
+                                            if let ExtendedType::Object(o) = t {
+                                                if o.implements_interfaces
+                                                    .contains(&interface_type.name)
+                                                {
+                                                    SchemaTypeRef::new(self.schema, &o.name)
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    for concrete_ref in concrete_refs {
+                                        self.walk_selection_with_shape(concrete_ref, field_shape)?;
+                                    }
+                                }
                                 (_, true) => {
-                                    // Invalid: non-object field with subselection (group selection)
+                                    // Invalid: non-composite field with subselection (group selection)
                                     return Err(Message {
                                         code: Code::GroupSelectionIsNotObject,
                                         message: format!(
@@ -855,7 +896,7 @@ impl<'schema> LegacySelectionValidator<'schema> {
                     code: Code::CircularReference,
                     message: format!(
                         "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.coordinate,
+                        coordinate = self.coordinate,
                         selection_path = self.path_string(field.definition),
                         new_object_name = object.name,
                     ),
@@ -1002,7 +1043,7 @@ impl<'schema> GroupVisitor<LegacyGroup<'schema>, LegacyField<'schema>>
                         code: Code::SelectedFieldNotFound,
                         message: format!(
                             "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                            coordinate = &self.coordinate,
+                            coordinate = self.coordinate,
                             parent_type = group.ty.name,
                         ),
                         locations: self.get_selection_location(selection).collect(),

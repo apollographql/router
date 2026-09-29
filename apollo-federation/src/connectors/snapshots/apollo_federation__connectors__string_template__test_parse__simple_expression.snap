@@ -52,7 +52,7 @@ StringTemplate {
                             ),
                         },
                     ),
-                    spec: V0_3,
+                    spec: V0_4,
                 },
                 location: 1..12,
             },

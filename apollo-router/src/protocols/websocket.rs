@@ -36,6 +36,60 @@ const GRAPHQL_WS_SUBPROTOCOL: &str = "graphql-transport-ws";
 /// See [`WebSocketProtocol::SubscriptionsTransportWs`].
 const SUBSCRIPTIONS_TRANSPORT_WS_SUBPROTOCOL: &str = "graphql-ws";
 
+/// Extension code for the synthetic error emitted when the subgraph closes the WebSocket with a
+/// non-normal close code.
+pub(crate) const WEBSOCKET_CLOSE_ERROR_CODE: &str = "WEBSOCKET_CLOSE_ERROR";
+/// Extension code for the synthetic error emitted when reading from the subgraph WebSocket fails.
+pub(crate) const WEBSOCKET_MESSAGE_ERROR_CODE: &str = "WEBSOCKET_MESSAGE_ERROR";
+/// Extension code for the synthetic error emitted when a subgraph WebSocket message cannot be
+/// deserialized.
+pub(crate) const INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE: &str =
+    "INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT";
+
+/// True if the response is one of the synthetic transport-error items
+/// `convert_websocket_stream` emits for an abnormal close or a read failure, rather than a genuine
+/// GraphQL error from the subgraph. Used by [`InnerStream`] to classify a terminal `ServerMessage::Error`
+/// as a recoverable [`SubscriptionEvent::Disconnected`] instead of a forwardable payload. Keyed on
+/// the shared extension-code constants alone (not on `subscribed`).
+fn is_transient_transport_error(resp: &graphql::Response) -> bool {
+    resp.errors.iter().any(|e| {
+        matches!(
+            e.extension_code().as_deref(),
+            Some(WEBSOCKET_CLOSE_ERROR_CODE)
+                | Some(WEBSOCKET_MESSAGE_ERROR_CODE)
+                | Some(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
+        )
+    })
+}
+
+/// The outcome of polling a subgraph subscription stream, classified by the WebSocket protocol
+/// layer so the reconnect machinery in `call_websocket` can match on intent rather than
+/// re-deriving it from a side-channel flag and the extension codes of synthetic errors.
+///
+/// Stream end (`None`) is always a terminal, non-recoverable end: a protocol-level Complete, a
+/// genuine subgraph operation error (already delivered as a `Payload`), or a protocol violation.
+/// A recoverable connection drop is signalled in-band by [`SubscriptionEvent::Disconnected`], never
+/// by `None`.
+pub(crate) enum SubscriptionEvent {
+    /// A payload to forward to subscribed clients: subscription data, or a genuine subgraph
+    /// operation error (which ends the subscription server-side — `None` follows).
+    Payload(graphql::Response),
+    /// A transport-level error on a connection that is still readable (currently: a message that
+    /// failed to deserialize). The connection stays open, so the consumer keeps reading; whether
+    /// the error is surfaced to clients is the consumer's reconnect policy.
+    TransientError(graphql::Response),
+    /// The subgraph connection dropped (abnormal close, read failure, or an EOF with no
+    /// protocol-level Complete). Recoverable by reconnecting; carries the synthetic error to
+    /// surface to clients if reconnection is ultimately exhausted. The stream yields `None` after
+    /// this.
+    Disconnected(graphql::Response),
+}
+
+/// A boxed subgraph subscription stream yielding [`SubscriptionEvent`]s, used for the dynamic
+/// dispatch the reconnect path needs (the initial connect and each reconnect attempt produce
+/// differently-typed concrete streams).
+pub(crate) type BoxSubscriptionStream = Pin<Box<dyn Stream<Item = SubscriptionEvent> + Send>>;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, JsonSchema, Copy)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WebSocketProtocol {
@@ -243,6 +297,10 @@ where
         + std::marker::Send
         + 'static,
 {
+    #[expect(
+        clippy::result_large_err,
+        reason = "in practice the generic Self and error are not significantly different in size"
+    )]
     pub(crate) async fn new(
         mut stream: S,
         id: String,
@@ -305,6 +363,10 @@ where
         })
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "function is infrequently used, ergonomics more important"
+    )]
     pub(crate) async fn into_subscription(
         mut self,
         request: graphql::Request,
@@ -331,6 +393,22 @@ pub(crate) enum Error {
     WebSocketError(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("deserialization/serialization error")]
     SerdeError(#[from] serde_json::Error),
+}
+
+/// Record a subscription event received from the subgraph over the WebSocket. Skips the connection
+/// acknowledgement — a handshake artifact, not a subscription event — so that reconnects, which
+/// each perform a fresh handshake, don't re-count it. A message that fails to deserialize (`Err`)
+/// is still counted, matching the pre-existing per-frame accounting.
+fn count_received_subscription_event(parsed: &serde_json::Result<ServerMessage>) {
+    if matches!(parsed, Ok(ServerMessage::ConnectionAck)) {
+        return;
+    }
+    u64_counter!(
+        "apollo.router.operations.subscriptions.events",
+        "Number of subscription events",
+        1,
+        subscriptions.mode = "passthrough"
+    );
 }
 
 /// Convert a bidirectional stream of untyped websocket packets to a [Stream] + [Sink] that speaks the
@@ -360,18 +438,21 @@ where
                 },
             }
         })
-        .inspect(|msg| if let Ok(Message::Text(_) | Message::Binary(_)) = msg {
-            u64_counter!(
-                "apollo.router.operations.subscriptions.events",
-                "Number of subscription events",
-                1,
-                subscriptions.mode = "passthrough"
-            );
-        })
-        // Parse messages received from the `Stream`
+        // Parse messages received from the `Stream`, counting each application message as a
+        // subscription event. Counting happens here (on the parsed text/binary frames) rather than
+        // on raw frames so the connection acknowledgement — a handshake artifact re-sent on every
+        // reconnect — is not counted as an event (see `count_received_subscription_event`).
         .map(move |msg| match msg {
-            Ok(Message::Text(text)) => serde_json::from_str(&text),
-            Ok(Message::Binary(bin)) => serde_json::from_slice(&bin),
+            Ok(Message::Text(text)) => {
+                let parsed = serde_json::from_str(&text);
+                count_received_subscription_event(&parsed);
+                parsed
+            }
+            Ok(Message::Binary(bin)) => {
+                let parsed = serde_json::from_slice(&bin);
+                count_received_subscription_event(&parsed);
+                parsed
+            }
             Ok(Message::Ping(payload)) => Ok(ServerMessage::Ping {
                 payload: serde_json::from_slice(&payload).ok(),
             }),
@@ -388,7 +469,7 @@ where
                         payload: ServerError::Error(
                             graphql::Error::builder()
                                 .message(format!("websocket connection has been closed with error code '{code}' and reason '{reason}'"))
-                                .extension_code("WEBSOCKET_CLOSE_ERROR")
+                                .extension_code(WEBSOCKET_CLOSE_ERROR_CODE)
                                 .build(),
                         ),
                     })
@@ -403,7 +484,7 @@ where
                     payload: ServerError::Error(
                         graphql::Error::builder()
                             .message("cannot read message from websocket")
-                            .extension_code("WEBSOCKET_MESSAGE_ERROR")
+                            .extension_code(WEBSOCKET_MESSAGE_ERROR_CODE)
                             .build(),
                     ),
                 })
@@ -455,13 +536,11 @@ where
                 tracing::trace!("cannot shutdown sink: {err:?}");
             };
 
-            u64_counter!(
-                "apollo.router.operations.subscriptions.events",
-                "Number of subscription events",
-                1,
-                subscriptions.mode = "passthrough",
-                subscriptions.complete = true
-            );
+            // Note: the `subscriptions.events{complete=true}` counter is intentionally NOT
+            // emitted here. This task runs once per physical WebSocket connection, and a
+            // reconnecting subscription opens several, which would over-count completions. The
+            // subgraph forwarding loop emits a single completion event per logical subscription
+            // instead (see `call_websocket`).
 
             if let Err(err) = sink.close().await {
                 tracing::trace!("cannot close the websocket stream: {err:?}");
@@ -489,7 +568,7 @@ impl<S> Stream for SubscriptionStream<S>
 where
     S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage> + std::marker::Unpin,
 {
-    type Item = graphql::Response;
+    type Item = SubscriptionEvent;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -514,6 +593,15 @@ pin_project! {
         terminated: bool,
         // When the websocket stream is closed (!= graphql sub protocol)
         closed: bool,
+        // Set once the server has ended the subscription with a terminal message (a protocol-level
+        // Complete or a genuine operation Error). A subsequent transport EOF is then the expected
+        // teardown rather than an unexpected drop, so it ends the stream with `None` instead of a
+        // recoverable `Disconnected`.
+        server_ended: bool,
+        // Set once this stream has yielded its terminal item (a terminal `None` or a
+        // `Disconnected`). Guards against polling the underlying stream past its end and against
+        // re-emitting a terminal event.
+        stream_ended: bool,
     }
 }
 
@@ -529,6 +617,8 @@ where
             completed: false,
             terminated: false,
             closed: false,
+            server_ended: false,
+            stream_ended: false,
         }
     }
 }
@@ -537,7 +627,7 @@ impl<S> Stream for InnerStream<S>
 where
     S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage>,
 {
-    type Item = graphql::Response;
+    type Item = SubscriptionEvent;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -545,51 +635,112 @@ where
     ) -> Poll<Option<Self::Item>> {
         let mut this = self.as_mut().project();
 
+        // Once we've yielded a terminal item, stay ended — and don't poll the underlying stream
+        // again (honoring the `Stream` fuse contract for the EOF case).
+        if *this.stream_ended {
+            return Poll::Ready(None);
+        }
+
         match Pin::new(&mut this.stream).poll_next(cx) {
-            Poll::Ready(message) => match message {
-                Some(server_message) => match server_message {
-                    Ok(server_message) => {
-                        if let Some(id) = &server_message.id()
-                            && this.id != id
-                        {
-                            tracing::error!(
-                                "we should not receive data from other subscriptions, closing the stream"
-                            );
-                            return Poll::Ready(None);
+            Poll::Ready(Some(server_message)) => match server_message {
+                Ok(server_message) => {
+                    if let Some(id) = &server_message.id()
+                        && this.id != id
+                    {
+                        // A frame for a different subscription is a protocol violation, not a
+                        // connection drop: end the stream terminally so the consumer does not
+                        // reconnect.
+                        tracing::error!(
+                            "we should not receive data from other subscriptions, closing the stream"
+                        );
+                        *this.stream_ended = true;
+                        return Poll::Ready(None);
+                    }
+                    if let ServerMessage::Ping { .. } = server_message {
+                        // Send pong asynchronously
+                        // XXX(@goto-bus-stop): We have to pull_flush() to ensure this thing
+                        // finishes, not sure if we're doing that right now?
+                        let _ = Pin::new(
+                            &mut Pin::new(&mut this.stream)
+                                .send(ClientMessage::Pong { payload: None }),
+                        )
+                        .poll(cx);
+                    }
+                    match server_message.into_graphql_response() {
+                        (None, true) => {
+                            // Protocol-level Complete: a normal, terminal end.
+                            *this.stream_ended = true;
+                            Poll::Ready(None)
                         }
-                        if let ServerMessage::Ping { .. } = server_message {
-                            // Send pong asynchronously
-                            // XXX(@goto-bus-stop): We have to pull_flush() to ensure this thing
-                            // finishes, not sure if we're doing that right now?
-                            let _ = Pin::new(
-                                &mut Pin::new(&mut this.stream)
-                                    .send(ClientMessage::Pong { payload: None }),
-                            )
-                            .poll(cx);
-                        }
-                        match server_message.into_graphql_response() {
-                            (None, true) => Poll::Ready(None),
-                            // For ignored message like ACK, Ping, Pong, etc...
-                            (None, false) => self.poll_next(cx),
-                            (Some(resp), _) => Poll::Ready(Some(resp)),
+                        // For ignored messages like ACK, Ping, Pong, etc...
+                        (None, false) => self.poll_next(cx),
+                        (Some(resp), terminal) => {
+                            // `terminal` is true for any `ServerMessage::Error` — but that includes
+                            // the *synthetic* transport errors `convert_websocket_stream` emits for
+                            // an abnormal close or read failure, which are a recoverable connection
+                            // drop rather than a payload to forward.
+                            if is_transient_transport_error(&resp) {
+                                *this.stream_ended = true;
+                                if *this.server_ended {
+                                    // The subgraph already ended the subscription with a terminal
+                                    // operation error; a following transport close is the expected
+                                    // teardown, not a recoverable drop.
+                                    Poll::Ready(None)
+                                } else {
+                                    Poll::Ready(Some(SubscriptionEvent::Disconnected(resp)))
+                                }
+                            } else {
+                                // Subscription data, or a genuine subgraph operation error. A
+                                // terminal operation error ends the subscription server-side, so a
+                                // later transport close or EOF is the expected teardown, not a drop
+                                // to recover from.
+                                if terminal {
+                                    *this.server_ended = true;
+                                }
+                                Poll::Ready(Some(SubscriptionEvent::Payload(resp)))
+                            }
                         }
                     }
-                    Err(err) => Poll::Ready(
+                }
+                Err(err) => {
+                    // A message we cannot deserialize. The connection itself is still readable, so
+                    // this is a transient error on a live stream, not a drop — keep the stream open.
+                    Poll::Ready(Some(SubscriptionEvent::TransientError(
                         graphql::Response::builder()
                             .error(
                                 graphql::Error::builder()
                                     .message(format!(
                                         "cannot deserialize websocket server message: {err:?}"
                                     ))
-                                    .extension_code("INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT")
+                                    .extension_code(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
                                     .build(),
                             )
-                            .build()
-                            .into(),
-                    ),
-                },
-                None => Poll::Ready(None),
+                            .build(),
+                    )))
+                }
             },
+            Poll::Ready(None) => {
+                *this.stream_ended = true;
+                if *this.server_ended {
+                    // The subgraph already ended the subscription (Complete or operation error);
+                    // the connection closing is the expected teardown.
+                    Poll::Ready(None)
+                } else {
+                    // The connection ended without a protocol-level Complete — an unexpected drop
+                    // the reconnect machinery can recover from.
+                    Poll::Ready(Some(SubscriptionEvent::Disconnected(
+                        graphql::Response::builder()
+                            .error(
+                                graphql::Error::builder()
+                                    .message("websocket connection closed unexpectedly")
+                                    .extension_code(WEBSOCKET_CLOSE_ERROR_CODE)
+                                    .build(),
+                            )
+                            .subscribed(false)
+                            .build(),
+                    )))
+                }
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -1010,14 +1161,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Starts at 1 for the connection ack message
-            assert_counter!(
-                "apollo.router.operations.subscriptions.events",
-                1,
-                subscriptions.mode = "passthrough"
-            );
+            // The connection ack is not counted as a subscription event.
 
-            let next_payload = gql_read_stream.next().await.unwrap();
+            let next_payload = response_of(gql_read_stream.next().await.unwrap());
             assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
                 .error(
                     graphql::Error::builder()
@@ -1028,14 +1174,14 @@ mod tests {
                 )
                 .build()
             );
-            // Increments to 2 for the invalid message
+            // Counts 1 for the invalid message
             assert_counter!(
                 "apollo.router.operations.subscriptions.events",
-                2,
+                1,
                 subscriptions.mode = "passthrough"
             );
 
-            let next_payload = gql_read_stream.next().await.unwrap();
+            let next_payload = response_of(gql_read_stream.next().await.unwrap());
             assert_eq!(
                 next_payload,
                 graphql::Response::builder()
@@ -1043,10 +1189,10 @@ mod tests {
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
-            // Increments to 3 for the next message
+            // Increments to 2 for the next message
             assert_counter!(
                 "apollo.router.operations.subscriptions.events",
-                3,
+                2,
                 subscriptions.mode = "passthrough"
             );
 
@@ -1170,14 +1316,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Starts at 1 for the connection ack
-            assert_counter!(
-                "apollo.router.operations.subscriptions.events",
-                1,
-                subscriptions.mode = "passthrough"
-            );
+            // The connection ack is not counted as a subscription event.
 
-            let next_payload = gql_read_stream.next().await.unwrap();
+            let next_payload = response_of(gql_read_stream.next().await.unwrap());
             assert_response_eq_ignoring_error_id!(next_payload, graphql::Response::builder()
                 .error(
                     graphql::Error::builder()
@@ -1188,14 +1329,14 @@ mod tests {
                 )
                 .build()
             );
-            // Increments to 3 for the keepalive and invalid message
+            // Counts 2 for the keepalive and invalid message
             assert_counter!(
                 "apollo.router.operations.subscriptions.events",
-                3,
+                2,
                 subscriptions.mode = "passthrough"
             );
 
-            let next_payload = gql_read_stream.next().await.unwrap();
+            let next_payload = response_of(gql_read_stream.next().await.unwrap());
             assert_eq!(
                 next_payload,
                 graphql::Response::builder()
@@ -1203,10 +1344,10 @@ mod tests {
                     .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
-            // Increments to 4 for the next message
+            // Increments to 3 for the next message
             assert_counter!(
                 "apollo.router.operations.subscriptions.events",
-                4,
+                3,
                 subscriptions.mode = "passthrough"
             );
 
@@ -1303,5 +1444,65 @@ mod tests {
             non_ascii_value.as_bytes(),
             "Header value should match the original non-ASCII value 'Montréal'"
         );
+    }
+
+    fn transport_error_response(code: &str) -> graphql::Response {
+        graphql::Response::builder()
+            .subscribed(false)
+            .error(
+                graphql::Error::builder()
+                    .message("transport error")
+                    .extension_code(code)
+                    .build(),
+            )
+            .build()
+    }
+
+    /// Unwrap the `graphql::Response` carried by any [`SubscriptionEvent`] variant, for assertions
+    /// that only care about the payload, not the classification.
+    fn response_of(event: SubscriptionEvent) -> graphql::Response {
+        match event {
+            SubscriptionEvent::Payload(resp)
+            | SubscriptionEvent::TransientError(resp)
+            | SubscriptionEvent::Disconnected(resp) => resp,
+        }
+    }
+
+    #[test]
+    fn transient_transport_error_matches_close_and_read_errors() {
+        assert!(is_transient_transport_error(&transport_error_response(
+            WEBSOCKET_CLOSE_ERROR_CODE
+        )));
+        assert!(is_transient_transport_error(&transport_error_response(
+            WEBSOCKET_MESSAGE_ERROR_CODE
+        )));
+    }
+
+    #[test]
+    fn transient_transport_error_matches_deserialize_error_with_subscribed_none() {
+        // The deserialize error is built without `subscribed(false)`, so `subscribed` is None.
+        // It must still be recognized so it is suppressed during a reconnect window rather than
+        // tearing down HTTP-multipart clients (where `subscribed.unwrap_or(false)` is false).
+        let parse = graphql::Response::builder()
+            .error(
+                graphql::Error::builder()
+                    .message("cannot deserialize")
+                    .extension_code(INVALID_WEBSOCKET_SERVER_MESSAGE_FORMAT_CODE)
+                    .build(),
+            )
+            .build();
+        assert_eq!(parse.subscribed, None);
+        assert!(is_transient_transport_error(&parse));
+    }
+
+    #[test]
+    fn transient_transport_error_ignores_data_and_application_errors() {
+        let data = graphql::Response::builder().subscribed(true).build();
+        assert!(!is_transient_transport_error(&data));
+
+        // A genuine subgraph application error (different code) is not a transport error.
+        assert!(!is_transient_transport_error(&transport_error_response(
+            "SOME_SUBGRAPH_ERROR"
+        )));
     }
 }

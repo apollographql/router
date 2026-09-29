@@ -7,4 +7,5 @@ preview_file_uploads:
         limits:
             max_file_size: 1mb
             max_files: 10
+            max_overhead_size: 64kb
 

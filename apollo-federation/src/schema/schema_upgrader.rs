@@ -28,8 +28,10 @@ use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
+use crate::schema::field_set::FieldSetValidation;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
@@ -44,13 +46,12 @@ use crate::utils::human_readable::human_readable_subgraph_names;
 #[derive(Debug)]
 pub(crate) struct SchemaUpgrader {
     subgraphs: HashMap<String, Subgraph<Expanded>>,
-    object_type_map: HashMap<Name, HashMap<String, TypeInfo>>,
-}
-
-#[derive(Clone, Debug)]
-struct TypeInfo {
-    pos: TypeDefinitionPosition,
-    metadata: SubgraphMetadata,
+    /// For each object or interface type name, the subgraphs that define it and
+    /// the position it is defined at there. This is an index into `subgraphs`:
+    /// everything else a lookup needs — the defining subgraph's schema and its
+    /// [`SubgraphMetadata`] — is read from `subgraphs` under the same name, so
+    /// no per-entry copy of either is kept here.
+    object_type_map: HashMap<Name, HashMap<String, TypeDefinitionPosition>>,
 }
 
 #[derive(Debug)]
@@ -80,7 +81,8 @@ pub(crate) struct UpgradeResult {
 
 impl SchemaUpgrader {
     pub(crate) fn new(subgraphs: &[Subgraph<Expanded>]) -> Self {
-        let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
+        let mut object_type_map: HashMap<Name, HashMap<String, TypeDefinitionPosition>> =
+            Default::default();
         for subgraph in subgraphs.iter() {
             for pos in subgraph.schema().get_types() {
                 if matches!(
@@ -90,13 +92,7 @@ impl SchemaUpgrader {
                     object_type_map
                         .entry(pos.type_name().clone())
                         .or_default()
-                        .insert(
-                            subgraph.name.clone(),
-                            TypeInfo {
-                                pos: pos.clone(),
-                                metadata: subgraph.metadata().clone(), // TODO: Prefer not to clone
-                            },
-                        );
+                        .insert(subgraph.name.clone(), pos.clone());
                 }
             }
         }
@@ -241,12 +237,11 @@ impl SchemaUpgrader {
                             // Fixed: dereference the string for comparison
                             subgraph_name.as_str() != subgraph.name.as_str()
                         })
-                        .fallible_any(|(other_name, type_info)| {
+                        .fallible_any(|(other_name, other_pos)| {
                             let Some(other_subgraph) = self.get_subgraph_by_name(other_name) else {
                                 return Ok(false);
                             };
-                            let extended_type =
-                                type_info.pos.get(other_subgraph.schema().schema())?;
+                            let extended_type = other_pos.get(other_subgraph.schema().schema())?;
                             // TODO this logic only checks for the explicit `extend type` definitions and ignores
                             //   extensions defined using federation @extends directive. Since fixing it would be
                             //   a breaking change that could affect some customers, we are keeping current behavior
@@ -465,17 +460,17 @@ impl SchemaUpgrader {
                 let Some(entries) = self.object_type_map.get(ty.type_name()) else {
                     continue;
                 };
-                for (subgraph_name, info) in entries.iter() {
+                for (subgraph_name, other_pos) in entries.iter() {
                     if subgraph_name == upgrade_metadata.subgraph_name.as_str() {
                         continue;
                     }
                     let Some(other_schema) = self.get_subgraph_by_name(subgraph_name) else {
                         continue;
                     };
-                    let keys_in_other = info.pos.get_applied_directives(
+                    let keys_in_other = other_pos.get_applied_directives(
                         other_schema.schema(),
-                        &info
-                            .metadata
+                        &other_schema
+                            .metadata()
                             .federation_spec_definition()
                             .key_directive_definition(other_schema.schema())?
                             .name,
@@ -494,7 +489,7 @@ impl SchemaUpgrader {
                         args.fields,
                         false,
                     )? {
-                        if TypeDefinitionPosition::from(field.parent()) != info.pos {
+                        if TypeDefinitionPosition::from(field.parent()) != *other_pos {
                             continue;
                         }
                         let external =
@@ -520,9 +515,13 @@ impl SchemaUpgrader {
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let cloned_schema = schema.clone();
+        // NOTE: we should be passing a supergraph schema so we could verify the remaining `@requires`
+        // field set values are valid. Schema upgrader runs before merge process, we don't have
+        // access to the supergraph so we need to skip the validation.
         remove_inactive_requires_and_provides_from_subgraph(
-            &cloned_schema, // TODO: I don't know what this value should be
+            &cloned_schema,
             schema,
+            FieldSetValidation::Skip,
         )
     }
 
@@ -761,24 +760,30 @@ impl SchemaUpgrader {
                     let Some(entries) = self.object_type_map.get(obj_name) else {
                         continue;
                     };
-                    let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, info)| {
-                        let field_exists = self
-                            .get_subgraph_by_name(subgraph_name)
-                            .unwrap()
+                    let mut type_in_other_subgraphs = false;
+                    for subgraph_name in entries.keys() {
+                        let other_subgraph =
+                            self.get_subgraph_by_name(subgraph_name).ok_or_else(|| {
+                                internal_error!(
+                                    "Type index names subgraph \"{subgraph_name}\", which the upgrader does not hold"
+                                )
+                            })?;
+                        let field_exists = other_subgraph
                             .schema()
                             .schema()
                             .type_field(&field.type_name, &field.field_name)
                             .is_ok();
+                        let other_metadata = other_subgraph.metadata();
 
                         if (subgraph_name != upgrade_metadata.subgraph_name.as_str())
                             && field_exists
-                            && (!info.metadata.is_field_external(&obj_field)
-                                || info.metadata.is_field_partially_external(&obj_field))
+                            && (!other_metadata.is_field_external(&obj_field)
+                                || other_metadata.is_field_partially_external(&obj_field))
                         {
-                            return true;
+                            type_in_other_subgraphs = true;
+                            break;
                         }
-                        false
-                    });
+                    }
                     if type_in_other_subgraphs
                         && !obj_field.has_applied_directive(schema, &shareable_directive_name)
                     {
@@ -789,7 +794,7 @@ impl SchemaUpgrader {
                 let Some(entries) = self.object_type_map.get(obj_name) else {
                     continue;
                 };
-                let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, _info)| {
+                let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, _)| {
                     if subgraph_name != upgrade_metadata.subgraph_name.as_str() {
                         return true;
                     }
@@ -2762,6 +2767,110 @@ scalar _FieldSet
             result.is_ok(),
             "Expected upgrade to succeed but got: {:?}",
             result.err()
+        );
+    }
+
+    /// Two subgraphs that both define `T`, one federation 1 and one federation 2.
+    fn mixed_federation_version_subgraphs() -> Vec<Subgraph<Expanded>> {
+        let fed1 = Subgraph::parse(
+            "fed1",
+            "",
+            r#"
+            type Query {
+                t1: T
+            }
+
+            type T @key(fields: "id") {
+                id: String
+                x: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let fed2 = Subgraph::parse(
+            "fed2",
+            "",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+
+            type Query {
+                t2: T
+            }
+
+            type T @key(fields: "id") {
+                id: String
+                x: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        vec![fed1, fed2]
+    }
+
+    #[test]
+    fn object_type_map_indexes_every_subgraph_that_defines_a_type() {
+        let subgraphs = mixed_federation_version_subgraphs();
+        let upgrader = SchemaUpgrader::new(&subgraphs);
+
+        // The index covers every subgraph that defines the type, including the
+        // federation 2 one that will never be upgraded — the upgrade rules read
+        // it to decide what the subgraph under upgrade has to declare.
+        let defining_subgraphs: Vec<&str> = upgrader
+            .object_type_map
+            .iter()
+            .filter(|(type_name, _)| type_name.as_str() == "T")
+            .flat_map(|(_, per_subgraph)| per_subgraph.keys().map(|name| name.as_str()))
+            .sorted()
+            .collect();
+        assert_eq!(defining_subgraphs, ["fed1", "fed2"]);
+
+        // Each entry is only an index into `subgraphs`: it names a subgraph the
+        // upgrader holds and a position that resolves in that subgraph's schema,
+        // which is where a lookup reads the schema and the metadata it needs.
+        for (type_name, per_subgraph) in &upgrader.object_type_map {
+            for (subgraph_name, pos) in per_subgraph {
+                assert_eq!(pos.type_name(), type_name);
+                let subgraph = upgrader
+                    .get_subgraph_by_name(subgraph_name)
+                    .unwrap_or_else(|| panic!("{subgraph_name} is indexed but not held"));
+                assert!(
+                    pos.get(subgraph.schema().schema()).is_ok(),
+                    "{type_name} is indexed in {subgraph_name} but does not resolve there"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn adds_shareable_for_a_type_also_resolved_by_a_federation_2_subgraph() {
+        // `T.x` in the federation 1 subgraph has to become @shareable because the
+        // federation 2 subgraph resolves it too, even though that subgraph is
+        // itself never upgraded.
+        let [fed1, fed2]: [Subgraph<_>; 2] =
+            upgrade_subgraphs_if_necessary(mixed_federation_version_subgraphs())
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 2 elements");
+
+        assert!(
+            fed1.schema()
+                .schema()
+                .type_field("T", "x")
+                .is_ok_and(|f| f.directives.has("shareable"))
+        );
+        // The federation 2 subgraph is passed through untouched.
+        assert!(
+            fed2.schema()
+                .schema()
+                .type_field("T", "x")
+                .is_ok_and(|f| !f.directives.has("shareable"))
         );
     }
 }

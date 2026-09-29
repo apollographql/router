@@ -23,7 +23,6 @@ use url::ParseError;
 use url::Url;
 
 use crate::LicenseSource;
-use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
@@ -47,6 +46,7 @@ pub(crate) static APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET: AtomicBool = AtomicBool:
 pub(crate) static APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
+// Unlike its siblings above, this is never read via `populate_cli_instrument` (or anywhere else) today.
 pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
 pub(crate) static APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE: Mutex<Option<String>> = Mutex::new(None);
@@ -96,10 +96,6 @@ enum ConfigSubcommand {
         #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
         config_path: PathBuf,
     },
-    /// List all the available experimental configurations with related GitHub discussion
-    Experimental,
-    /// List all the available preview configurations with related GitHub discussion
-    Preview,
 }
 
 /// Options for the router
@@ -187,7 +183,8 @@ pub struct Opt {
     #[clap(long, env = "APOLLO_GRAPH_ARTIFACT_REFERENCE", action = ArgAction::Append)]
     graph_artifact_reference: Option<String>,
 
-    /// Disable sending anonymous usage information to Apollo.
+    /// Disable the router's fully anonymous usage ping. Doesn't affect usage reporting to Apollo
+    /// Studio for graphs configured with APOLLO_KEY and APOLLO_GRAPH_REF.
     #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
@@ -446,18 +443,6 @@ impl Executable {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
                 println!("{output}");
-                Ok(())
-            }
-            Some(Commands::Config(ConfigSubcommandArgs {
-                command: ConfigSubcommand::Experimental,
-            })) => {
-                Discussed::new().print_experimental();
-                Ok(())
-            }
-            Some(Commands::Config(ConfigSubcommandArgs {
-                command: ConfigSubcommand::Preview,
-            })) => {
-                Discussed::new().print_preview();
                 Ok(())
             }
             None => Self::inner_start(shutdown, schema, config, license, opt).await,

@@ -1,8 +1,37 @@
-# Apollo Router — Code Review Guidelines
+# Apollo Router — Engineering Guidelines
 
-The following patterns are known sources of bugs in this codebase. During code review, check for all of them in addition to general correctness, performance, and security concerns.
+This file applies both when writing new code and when reviewing it: the "Required" rule below must be followed by anyone (or any AI tooling) authoring changes, and the "Known patterns to check" list is what to look for during code review — including whether the "Required" rule was actually followed.
 
-## Known patterns to check
+## Required when writing code
+
+### Usage metric for every new config option or feature
+
+Any new config option or feature must ship with a usage metric, so adoption is measurable from day one. Knowing how many deployments actually use a feature is what makes decisions like deprecation, further investment, or support prioritization possible — without it, those calls get made blind.
+
+- The metric must be **always-on**: emitted once per router startup/config-reload (an `ObservableGauge` populated from the parsed config), not a per-request counter that scales with traffic volume. A feature used by one router instance serving zero requests must still be visible.
+- Follow the existing pattern in `populate_config_instruments` (`apollo-router/src/configuration/metrics.rs`), which registers instruments via the `populate_config_instrument!` macro. Name the metric `apollo.router.config.<feature>` and add it there — do not build a parallel mechanism.
+- It's fine for the metric to just record "this is enabled" with no immediate consumer. The goal is a black-hole signal — cheap to emit, ignorable for now, queryable later if adoption becomes a question.
+
+Example, following `apollo.router.config.authorization` in `apollo-router/src/configuration/metrics.rs`:
+
+```rust
+populate_config_instrument!(
+    apollo.router.config.my_new_feature, // metric name
+    "$.my_new_feature[?(@.enabled == true)]", // path to the feature in config
+    opt.some_sub_option, // attribute name
+    "$[?(@.some_sub_option == true)]" // path to the attribute, relative to the feature
+);
+```
+
+This sets `apollo.router.config.my_new_feature` to `1` whenever `my_new_feature.enabled: true` is present in the router's YAML config (with an `opt_some_sub_option` attribute for the sub-option), and reports it on every metrics collection cycle regardless of request traffic.
+
+## Known patterns to check during code review
+
+The following patterns are known sources of bugs in this codebase. Check for all of them in addition to general correctness, performance, and security concerns.
+
+**Missing usage metric for a new config option or feature.**
+- When a diff adds a new config option or feature flag, check whether `populate_config_instruments` in `apollo-router/src/configuration/metrics.rs` was updated to register it.
+- Flag config/feature additions with no corresponding `apollo.router.config.*` gauge — see the "Required" section above.
 
 **Test asserts on the wrong side of the wire.**
 - For each external call in the diff (HTTP, IPC, DB, etc.), ask: where's the metric/log/span that records it happened?
