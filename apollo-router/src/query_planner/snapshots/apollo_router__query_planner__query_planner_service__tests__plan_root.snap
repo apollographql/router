@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/query_planner/query_planner_service.rs
-expression: plan.root
+expression: "plan.root.as_deref().expect(\"non-empty plan\")"
 ---
 Fetch(
     FetchNode {
@@ -15,7 +15,7 @@ Fetch(
         output_rewrites: None,
         context_rewrites: None,
         schema_aware_hash: QueryHash(
-            "8ff8771554b8db5906bdbb18a3d9e39685c5c7b32e53078f47a09455bb170939",
+            "2216b9adcba62b2fc2a54e30fa477bda19c79be484b505a25a84e6517fc6a653",
         ),
         authorization: CacheKeyMetadata {
             is_authenticated: false,
