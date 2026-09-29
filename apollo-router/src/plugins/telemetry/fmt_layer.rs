@@ -660,11 +660,34 @@ connector:
 
             assert_eq!(parsed["keys"], "{[1, 2]: true}");
             assert_eq!(
-                parsed["keys_serialization_error"], "key must be a string",
+                parsed["serialization_errors"],
+                serde_json::json!({ "keys": "key must be a string" }),
                 "the fallback should record why conversion failed; got: {raw}"
             );
             assert_eq!(parsed["code"], 43);
             assert_eq!(parsed["message"], "still logged");
+        }
+
+        #[test]
+        fn test_json_logging_valuable_own_serialization_errors_field_wins() {
+            let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
+            let raw = json_log_line(|| {
+                info!(
+                    keys = ::tracing::field::valuable(&keyed_by_list),
+                    serialization_errors = "from the plugin",
+                    "still logged"
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(
+                raw.matches(r#""serialization_errors":"#).count(),
+                1,
+                "the key must not be duplicated; got: {raw}"
+            );
+            assert_eq!(parsed["serialization_errors"], "from the plugin");
+            assert_eq!(parsed["keys"], "{[1, 2]: true}");
         }
     }
 

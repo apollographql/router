@@ -14,7 +14,7 @@ Since the JSON formatter's event visitor was replaced to deduplicate the empty `
 "log": "AccessLog { client_id: \"abc\", entitlements: Entitlements { bypass: true } }"
 ```
 
-The replacement visitor did not override `record_value`, so it inherited the trait's default implementation, which forwards to the `Debug` rendering. It now converts `valuable` values directly, and the deduplication behavior is unchanged. A value that has no JSON representation, such as a map with non-string keys, still falls back to its `Debug` string, with a sibling `<field>_serialization_error` field giving the reason, and the rest of the log line is unaffected.
+The replacement visitor did not override `record_value`, so it inherited the trait's default implementation, which forwards to the `Debug` rendering. It now converts `valuable` values directly, and the deduplication behavior is unchanged. A value that has no JSON representation, such as a map with non-string keys, still falls back to its `Debug` string, and the reason is recorded under a single `serialization_errors` object keyed by field name (omitted if the event already has its own `serialization_errors` field). The rest of the log line is unaffected.
 
 This applies only to event fields in JSON logs. Span attributes (including the `span` and `spans` entries in JSON logs), the text formatter and exported OpenTelemetry span events still render `valuable` values as `Debug` strings, as they did in 2.15.
 

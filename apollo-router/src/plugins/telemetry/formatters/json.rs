@@ -271,17 +271,36 @@ where
 /// By collecting first we can drop the empty-string `message` when a real one is present.
 struct EventFieldCollector {
     fields: Vec<(String, serde_json::Value)>,
+    /// Why a field fell back to its Debug string, keyed by field name. Written as the single
+    /// [`SERIALIZATION_ERRORS_KEY`] entry after the event's own fields.
+    serialization_errors: serde_json::Map<String, serde_json::Value>,
 }
+
+/// Top-level key for [`EventFieldCollector::serialization_errors`]. A fixed key, rather than one
+/// per failing field, keeps log-backend index mappings stable.
+const SERIALIZATION_ERRORS_KEY: &str = "serialization_errors";
 
 impl EventFieldCollector {
     fn new() -> Self {
-        Self { fields: Vec::new() }
+        Self {
+            fields: Vec::new(),
+            serialization_errors: serde_json::Map::new(),
+        }
     }
 
+    /// Writes the buffered fields, then any serialization errors.
+    ///
+    /// If the event has its own `serialization_errors` field, that field is written and the
+    /// collected errors are left out, so the line never has a duplicate key and never loses
+    /// the plugin's data. The fallen-back fields still carry their Debug strings.
     fn serialize_into<M: SerializeMap>(self, map: &mut M) -> Result<(), M::Error> {
         let has_real_message = self.fields.iter().any(|(k, v)| {
             k == "message" && !matches!(v, serde_json::Value::String(s) if s.is_empty())
         });
+        let has_own_serialization_errors = self
+            .fields
+            .iter()
+            .any(|(k, _)| k == SERIALIZATION_ERRORS_KEY);
         for (key, value) in self.fields {
             if key == "message"
                 && has_real_message
@@ -290,6 +309,9 @@ impl EventFieldCollector {
                 continue;
             }
             map.serialize_entry(key.as_str(), &value)?;
+        }
+        if !self.serialization_errors.is_empty() && !has_own_serialization_errors {
+            map.serialize_entry(SERIALIZATION_ERRORS_KEY, &self.serialization_errors)?;
         }
         Ok(())
     }
@@ -341,9 +363,9 @@ impl field::Visit for EventFieldCollector {
     /// Only compiled when the build sets `--cfg tracing_unstable`, which is what makes
     /// `record_value` exist on `field::Visit` in the first place.
     ///
-    /// A value with no JSON representation falls back to its Debug string, and a sibling
-    /// `<name>_serialization_error` field records why. The error goes in the log line rather
-    /// than a separate event because emitting an event from inside the formatter can recurse.
+    /// A value with no JSON representation falls back to its Debug string, and the reason is
+    /// recorded under `serialization_errors.<name>`. The error goes in the log line rather than
+    /// a separate event because emitting an event from inside the formatter can recurse.
     #[cfg(tracing_unstable)]
     fn record_value(&mut self, field: &Field, value: valuable::Value<'_>) {
         let name = field_name(field);
@@ -354,10 +376,8 @@ impl field::Visit for EventFieldCollector {
                     name.to_owned(),
                     serde_json::Value::from(format!("{value:?}")),
                 ));
-                self.fields.push((
-                    format!("{name}_serialization_error"),
-                    serde_json::Value::from(error.to_string()),
-                ));
+                self.serialization_errors
+                    .insert(name.to_owned(), serde_json::Value::from(error.to_string()));
             }
         }
     }
@@ -849,5 +869,53 @@ mod test {
             .map(|(name, _)| name.as_str())
             .collect();
         assert_eq!(names, ["f64", "i64", "u64", "bool", "str", "debug"]);
+    }
+
+    /// Serializes the collector the way the formatter does, as the fields of one JSON object.
+    fn collector_json(collector: EventFieldCollector) -> String {
+        use serde::ser::SerializeMap;
+        use serde::ser::Serializer as _;
+
+        let mut out = Vec::new();
+        let mut serializer = serde_json::Serializer::new(&mut out);
+        let mut map = serializer.serialize_map(None).unwrap();
+        collector.serialize_into(&mut map).unwrap();
+        map.end().unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn test_event_field_collector_groups_serialization_errors_under_one_key() {
+        let mut collector = EventFieldCollector::new();
+        collector
+            .fields
+            .push(("payload".into(), "{[1]: true}".into()));
+        collector
+            .serialization_errors
+            .insert("payload".into(), "reason".into());
+
+        assert_eq!(
+            collector_json(collector),
+            r#"{"payload":"{[1]: true}","serialization_errors":{"payload":"reason"}}"#
+        );
+    }
+
+    #[test]
+    fn test_event_field_collector_keeps_own_serialization_errors_field() {
+        let mut collector = EventFieldCollector::new();
+        collector
+            .fields
+            .push(("payload".into(), "{[1]: true}".into()));
+        collector
+            .fields
+            .push(("serialization_errors".into(), "from the plugin".into()));
+        collector
+            .serialization_errors
+            .insert("payload".into(), "reason".into());
+
+        assert_eq!(
+            collector_json(collector),
+            r#"{"payload":"{[1]: true}","serialization_errors":"from the plugin"}"#
+        );
     }
 }
