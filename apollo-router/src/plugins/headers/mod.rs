@@ -50,46 +50,43 @@ use crate::services::router;
 register_private_plugin!("apollo", "headers", Headers);
 
 /// Request-side header configuration: propagation operations + optional masking.
-#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 struct HeadersLocation {
     /// Propagate/Insert/Remove operations
-    #[serde(default)]
+    // Operation can't take the configuration attribute: its from-body insert holds a JsonPathInst,
+    // which has no Debug impl for the macro's derive, nor a Validate impl.
+    #[config(skip_validate)]
     operations: Vec<Operation>,
 
     /// Header masking configuration applied to request headers in logs/telemetry.
-    #[serde(default)]
     masking: Option<crate::configuration::header_masking_config::HeaderMaskingConfig>,
 }
 
 /// Response-side header configuration. Response propagation isn't a router
 /// feature, so only masking is configurable here.
-#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 struct ResponseHeadersLocation {
     /// Header masking configuration applied to response headers in logs/telemetry.
-    #[serde(default)]
     masking: Option<crate::configuration::header_masking_config::HeaderMaskingConfig>,
 }
 
 /// Configuration for connector headers at a specific location
 /// Connectors only have request operations - masking is inherited from parent subgraph
-#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 struct ConnectorHeadersLocation {
     /// Request-side propagate/insert/remove operations
-    #[serde(default)]
     request: Option<ConnectorRequestHeadersLocation>,
 }
 
 /// Request-side connector header configuration. Mirrors the wrapped
 /// `operations:` shape used by `HeadersLocation`, so connector config doesn't
 /// drift from regular subgraph config.
-#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 struct ConnectorRequestHeadersLocation {
     /// Propagate/Insert/Remove operations
-    #[serde(default)]
+    // Operation can't take the configuration attribute: its from-body insert holds a JsonPathInst,
+    // which has no Debug impl for the macro's derive, nor a Validate impl.
+    #[config(skip_validate)]
     operations: Vec<Operation>,
 }
 
@@ -231,29 +228,23 @@ enum Propagate {
 }
 
 /// Configuration for connectors (no masking - inherits from parent subgraph)
-#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 struct ConnectorHeadersConfiguration {
     /// Options applying to all sources across all subgraphs
-    #[serde(default)]
     all: Option<ConnectorHeadersLocation>,
 
     /// Map of subgraph_name.connector_source_name to configuration
-    #[serde(default)]
     sources: HashMap<String, ConnectorHeadersLocation>,
 }
 
 /// Per-subgraph (or global) header configuration. Request configuration covers
 /// propagation + masking; response configuration covers masking only.
-#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 struct GlobalHeadersConfiguration {
     /// Request configuration (operations and masking)
-    #[serde(default)]
     request: Option<HeadersLocation>,
 
     /// Response configuration (masking only)
-    #[serde(default)]
     response: Option<ResponseHeadersLocation>,
 }
 
@@ -263,15 +254,12 @@ struct GlobalHeadersConfiguration {
 #[schemars(rename = "HeadersConfig")]
 pub(crate) struct Config {
     /// Rules to apply to all subgraphs (global defaults)
-    #[config(skip_validate)]
     all: Option<GlobalHeadersConfiguration>,
 
     /// Rules for specific subgraphs
-    #[config(skip_validate)]
     subgraphs: HashMap<String, GlobalHeadersConfiguration>,
 
     /// Rules for connectors
-    #[config(skip_validate)]
     connector: ConnectorHeadersConfiguration,
 }
 
