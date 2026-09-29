@@ -239,6 +239,7 @@ pub(crate) struct Config {
     include_cache_control_header_on_router_response: bool,
 
     /// Configure invalidation per subgraph
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
     #[config(default = default_disabled_subgraph(), skip_validate)]
     #[schemars(extend("default" = {
         "all": {
@@ -253,11 +254,11 @@ pub(crate) struct Config {
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Configure response caching per connector source
+    // Holds Ttl, a tuple struct (see PLAT-320), and Redis config, which have no Validate impl.
     #[config(skip_validate)]
     pub(crate) connector: ConnectorCacheConfiguration,
 
     /// Global invalidation configuration
-    #[config(skip_validate)]
     invalidation: Option<InvalidationEndpointConfig>,
 
     /// Buffer size for known private queries (default: 2048)
@@ -267,7 +268,6 @@ pub(crate) struct Config {
     /// Propagation of aggregated response_cache cache tags to the supergraph response.
     /// Off by default; opt in to surface cache tags to a CDN for tag-based purging. See
     /// `CdnInvalidationConfig` for the individual fields.
-    #[config(skip_validate)]
     pub(crate) cdn_invalidation: CdnInvalidationConfig,
 }
 
@@ -281,20 +281,23 @@ pub(crate) struct Config {
 /// coprocessors or Rhai regardless of this config), but the fine-grained tag values are only
 /// aggregated when `enabled` is `true` — there's no way to read the full label set from context
 /// without also enabling header emission.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Serialize)]
 pub(crate) struct CdnInvalidationConfig {
     /// Whether to emit the configured header on the supergraph response. Defaults to false.
     pub(crate) enabled: bool,
 
     /// Name of the invalidation labels header used by CDNs
+    #[config(default = "Cache-Tag".to_string())]
     pub(crate) header_name: String,
 
     /// The delimiter used by the invalidation labels header (eg, `" "`, `","`). Defaults to `","`.
+    #[config(default = ",".to_string())]
     pub(crate) header_delimiter: String,
 
     /// Maximum number of bytes for the joined header value. When the joined value would exceed
     /// this size, `experimental_on_overflow` decides what to do. Defaults to 16kb.
+    #[config(default = 16384)]
     pub(crate) max_bytes: usize,
 
     /// What to do when the joined header value would exceed `max_bytes`.
@@ -306,13 +309,13 @@ pub(crate) struct CdnInvalidationConfig {
 
 /// What the router does when the joined `Cache-Tag`/invalidation-labels header value would
 /// exceed `max_bytes`. See `CdnInvalidationConfig::experimental_on_overflow`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum OverflowBehavior {
     /// Pack the header coarsest-first (subgraph, then type, then tag) and drop whatever doesn't
     /// fit, finest-grained first, so an oversized response still gets a usable, if partial,
     /// header.
-    #[default]
+    #[config(default)]
     Truncate,
     /// Omit the header entirely rather than send a partial one. Note: this does not drop the
     /// `Cache-Control` header, so the response is still cached — this option is only useful
@@ -320,18 +323,6 @@ pub(crate) enum OverflowBehavior {
     /// to bypass caching for that response (e.g. Cloudflare response rules setting `no-store`
     /// when the header is absent).
     Drop,
-}
-
-impl Default for CdnInvalidationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            header_name: "Cache-Tag".to_string(),
-            header_delimiter: ",".to_string(),
-            max_bytes: 16384,
-            experimental_on_overflow: OverflowBehavior::default(),
-        }
-    }
 }
 
 const fn default_lru_private_queries_size() -> NonZeroUsize {

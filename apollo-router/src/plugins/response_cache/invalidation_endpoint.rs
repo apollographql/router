@@ -200,12 +200,15 @@ mod subgraph_invalidation_config_tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Serialize)]
 pub(crate) struct InvalidationEndpointConfig {
     /// Specify on which path you want to listen for invalidation endpoint.
+    #[config(required)]
     pub(crate) path: String,
     /// Listen address on which the invalidation endpoint must listen.
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
+    #[config(required, skip_validate)]
     pub(crate) listen: ListenAddr,
 }
 
