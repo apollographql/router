@@ -12811,8 +12811,35 @@ expression: "&schema"
           "default": "",
           "description": "Any name except `reserved`.",
           "type": "string"
+        },
+        "nested": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ValidatedNestedConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A nested section with its own rule."
         }
       },
+      "type": "object"
+    },
+    "ValidatedNestedConfig": {
+      "additionalProperties": false,
+      "description": "A nested section whose rule runs because its parent's field doesn't skip validation.",
+      "properties": {
+        "limit": {
+          "description": "At least 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
       "type": "object"
     },
     "WebSocketConfiguration": {
