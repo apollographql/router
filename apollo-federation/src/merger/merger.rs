@@ -107,8 +107,10 @@ use crate::supergraph::CompositionHint;
 use crate::utils::FallibleOnceCell;
 use crate::utils::MultiIndexMap;
 use crate::utils::first_max_by_key;
+use crate::utils::human_readable::JoinStringsOptions;
 use crate::utils::human_readable::human_readable_subgraph_names;
 use crate::utils::human_readable::human_readable_types;
+use crate::utils::human_readable::join_strings;
 use crate::utils::iter_into_single_item;
 
 static NON_MERGED_CORE_FEATURES: LazyLock<[Identity; 4]> = LazyLock::new(|| {
@@ -1966,6 +1968,7 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             IndexMap::default();
         let mut external_fields_to_update: IndexMap<ObjectFieldDefinitionPosition, DirectiveList> =
             IndexMap::default();
+        let mut conflicting_field_errors = Vec::new();
 
         let access_control_directive_names: IndexSet<Name> = self
             .access_control_directives_in_supergraph
@@ -2042,6 +2045,39 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                                 if self
                                     .is_field_provided_by_an_interface_object(intf_field_name, intf)
                                 {
+                                    // The field must not also be provided through @interfaceObject for other
+                                    // interfaces of this type (from different subgraphs). Since we only copy the
+                                    // definition from the first such interface, the result would depend on the
+                                    // order of the `implements` clause, and query planning could pick an
+                                    // @interfaceObject whose field definition does not match.
+                                    let other_providing_interfaces: Vec<_> = object
+                                        .implements_interfaces
+                                        .iter()
+                                        .filter(|other| {
+                                            *other != intf
+                                                && self.is_field_provided_by_an_interface_object(
+                                                    intf_field_name,
+                                                    other,
+                                                )
+                                        })
+                                        .collect();
+                                    if !other_providing_interfaces.is_empty() {
+                                        let interfaces = std::iter::once(intf)
+                                            .chain(other_providing_interfaces)
+                                            .map(|itf| format!("\"{itf}\""));
+                                        conflicting_field_errors.push(
+                                            CompositionError::InterfaceObjectUsageError {
+                                                message: format!(
+                                                    "Field \"{candidate_field}\" is provided through @interfaceObject by multiple interfaces of \"{name}\": {}. A field of an implementation type can only be provided through a single @interfaceObject type.",
+                                                    join_strings(
+                                                        interfaces,
+                                                        JoinStringsOptions::default()
+                                                    ),
+                                                ),
+                                            },
+                                        );
+                                    }
+
                                     // Note it's possible that interface is abstracted away (as an interface object) in multiple
                                     // subgraphs, so we don't bother with the field definition in those subgraphs, but rather
                                     // just copy the merged definition from the interface.
@@ -2074,6 +2110,10 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
                     }
                 }
             }
+        }
+
+        for error in conflicting_field_errors {
+            self.error_reporter.add_error(error);
         }
 
         for (dest, ast_node) in fields_to_insert {
