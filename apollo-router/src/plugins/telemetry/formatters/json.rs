@@ -295,37 +295,41 @@ impl EventFieldCollector {
     }
 }
 
+/// Field name without the `r#` prefix that tracing keeps for raw identifiers such as `r#type`.
+fn field_name(field: &Field) -> &str {
+    let name = field.name();
+    name.strip_prefix("r#").unwrap_or(name)
+}
+
 impl field::Visit for EventFieldCollector {
     fn record_f64(&mut self, field: &Field, value: f64) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         self.fields
-            .push((field.name().to_owned(), serde_json::Value::from(value)));
+            .push((field_name(field).to_owned(), serde_json::Value::from(value)));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        let name = field.name();
-        let name = name.strip_prefix("r#").unwrap_or(name);
         self.fields.push((
-            name.to_owned(),
+            field_name(field).to_owned(),
             serde_json::Value::from(format!("{value:?}")),
         ));
     }
@@ -338,8 +342,7 @@ impl field::Visit for EventFieldCollector {
     /// `record_value` exist on `field::Visit` in the first place.
     #[cfg(tracing_unstable)]
     fn record_value(&mut self, field: &Field, value: valuable::Value<'_>) {
-        let name = field.name();
-        let name = name.strip_prefix("r#").unwrap_or(name);
+        let name = field_name(field);
         let json = serde_json::to_value(valuable_serde::Serializable::new(value))
             .unwrap_or_else(|_| serde_json::Value::from(format!("{value:?}")));
         self.fields.push((name.to_owned(), json));
@@ -655,14 +658,23 @@ impl fmt::Debug for WriteAdaptor<'_> {
 #[cfg(test)]
 mod test {
     use tracing::subscriber;
+    use tracing_core::Callsite;
     use tracing_core::Event;
+    use tracing_core::Kind;
+    use tracing_core::Level;
+    use tracing_core::Metadata;
     use tracing_core::Subscriber;
+    use tracing_core::field::FieldSet;
+    use tracing_core::field::Visit;
+    use tracing_core::identify_callsite;
+    use tracing_core::subscriber::Interest;
     use tracing_subscriber::Layer;
     use tracing_subscriber::Registry;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
 
+    use super::EventFieldCollector;
     use super::JsonAwareStr;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
@@ -780,5 +792,48 @@ mod test {
         };
         let out = serde_json::to_string(&s).unwrap();
         assert_eq!(out, r#""{not valid json}""#);
+    }
+
+    #[test]
+    fn test_event_field_collector_strips_raw_identifier_prefix() {
+        // tracing's macros already strip `r#` from field names, but names declared any other
+        // way keep it, so every `record_*` method has to strip it the same way.
+        struct RawCallsite;
+        impl Callsite for RawCallsite {
+            fn set_interest(&self, _: Interest) {}
+            fn metadata(&self) -> &Metadata<'_> {
+                &RAW_METADATA
+            }
+        }
+        static RAW_CALLSITE: RawCallsite = RawCallsite;
+        static RAW_METADATA: Metadata<'static> = Metadata::new(
+            "raw",
+            "raw",
+            Level::INFO,
+            None,
+            None,
+            None,
+            FieldSet::new(
+                &["r#f64", "r#i64", "r#u64", "r#bool", "r#str", "r#debug"],
+                identify_callsite!(&RAW_CALLSITE),
+            ),
+            Kind::EVENT,
+        );
+        let field = |name| RAW_METADATA.fields().field(name).expect("declared field");
+
+        let mut collector = EventFieldCollector::new();
+        collector.record_f64(&field("r#f64"), 1.5);
+        collector.record_i64(&field("r#i64"), -1);
+        collector.record_u64(&field("r#u64"), 1);
+        collector.record_bool(&field("r#bool"), true);
+        collector.record_str(&field("r#str"), "query");
+        collector.record_debug(&field("r#debug"), &Some(1));
+
+        let names: Vec<&str> = collector
+            .fields
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        assert_eq!(names, ["f64", "i64", "u64", "bool", "str", "debug"]);
     }
 }
