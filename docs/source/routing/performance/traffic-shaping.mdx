@@ -270,7 +270,7 @@ traffic_shaping:
     pool_idle_timeout: 30s  # default: 15s; set to null to disable
 ```
 
-You can set this option in the `all` block, per subgraph under `subgraphs`, and per source under `connector.sources`. A per-subgraph or per-source block that omits it uses the value from the `all` block (or `connector.all`). Setting it to `null` there disables idle eviction for that subgraph or source, even if the `all` block sets a value.
+Set this option in the `all` block, per subgraph under `subgraphs`, or per source under `connector.sources`. A per-subgraph or per-source block that omits it uses the value from the `all` block (or `connector.all`). Setting it to `null` there disables idle eviction for that subgraph or source, even if the `all` block sets a value.
 
 ### Ordering
 
