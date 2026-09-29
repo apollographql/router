@@ -6,13 +6,13 @@
 //! * Compression
 //! * Rate limiting
 //!
+mod admission;
 mod deduplication;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderValue;
 use http::StatusCode;
@@ -28,20 +28,24 @@ use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
+use tower::util::MapRequestLayer;
+use tower::util::option_layer;
 
+use self::admission::ConnectorSourceAdmissionLayer;
+use self::admission::SubgraphAdmissionLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::OptionLayer;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::unconstrained_buffer::UnconstrainedBufferLayer;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
 use crate::services::connector;
-use crate::services::connector::request_service::Request;
-use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;
 use crate::services::router;
 use crate::services::subgraph;
@@ -409,177 +413,28 @@ impl PluginPrivate for TrafficShaping {
         name: &str,
         service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
-        // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
-        let all_config = self.config.all.as_ref();
-        let subgraph_config = self.config.subgraphs.get(name);
-        let final_config = Self::merge_config(all_config, subgraph_config);
-
-        if let Some(config) = final_config {
-            let rate_limit = config
-                .shaping
-                .global_rate_limit
-                .as_ref()
-                .map(|rate_limit_conf| {
-                    self.rate_limit_subgraphs
-                        .lock()
-                        .entry(name.to_string())
-                        .or_insert_with(|| {
-                            RateLimitLayer::new(
-                                rate_limit_conf.capacity.into(),
-                                rate_limit_conf.interval,
-                            )
-                        })
-                        .clone()
-                });
-
-            // Outer buffer: required before load_shed() for correct cooperative-scheduling
-            // behaviour (see router_service above for the full explanation).
-            // Inner buffer (below): provides a backpressure surface so that RateLimitLayer
-            // can return poll_ready Pending and LoadShed will actually shed that load.
-            ServiceBuilder::new()
-                .buffered()
-                .map_future_with_request_data(
-                    |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
-                    move |(ctx, subgraph_name), future| {
-                        async {
-                            let response: Result<SubgraphResponse, BoxError> = future.await;
-                            match response {
-                                Err(err) if err.is::<Elapsed>() => {
-                                    // TODO add metrics
-                                    Ok(SubgraphResponse::error_builder()
-                                        .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                        .subgraph_name(subgraph_name)
-                                        .error(gateway_timeout_error())
-                                        .context(ctx)
-                                        .build())
-                                }
-                                Err(err) if err.is::<Overloaded>() => {
-                                    // TODO add metrics
-                                    Ok(SubgraphResponse::error_builder()
-                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                                        .subgraph_name(subgraph_name)
-                                        .error(rate_limit_error())
-                                        .context(ctx)
-                                        .build())
-                                }
-                                _ => response
-                            }
-                        }
-                    },
-                )
-                .load_shed()
-                .layer(TimeoutLayer::new(
-                    config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
-                ))
-                .option_layer(rate_limit)
-                .option_layer(
-                    config
-                        .shaping
-                        .deduplicate_query
-                        .unwrap_or_default()
-                        .then(QueryDeduplicationLayer::default),
-                )
-                .map_request(move |mut req: SubgraphRequest| {
-                    if let Some(compression) = config.shaping.compression {
-                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
-                    }
-                    req
-                })
-                .buffered()
-                .service(service)
-                .boxed_clone()
-        } else {
-            service
-        }
+        ServiceBuilder::new()
+            .layer(self.subgraph_admission_layer(name))
+            .layer(self.subgraph_timeout_layer(name))
+            .layer(self.subgraph_deduplication_layer(name))
+            .layer(self.subgraph_compression_layer(name))
+            .layer(self.subgraph_backpressure_buffer_layer(name))
+            .service(service)
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxCloneService,
+        service: connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneService {
-        let all_config = self.config.connector.all.as_ref();
-        let source_config = self.config.connector.sources.get(&source_name).cloned();
-        let final_config = Self::merge_config(all_config, source_config.as_ref());
-
-        if let Some(config) = final_config {
-            let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
-                self.rate_limit_sources
-                    .lock()
-                    .entry(source_name.clone())
-                    .or_insert_with(|| {
-                        RateLimitLayer::new(
-                            rate_limit_conf.capacity.into(),
-                            rate_limit_conf.interval,
-                        )
-                    })
-                    .clone()
-            });
-
-            // Outer buffer: required before load_shed() for correct cooperative-scheduling
-            // behaviour (see router_service above for the full explanation).
-            // Inner buffer (below): provides the backpressure surface for RateLimitLayer.
-            ServiceBuilder::new()
-                .buffered()
-                .map_future_with_request_data(
-                    |req: &Request| {
-                        (
-                            req.context.clone(),
-                            req.key.clone(),
-                            req.connector.id.subgraph_name.to_string(),
-                        )
-                    },
-                    move |(context, response_key, subgraph_name), future| {
-                        async {
-                            let response: Result<Response, BoxError> = future.await;
-                            match response {
-                                Ok(ok) => Ok(ok),
-                                Err(err) if err.is::<Elapsed>() => {
-                                    let response = Response::error_new(
-                                        context,
-                                        subgraph_name,
-                                        Error::GatewayTimeout,
-                                        "Your request has been timed out",
-                                        response_key,
-                                    );
-                                    Ok(response)
-                                }
-                                Err(err) if err.is::<Overloaded>() => {
-                                    let response = Response::error_new(
-                                        context,
-                                        subgraph_name,
-                                        Error::RateLimited,
-                                        "Your request has been rate limited",
-                                        response_key,
-                                    );
-                                    Ok(response)
-                                }
-                                Err(err) => Err(err),
-                            }
-                        }
-                    },
-                )
-                .load_shed()
-                .layer(TimeoutLayer::new(
-                    config.timeout.unwrap_or(DEFAULT_TIMEOUT),
-                ))
-                .option_layer(rate_limit)
-                .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.compression
-                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
-                    {
-                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
-                    }
-                    req
-                })
-                .buffered()
-                .service(service)
-                .boxed_clone()
-        } else {
-            service
-        }
+    ) -> connector::request_service::BoxCloneService {
+        ServiceBuilder::new()
+            .layer(self.connector_source_admission_layer(&source_name))
+            .layer(self.connector_source_timeout_layer(&source_name))
+            .layer(self.connector_source_compression_layer(&source_name))
+            .layer(self.connector_source_backpressure_buffer_layer(&source_name))
+            .service(service)
+            .boxed_clone()
     }
 }
 
@@ -632,6 +487,199 @@ impl TrafficShaping {
     }
 }
 
+/// The layers traffic shaping applies to each subgraph and connector source.
+///
+/// A target with no traffic shaping configuration, neither its own block nor `all`, gets an
+/// identity layer from every constructor. The layers go in this order, from the outside in:
+///
+/// 1. admission: outer buffer, error mapping, load shedding and rate limit
+/// 2. timeout
+/// 3. deduplication (subgraphs only)
+/// 4. compression
+/// 5. backpressure buffer
+///
+/// Admission renders the errors of the timeout beneath it, so the timeout must stay below
+/// admission. The [`admission`] module explains why admission is one layer.
+impl TrafficShaping {
+    /// This subgraph's shaping: its own block merged over `all`, or `all` alone.
+    fn subgraph_shaping(&self, name: &str) -> Option<Shaping> {
+        Self::merge_config(self.config.all.as_ref(), self.config.subgraphs.get(name))
+            .map(|config| config.shaping)
+    }
+
+    /// This connector source's shaping: its own block merged over `all`, or `all` alone.
+    fn connector_source_shaping(&self, source: &str) -> Option<ConnectorShaping> {
+        Self::merge_config(
+            self.config.connector.all.as_ref(),
+            self.config.connector.sources.get(source),
+        )
+    }
+
+    /// The rate limit for the target named `key`, created the first time it is asked for and
+    /// reused for the life of this plugin instance.
+    fn shared_rate_limit(
+        rate_limits: &Mutex<HashMap<String, RateLimitLayer>>,
+        key: &str,
+        conf: Option<&RateLimitConf>,
+    ) -> Option<RateLimitLayer> {
+        conf.map(|conf| {
+            rate_limits
+                .lock()
+                .entry(key.to_string())
+                .or_insert_with(|| RateLimitLayer::new(conf.capacity.into(), conf.interval))
+                .clone()
+        })
+    }
+
+    /// Returns a layer that admits or rejects requests to this subgraph. A request over the
+    /// subgraph's rate limit is answered with a `503`, and a timeout raised beneath this layer
+    /// with a `504`.
+    pub(crate) fn subgraph_admission_layer(
+        &self,
+        name: &str,
+    ) -> OptionLayer<SubgraphAdmissionLayer> {
+        option_layer(self.subgraph_shaping(name).map(|shaping| {
+            SubgraphAdmissionLayer::new(Self::shared_rate_limit(
+                &self.rate_limit_subgraphs,
+                name,
+                shaping.global_rate_limit.as_ref(),
+            ))
+        }))
+    }
+
+    /// Returns a layer that fails a request to this subgraph once it runs past the subgraph's
+    /// timeout (30 seconds by default).
+    pub(crate) fn subgraph_timeout_layer(&self, name: &str) -> OptionLayer<TimeoutLayer> {
+        option_layer(
+            self.subgraph_shaping(name)
+                .map(|shaping| TimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))),
+        )
+    }
+
+    /// Returns a layer that lets identical in-flight queries to this subgraph share one
+    /// request, when `deduplicate_query` is enabled for it.
+    pub(crate) fn subgraph_deduplication_layer(
+        &self,
+        name: &str,
+    ) -> OptionLayer<QueryDeduplicationLayer> {
+        option_layer(self.subgraph_shaping(name).and_then(|shaping| {
+            shaping
+                .deduplicate_query
+                .unwrap_or_default()
+                .then(QueryDeduplicationLayer::default)
+        }))
+    }
+
+    /// Returns a layer that sets `Content-Encoding` on requests to this subgraph, when
+    /// compression is configured for it.
+    pub(crate) fn subgraph_compression_layer(
+        &self,
+        name: &str,
+    ) -> OptionLayer<MapRequestLayer<impl Fn(SubgraphRequest) -> SubgraphRequest + Clone + use<>>>
+    {
+        option_layer(
+            self.subgraph_shaping(name)
+                .and_then(|shaping| shaping.compression)
+                .map(|compression| {
+                    let encoding = content_encoding(compression);
+                    MapRequestLayer::new(move |mut req: SubgraphRequest| {
+                        req.subgraph_request
+                            .headers_mut()
+                            .insert(CONTENT_ENCODING, encoding.clone());
+                        req
+                    })
+                }),
+        )
+    }
+
+    /// Returns the buffer beneath this subgraph's shaping layers, which gives the rate limit
+    /// and load shedding above it a backpressure surface.
+    pub(crate) fn subgraph_backpressure_buffer_layer(
+        &self,
+        name: &str,
+    ) -> OptionLayer<UnconstrainedBufferLayer<subgraph::Request>> {
+        option_layer(
+            self.subgraph_shaping(name)
+                .map(|_| UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE)),
+        )
+    }
+
+    /// Returns a layer that admits or rejects requests to this connector source, keyed by
+    /// `<subgraph name>.<source name>`. A request over the source's rate limit is answered with
+    /// a rate-limited error, and a timeout raised beneath this layer with a gateway-timeout
+    /// error.
+    pub(crate) fn connector_source_admission_layer(
+        &self,
+        source: &str,
+    ) -> OptionLayer<ConnectorSourceAdmissionLayer> {
+        option_layer(self.connector_source_shaping(source).map(|shaping| {
+            ConnectorSourceAdmissionLayer::new(Self::shared_rate_limit(
+                &self.rate_limit_sources,
+                source,
+                shaping.global_rate_limit.as_ref(),
+            ))
+        }))
+    }
+
+    /// Returns a layer that fails a request to this connector source once it runs past the
+    /// source's timeout (30 seconds by default).
+    pub(crate) fn connector_source_timeout_layer(&self, source: &str) -> OptionLayer<TimeoutLayer> {
+        option_layer(
+            self.connector_source_shaping(source)
+                .map(|shaping| TimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))),
+        )
+    }
+
+    /// Returns a layer that sets `Content-Encoding` on HTTP requests to this connector source,
+    /// when compression is configured for it.
+    pub(crate) fn connector_source_compression_layer(
+        &self,
+        source: &str,
+    ) -> OptionLayer<
+        MapRequestLayer<
+            impl Fn(connector::request_service::Request) -> connector::request_service::Request
+            + Clone
+            + use<>,
+        >,
+    > {
+        option_layer(
+            self.connector_source_shaping(source)
+                .and_then(|shaping| shaping.compression)
+                .map(|compression| {
+                    let encoding = content_encoding(compression);
+                    MapRequestLayer::new(move |mut req: connector::request_service::Request| {
+                        if let TransportRequest::Http(ref mut http_request) = req.transport_request
+                        {
+                            http_request
+                                .inner
+                                .headers_mut()
+                                .insert(CONTENT_ENCODING, encoding.clone());
+                        }
+                        req
+                    })
+                }),
+        )
+    }
+
+    /// Returns the buffer beneath this connector source's shaping layers, which gives the rate
+    /// limit and load shedding above it a backpressure surface.
+    pub(crate) fn connector_source_backpressure_buffer_layer(
+        &self,
+        source: &str,
+    ) -> OptionLayer<UnconstrainedBufferLayer<connector::request_service::Request>> {
+        option_layer(
+            self.connector_source_shaping(source)
+                .map(|_| UnconstrainedBufferLayer::new(DEFAULT_BUFFER_SIZE)),
+        )
+    }
+}
+
+/// The `Content-Encoding` header value for `compression`.
+fn content_encoding(compression: Compression) -> HeaderValue {
+    HeaderValue::from_str(&compression.to_string())
+        .expect("compression is manually implemented and already have the right values; qed")
+}
+
 fn concurrency_limit_error() -> graphql::Error {
     graphql::Error::builder()
         .message("Your request has been concurrency limited")
@@ -678,6 +726,8 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
+
+    use apollo_federation::connectors::runtime::errors::Error;
 
     use super::*;
     use crate::Configuration;

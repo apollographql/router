@@ -419,7 +419,7 @@ pub trait ServiceExt<Request>: Service<Request> {
 impl<T: ?Sized, Request> ServiceExt<Request> for T where T: Service<Request> {}
 
 /// Helper type to name layers produced by [`ServiceBuilder::option_layer()`].
-type OptionLayer<L> = tower::util::Either<L, tower::layer::util::Identity>;
+pub(crate) type OptionLayer<L> = tower::util::Either<L, tower::layer::util::Identity>;
 
 /// Extension to [`ServiceBuilder`] for pipeline utilities that are not exposed to crate consumers.
 pub(crate) trait InternalServiceBuilderExt<L>: Sized {
