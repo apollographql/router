@@ -3,10 +3,9 @@ use std::ops::ControlFlow;
 use anyhow::Result;
 use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
-use apollo_router::plugin::Configuration;
+use apollo_router::plugin::Enabled;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
-use apollo_router::plugin::Validate;
 use apollo_router::register_plugin;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
@@ -19,15 +18,6 @@ struct ExposeReferencedFieldsByType {
     #[allow(dead_code)]
     configuration: Enabled,
 }
-
-/// The plugin's section is `true` or `false`.
-#[derive(Clone, Debug, serde::Deserialize, schemars::JsonSchema)]
-#[serde(transparent)]
-struct Enabled(#[allow(dead_code)] bool);
-
-// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
-impl Validate for Enabled {}
-impl Configuration for Enabled {}
 
 #[async_trait::async_trait]
 impl Plugin for ExposeReferencedFieldsByType {

@@ -14,9 +14,12 @@
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
+mod enabled;
 pub mod serde;
 #[macro_use]
 pub mod test;
+
+pub use enabled::Enabled;
 
 use std::any::TypeId;
 use std::fmt;

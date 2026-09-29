@@ -4095,10 +4095,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ExposeQueryPlanConfig": {
-      "description": "Expose query plan",
-      "type": "boolean"
-    },
     "ExposeTraceId": {
       "additionalProperties": false,
       "properties": {
@@ -5642,10 +5638,6 @@ expression: "&schema"
         "protocols"
       ],
       "type": "object"
-    },
-    "ForbidMutationsConfig": {
-      "description": "Forbid mutations configuration",
-      "type": "boolean"
     },
     "ForwardHeaders": {
       "description": "Forward headers",
@@ -13169,13 +13161,15 @@ expression: "&schema"
       "type": "boolean"
     },
     "expose_query_plan": {
-      "$ref": "#/definitions/ExposeQueryPlanConfig"
+      "description": "Set to `true` to enable, or `false` to disable.",
+      "type": "boolean"
     },
     "fleet_detector": {
       "$ref": "#/definitions/Conf2"
     },
     "forbid_mutations": {
-      "$ref": "#/definitions/ForbidMutationsConfig"
+      "description": "Set to `true` to enable, or `false` to disable.",
+      "type": "boolean"
     },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"

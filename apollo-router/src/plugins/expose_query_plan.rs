@@ -4,9 +4,6 @@ use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -16,6 +13,7 @@ use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
+use crate::plugin::Enabled;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::execution;
@@ -33,14 +31,6 @@ struct ExposeQueryPlan {
     enabled: bool,
 }
 
-/// Expose query plan
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ExposeQueryPlanConfig(
-    /// Enabled
-    bool,
-);
-
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 enum Setting {
     Enabled,
@@ -48,13 +38,9 @@ enum Setting {
     Disabled,
 }
 
-// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
-impl apollo_configuration::Validate for ExposeQueryPlanConfig {}
-impl apollo_configuration::Configuration for ExposeQueryPlanConfig {}
-
 #[async_trait::async_trait]
 impl Plugin for ExposeQueryPlan {
-    type Config = ExposeQueryPlanConfig;
+    type Config = Enabled;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ExposeQueryPlan {

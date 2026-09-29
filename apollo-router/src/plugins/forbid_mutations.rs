@@ -1,15 +1,13 @@
 use std::ops::ControlFlow;
 
 use http::StatusCode;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
 use crate::layers::ServiceBuilderExt;
+use crate::plugin::Enabled;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::ExecutionRequest;
@@ -21,21 +19,9 @@ struct ForbidMutations {
     forbid: bool,
 }
 
-/// Forbid mutations configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct ForbidMutationsConfig(
-    /// Enabled
-    bool,
-);
-
-// `#[configuration]` does not support tuple structs, so this implements the traits by hand.
-impl apollo_configuration::Validate for ForbidMutationsConfig {}
-impl apollo_configuration::Configuration for ForbidMutationsConfig {}
-
 #[async_trait::async_trait]
 impl Plugin for ForbidMutations {
-    type Config = ForbidMutationsConfig;
+    type Config = Enabled;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ForbidMutations {
@@ -92,7 +78,7 @@ mod forbid_http_get_mutations_tests {
         let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let mut service_stack = ForbidMutations::new(PluginInit::fake_new(
-            ForbidMutationsConfig(true),
+            Enabled(true),
             Default::default(),
         ))
         .await
@@ -124,7 +110,7 @@ mod forbid_http_get_mutations_tests {
 
         let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
         let service_stack = ForbidMutations::new(PluginInit::fake_new(
-            ForbidMutationsConfig(true),
+            Enabled(true),
             Default::default(),
         ))
         .await
@@ -147,7 +133,7 @@ mod forbid_http_get_mutations_tests {
         let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let mut service_stack = ForbidMutations::new(PluginInit::fake_new(
-            ForbidMutationsConfig(false),
+            Enabled(false),
             Default::default(),
         ))
         .await
