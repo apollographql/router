@@ -201,15 +201,17 @@ impl Source {
 }
 
 /// Authentication
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "AuthenticationConfig")]
 struct Conf {
     /// Router configuration
+    #[config(skip_validate)]
     router: Option<RouterConf>,
     /// Subgraph configuration
+    #[config(skip_validate)]
     subgraph: Option<subgraph::Config>,
     /// Connector configuration
+    #[config(skip_validate)]
     connector: Option<connector::Config>,
 }
 

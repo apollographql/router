@@ -49,10 +49,13 @@ use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::metadata::LinksMetadata;
+use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_registry::SPEC_REGISTRY;
+use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -354,7 +357,7 @@ impl FederationSchema {
     // This works even if the schema bootstrapping was not completed.
     pub(crate) fn is_fed_2(&self) -> bool {
         self.federation_link()
-            .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+            .is_some_and(|link| link.url.version >= (Version { major: 2, minor: 0 }))
     }
 
     /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
@@ -365,6 +368,58 @@ impl FederationSchema {
     pub(crate) fn is_fed_1_subgraph(&self) -> bool {
         self.subgraph_metadata()
             .is_some_and(|meta| !meta.is_fed_2_schema())
+    }
+
+    /// Rewrites the federation spec `@link` to the given federation version, keeping its imports
+    /// and alias, then adds the definitions introduced by that version and recomputes the subgraph
+    /// metadata.
+    ///
+    /// The schema must already link some version of the federation spec.
+    pub(crate) fn upgrade_federation_link(
+        &mut self,
+        version: &Version,
+    ) -> Result<(), FederationError> {
+        let Some(metadata) = self.metadata() else {
+            bail!("Cannot upgrade the federation version of a schema with no @link")
+        };
+        let link_name_in_schema = metadata.link_itself().spec_name_in_schema().clone();
+        let federation_identity = FederationSpecDefinition::latest().identity();
+        let new_url = FederationSpecDefinition::for_version(version)?
+            .url()
+            .to_string();
+
+        let mut upgraded = false;
+        for directive in self
+            .schema
+            .schema_definition
+            .make_mut()
+            .directives
+            .iter_mut()
+        {
+            if directive.name != link_name_in_schema {
+                continue;
+            }
+            for argument in directive.make_mut().arguments.iter_mut() {
+                let links_federation = argument.name == LINK_DIRECTIVE_URL_ARGUMENT_NAME
+                    && argument
+                        .value
+                        .as_str()
+                        .and_then(|url| url.parse::<Url>().ok())
+                        .is_some_and(|url| url.identity == *federation_identity);
+                if links_federation {
+                    argument.make_mut().value = new_url.as_str().into();
+                    upgraded = true;
+                }
+            }
+        }
+        if !upgraded {
+            bail!("Cannot upgrade the federation version of a schema with no federation @link")
+        }
+
+        self.collect_links_metadata()?;
+        FederationBlueprint::complete_subgraph_schema(self)?;
+        self.subgraph_metadata = compute_subgraph_metadata(self)?.map(Box::new);
+        Ok(())
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS

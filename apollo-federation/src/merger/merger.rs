@@ -194,7 +194,7 @@ impl Merger {
             )
         };
         let Some(link_spec_definition) =
-            LINK_VERSIONS.get_minimum_required_version(&latest_federation_version_used)
+            LINK_VERSIONS.get_maximum_allowed_version(&latest_federation_version_used)
         else {
             bail!(
                 "No link spec version found for federation version {}",
@@ -269,9 +269,6 @@ impl Merger {
             .max_by_key(|spec| spec.minimum_federation_version());
 
         if let Some(spec) = spec_with_max_implied_version
-            && spec
-                .minimum_federation_version()
-                .satisfies(linked_federation_version)
             && spec
                 .minimum_federation_version()
                 .gt(linked_federation_version)

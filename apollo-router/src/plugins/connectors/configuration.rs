@@ -16,19 +16,17 @@ use crate::services::connector_service::ConnectorSourceRef;
 /// Configuration for Apollo Connectors.
 ///
 /// https://www.apollographql.com/docs/graphos/routing/configuration/yaml#connectors
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct ConnectorsConfig {
     /// Map of subgraph_name.connector_source_name to source configuration
-    #[serde(default)]
+    #[config(skip_validate)]
     pub(crate) sources: HashMap<String, SourceConfiguration>,
 
     /// Enables connector debugging information on response extensions if the feature is enabled
-    #[serde(default)]
     pub(crate) debug_extensions: bool,
 
     /// The maximum number of requests for a connector source
-    #[serde(default)]
     pub(crate) max_requests_per_operation_per_source: Option<usize>,
 
     /// When enabled, adds an entry to the context for use in coprocessors
@@ -44,30 +42,28 @@ pub(crate) struct ConnectorsConfig {
     ///   }
     /// }
     /// ```
-    #[serde(default)]
     pub(crate) expose_sources_in_context: bool,
 
+    // The deprecated `preview_connect_*` flags below are no-ops that are still accepted so that
+    // existing configurations load. The schema marks them deprecated for editors; nothing reads
+    // them, so they don't need Rust's `#[deprecated]`.
     /// Enables Connect spec v0.2 during the preview.
-    #[serde(default)]
-    #[deprecated(note = "Connect spec v0.2 is now available.")]
+    #[schemars(extend("deprecated" = true))]
     pub(crate) preview_connect_v0_2: Option<bool>,
 
     /// Feature gate for Connect spec v0.3. Set to `true` to enable the using
     /// the v0.3 spec during the preview phase.
-    #[serde(default)]
-    #[deprecated(note = "Connect spec v0.3 is now available.")]
+    #[schemars(extend("deprecated" = true))]
     pub(crate) preview_connect_v0_3: Option<bool>,
 
     /// Feature gate for Connect spec v0.4. Previously required to opt into the
     /// v0.4 spec during its preview phase; now a no-op, since `@link`-ing
     /// connect/v0.4 in a subgraph is itself a sufficient opt-in.
-    #[serde(default)]
-    #[deprecated(note = "Connect spec v0.4 no longer requires this flag.")]
+    #[schemars(extend("deprecated" = true))]
     pub(crate) preview_connect_v0_4: Option<bool>,
 
     /// Feature gate for Connect spec v0.5. Set to `true` to enable using
     /// the v0.5 spec during the preview phase.
-    #[serde(default)]
     pub(crate) preview_connect_v0_5: Option<bool>,
 }
 
