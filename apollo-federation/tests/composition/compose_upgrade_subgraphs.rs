@@ -2,6 +2,7 @@ use apollo_compiler::coord;
 use apollo_federation::composition::CompositionOptions;
 use apollo_federation::composition::compose;
 use apollo_federation::composition::upgrade_subgraphs_if_necessary;
+use apollo_federation::subgraph::typestate::Initial;
 use apollo_federation::subgraph::typestate::Subgraph;
 use insta::assert_snapshot;
 use test_log::test;
@@ -344,4 +345,77 @@ fn fed1_requires_with_cross_subgraph_inline_fragment_type_condition() {
 
     compose(vec![subgraph_a, subgraph_b], CompositionOptions::default())
         .expect("composition succeeds");
+}
+
+// =============================================================================
+// Fed3 Upgrade Tests
+// =============================================================================
+
+fn join_link(subgraphs: Vec<Subgraph<Initial>>) -> String {
+    let supergraph =
+        compose(subgraphs, CompositionOptions::default()).expect("composition succeeds");
+    supergraph
+        .schema()
+        .schema()
+        .schema_definition
+        .directives
+        .iter()
+        .map(|directive| directive.to_string())
+        .find(|directive| directive.contains("specs.apollo.dev/join/"))
+        .expect("supergraph links the join spec")
+}
+
+fn fed2_subgraph() -> Subgraph<Initial> {
+    Subgraph::parse(
+        "fed2",
+        "http://fed2",
+        r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int
+            }
+        "#,
+    )
+    .expect("parses subgraph")
+}
+
+/// A fed 2 subgraph composed alongside a fed 3 subgraph is upgraded to fed 3, and the supergraph
+/// uses the join spec version for fed 3.
+#[test]
+fn fed3_subgraph_upgrades_composition_to_fed3() {
+    let fed3 = Subgraph::parse(
+        "fed3",
+        "http://fed3",
+        r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key"])
+
+            type T @key(fields: "id") {
+                id: ID!
+                y: Int
+            }
+        "#,
+    )
+    .expect("parses subgraph");
+
+    assert_snapshot!(
+        join_link(vec![fed2_subgraph(), fed3]),
+        @r#"@link(url: "https://specs.apollo.dev/join/v0.6", for: EXECUTION)"#
+    );
+}
+
+/// Without a fed 3 subgraph, the composition stays on fed 2.
+#[test]
+fn fed2_subgraphs_compose_to_fed2() {
+    assert_snapshot!(
+        join_link(vec![fed2_subgraph()]),
+        @r#"@link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)"#
+    );
 }
