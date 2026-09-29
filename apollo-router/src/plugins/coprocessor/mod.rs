@@ -477,7 +477,7 @@ struct Conf {
     /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
     #[config(required)]
     url: String,
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     client: Option<Client>,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]

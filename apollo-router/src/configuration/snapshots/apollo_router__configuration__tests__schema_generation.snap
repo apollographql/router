@@ -2059,6 +2059,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Global invalidation configuration"
         },
         "private_queries_buffer_size": {
@@ -8378,6 +8379,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "storage_path": {
+          "default": null,
           "description": "The path to the directory where recordings will be stored. Defaults to\nthe current working directory.",
           "type": [
             "string",
@@ -8643,6 +8645,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "main": {
+          "default": null,
           "description": "The main entry point for Rhai script evaluation",
           "type": [
             "string",
@@ -8650,6 +8653,7 @@ expression: "&schema"
           ]
         },
         "scripts": {
+          "default": null,
           "description": "The directory where Rhai scripts can be found",
           "type": [
             "string",

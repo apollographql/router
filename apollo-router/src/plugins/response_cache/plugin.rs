@@ -217,7 +217,7 @@ pub(crate) struct Config {
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Global invalidation configuration
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     invalidation: Option<InvalidationEndpointConfig>,
 
     /// Buffer size for known private queries (default: 2048)

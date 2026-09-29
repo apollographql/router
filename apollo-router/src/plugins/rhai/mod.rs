@@ -59,10 +59,9 @@ fn default_intern_strings() -> bool {
 #[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
     /// The directory where Rhai scripts can be found
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     scripts: Option<PathBuf>,
     /// The main entry point for Rhai script evaluation
-    #[config(required)]
     main: Option<String>,
     /// Whether to enable Rhai's internal string interning.
     ///

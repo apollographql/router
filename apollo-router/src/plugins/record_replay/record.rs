@@ -35,7 +35,7 @@ struct RecordConfig {
     enabled: bool,
     /// The path to the directory where recordings will be stored. Defaults to
     /// the current working directory.
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     storage_path: Option<PathBuf>,
 }
 

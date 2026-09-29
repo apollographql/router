@@ -202,17 +202,16 @@ impl Source {
 
 /// Authentication
 #[apollo_configuration::configuration]
-#[derive(Default)]
 #[schemars(rename = "AuthenticationConfig")]
 struct Conf {
     /// Router configuration
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     router: Option<RouterConf>,
     /// Subgraph configuration
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     subgraph: Option<subgraph::Config>,
     /// Connector configuration
-    #[config(required, skip_validate)]
+    #[config(skip_validate)]
     connector: Option<connector::Config>,
 }
 
