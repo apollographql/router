@@ -2789,13 +2789,16 @@ type Query
 
 /// Plan `query` with `build_bulb_plan` from subgraph `subgraph`'s Query
 /// root, which the public planner never uses as a head (it always enters at
-/// the federated root). Returns the evaluated plan count alongside the
-/// result because the public planner drops statistics on failure.
+/// the federated root). Returns the planning statistics alongside the
+/// result because the public planner drops them on failure.
 fn plan_from_subgraph_root(
     schema: &str,
     subgraph: &str,
     query: &str,
-) -> (Result<super::super::BulbPlan, FederationError>, usize) {
+) -> (
+    Result<super::super::BulbPlan, FederationError>,
+    crate::query_plan::query_planner::QueryPlanningStatistics,
+) {
     use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
     use crate::schema::position::SchemaRootDefinitionKind;
 
@@ -2853,7 +2856,7 @@ fn plan_from_subgraph_root(
         &mut naming,
         false,
     );
-    (result, statistics.evaluated_plan_count.get())
+    (result, statistics)
 }
 
 /// Planning from a concrete subgraph root type (a SchemaType head) seeds the
@@ -2869,19 +2872,21 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
     );
 }
 
-/// `target` is only reachable through T's circular key, so it is dropped
-/// on every path. Each `s*` field is shared by A and B, giving the search
-/// a real choice per field. Nothing below the drop can complete, so the
-/// search should give up without walking those choices.
-#[test]
-fn dropped_field_prunes_remaining_choices() {
-    let schema = r#"
+/// Schema where `target` is only reachable through T's circular key, so it
+/// is dropped on every path. Each `s1..=sN` field is shared by A and B,
+/// giving the search a real choice per field.
+fn dropped_field_schema(shared_fields: usize) -> String {
+    let shared: String = (1..=shared_fields)
+        .map(|i| format!("  s{i}: E @join__field(graph: A) @join__field(graph: B)\n"))
+        .collect();
+    format!(
+        r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
-{
+{{
   query: Query
-}
+}}
 
 directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -2891,57 +2896,59 @@ directive @link(url: String, as: String, for: link__Purpose, import: [link__Impo
 
 scalar join__FieldSet
 
-enum join__Graph {
+enum join__Graph {{
   A @join__graph(name: "a", url: "http://a")
   B @join__graph(name: "b", url: "http://b")
   T @join__graph(name: "t", url: "http://t")
-}
+}}
 
 scalar link__Import
 
-enum link__Purpose {
+enum link__Purpose {{
   SECURITY
   EXECUTION
-}
+}}
 
 type Query
   @join__type(graph: A)
-{
+{{
   entry: E @join__field(graph: A)
-}
+}}
 
 type E
   @join__type(graph: A, key: "id")
   @join__type(graph: B, key: "id")
-  @join__type(graph: T, key: "c { cid cm }")
-{
+  @join__type(graph: T, key: "c {{ cid cm }}")
+{{
   id: ID! @join__field(graph: A) @join__field(graph: B)
   c: C @join__field(graph: A) @join__field(graph: T)
   target: String @join__field(graph: T)
-  s1: E @join__field(graph: A) @join__field(graph: B)
-  s2: E @join__field(graph: A) @join__field(graph: B)
-  s3: E @join__field(graph: A) @join__field(graph: B)
-  s4: E @join__field(graph: A) @join__field(graph: B)
-  s5: E @join__field(graph: A) @join__field(graph: B)
-  s6: E @join__field(graph: A) @join__field(graph: B)
-}
+{shared}}}
 
 type C
   @join__type(graph: A)
   @join__type(graph: T, key: "cid cm")
-{
+{{
   cid: ID! @join__field(graph: A) @join__field(graph: T)
   cm: String @join__field(graph: T)
+}}
+"#
+    )
 }
-"#;
-    let (result, evaluated) = plan_from_subgraph_root(
-        schema,
+
+/// Nothing below the drop can complete, so the search should give up
+/// without walking the remaining choices.
+#[test]
+fn dropped_field_prunes_remaining_choices() {
+    let (result, statistics) = plan_from_subgraph_root(
+        &dropped_field_schema(6),
         "a",
         "{ entry { target s1 { id } s2 { id } s3 { id } s4 { id } s5 { id } s6 { id } } }",
     );
     assert!(result.is_err(), "target is unreachable, planning must fail");
     assert_eq!(
-        evaluated, 0,
+        statistics.evaluated_plan_count.get(),
+        0,
         "no terminal below the dropped field should be evaluated"
     );
 }

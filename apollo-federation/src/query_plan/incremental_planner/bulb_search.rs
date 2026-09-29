@@ -183,7 +183,9 @@ pub enum BulbTermination {
 
 /// Statistics from a BULB search run.
 pub struct BulbStats {
-    /// Terminal candidates evaluated, including incomplete ones.
+    /// Terminal candidates evaluated, including incomplete ones. Candidates
+    /// cut off by [`BulbSearchSpace::is_viable`] never reach a terminal and
+    /// are not counted.
     pub evaluated_plans: usize,
     /// Decision points expanded (advanced to and scored).
     pub expansions: usize,
@@ -549,7 +551,8 @@ fn bulb_probe<S: BulbSearchSpace>(
 }
 
 /// Score all options at a decision point: apply -> cost -> rollback per option.
-/// Returns (option_index, cost) pairs for options that survive the incumbent prune.
+/// Returns (option_index, cost) pairs for viable options that survive the
+/// incumbent prune.
 fn score_options<S: BulbSearchSpace>(
     space: &S,
     candidate: &mut S::Candidate,
@@ -563,7 +566,12 @@ fn score_options<S: BulbSearchSpace>(
     for (i, choice) in options.iter().enumerate() {
         space.apply(candidate, decision, choice);
         let cost = space.cost(candidate);
-        if cost < best_cost {
+        // Dropping a non-viable option here keeps it out of the alt slice,
+        // which is explored first, and out of the beam-width count that
+        // decides whether another discrepancy iteration runs.
+        if !space.is_viable(candidate) {
+            trace!(option_index = i, cost, "scored option, pruned (not viable)");
+        } else if cost < best_cost {
             scored.push((i, cost));
             trace!(
                 option_index = i,
@@ -868,6 +876,69 @@ mod tests {
             "should not waste fuel on redundant completions, used {}",
             stats.evaluated_plans,
         );
+    }
+
+    /// `sum_space` where picking `dead` at the first level is not viable.
+    struct DeadOptionSpace {
+        inner: LevelSpace,
+        dead: usize,
+    }
+
+    impl BulbSearchSpace for DeadOptionSpace {
+        type Candidate = LevelState;
+        type Decision = usize;
+        type Choice = usize;
+        type Checkpoint = LevelState;
+
+        fn advance(&self, candidate: &mut LevelState) -> AdvanceResult<usize> {
+            self.inner.advance(candidate)
+        }
+        fn options(&self, decision: &usize) -> Vec<usize> {
+            self.inner.options(decision)
+        }
+        fn apply(&self, candidate: &mut LevelState, decision: &usize, choice: &usize) {
+            self.inner.apply(candidate, decision, choice)
+        }
+        fn checkpoint(&self, candidate: &LevelState) -> LevelState {
+            self.inner.checkpoint(candidate)
+        }
+        fn rollback(&self, candidate: &mut LevelState, cp: LevelState) {
+            self.inner.rollback(candidate, cp)
+        }
+        fn snapshot(&self, candidate: &LevelState) -> LevelState {
+            self.inner.snapshot(candidate)
+        }
+        fn effort(&self, candidate: &LevelState) -> u64 {
+            self.inner.effort(candidate)
+        }
+        fn cost(&self, candidate: &LevelState) -> f64 {
+            self.inner.cost(candidate)
+        }
+        fn is_complete(&self, candidate: &LevelState) -> bool {
+            self.is_viable(candidate) && self.inner.is_complete(candidate)
+        }
+        fn is_viable(&self, candidate: &LevelState) -> bool {
+            candidate.path.first() != Some(&self.dead)
+        }
+    }
+
+    /// A non-viable option is discarded while scoring, so it neither gets
+    /// advanced as an alt slice nor counts as an alternative that forces
+    /// another discrepancy iteration.
+    #[test]
+    fn non_viable_options_are_not_expanded() {
+        let space = DeadOptionSpace {
+            inner: sum_space(vec![vec![1, 5], vec![1]]),
+            dead: 5,
+        };
+        let config = BulbConfig {
+            beam_width: 1,
+            fuel: 100,
+            timeout: default_timeout(),
+        };
+        let (result, stats) = bulb_search(&space, initial(), config, None);
+        assert_eq!(result.expect("complete plan").path, vec![1, 1]);
+        assert_eq!(stats.expansions, 2, "only the greedy pass should expand");
     }
 
     #[test]
