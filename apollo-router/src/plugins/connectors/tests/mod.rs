@@ -1947,6 +1947,7 @@ async fn test_variables() {
         "{ f(arg: \"arg\") { arg context config sibling status extra request response f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
+          "supergraph": { "query_planning": { "incremental_planner": { "enabled": false } } },
           "connectors": {
             "sources": {
               "connectors.v1": {
@@ -2134,6 +2135,15 @@ mod quickstart_tests {
         variables: JsonMap,
         snapshot_file_name: &str,
     ) -> serde_json::Value {
+        execute_with_config(query, variables, snapshot_file_name, None).await
+    }
+
+    async fn execute_with_config(
+        query: &str,
+        variables: JsonMap,
+        snapshot_file_name: &str,
+        config: Option<serde_json_bytes::Value>,
+    ) -> serde_json::Value {
         let snapshot_path = [SNAPSHOT_DIR, snapshot_file_name, ".json"].concat();
 
         let server = SnapshotServer::spawn(
@@ -2151,7 +2161,7 @@ mod quickstart_tests {
             &server.uri(),
             query,
             variables,
-            None,
+            config,
             |_| {},
             None,
         )
@@ -2234,7 +2244,13 @@ mod quickstart_tests {
           }
       "#;
 
-        let response = execute(query, map!({ "postId": "1" }), "query_3").await;
+        let response = execute_with_config(
+            query,
+            map!({ "postId": "1" }),
+            "query_3",
+            super::legacy_planner_config(),
+        )
+        .await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -2272,7 +2288,13 @@ mod quickstart_tests {
           }
       "#;
 
-        let response = execute(query, map!({ "userId": "1" }), "query_4").await;
+        let response = execute_with_config(
+            query,
+            map!({ "userId": "1" }),
+            "query_4",
+            super::legacy_planner_config(),
+        )
+        .await;
 
         insta::assert_json_snapshot!(response, @r###"
         {
@@ -2358,6 +2380,16 @@ async fn execute_with_unstable_plugin<P: crate::plugin::PluginUnstable>(
         .unwrap();
 
     serde_json::to_value(response).unwrap()
+}
+
+/// The incremental planner cannot yet resolve connector entities whose type
+/// has no `@key` in the connector subgraph (connectors on types, or field
+/// connectors using `$this`), so tests covering those run on the legacy
+/// planner.
+fn legacy_planner_config() -> Option<serde_json_bytes::Value> {
+    Some(json!({
+        "supergraph": { "query_planning": { "incremental_planner": { "enabled": false } } }
+    }))
 }
 
 async fn execute(

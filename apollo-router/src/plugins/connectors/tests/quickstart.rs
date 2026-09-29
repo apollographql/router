@@ -8,6 +8,14 @@ macro_rules! map {
     }
 
 async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockServer) {
+    execute_with_config(query, variables, None).await
+}
+
+async fn execute_with_config(
+    query: &str,
+    variables: JsonMap,
+    config: Option<serde_json_bytes::Value>,
+) -> (serde_json::Value, MockServer) {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET")).and(path("/posts")).respond_with(
             ResponseTemplate::new(200).set_body_json(serde_json::json!([
@@ -93,7 +101,7 @@ async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockSer
         &mock_server.uri(),
         query,
         variables,
-        None,
+        config,
         |_| {},
         None,
     )
@@ -189,7 +197,12 @@ async fn query_3() {
           }
       "#;
 
-    let (response, server) = execute(query, map!({ "postId": "1" })).await;
+    let (response, server) = execute_with_config(
+        query,
+        map!({ "postId": "1" }),
+        super::legacy_planner_config(),
+    )
+    .await;
 
     insta::assert_json_snapshot!(response, @r###"
         {
@@ -235,7 +248,12 @@ async fn query_4() {
           }
       "#;
 
-    let (response, server) = execute(query, map!({ "userId": "1" })).await;
+    let (response, server) = execute_with_config(
+        query,
+        map!({ "userId": "1" }),
+        super::legacy_planner_config(),
+    )
+    .await;
 
     insta::assert_json_snapshot!(response, @r###"
         {

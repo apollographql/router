@@ -48,7 +48,7 @@ async fn basic_batch() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        None,
+        super::legacy_planner_config(),
         |_| {},
         None,
     )
@@ -127,7 +127,7 @@ async fn basic_batch_query_params() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        None,
+        super::legacy_planner_config(),
         |_| {},
         None,
     )
@@ -204,7 +204,7 @@ async fn batch_missing_items() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        None,
+        super::legacy_planner_config(),
         |_| {},
         None,
     )
@@ -298,7 +298,7 @@ async fn connect_on_type() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        None,
+        super::legacy_planner_config(),
         |_| {},
         None,
     )
@@ -477,7 +477,7 @@ async fn batch_with_max_size_under_batch_size() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        None,
+        super::legacy_planner_config(),
         |_| {},
         None,
     )
@@ -591,7 +591,7 @@ async fn batch_with_max_size_over_batch_size() {
         &mock_server.uri(),
         "query { users { id name username } }",
         Default::default(),
-        None,
+        super::legacy_planner_config(),
         |_| {},
         None,
     )
