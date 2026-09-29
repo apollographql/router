@@ -102,8 +102,9 @@ static REGISTRY: LazyLock<Mutex<Option<Registry>>> = LazyLock::new(Default::defa
 
 /// The tracer provider that the router has installed globally.
 ///
-/// Owned by the router factory, which outlives every router it creates, so a reload that leaves
-/// tracing unchanged keeps the installed provider. Clones share the same provider.
+/// Owned by the router factory through a [`TracerProviderOwner`], which outlives every router it
+/// creates, so a reload that leaves tracing unchanged keeps the installed provider. Clones share the
+/// same provider.
 #[derive(Clone, Default)]
 pub(crate) struct TracerProviderHandle(Arc<Mutex<Option<SdkTracerProvider>>>);
 
@@ -113,13 +114,38 @@ impl TracerProviderHandle {
         self.0.lock().replace(tracer_provider)
     }
 
+    fn take(&self) -> Option<SdkTracerProvider> {
+        self.0.lock().take()
+    }
+
     /// Shuts down the installed tracer provider, flushing any pending spans.
     ///
     /// This MUST be called from a blocking thread.
     pub(crate) fn shutdown(&self) {
-        let tracer_provider = self.0.lock().take();
-        if let Some(tracer_provider) = tracer_provider {
+        if let Some(tracer_provider) = self.take() {
             shutdown(tracer_provider);
+        }
+    }
+}
+
+/// Owns the router's [`TracerProviderHandle`] and shuts down the provider it holds when dropped.
+///
+/// The router factory shuts the installed provider down explicitly when the state machine stops.
+/// This covers the cases where that never happens, such as the state machine task panicking or
+/// being cancelled: the provider is then shut down on a blocking thread when its owner is dropped.
+#[derive(Default)]
+pub(crate) struct TracerProviderOwner(TracerProviderHandle);
+
+impl TracerProviderOwner {
+    pub(crate) fn handle(&self) -> &TracerProviderHandle {
+        &self.0
+    }
+}
+
+impl Drop for TracerProviderOwner {
+    fn drop(&mut self) {
+        if let Some(tracer_provider) = self.0.take() {
+            Activation::off_async_workers(move || shutdown(tracer_provider));
         }
     }
 }
@@ -302,13 +328,18 @@ impl Drop for Activation {
     fn drop(&mut self) {
         let meter_providers = std::mem::take(&mut self.new_meter_providers);
         let tracer_provider = self.new_trace_provider.take();
-        let cleanup = move || {
+        Activation::off_async_workers(move || {
             drop(meter_providers);
             if let Some(tracer_provider) = tracer_provider {
                 shutdown(tracer_provider);
             }
-        };
+        });
+    }
+}
 
+impl Activation {
+    /// Runs provider cleanup on a blocking thread, so that it cannot block an async worker.
+    fn off_async_workers(cleanup: impl FnOnce() + Send + 'static) {
         // In tests, drop providers synchronously via block_in_place. This avoids a race
         // condition between spawn_blocking and Runtime::drop: when the tokio test runtime
         // shuts down, it cancels async tasks (including PeriodicReader background tasks)
@@ -350,6 +381,7 @@ mod tests {
     use opentelemetry_sdk::trace::Span;
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanProcessor;
+    use tokio::task::JoinError;
 
     use super::*;
 
@@ -431,6 +463,34 @@ mod tests {
         // The handle now holds the new provider, which its owner shuts down when the router stops.
         installed.shutdown();
         assert_eq!(new_shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn owner_shuts_down_the_installed_provider_if_its_task_panics_or_is_cancelled() {
+        // Stands in for the state machine task, which owns the router factory.
+        async fn run_until_torn_down(owner: TracerProviderOwner, panics: bool) -> JoinError {
+            let task = tokio::spawn(async move {
+                let _owner = owner;
+                if panics {
+                    panic!("the state machine panicked");
+                }
+                std::future::pending::<()>().await
+            });
+            if !panics {
+                task.abort();
+            }
+            task.await.expect_err("the task never completes")
+        }
+
+        for panics in [true, false] {
+            let (tracer_provider, shutdowns) = counting_tracer_provider();
+            let owner = TracerProviderOwner::default();
+            assert!(owner.handle().replace(tracer_provider).is_none());
+
+            let error = run_until_torn_down(owner, panics).await;
+            assert_eq!(error.is_panic(), panics);
+            assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

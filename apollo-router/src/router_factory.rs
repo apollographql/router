@@ -31,6 +31,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::subscription::notification::Notify;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::reload::activation::TracerProviderHandle;
+use crate::plugins::telemetry::reload::activation::TracerProviderOwner;
 use crate::plugins::telemetry::reload::otel::apollo_opentelemetry_initialized;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -189,9 +190,9 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
 #[derive(Default)]
 pub(crate) struct YamlRouterFactory {
     /// The tracer provider installed by the routers this factory creates. Every plugin this factory
-    /// creates is given it, so each telemetry plugin retires the previous provider when it installs
-    /// a new one.
-    tracer_provider: TracerProviderHandle,
+    /// creates is given its handle, so each telemetry plugin retires the previous provider when it
+    /// installs a new one. Dropping the factory shuts down the installed provider.
+    tracer_provider: TracerProviderOwner,
 }
 
 #[async_trait::async_trait]
@@ -246,7 +247,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .full_config(configuration.validated_yaml.clone())
                     .and_original_config_yaml(configuration.raw_yaml.clone())
                     .build()
-                    .with_tracer_provider(self.tracer_provider.clone());
+                    .with_tracer_provider(self.tracer_provider.handle().clone());
 
                 match factory.create_instance(telemetry_init).await {
                     Ok(plugin) => {
@@ -274,7 +275,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
     }
 
     async fn shutdown(&mut self) {
-        let tracer_provider = self.tracer_provider.clone();
+        let tracer_provider = self.tracer_provider.handle().clone();
         if let Err(error) = tokio::task::spawn_blocking(move || tracer_provider.shutdown()).await {
             tracing::warn!(%error, "failed to shut down tracer provider");
         }
@@ -387,7 +388,7 @@ impl YamlRouterFactory {
                 extra_plugins,
                 license,
                 previous_router,
-                &self.tracer_provider,
+                self.tracer_provider.handle(),
             )
             .instrument(span)
             .await?
