@@ -259,7 +259,7 @@ async fn subscription_task(
     };
 
     let mut max_lifetime_timeout = if let Some(max_lifetime) = subscription_config.max_lifetime {
-        tokio::time::sleep(max_lifetime).boxed()
+        tokio::time::sleep(*max_lifetime).boxed()
     } else {
         futures::future::pending().boxed()
     };

@@ -11647,6 +11647,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Enable callback mode for subgraph(s)"
         },
         "passthrough": {
@@ -11658,6 +11659,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Enable passthrough mode for subgraph(s)"
         }
       },
