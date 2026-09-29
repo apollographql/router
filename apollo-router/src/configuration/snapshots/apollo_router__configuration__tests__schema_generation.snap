@@ -8376,7 +8376,7 @@ expression: "&schema"
       "description": "Configuration options pertaining to the readiness health interval sub-component.",
       "properties": {
         "sampling": {
-          "default": "0s",
+          "default": "5s",
           "description": "The sampling interval (default: 5s)",
           "type": [
             "string",

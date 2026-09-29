@@ -16,8 +16,6 @@ use std::time::Duration;
 
 use http::StatusCode;
 use multimap::MultiMap;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -44,52 +42,30 @@ struct Health {
 }
 
 /// Configuration options pertaining to the readiness health interval sub-component.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct ReadinessIntervalConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[serde(serialize_with = "humantime_serde::serialize")]
-    #[schemars(with = "Option<String>", default)]
+    #[config(default = Duration::from_secs(5).into())]
+    #[schemars(with = "Option<String>")]
     /// The sampling interval (default: 5s)
-    pub(crate) sampling: Duration,
+    pub(crate) sampling: apollo_configuration::types::Duration,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>")]
     /// The unready interval (default: 2 * sampling interval)
-    pub(crate) unready: Option<Duration>,
+    pub(crate) unready: Option<apollo_configuration::types::Duration>,
 }
 
 /// Configuration options pertaining to the readiness health sub-component.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct ReadinessConfig {
     /// The readiness interval configuration
     pub(crate) interval: ReadinessIntervalConfig,
 
     /// How many rejections are allowed in an interval (default: 100)
     /// If this number is exceeded, the router will start to report unready.
+    #[config(default = 100)]
     pub(crate) allowed: usize,
-}
-
-impl Default for ReadinessIntervalConfig {
-    fn default() -> Self {
-        Self {
-            sampling: Duration::from_secs(5),
-            unready: None,
-        }
-    }
-}
-
-impl Default for ReadinessConfig {
-    fn default() -> Self {
-        Self {
-            interval: Default::default(),
-            allowed: 100,
-        }
-    }
 }
 
 /// Configuration options pertaining to the health component.
@@ -99,6 +75,7 @@ impl Default for ReadinessConfig {
 pub(crate) struct Config {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
     #[config(default = default_health_check_listen(), skip_validate)]
     pub(crate) listen: ListenAddr,
 
@@ -112,7 +89,6 @@ pub(crate) struct Config {
     pub(crate) path: String,
 
     /// Optionally specify readiness configuration
-    #[config(skip_validate)]
     pub(crate) readiness: ReadinessConfig,
 }
 
@@ -191,13 +167,13 @@ impl PluginPrivate for HealthCheck {
         let rejected = Arc::new(AtomicUsize::new(0));
 
         let allowed = init.config.readiness.allowed;
-        let my_sampling_interval = init.config.readiness.interval.sampling;
+        let my_sampling_interval = *init.config.readiness.interval.sampling;
         let my_recovery_interval = init
             .config
             .readiness
             .interval
             .unready
-            .unwrap_or(2 * my_sampling_interval);
+            .map_or(2 * my_sampling_interval, |unready| *unready);
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
@@ -338,6 +314,20 @@ mod test {
     use super::*;
     use crate::plugins::test::PluginTestHarness;
     use crate::plugins::test::ServiceHandle;
+
+    /// An interval that sets only `unready` still samples every 5s, rather than every 0s, which
+    /// panicked the readiness ticker.
+    #[test]
+    fn omitted_sampling_interval_defaults_to_five_seconds() {
+        let config: ReadinessConfig =
+            serde_json::from_value(json!({ "interval": { "unready": "10s" } })).unwrap();
+
+        assert_eq!(*config.interval.sampling, Duration::from_secs(5));
+        assert_eq!(
+            config.interval.unready.map(|unready| *unready),
+            Some(Duration::from_secs(10))
+        );
+    }
 
     // Create a base for testing. Even though we don't use the test_harness once this function
     // completes, we return it because we need to keep it alive to prevent the ticker from being
