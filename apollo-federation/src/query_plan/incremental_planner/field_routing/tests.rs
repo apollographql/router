@@ -1512,6 +1512,66 @@ fn interface_object_fake_downcast_fetches_concrete_typename() {
     "###);
 }
 
+/// A fake downcast whose fragment also selects a field only the concrete
+/// type defines: that field cannot stay under the io type in B, so it is
+/// fetched from A, where the concrete type exists.
+#[test]
+fn interface_object_fake_downcast_with_concrete_only_field() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "{ stuff { ... on X { desc name } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            stuff {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "a") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+                ... on X {
+                  __typename
+                  id
+                  name
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "b") {
+            {
+              ... on X {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                desc
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
 /// Entering through A (real interface), a concrete-type downcast whose field
 /// only exists on the @interfaceObject copy in B key-hops into B.
 #[test]
@@ -3152,6 +3212,147 @@ fn sibling_connector_entity_groups_not_merged() {
         coordinates.contains(&"connectors:Query.userDetails[0]"),
         "{plan}"
     );
+}
+
+const CONNECTOR_INTERFACE_OBJECT_SCHEMA: &str =
+    include_str!("../fixtures/connector_interface_object.graphql");
+
+/// A connector subgraph exposes `Itf` as an @interfaceObject, so the
+/// implementation-specific fragments must be resolved by the GraphQL
+/// subgraph after the connector returns the interface fields.
+#[test]
+fn connector_interface_object_with_implementation_fragments() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_INTERFACE_OBJECT_SCHEMA,
+        "{ itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+              c
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Query_itf_0") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  d
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Itf_e_0") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  e
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "graphql") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  __typename
+                  ... on T2 {
+                    b
+                  }
+                  ... on T1 {
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A fragment on an implementation that mixes a field the @interfaceObject
+/// connector provides with one only the GraphQL subgraph defines.
+#[test]
+fn connector_interface_object_with_mixed_implementation_fragment() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_INTERFACE_OBJECT_SCHEMA,
+        "{ itfs { id ... on T1 { c a } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on Itf {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                __typename
+                ... on T1 {
+                  __typename
+                  id
+                  a
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "connectors_Query_itf_0") {
+            {
+              ... on T1 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                c
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
 }
 
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =

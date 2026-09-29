@@ -112,11 +112,15 @@ impl FieldRoutingSearchSpace {
                     connector.clone(),
                     child_defer_ref,
                 );
+                // The entity type as the connector subgraph knows it. It
+                // differs from the source type when the source is an
+                // implementation of an @interfaceObject.
+                let entity_type = key_conditions.type_position.clone();
                 let inputs = vec![InputContribution::Key {
                     source_type_name: source.type_pos.type_name().clone(),
                     conditions: key_conditions.clone(),
                     rewrite_info: InputRewriteInfo {
-                        dest_type: source.type_pos.clone(),
+                        dest_type: entity_type.clone(),
                         dest_subgraph: source_subgraph.clone(),
                     },
                 }];
@@ -128,7 +132,7 @@ impl FieldRoutingSearchSpace {
                     self.push_condition_pendings(state, pending, key_conditions, new_group)?;
                 }
 
-                let entity_base_path = self.entity_root_path(source.type_pos.type_name())?;
+                let entity_base_path = self.entity_root_path(entity_type.type_name())?;
                 (
                     new_group,
                     entity_base_path.pushed(field_op_element),
@@ -382,6 +386,26 @@ impl FieldRoutingSearchSpace {
                         .as_ref()
                         .map(|t| t.type_name().clone())
                         .unwrap_or_else(|| parent_type.clone());
+                    // The connector cannot resolve a type condition its subgraph
+                    // does not define (e.g. an implementation of an
+                    // @interfaceObject), so regular routing takes the fragment
+                    // from the parent's node.
+                    if fragment_type != *parent_type
+                        && self
+                            .connector_landing_node(source_subgraph, &fragment_type)
+                            .is_none()
+                        && let Some(anchor_node) =
+                            self.connector_landing_node(source_subgraph, parent_type)
+                    {
+                        deferred.push(DeferredConnectorSelection {
+                            selection: selection.clone(),
+                            parent_type: parent_type.clone(),
+                            anchor_node,
+                            op_path: op_path.clone(),
+                            response_path: response_path.clone(),
+                        });
+                        continue;
+                    }
                     let child_op = op_path.pushed(Arc::new(OpPathElement::InlineFragment(
                         fragment_sel.inline_fragment.clone(),
                     )));

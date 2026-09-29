@@ -5289,19 +5289,19 @@ fn inc_defer_multiple_labels_keep_scopes_separate() {
             },
           },
         }, [
-          Deferred(depends: [1], path: "t/v3", label: "defer_in_v3") {
-            { y }:
-            Flatten(path: "t.v3") {
-              Fetch(service: "Subgraph3") {
+          Deferred(depends: [0], path: "t", label: "defer_v1") {
+            { v1 }:
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph1") {
                 {
-                  ... on U {
+                  ... on T {
                     __typename
                     id
                   }
                 } =>
                 {
-                  ... on U {
-                    y
+                  ... on T {
+                    v1
                   }
                 }
               },
@@ -5325,19 +5325,19 @@ fn inc_defer_multiple_labels_keep_scopes_separate() {
               },
             },
           },
-          Deferred(depends: [0], path: "t", label: "defer_v1") {
-            { v1 }:
-            Flatten(path: "t") {
-              Fetch(service: "Subgraph1") {
+          Deferred(depends: [1], path: "t/v3", label: "defer_in_v3") {
+            { y }:
+            Flatten(path: "t.v3") {
+              Fetch(service: "Subgraph3") {
                 {
-                  ... on T {
+                  ... on U {
                     __typename
                     id
                   }
                 } =>
                 {
-                  ... on T {
-                    v1
+                  ... on U {
+                    y
                   }
                 }
               },
