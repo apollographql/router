@@ -112,11 +112,15 @@ impl FieldRoutingSearchSpace {
                     connector.clone(),
                     child_defer_ref,
                 );
+                // The entity type as the connector subgraph knows it. It
+                // differs from the source type when the source is an
+                // implementation of an @interfaceObject.
+                let entity_type = key_conditions.type_position.clone();
                 let inputs = vec![InputContribution::Key {
                     source_type_name: source.type_pos.type_name().clone(),
                     conditions: key_conditions.clone(),
                     rewrite_info: InputRewriteInfo {
-                        dest_type: source.type_pos.clone(),
+                        dest_type: entity_type.clone(),
                         dest_subgraph: source_subgraph.clone(),
                     },
                 }];
@@ -128,7 +132,7 @@ impl FieldRoutingSearchSpace {
                     self.push_condition_pendings(state, pending, key_conditions, new_group)?;
                 }
 
-                let entity_base_path = self.entity_root_path(source.type_pos.type_name())?;
+                let entity_base_path = self.entity_root_path(entity_type.type_name())?;
                 (
                     new_group,
                     entity_base_path.pushed(field_op_element),

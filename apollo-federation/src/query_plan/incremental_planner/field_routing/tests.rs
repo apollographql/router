@@ -3296,6 +3296,65 @@ fn connector_interface_object_with_implementation_fragments() {
     "###);
 }
 
+/// A fragment on an implementation that mixes a field the @interfaceObject
+/// connector provides with one only the GraphQL subgraph defines.
+#[test]
+fn connector_interface_object_with_mixed_implementation_fragment() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_INTERFACE_OBJECT_SCHEMA,
+        "{ itfs { id ... on T1 { c a } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on Itf {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                __typename
+                ... on T1 {
+                  __typename
+                  id
+                  a
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "connectors_Query_itf_0") {
+            {
+              ... on T1 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                c
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 
