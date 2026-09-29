@@ -2383,9 +2383,9 @@ async fn execute_with_unstable_plugin<P: crate::plugin::PluginUnstable>(
 }
 
 /// The incremental planner cannot yet resolve connector entities whose type
-/// has no `@key` in the connector subgraph (connectors on types, or field
-/// connectors using `$this`), so tests covering those run on the legacy
-/// planner.
+/// has no `@key` in the connector subgraph (connectors on types, field
+/// connectors using `$this`, or `entity: true` connectors), so tests covering
+/// those run on the legacy planner.
 fn legacy_planner_config() -> Option<serde_json_bytes::Value> {
     Some(json!({
         "supergraph": { "query_planning": { "incremental_planner": { "enabled": false } } }

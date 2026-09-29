@@ -386,6 +386,15 @@ async fn get_connector_router_service(
             "posts.routerHealth".to_string(),
             serde_json::json!({"override_url": format!("{mock_url}/")}),
         );
+
+        // `Post` has entity connectors but no @key, which the incremental
+        // planner cannot route to yet.
+        obj.insert(
+            "supergraph".to_string(),
+            serde_json::json!({
+                "query_planning": { "incremental_planner": { "enabled": false } }
+            }),
+        );
     }
 
     let builder = TestHarness::builder()
