@@ -1822,7 +1822,7 @@ async fn test_interface_object() {
                 .method("POST")
                 .path("/graphql")
                 .body(serde_json::json!({
-                  "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
+                  "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T2 { b } ... on T1 { a } } } }"#,
                   "variables": {
                     "representations": [
                       { "__typename": "Itf", "id": 1 },
