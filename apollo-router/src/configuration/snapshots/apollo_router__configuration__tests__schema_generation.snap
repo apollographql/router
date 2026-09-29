@@ -337,12 +337,10 @@ expression: "&schema"
       ]
     },
     "ApolloUsageReportsBatchProcessorConfiguration": {
+      "additionalProperties": false,
       "properties": {
         "max_export_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 30
-          },
+          "default": "30s",
           "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
           "type": "string"
         },
@@ -354,10 +352,7 @@ expression: "&schema"
           "type": "integer"
         },
         "scheduled_delay": {
-          "default": {
-            "nanos": 0,
-            "secs": 5
-          },
+          "default": "5s",
           "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
           "type": "string"
         }
@@ -7882,20 +7877,15 @@ expression: "&schema"
       ]
     },
     "OtlpMetricsBatchProcessorConfiguration": {
+      "additionalProperties": false,
       "properties": {
         "max_export_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 30
-          },
+          "default": "30s",
           "description": "The maximum duration to export a batch of data.\nThe default value is 30 seconds.",
           "type": "string"
         },
         "scheduled_delay": {
-          "default": {
-            "nanos": 0,
-            "secs": 5
-          },
+          "default": "5s",
           "description": "The delay interval in milliseconds between two consecutive processing\nof batches. The default value is 5 seconds.",
           "type": "string"
         }

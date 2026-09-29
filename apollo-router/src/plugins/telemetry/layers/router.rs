@@ -81,8 +81,8 @@ fn filter_headers(
             let send_header = match &forward_rules {
                 ForwardHeaders::None => false,
                 ForwardHeaders::All => true,
-                ForwardHeaders::Only(only) => only.contains(name),
-                ForwardHeaders::Except(except) => !except.contains(name),
+                ForwardHeaders::Only(only) => only.iter().any(|only| **only == *name),
+                ForwardHeaders::Except(except) => !except.iter().any(|except| **except == *name),
             };
 
             send_header.then(|| {
@@ -252,13 +252,13 @@ where
                     let library_name_valid = req
                         .router_request
                         .headers()
-                        .get(&config_checkpoint.apollo.library_name_header)
+                        .get(&*config_checkpoint.apollo.library_name_header)
                         .and_then(|v| v.to_str().ok())
                         .is_none_or(is_valid_client_library_value);
                     let library_version_valid = req
                         .router_request
                         .headers()
-                        .get(&config_checkpoint.apollo.library_version_header)
+                        .get(&*config_checkpoint.apollo.library_version_header)
                         .and_then(|v| v.to_str().ok())
                         .is_none_or(is_valid_client_library_value);
                     if !library_name_valid || !library_version_valid {
@@ -293,12 +293,12 @@ where
                     let client_name = request
                         .router_request
                         .headers()
-                        .get(&config_request.apollo.client_name_header)
+                        .get(&*config_request.apollo.client_name_header)
                         .and_then(|h| h.to_str().ok());
                     let client_version = request
                         .router_request
                         .headers()
-                        .get(&config_request.apollo.client_version_header)
+                        .get(&*config_request.apollo.client_version_header)
                         .and_then(|h| h.to_str().ok());
 
                     if let Some(name) = client_name {
@@ -312,12 +312,12 @@ where
                     let library_name = request
                         .router_request
                         .headers()
-                        .get(&config_request.apollo.library_name_header)
+                        .get(&*config_request.apollo.library_name_header)
                         .and_then(|h| h.to_str().ok());
                     let library_version = request
                         .router_request
                         .headers()
-                        .get(&config_request.apollo.library_version_header)
+                        .get(&*config_request.apollo.library_version_header)
                         .and_then(|h| h.to_str().ok());
 
                     if let Some(name) = library_name {
@@ -577,8 +577,8 @@ mod tests {
     #[test]
     fn it_test_send_headers_to_studio() {
         let fw_headers = ForwardHeaders::Only(vec![
-            HeaderName::from_static("test"),
-            HeaderName::from_static("apollo-x-name"),
+            HeaderName::from_static("test").into(),
+            HeaderName::from_static("apollo-x-name").into(),
         ]);
         let mut headers = HeaderMap::new();
         headers.insert(
