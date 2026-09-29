@@ -339,9 +339,22 @@ async fn _test_type_conditions_enabled_shouldnt_make_article_fetch() -> Response
 }
 
 fn setup_from_mocks(
-    configuration: serde_json::Value,
+    mut configuration: serde_json::Value,
     mocks: &[(&'static str, &'static str)],
 ) -> TestHarness<'static> {
+    // The incremental planner does not implement type-conditioned fetching.
+    configuration
+        .as_object_mut()
+        .expect("configuration is an object")
+        .entry("supergraph")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("supergraph is an object")
+        .insert(
+            "query_planning".to_string(),
+            json!({ "incremental_planner": { "enabled": false } }),
+        );
+
     let mut mocked_subgraphs = MockedSubgraphs::default();
 
     for (name, m) in mocks {

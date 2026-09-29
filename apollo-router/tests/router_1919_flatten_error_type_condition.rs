@@ -108,6 +108,10 @@ fn setup() -> TestHarness<'static> {
         .try_log_level("info")
         .configuration_json(json! {{
             "experimental_type_conditioned_fetching": true,
+            // The incremental planner does not implement type-conditioned fetching.
+            "supergraph": {
+                "query_planning": { "incremental_planner": { "enabled": false } }
+            },
             "include_subgraph_errors": {
                 "all": true
             }

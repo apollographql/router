@@ -24,6 +24,11 @@ async fn reports_evaluated_plans() {
                 metrics:
                   prometheus:
                     enabled: true
+            supergraph:
+              query_planning:
+                # Evaluated plans are counted by the legacy planner only.
+                incremental_planner:
+                  enabled: false
         "#,
         )
         .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
@@ -67,6 +72,9 @@ async fn does_not_exceed_max_evaluated_plans() {
             supergraph:
               query_planning:
                 experimental_plans_limit: 4
+                # Evaluated plans are counted by the legacy planner only.
+                incremental_planner:
+                  enabled: false
         "#,
         )
         .supergraph("tests/integration/fixtures/query_planner_max_evaluated_plans.graphql")
