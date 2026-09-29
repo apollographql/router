@@ -52,6 +52,7 @@ pub enum ExpansionResult {
 /// `FetchProtocol::Connector`.
 pub fn build_connectors_without_expansion(
     supergraph_str: &str,
+    validate_default_values: bool,
 ) -> Result<Option<Connectors>, FederationError> {
     let connect_url = ConnectSpec::identity();
     let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
@@ -59,7 +60,11 @@ pub fn build_connectors_without_expansion(
         return Ok(None);
     }
 
-    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+    let supergraph = Supergraph::new_with_spec_check_and_options(
+        supergraph_str,
+        &crate::router_supported_supergraph_specs(),
+        validate_default_values,
+    )?;
 
     let connect_subgraphs: Vec<_> = supergraph
         .extract_subgraphs()?

@@ -77,9 +77,10 @@ impl Schema {
                 // would have produced, so the expensive virtual-subgraph
                 // expansion is skipped. The Connector models are still parsed so
                 // ConnectorServiceFactory can serve requests.
-                let connectors = build_connectors_without_expansion(&raw_sdl.sdl)
-                    .map_err(SchemaError::Connector)?
-                    .map(|c| apply_config(config, c));
+                let connectors =
+                    build_connectors_without_expansion(&raw_sdl.sdl, validate_default_values)
+                        .map_err(SchemaError::Connector)?
+                        .map(|c| apply_config(config, c));
                 (raw_sdl, None, connectors)
             } else {
                 let expansion =

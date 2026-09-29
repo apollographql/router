@@ -206,3 +206,31 @@ async fn test_validate_default_values_false_allows_startup_with_connectors() -> 
     router.graceful_shutdown().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_validate_default_values_false_allows_startup_with_native_connectors()
+-> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              validate_default_values: false
+              query_planning:
+                incremental_planner:
+                  enabled: true
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "supergraph_with_invalid_default.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
