@@ -79,17 +79,18 @@ impl<'a> MetricsBuilder<'a> {
         HashMap<MeterProviderType, FilterMeterProvider>,
         Sender,
     ) {
-        // Count each overflow on the public meter provider once. Prometheus scrapes read cumulative
-        // state, so they see every overflow a push exporter could, including one that a delta
-        // exporter's per-interval state never reaches. Without Prometheus, the first push exporter
-        // counts.
-        if self.prometheus_registry.is_none()
-            && let Some(counting) = self.public_push_overflow_counting.first()
-        {
+        // Count each overflow on the public meter provider once. The first push exporter counts,
+        // with OpenTelemetry metric names. Prometheus scrapes count only when Prometheus is the
+        // provider's only exporter.
+        let mut prometheus_registry = self.prometheus_registry;
+        if let Some(counting) = self.public_push_overflow_counting.first() {
             counting.enable();
+            if let Some(prometheus_registry) = &mut prometheus_registry {
+                prometheus_registry.overflow_starts = None;
+            }
         }
         (
-            self.prometheus_registry,
+            prometheus_registry,
             self.meter_provider_builders
                 .into_iter()
                 .map(|(k, v)| {
@@ -293,7 +294,7 @@ mod overflow_counting_tests {
     }
 
     #[test]
-    fn first_public_push_exporter_counts_without_prometheus() {
+    fn first_public_push_exporter_counts() {
         let conf = Conf::default();
         let mut builder = MetricsBuilder::new(&conf);
         let first = builder.public_overflow_exporter(InMemoryMetricExporter::default());
@@ -305,7 +306,7 @@ mod overflow_counting_tests {
     }
 
     #[test]
-    fn prometheus_counts_instead_of_public_push_exporters() {
+    fn push_exporter_counts_instead_of_prometheus() {
         // Configuration order must not matter.
         for prometheus_first in [true, false] {
             let conf = Conf::default();
@@ -319,9 +320,19 @@ mod overflow_counting_tests {
             }
             let (prometheus_registry, _, _) = builder.build();
 
-            assert!(prometheus_registry.is_some());
-            assert!(!push.counts_overflow());
+            assert!(push.counts_overflow());
+            assert!(prometheus_registry.unwrap().overflow_starts.is_none());
         }
+    }
+
+    #[test]
+    fn prometheus_counts_when_it_is_the_only_exporter() {
+        let conf = Conf::default();
+        let mut builder = MetricsBuilder::new(&conf);
+        builder.configure(&prometheus_config()).unwrap();
+        let (prometheus_registry, _, _) = builder.build();
+
+        assert!(prometheus_registry.unwrap().overflow_starts.is_some());
     }
 }
 

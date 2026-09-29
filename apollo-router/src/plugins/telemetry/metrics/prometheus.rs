@@ -3,7 +3,6 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
-use opentelemetry_prometheus::PrometheusExporter;
 use opentelemetry_prometheus::ResourceSelector;
 use prometheus::Encoder;
 use prometheus::Registry;
@@ -16,7 +15,7 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::metrics::OverflowMetricReader;
+use crate::plugins::telemetry::metrics::OverflowStarts;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -83,26 +82,25 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        // Scrapes bypass reader wrappers, so the endpoint keeps a handle to check for overflow itself
-        let reader = OverflowMetricReader::new(exporter);
-        builder.with_reader(MeterProviderType::Public, reader.clone());
+        builder.with_reader(MeterProviderType::Public, exporter);
+        // Scrapes bypass reader wrappers, so the endpoint checks each scrape for overflow itself
         builder.with_prometheus_registry(PrometheusRegistry {
             registry,
-            overflow_reader: reader,
+            overflow_starts: Some(OverflowStarts::default()),
         });
 
         Ok(())
     }
 }
 
-/// The registry backing the Prometheus endpoint, with the reader used to detect cardinality
+/// The registry backing the Prometheus endpoint, with the state used to count cardinality
 /// overflow.
 #[derive(Clone, Debug)]
 pub(crate) struct PrometheusRegistry {
     pub(crate) registry: Registry,
-    /// Counts cardinality overflow on the public meter provider from each scrape. While
-    /// Prometheus is configured, it is the provider's only counting source.
-    pub(crate) overflow_reader: OverflowMetricReader<PrometheusExporter>,
+    /// Present when scrapes count cardinality overflow on the public meter provider, which is when
+    /// Prometheus is its only exporter. `None` when a push exporter counts instead.
+    pub(crate) overflow_starts: Option<OverflowStarts>,
 }
 
 pub(crate) struct PrometheusService {
@@ -125,11 +123,13 @@ impl Service<router::Request> for PrometheusService {
         // only matters for task-local test meter providers (`with_metrics`); in production the
         // counter goes to the global meter provider whichever task records it.
         Box::pin(async move {
-            let metric_families = registry.registry.gather();
             // As with the push exporters, the counter shows up from the next collection.
-            registry
-                .overflow_reader
-                .report_cardinality_overflow(&metric_families);
+            let metric_families = match &registry.overflow_starts {
+                Some(overflow_starts) => {
+                    overflow_starts.gather_and_record(|| registry.registry.gather())
+                }
+                None => registry.registry.gather(),
+            };
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;

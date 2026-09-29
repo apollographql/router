@@ -1,11 +1,13 @@
-### Report `apollo.router.telemetry.metrics.cardinality_overflow` on the Prometheus endpoint
+### Report `apollo.router.telemetry.metrics.cardinality_overflow` on the Prometheus endpoint, once per start of overflow
 
-Since v2.13.0, routers exporting metrics only through Prometheus never reported `apollo.router.telemetry.metrics.cardinality_overflow`, even when a metric went past its cardinality limit. OTLP exports were not affected. The Prometheus endpoint now reports the counter again.
+Since v2.13.0, routers exporting metrics only through Prometheus never reported `apollo.router.telemetry.metrics.cardinality_overflow`, even when a metric went past its cardinality limit. The Prometheus endpoint now reports it again.
 
-The counter behaves the same way on every exporter:
+The counter now goes up once when a metric starts overflowing, and not again while it stays overflowed, so a steady overflow no longer counts once per export, scrape or scraper. Cumulative sums and histograms keep an overflow until the router reloads, so each counts once. Observable gauges reflect each collection, and delta temporality starts each export interval empty, so a metric can stop overflowing and later start again; each observed restart counts again.
 
-- It carries a `metric.name` attribute with the OpenTelemetry name of the overflowed metric, for example `metric_name="http.server.request.duration"` on Prometheus. Before v2.13.0 the counter had no attributes.
-- It goes up by one per Prometheus scrape (or per export, without Prometheus) while the metric has overflowed series, rather than once per overflow warning as it did before v2.13.0. Alerts on any increase keep working; alerts on a fixed value may need adjusting.
-- When OTLP and Prometheus are both enabled, overflow is counted once, on each Prometheus scrape, and OTLP exports the same single series. Since v2.13.0 OTLP counted it on each export instead, so the counter now rises at the scrape rate, and doesn't rise while nothing scrapes the endpoint. Counting from Prometheus's cumulative state also reports overflow that an OTLP exporter using `temporality: delta` never reaches within one export interval.
+- **OTLP, with or without Prometheus:** the OTLP exporter counts, with the OpenTelemetry metric name, for example `metric.name="http.server.request.duration"`. From v2.13.0 to v2.16.x it went up on every export while a metric was overflowed, so its rate changes. Alerts on any increase keep working; alerts on a rate or a fixed value may need adjusting.
+- **Prometheus only:** scrapes count, labelled with the Prometheus family name, for example `metric_name="http_server_request_duration_seconds"`.
+- **Apollo usage reporting** is unchanged: it counts every export in which a metric has overflowed.
+
+In v2.12.0 and earlier, the counter had no attributes and counted the OpenTelemetry SDK's overflow warnings. That was once when a counter's overflow bucket was created, but once per measurement with a new attribute set for histograms and gauges.
 
 By [@bryncooke](https://github.com/bryncooke)

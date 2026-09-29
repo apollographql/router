@@ -192,11 +192,13 @@ impl Config {
 
         // Wrap with retry, then overflow detection, then error prefixing
         let named_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(exporter)),
+            OverflowMetricExporter::new_push_always_counting(RetryMetricExporter::new(exporter)),
             "apollo",
         );
         let named_realtime_exporter = NamedMetricExporter::new(
-            OverflowMetricExporter::new_push(RetryMetricExporter::new(realtime_exporter)),
+            OverflowMetricExporter::new_push_always_counting(RetryMetricExporter::new(
+                realtime_exporter,
+            )),
             "apollo",
         );
 
