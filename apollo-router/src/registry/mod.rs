@@ -253,7 +253,7 @@ async fn fetch_schema_from_reference(
     // supported layers. Apollo wants to add new layers as features evolve and routers in the field will
     // break if they get an unsupported layer type. Instead, this code narrowly fetches only the layers
     // understands.
-    let (manifest, _) = fetch_oci_manifest(client, auth, reference, oci_config).await?;
+    let (manifest, _) = fetch_oci_manifest(client, auth, reference, oci_config, "graph").await?;
 
     let schema_layer = manifest
         .layers
@@ -263,7 +263,7 @@ async fn fetch_schema_from_reference(
         .clone();
 
     tracing::debug!("pulling oci blob");
-    let schema = fetch_oci_blob(client, reference, &schema_layer).await?;
+    let schema = fetch_oci_blob(client, reference, &schema_layer, "graph").await?;
 
     let annotations = manifest.annotations;
 
@@ -285,6 +285,7 @@ async fn fetch_oci_manifest(
     auth: &RegistryAuth,
     reference: &Reference,
     oci_config: Option<&OciConfig>,
+    artifact: &'static str,
 ) -> Result<(oci_client::manifest::OciImageManifest, String), OciError> {
     let before_request = Instant::now();
     let registry = reference.registry().to_string();
@@ -300,6 +301,7 @@ async fn fetch_oci_manifest(
         1u64,
         registry = registry.clone(),
         kind = "get_manifest",
+        artifact = artifact,
         status = status
     );
     f64_histogram_with_unit!(
@@ -309,6 +311,7 @@ async fn fetch_oci_manifest(
         duration,
         registry = registry,
         kind = "get_manifest",
+        artifact = artifact,
         status = status
     );
 
@@ -329,6 +332,7 @@ async fn fetch_oci_blob(
     client: &mut Client,
     reference: &Reference,
     schema_layer: &oci_client::manifest::OciDescriptor,
+    artifact: &'static str,
 ) -> Result<Vec<u8>, OciError> {
     let before_request = Instant::now();
     let registry = reference.registry().to_string();
@@ -348,6 +352,7 @@ async fn fetch_oci_blob(
         1u64,
         registry = registry.clone(),
         kind = "get_blob",
+        artifact = artifact,
         status = status
     );
     f64_histogram_with_unit!(
@@ -357,6 +362,7 @@ async fn fetch_oci_blob(
         duration,
         registry = registry,
         kind = "get_blob",
+        artifact = artifact,
         status = status
     );
 
@@ -444,7 +450,7 @@ pub(crate) async fn fetch_oci_manifest_digest(oci_config: &OciConfig) -> Result<
         ..Default::default()
     });
 
-    fetch_manifest_digest_from_reference(&auth, &client, &reference).await
+    fetch_manifest_digest_from_reference(&auth, &client, &reference, "graph").await
 }
 
 /// Fetch the manifest digest for an arbitrary reference in the same registry
@@ -452,6 +458,7 @@ async fn fetch_manifest_digest_from_reference(
     auth: &RegistryAuth,
     client: &Client,
     reference: &Reference,
+    artifact: &'static str,
 ) -> Result<String, OciError> {
     let before_request = Instant::now();
     let registry = reference.registry().to_string();
@@ -466,6 +473,7 @@ async fn fetch_manifest_digest_from_reference(
         1u64,
         registry = registry.clone(),
         kind = "head_manifest",
+        artifact = artifact,
         status = status
     );
     f64_histogram_with_unit!(
@@ -475,6 +483,7 @@ async fn fetch_manifest_digest_from_reference(
         duration,
         registry = registry,
         kind = "head_manifest",
+        artifact = artifact,
         status = status
     );
 
@@ -657,7 +666,8 @@ async fn fetch_entitlement_id(
     auth: &RegistryAuth,
     graph_reference: &Reference,
 ) -> Result<Option<String>, OciError> {
-    let (graph_manifest, _) = fetch_oci_manifest(client, auth, graph_reference, None).await?;
+    let (graph_manifest, _) =
+        fetch_oci_manifest(client, auth, graph_reference, None, "graph").await?;
     // Return entitlement id if &annotations is Some(_) and contains the id
     // Otherwise, return None
     Ok(graph_manifest
@@ -785,8 +795,13 @@ fn stream_license_from_oci(
 
                     // Compare the old entitlement digest to the new one
                     // Retry if digest not found, otherwise Error
-                    match fetch_manifest_digest_from_reference(&auth, &client, &license_reference)
-                        .await
+                    match fetch_manifest_digest_from_reference(
+                        &auth,
+                        &client,
+                        &license_reference,
+                        "entitlement",
+                    )
+                    .await
                     {
                         Ok(current_digest) => {
                             if last_entitlement_digest.as_deref() == Some(current_digest.as_str()) {
@@ -892,7 +907,8 @@ async fn fetch_license_from_reference(
     oci_config: Option<&OciConfig>,
 ) -> Result<License, OciError> {
     tracing::debug!("pulling oci manifest for license");
-    let (manifest, _) = fetch_oci_manifest(client, auth, reference, oci_config).await?;
+    let (manifest, _) =
+        fetch_oci_manifest(client, auth, reference, oci_config, "entitlement").await?;
 
     let license_layer = manifest
         .layers
@@ -913,7 +929,8 @@ async fn fetch_license_from_reference(
     };
 
     tracing::debug!("pulling oci blob for license layer");
-    let license_blob_bytes = fetch_oci_blob(client, reference, &license_layer).await?;
+    let license_blob_bytes =
+        fetch_oci_blob(client, reference, &license_layer, "entitlement").await?;
 
     // Convert the license blob bytes into a License object (assuming it's json)
     let jwt = String::from_utf8(license_blob_bytes)?;

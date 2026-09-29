@@ -445,6 +445,13 @@ impl Merger {
                 &input_object.directives,
             );
 
+            if input_object.is_one_of() && !mutable_object.is_one_of() {
+                mutable_object.directives.push(Node::new(Directive {
+                    name: name!("oneOf"),
+                    arguments: Default::default(),
+                }));
+            }
+
             for (field_name, field) in input_object.fields.iter() {
                 let existing_field = mutable_object.fields.entry(field_name.clone());
 
