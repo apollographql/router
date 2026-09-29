@@ -77,13 +77,11 @@ mod forbid_http_get_mutations_tests {
     async fn it_lets_queries_pass_through() {
         let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        let mut service_stack = ForbidMutations::new(PluginInit::fake_new(
-            Enabled(true),
-            Default::default(),
-        ))
-        .await
-        .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock.boxed_clone());
+        let mut service_stack =
+            ForbidMutations::new(PluginInit::fake_new(Enabled(true), Default::default()))
+                .await
+                .expect("couldn't create forbid_mutations plugin")
+                .execution_service(mock.boxed_clone());
 
         let call = service_stack
             .ready()
@@ -109,13 +107,11 @@ mod forbid_http_get_mutations_tests {
         let expected_status = StatusCode::BAD_REQUEST;
 
         let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
-        let service_stack = ForbidMutations::new(PluginInit::fake_new(
-            Enabled(true),
-            Default::default(),
-        ))
-        .await
-        .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock.boxed_clone());
+        let service_stack =
+            ForbidMutations::new(PluginInit::fake_new(Enabled(true), Default::default()))
+                .await
+                .expect("couldn't create forbid_mutations plugin")
+                .execution_service(mock.boxed_clone());
 
         let mut response = service_stack
             .oneshot(create_request(Method::GET, OperationKind::Mutation))
@@ -132,13 +128,11 @@ mod forbid_http_get_mutations_tests {
     async fn configuration_set_to_false_lets_mutations_pass_through() {
         let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        let mut service_stack = ForbidMutations::new(PluginInit::fake_new(
-            Enabled(false),
-            Default::default(),
-        ))
-        .await
-        .expect("couldn't create forbid_mutations plugin")
-        .execution_service(mock.boxed_clone());
+        let mut service_stack =
+            ForbidMutations::new(PluginInit::fake_new(Enabled(false), Default::default()))
+                .await
+                .expect("couldn't create forbid_mutations plugin")
+                .execution_service(mock.boxed_clone());
 
         let call = service_stack
             .ready()
