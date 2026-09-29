@@ -1335,6 +1335,14 @@ fn nested_plugin_sections_reject_unknown_keys() {
             "telemetry:\n  exporters:\n    tracing:\n      otlp:\n        enabled: false\n        batch_processor:\n          max_queue_sise: 10\n",
             "max_queue_sise",
         ),
+        (
+            "telemetry:\n  apollo:\n    metrics:\n      otlp:\n        batch_processor:\n          scheduled_dealy: 5s\n",
+            "scheduled_dealy",
+        ),
+        (
+            "telemetry:\n  apollo:\n    metrics:\n      usage_reports:\n        batch_processor:\n          scheduled_dealy: 5s\n",
+            "scheduled_dealy",
+        ),
     ] {
         assert_rejects_unknown_key(yaml, key);
     }
