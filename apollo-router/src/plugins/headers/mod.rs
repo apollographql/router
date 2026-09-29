@@ -5,6 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_redaction::Redacted;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -37,10 +38,10 @@ use tower_service::Service;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
-use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugin::serde::deserialize_option_header_name;
-use crate::plugin::serde::deserialize_option_header_value;
+use crate::plugin::serde::deserialize_option_redacted_header_value;
+use crate::plugin::serde::deserialize_redacted_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
@@ -146,8 +147,8 @@ struct InsertStatic {
 
     /// The value for the header
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_header_value")]
-    value: HeaderValue,
+    #[serde(deserialize_with = "deserialize_redacted_header_value")]
+    value: Redacted<HeaderValue>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -178,8 +179,8 @@ struct InsertFromBody {
 
     /// The default if the path in the body did not resolve to an element
     #[schemars(with = "Option<String>", default)]
-    #[serde(deserialize_with = "deserialize_option_header_value", default)]
-    default: Option<HeaderValue>,
+    #[serde(deserialize_with = "deserialize_option_redacted_header_value", default)]
+    default: Option<Redacted<HeaderValue>>,
 }
 
 // `JsonPathInst` does not implement `Debug`, so the path is left out.
@@ -217,8 +218,8 @@ enum Propagate {
 
         /// Default value for the header.
         #[schemars(with = "Option<String>", default)]
-        #[serde(deserialize_with = "deserialize_option_header_value", default)]
-        default: Option<HeaderValue>,
+        #[serde(deserialize_with = "deserialize_option_redacted_header_value", default)]
+        default: Option<Redacted<HeaderValue>>,
     },
     /// Propagate header given a regex to match header name
     Matching {
@@ -714,7 +715,7 @@ impl Insert {
     ) {
         match self {
             Insert::Static(insert_static) => {
-                headers_mut.insert(&insert_static.name, insert_static.value.clone());
+                headers_mut.insert(&insert_static.name, insert_static.value.unredact().clone());
             }
             Insert::FromContext(insert_from_context) => {
                 if let Some(val) = context
@@ -741,7 +742,7 @@ impl Insert {
                     let output = from_body.path.find(body_to_value);
                     if let serde_json_bytes::Value::Null = output {
                         if let Some(default_val) = &from_body.default {
-                            headers_mut.insert(&from_body.name, default_val.clone());
+                            headers_mut.insert(&from_body.name, default_val.unredact().clone());
                         }
                     } else {
                         let header_value = if let serde_json_bytes::Value::String(val_str) = output
@@ -761,7 +762,7 @@ impl Insert {
                         }
                     }
                 } else if let Some(default_val) = &from_body.default {
-                    headers_mut.insert(&from_body.name, default_val.clone());
+                    headers_mut.insert(&from_body.name, default_val.unredact().clone());
                 }
             }
         }
@@ -823,7 +824,7 @@ impl Propagate {
                     let values = supergraph_headers.get_all(named);
                     if values.iter().count() == 0 {
                         if let Some(default) = default {
-                            headers_mut.append(target_header, default.clone());
+                            headers_mut.append(target_header, default.unredact().clone());
                             already_propagated.insert(target_header.to_string());
                         }
                     } else {
@@ -923,6 +924,38 @@ mod test {
         "#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_config_debug_redacts_header_values() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            request:
+                operations:
+                    - insert:
+                        name: "authorization"
+                        value: "Bearer static-secret"
+                    - insert:
+                        name: "x-from-body"
+                        path: ".secret"
+                        default: "body-default-secret"
+                    - propagate:
+                        named: "x-token"
+                        default: "propagate-default-secret"
+        "#,
+        )
+        .unwrap();
+
+        let debug = format!("{config:?}");
+        assert!(debug.contains("authorization"), "{debug}");
+        for secret in [
+            "static-secret",
+            "body-default-secret",
+            "propagate-default-secret",
+        ] {
+            assert!(!debug.contains(secret), "{secret} leaked in {debug}");
+        }
     }
 
     #[test]
@@ -1238,7 +1271,7 @@ mod test {
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
                 name: "c".try_into()?,
-                value: "d".try_into()?,
+                value: Redacted::new("d".try_into()?),
             },
         ))]))
         .layer(mock);
@@ -1268,7 +1301,7 @@ mod test {
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
                 name: "c".try_into()?,
-                value: "d".try_into()?,
+                value: Redacted::new("d".try_into()?),
             },
         ))]))
         .layer(mock);
@@ -1830,7 +1863,7 @@ mod test {
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
-                default: Some("defaulted".try_into()?),
+                default: Some(Redacted::new("defaulted".try_into()?)),
             })]))
             .layer(mock);
         let call = tokio::spawn(service.ready().await?.call(example_request()));
@@ -1857,7 +1890,7 @@ mod test {
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
-                default: Some("defaulted".try_into()?),
+                default: Some(Redacted::new("defaulted".try_into()?)),
             })]))
             .layer(mock);
 

@@ -228,6 +228,26 @@ where
     value.as_ref().map(Redacted::unredact).serialize(serializer)
 }
 
+/// De-serialize a [`HeaderValue`] that `Debug` output must not reveal.
+pub(crate) fn deserialize_redacted_header_value<'de, D>(
+    deserializer: D,
+) -> Result<Redacted<HeaderValue>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_header_value(deserializer).map(Redacted::new)
+}
+
+/// De-serialize an optional [`HeaderValue`] that `Debug` output must not reveal.
+pub(crate) fn deserialize_option_redacted_header_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<Redacted<HeaderValue>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(deserialize_option_header_value(deserializer)?.map(Redacted::new))
+}
+
 /// Deserialize a secret string, reporting a type mismatch without the rejected value.
 ///
 /// `Redacted`'s own `Deserialize` replaces every error with `failed to parse 'String'`, and
