@@ -110,9 +110,9 @@ impl<Att, Request, Response, EventResponse> Conditional<Att>
 where
     Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         match &self.condition {
-            Some(cond) => cond.lock().validate(None),
+            Some(cond) => cond.lock().validate_selectors(None),
             None => Ok(()),
         }
     }

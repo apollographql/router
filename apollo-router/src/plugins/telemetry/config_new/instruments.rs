@@ -130,34 +130,34 @@ pub(super) const APOLLO_ROUTER_OPERATIONS_SUBSCRIPTIONS_TERMINATED: &str =
     "apollo.router.operations.subscriptions.terminated.client";
 
 impl InstrumentsConfig {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         for (name, custom) in &self.router.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom router instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.supergraph.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom supergraph instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.subgraph.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom subgraph instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.graphql.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom graphql instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.cache.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom cache instrument {name:?} in condition: {err}")
             })?;
         }
         for (name, custom) in &self.connector.custom {
-            custom.condition.validate(None).map_err(|err| {
+            custom.condition.validate_selectors(None).map_err(|err| {
                 format!("error for custom connector instrument {name:?} in condition: {err}")
             })?;
         }

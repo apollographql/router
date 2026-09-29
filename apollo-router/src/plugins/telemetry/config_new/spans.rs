@@ -59,25 +59,25 @@ impl Spans {
         );
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         for (name, custom) in &self.router.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for router span attribute {name:?}: {err}"))?;
         }
         for (name, custom) in &self.supergraph.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for supergraph span attribute {name:?}: {err}"))?;
         }
         for (name, custom) in &self.subgraph.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for subgraph span attribute {name:?}: {err}"))?;
         }
         for (name, custom) in &self.http_client.attributes.custom {
             custom
-                .validate()
+                .validate_selectors()
                 .map_err(|err| format!("error for http_client span attribute {name:?}: {err}"))?;
         }
 
