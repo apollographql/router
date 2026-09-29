@@ -18,7 +18,7 @@ const DEFAULT_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// HTTP client configuration
-#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema, buildstructor::Builder)]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, buildstructor::Builder)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
     /// Use HTTP/2 to communicate with the coprocessor.
@@ -48,6 +48,20 @@ pub(crate) struct Client {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
     pub(crate) experimental_http2_keep_alive_timeout: Option<Duration>,
+}
+
+// Implemented by hand so that a missing `client` block gets the same pool idle timeout as an
+// empty one, rather than `None` (no idle eviction).
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            experimental_http2: None,
+            dns_resolution_strategy: None,
+            pool_idle_timeout: default_pool_idle_timeout(),
+            experimental_http2_keep_alive_interval: None,
+            experimental_http2_keep_alive_timeout: None,
+        }
+    }
 }
 
 /// Returns the hardcoded default pool idle timeout for keep-alive sockets in a client's connection
@@ -108,8 +122,10 @@ mod tests {
     #[test]
     fn test_client_default_has_pool_idle_timeout() {
         let client = Client::default();
-        assert_eq!(client.pool_idle_timeout, None);
+        assert_eq!(client.pool_idle_timeout, Some(DEFAULT_POOL_IDLE_TIMEOUT));
+        assert_eq!(client, serde_yaml::from_str::<Client>("{}").unwrap());
 
+        // The builder only sets what it is given.
         let client = Client::builder().build();
         assert_eq!(client.pool_idle_timeout, None);
     }
