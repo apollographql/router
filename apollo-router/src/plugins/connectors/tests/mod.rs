@@ -1,3 +1,8 @@
+//! Tests for connectors that resolve entity types without an `@key` in the
+//! connector subgraph (connectors on types, field connectors using `$this`,
+//! and `entity: true` connectors) run on the legacy query planner, because the
+//! incremental planner does not route to those resolvers.
+
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -2382,10 +2387,6 @@ async fn execute_with_unstable_plugin<P: crate::plugin::PluginUnstable>(
     serde_json::to_value(response).unwrap()
 }
 
-/// The incremental planner cannot yet resolve connector entities whose type
-/// has no `@key` in the connector subgraph (connectors on types, field
-/// connectors using `$this`, or `entity: true` connectors), so tests covering
-/// those run on the legacy planner.
 fn legacy_planner_config() -> Option<serde_json_bytes::Value> {
     Some(json!({
         "supergraph": { "query_planning": { "incremental_planner": { "enabled": false } } }
