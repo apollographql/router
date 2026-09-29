@@ -35,7 +35,7 @@ expression: "(graphql_response, &subgraph_query_log)"
         (
             "products",
             Some(
-                "query TopProducts__products__0($first: Int) { topProducts(first: $first) { __typename upc name } }",
+                "query TopProducts__products__0($first: Int) { topProducts(first: $first) { __typename name upc } }",
             ),
         ),
         (

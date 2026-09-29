@@ -94,7 +94,7 @@ async fn authenticated_request() {
             }},
         ).build()),
     ("orga", MockSubgraph::builder().with_json(
-        serde_json::json!{{"query":"{orga(id:1){id creatorUser{__typename id}}}"}},
+        serde_json::json!{{"query":"{orga(id:1){creatorUser{__typename id} id}}"}},
         serde_json::json!{{"data": {"orga": { "id": 1, "creatorUser": { "__typename": "User", "id": 0 } }}}}
     ).build())
 ].into_iter().collect());

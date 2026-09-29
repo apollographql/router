@@ -252,7 +252,7 @@ async fn root_selection_skipped_with_other_fields() {
                 "user",
                 MockSubgraph::builder()
                     .with_json(
-                        serde_json::json! {{"query":"query($skip:Boolean=false){currentUser@skip(if:$skip){id name activeOrganization{id}}otherUser{id name}}","variables":{"skip":true}}},
+                        serde_json::json! {{"query":"query($skip:Boolean=false){currentUser@skip(if:$skip){name activeOrganization{id} id}otherUser{id name}}","variables":{"skip":true}}},
                         serde_json::json! {{"data": {"otherUser": { "id": "2", "name": "test" }}}},
                     )
                     .build(),
@@ -330,7 +330,7 @@ async fn root_selection_not_skipped() {
         [
             ("user", MockSubgraph::builder()
                     .with_json(
-                        serde_json::json! {{"query":"{currentUser{id name}}"}},
+                        serde_json::json! {{"query":"{currentUser{name id}}"}},
                         serde_json::json! {{"data": {"currentUser": { "id": "2", "name": "test" }}}},
                     )
                     .build()),
@@ -2861,7 +2861,7 @@ async fn errors_on_nullified_paths() {
 async fn missing_entities() {
     let subgraphs = MockedSubgraphs([
             ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{id activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id} id}}"}},
                 serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0", "activeOrganization": { "__typename": "Organization", "id": "1" } } } }}
             ).build()),
             ("orga", MockSubgraph::builder().with_json(serde_json::json!{{"query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}","variables":{"representations":[{"__typename":"Organization","id":"1"}]}}},

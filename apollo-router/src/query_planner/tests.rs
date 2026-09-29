@@ -2266,7 +2266,7 @@ async fn missing_nonnull_field_in_requires_returns_error() {
                 MockSubgraph::builder()
                     .with_json(
                         // Router queries sub1 for entity fields including code and name (needed for @requires)
-                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"query": "{entity{__typename id code name}}"}},
                         // Sub1 returns WITHOUT `code` (simulating coprocessor stripping the field
                         // from the request, so the subgraph never received it and doesn't return it)
                         serde_json::json! {{"data": {
@@ -2338,7 +2338,7 @@ async fn missing_nullable_field_in_requires_returns_error_coercion_on() {
                 "sub1",
                 MockSubgraph::builder()
                     .with_json(
-                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"query": "{entity{__typename id code name}}"}},
                         serde_json::json! {{"data": {
                             "entity": {
                               "__typename": "Entity",
@@ -2429,7 +2429,7 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_leaf() {
                 "sub1",
                 MockSubgraph::builder()
                     .with_json(
-                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"query": "{entity{__typename id code name}}"}},
                         // sub1 returns WITHOUT `code` — sub2 (which requires code) is skipped.
                         serde_json::json! {{"data": {
                             "entity": {
@@ -2523,7 +2523,7 @@ async fn missing_nonnull_field_in_requires_returns_error_nonnull_entity() {
                 "sub1",
                 MockSubgraph::builder()
                     .with_json(
-                        serde_json::json! {{"query": "{entity{__typename id name code}}"}},
+                        serde_json::json! {{"query": "{entity{__typename id code name}}"}},
                         // sub1 returns WITHOUT `code` — sub2 (which requires code) is skipped.
                         serde_json::json! {{"data": {
                             "entity": {

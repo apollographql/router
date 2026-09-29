@@ -344,7 +344,7 @@ async fn connect_on_interface_object() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
     .and(path("/graphql"))
-    .and(body_json(json!({"query": "{ users { __typename id ... on Employee { name } ... on Customer { name } } }"})))
+    .and(body_json(json!({"query": "{ users { __typename ... on Employee { name } ... on Customer { name } id } }"})))
     .respond_with(
         ResponseTemplate::new(200)
             .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
