@@ -630,6 +630,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationDirectivesConfig": {
+      "additionalProperties": false,
       "properties": {
         "dry_run": {
           "default": false,
@@ -662,6 +663,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationErrorConfig": {
+      "additionalProperties": false,
       "properties": {
         "log": {
           "default": true,
