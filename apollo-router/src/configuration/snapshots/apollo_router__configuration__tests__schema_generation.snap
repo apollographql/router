@@ -409,6 +409,7 @@ expression: "&schema"
       "description": "Specify assumed role configuration.",
       "properties": {
         "external_id": {
+          "default": null,
           "description": "Unique identifier that might be required when you assume a role in another account.",
           "type": [
             "string",
@@ -3614,6 +3615,7 @@ expression: "&schema"
           "description": "Specify assumed role configuration."
         },
         "profile_name": {
+          "default": null,
           "description": "The profile name used by this provider",
           "type": [
             "string",
@@ -7198,6 +7200,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "audiences": {
+          "default": null,
           "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
           "items": {
             "type": "string"
@@ -7216,6 +7219,7 @@ expression: "&schema"
           "type": "array"
         },
         "issuers": {
+          "default": null,
           "description": "Expected issuers for tokens verified by that JWKS\n\nIf not specified, the issuer will not be checked.",
           "items": {
             "type": "string"
