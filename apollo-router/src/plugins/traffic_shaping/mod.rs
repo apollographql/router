@@ -70,6 +70,13 @@ fn resolve_pool_idle_timeout(pool_idle_timeout: PoolIdleTimeout) -> Option<Durat
     pool_idle_timeout.unwrap_or_else(default_pool_idle_timeout)
 }
 
+/// Removes `default` from a field's schema. An omitted `pool_idle_timeout` inherits from the `all`
+/// block, so no single value is its default, and the `null` schemars would otherwise show means
+/// "disable idle eviction".
+fn without_default(schema: &mut schemars::Schema) {
+    schema.remove("default");
+}
+
 /// Traffic shaping options
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -88,9 +95,14 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    ///
+    /// A `subgraphs.<name>` block that omits it inherits the value from `all`; if neither sets
+    /// it, the default is 15 seconds. Set it to `null` to disable idle eviction. A per-subgraph
+    /// `null` disables eviction for that subgraph even when `all` sets a value (it used to be
+    /// ignored in favor of `all`).
     #[serde(deserialize_with = "deserialize_pool_idle_timeout", default)]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", transform = without_default)]
     pool_idle_timeout: PoolIdleTimeout,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
@@ -202,9 +214,14 @@ struct ConnectorShaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    ///
+    /// A `sources.<name>` block that omits it inherits the value from `connector.all`; if
+    /// neither sets it, the default is 15 seconds. Set it to `null` to disable idle eviction. A
+    /// per-source `null` disables eviction for that source even when `connector.all` sets a
+    /// value (it used to be ignored in favor of `connector.all`).
     #[serde(deserialize_with = "deserialize_pool_idle_timeout", default)]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
+    #[schemars(with = "Option<String>", transform = without_default)]
     pool_idle_timeout: PoolIdleTimeout,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.

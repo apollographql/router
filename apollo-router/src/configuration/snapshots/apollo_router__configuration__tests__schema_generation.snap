@@ -2975,11 +2975,7 @@ expression: "&schema"
           "description": "Enable global rate limiting"
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\n\nA `sources.<name>` block that omits it inherits the value from `connector.all`; if\nneither sets it, the default is 15 seconds. Set it to `null` to disable idle eviction. A\nper-source `null` disables eviction for that source even when `connector.all` sets a\nvalue (it used to be ignored in favor of `connector.all`).",
           "type": [
             "string",
             "null"
@@ -11704,11 +11700,7 @@ expression: "&schema"
           "description": "Enable global rate limiting"
         },
         "pool_idle_timeout": {
-          "default": {
-            "nanos": 0,
-            "secs": 15
-          },
-          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool",
+          "description": "Specify a timeout for idle sockets being kept-alive in the client's connection pool.\n\nA `subgraphs.<name>` block that omits it inherits the value from `all`; if neither sets\nit, the default is 15 seconds. Set it to `null` to disable idle eviction. A per-subgraph\n`null` disables eviction for that subgraph even when `all` sets a value (it used to be\nignored in favor of `all`).",
           "type": [
             "string",
             "null"
