@@ -56,8 +56,8 @@ pub(crate) fn default_pool_idle_timeout() -> Option<Duration> {
     Some(DEFAULT_POOL_IDLE_TIMEOUT)
 }
 
-#[derive(PartialEq, Eq, Hash, Default, Debug, Clone, Copy, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Hash, Copy)]
 pub(crate) enum DnsResolutionStrategy {
     /// Only query for `A` (IPv4) records
     Ipv4Only,
@@ -67,7 +67,7 @@ pub(crate) enum DnsResolutionStrategy {
     Ipv4AndIpv6,
     /// Query for `AAAA` (IPv6) records first; if that fails, query for `A` (IPv4) records
     Ipv6ThenIpv4,
-    #[default]
+    #[config(default)]
     /// Default: Query for `A` (IPv4) records first; if that fails, query for `AAAA` (IPv6) records
     Ipv4ThenIpv6,
 }

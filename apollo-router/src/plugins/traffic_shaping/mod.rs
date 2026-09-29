@@ -18,8 +18,6 @@ use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
 use parking_lot::Mutex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -54,8 +52,8 @@ trait Merge {
 }
 
 /// Traffic shaping options
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct Shaping {
     /// Enable query deduplication
     deduplicate_query: Option<bool>,
@@ -63,42 +61,38 @@ struct Shaping {
     compression: Option<Compression>,
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
-    timeout: Option<Duration>,
+    timeout: Option<apollo_configuration::types::Duration>,
     /// Enable HTTP2 for subgraphs
     http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
+    #[config(default = default_pool_idle_timeout().map(Into::into))]
     #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    pool_idle_timeout: Option<Duration>,
+    pool_idle_timeout: Option<apollo_configuration::types::Duration>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_interval: Option<Duration>,
+    experimental_http2_keep_alive_interval: Option<apollo_configuration::types::Duration>,
     /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
     /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_timeout: Option<Duration>,
+    experimental_http2_keep_alive_timeout: Option<apollo_configuration::types::Duration>,
 }
 
-#[derive(PartialEq, Default, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum Http2Config {
-    #[default]
+    #[config(default)]
     /// Enable HTTP2 for subgraphs
     Enable,
     /// Disable HTTP2 for subgraphs
     Disable,
     /// Only HTTP2 is active
+    // The macro renames variants to snake_case; this keeps the lowercase name.
+    #[serde(rename = "http2only")]
     Http2Only,
 }
 
@@ -142,8 +136,8 @@ impl Merge for Shaping {
 }
 
 // this is a wrapper struct to add subgraph specific options over Shaping
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct SubgraphShaping {
     #[serde(flatten)]
     shaping: Shaping,
@@ -160,8 +154,8 @@ impl Merge for SubgraphShaping {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct ConnectorsShapingConfig {
     /// Applied on all connectors
     all: Option<ConnectorShaping>,
@@ -169,38 +163,32 @@ struct ConnectorsShapingConfig {
     sources: HashMap<String, ConnectorShaping>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct ConnectorShaping {
     /// Enable compression for connectors (available compressions are deflate, br, gzip)
     compression: Option<Compression>,
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for connectors requests
-    timeout: Option<Duration>,
+    timeout: Option<apollo_configuration::types::Duration>,
     /// Enable HTTP2 for connectors
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
     /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
+    #[config(default = default_pool_idle_timeout().map(Into::into))]
     #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    pool_idle_timeout: Option<Duration>,
+    pool_idle_timeout: Option<apollo_configuration::types::Duration>,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_interval: Option<Duration>,
+    experimental_http2_keep_alive_interval: Option<apollo_configuration::types::Duration>,
     /// Configure the timeout for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled and
     /// `experimental_http2_keep_alive_interval` to be set. Defaults to 20 seconds.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    experimental_http2_keep_alive_timeout: Option<Duration>,
+    experimental_http2_keep_alive_timeout: Option<apollo_configuration::types::Duration>,
 }
 
 impl Merge for ConnectorShaping {
@@ -245,18 +233,17 @@ impl Merge for ConnectorShaping {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct RouterShaping {
     /// The global concurrency limit
     concurrency_limit: Option<usize>,
 
     /// Enable global rate limiting
     global_rate_limit: Option<RateLimitConf>,
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
-    timeout: Option<Duration>,
+    timeout: Option<apollo_configuration::types::Duration>,
 }
 
 #[apollo_configuration::configuration]
@@ -266,28 +253,25 @@ struct RouterShaping {
 /// Configuration for the traffic shaping plugin
 pub(crate) struct Config {
     /// Applied at the router level
-    #[config(skip_validate)]
     router: Option<RouterShaping>,
     /// Applied on all subgraphs
-    #[config(skip_validate)]
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
-    #[config(skip_validate)]
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
-    #[config(skip_validate)]
     connector: ConnectorsShapingConfig,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 struct RateLimitConf {
     /// Number of requests allowed
+    #[config(required)]
     capacity: NonZeroU64,
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[config(required)]
     #[schemars(with = "String")]
     /// Per interval
-    interval: Duration,
+    interval: apollo_configuration::types::Duration,
 }
 
 impl Merge for RateLimitConf {
@@ -351,7 +335,7 @@ impl PluginPrivate for TrafficShaping {
                 self.config
                     .router
                     .as_ref()
-                    .and_then(|r| r.timeout)
+                    .and_then(|r| r.timeout.as_deref().copied())
                     .unwrap_or(DEFAULT_TIMEOUT),
             ))
             .map_future_with_request_data(
@@ -398,7 +382,7 @@ impl PluginPrivate for TrafficShaping {
                 router
                     .global_rate_limit
                     .as_ref()
-                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), limit.interval))
+                    .map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval))
             }))
             .service(service)
             .boxed_clone()
@@ -426,7 +410,7 @@ impl PluginPrivate for TrafficShaping {
                         .or_insert_with(|| {
                             RateLimitLayer::new(
                                 rate_limit_conf.capacity.into(),
-                                rate_limit_conf.interval,
+                                *rate_limit_conf.interval,
                             )
                         })
                         .clone()
@@ -469,7 +453,7 @@ impl PluginPrivate for TrafficShaping {
                 )
                 .load_shed()
                 .layer(TimeoutLayer::new(
-                    config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                    config.shaping.timeout.as_deref().copied().unwrap_or(DEFAULT_TIMEOUT),
                 ))
                 .option_layer(rate_limit)
                 .option_layer(
@@ -511,7 +495,7 @@ impl PluginPrivate for TrafficShaping {
                     .or_insert_with(|| {
                         RateLimitLayer::new(
                             rate_limit_conf.capacity.into(),
-                            rate_limit_conf.interval,
+                            *rate_limit_conf.interval,
                         )
                     })
                     .clone()
@@ -562,7 +546,7 @@ impl PluginPrivate for TrafficShaping {
                 )
                 .load_shed()
                 .layer(TimeoutLayer::new(
-                    config.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                    config.timeout.as_deref().copied().unwrap_or(DEFAULT_TIMEOUT),
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
@@ -603,13 +587,17 @@ impl TrafficShaping {
         .map(|config| crate::configuration::shared::Client {
             http2: config.shaping.http2,
             dns_resolution_strategy: config.shaping.dns_resolution_strategy,
-            pool_idle_timeout: config.shaping.pool_idle_timeout,
+            pool_idle_timeout: config.shaping.pool_idle_timeout.as_deref().copied(),
             experimental_http2_keep_alive_interval: config
                 .shaping
-                .experimental_http2_keep_alive_interval,
+                .experimental_http2_keep_alive_interval
+                .as_deref()
+                .copied(),
             experimental_http2_keep_alive_timeout: config
                 .shaping
-                .experimental_http2_keep_alive_timeout,
+                .experimental_http2_keep_alive_timeout
+                .as_deref()
+                .copied(),
         })
         .unwrap_or_default()
     }
@@ -623,10 +611,15 @@ impl TrafficShaping {
             .map(|config| crate::configuration::shared::Client {
                 http2: config.experimental_http2,
                 dns_resolution_strategy: config.dns_resolution_strategy,
-                pool_idle_timeout: config.pool_idle_timeout,
+                pool_idle_timeout: config.pool_idle_timeout.as_deref().copied(),
                 experimental_http2_keep_alive_interval: config
-                    .experimental_http2_keep_alive_interval,
-                experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
+                    .experimental_http2_keep_alive_interval
+                    .as_deref()
+                    .copied(),
+                experimental_http2_keep_alive_timeout: config
+                    .experimental_http2_keep_alive_timeout
+                    .as_deref()
+                    .copied(),
             })
             .unwrap_or_default()
     }
