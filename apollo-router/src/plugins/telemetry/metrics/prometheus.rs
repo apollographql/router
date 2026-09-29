@@ -8,7 +8,6 @@ use opentelemetry_prometheus::ResourceSelector;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
-use prometheus::proto::MetricFamily;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -121,17 +120,15 @@ impl Service<router::Request> for PrometheusService {
 
     fn call(&mut self, req: router::Request) -> Self::Future {
         let registry = self.registry.clone();
-        // Work happens in the response future rather than `call`: endpoint services are buffered,
-        // so `call` runs on the buffer worker task rather than the task handling the scrape.
+        // Endpoint services are buffered, so `call` runs on the buffer worker task. Doing the work
+        // in the response future keeps the overflow counter on the task handling the scrape. That
+        // only matters for task-local test meter providers (`with_metrics`); in production the
+        // counter goes to the global meter provider whichever task records it.
         Box::pin(async move {
             let metric_families = registry.registry.gather();
-            if let Some(reader) = &registry.overflow_reader
-                && has_overflow(&metric_families)
-            {
-                // The scrape only carries Prometheus names, so collect again to report
-                // OpenTelemetry instrument names. As with the push exporters, the counter shows
-                // up from the next collection.
-                reader.report_cardinality_overflow();
+            // As with the push exporters, the counter shows up from the next collection.
+            if let Some(reader) = &registry.overflow_reader {
+                reader.report_cardinality_overflow(&metric_families);
             }
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
@@ -153,16 +150,4 @@ impl Service<router::Request> for PrometheusService {
                 .build()
         })
     }
-}
-
-/// Whether any gathered series carries the SDK's cardinality overflow marker.
-fn has_overflow(metric_families: &[MetricFamily]) -> bool {
-    metric_families.iter().any(|family| {
-        family.get_metric().iter().any(|metric| {
-            metric
-                .get_label()
-                .iter()
-                .any(|label| label.name() == "otel_metric_overflow" && label.value() == "true")
-        })
-    })
 }

@@ -7,7 +7,7 @@
 //!
 //! Push exporters (OTLP, Apollo) are checked on every export. The Prometheus exporter serves
 //! scrapes from its own internal collector, which never calls back into a reader wrapper, so the
-//! Prometheus endpoint asks [`OverflowMetricReader`] to check when a scrape contains overflow.
+//! Prometheus endpoint passes each scrape to [`OverflowMetricReader`] to check.
 
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -25,8 +25,12 @@ use opentelemetry_sdk::metrics::data::MetricData;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::reader::MetricReader;
+use parking_lot::Mutex;
+use prometheus::proto::MetricFamily;
 
 const OTEL_METRIC_OVERFLOW_KEY: &str = "otel.metric.overflow";
+/// [`OTEL_METRIC_OVERFLOW_KEY`] as the Prometheus exporter writes it, with dots sanitized.
+const PROMETHEUS_OVERFLOW_LABEL: &str = "otel_metric_overflow";
 const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardinality_overflow";
 
 /// Wrapper for push metric exporters that detects cardinality overflow.
@@ -63,7 +67,7 @@ impl<T: PushMetricExporter> PushMetricExporter for OverflowMetricExporter<T> {
         &self,
         metrics: &ResourceMetrics,
     ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        report_cardinality_overflow(metrics);
+        overflowing_metric_names(metrics).for_each(record_overflow);
         self.inner.export(metrics)
     }
 
@@ -80,18 +84,28 @@ impl<T: PushMetricExporter> PushMetricExporter for OverflowMetricExporter<T> {
     }
 }
 
-/// Wrapper for pull readers (Prometheus) that can check for cardinality overflow on demand.
+/// Wrapper for pull readers (Prometheus) that checks each scrape for cardinality overflow.
 ///
 /// The SDK owns the registered reader, so the wrapper shares it: one clone is registered with the
 /// meter provider and another is kept by whoever serves the pull endpoint.
 pub(crate) struct OverflowMetricReader<T> {
     inner: Arc<T>,
+    overflowing: Arc<Mutex<OverflowingMetrics>>,
+}
+
+/// The overflowing metrics found by the last collect, keyed by the scraped families that showed
+/// overflow at the time.
+#[derive(Debug, Default)]
+struct OverflowingMetrics {
+    families: Vec<String>,
+    metric_names: Vec<String>,
 }
 
 impl<T> Clone for OverflowMetricReader<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            overflowing: self.overflowing.clone(),
         }
     }
 }
@@ -108,23 +122,46 @@ impl<T: MetricReader> OverflowMetricReader<T> {
     pub(crate) fn new(inner: T) -> Self {
         Self {
             inner: Arc::new(inner),
+            overflowing: Default::default(),
         }
     }
 
-    /// Collect from the wrapped reader and increment the overflow counter for every metric that
-    /// has an overflow data point.
+    /// Increment the overflow counter for every metric that has overflowed in a scrape.
     ///
-    /// The collected data carries OpenTelemetry instrument names, so `metric.name` matches what the
-    /// push exporters report. With cumulative temporality this reads the aggregation state without
-    /// resetting it; observable instrument callbacks run once more per call.
-    pub(crate) fn report_cardinality_overflow(&self) {
-        let mut rm = ResourceMetrics::default();
-        match self.inner.collect(&mut rm) {
-            Ok(()) => report_cardinality_overflow(&rm),
-            Err(err) => {
-                tracing::debug!("could not collect metrics to check cardinality overflow: {err}")
-            }
+    /// Scraped families carry Prometheus names, but the counter reports OpenTelemetry instrument
+    /// names, as the push exporters do. Those are read by collecting from the wrapped reader, which
+    /// with cumulative temporality doesn't reset the aggregation state. The result is reused
+    /// until the set of overflowing families changes, so a persistent overflow doesn't collect
+    /// twice on every scrape.
+    pub(crate) fn report_cardinality_overflow(&self, scrape: &[MetricFamily]) {
+        let families: Vec<&str> = scrape
+            .iter()
+            .filter(|family| family_has_overflow(family))
+            .map(MetricFamily::name)
+            .collect();
+        if families.is_empty() {
+            return;
         }
+
+        let mut overflowing = self.overflowing.lock();
+        if !overflowing.families.iter().eq(families.iter()) {
+            let mut rm = ResourceMetrics::default();
+            if let Err(err) = self.inner.collect(&mut rm) {
+                tracing::debug!("could not collect metrics to check cardinality overflow: {err}");
+                return;
+            }
+            *overflowing = OverflowingMetrics {
+                families: families.iter().map(ToString::to_string).collect(),
+                metric_names: overflowing_metric_names(&rm)
+                    .map(ToString::to_string)
+                    .collect(),
+            };
+        }
+        overflowing
+            .metric_names
+            .iter()
+            .map(String::as_str)
+            .for_each(record_overflow);
     }
 }
 
@@ -154,28 +191,29 @@ impl<T: MetricReader> MetricReader for OverflowMetricReader<T> {
     }
 }
 
-/// Check for cardinality overflow in metrics and report via counter.
-fn report_cardinality_overflow(metrics: &ResourceMetrics) {
-    for scope_metrics in metrics.scope_metrics() {
-        for metric in scope_metrics.metrics() {
-            // Skip our own overflow counter to avoid recursion
-            if metric.name() == CARDINALITY_OVERFLOW_METRIC {
-                continue;
-            }
-            if has_overflow_data_point(metric) {
-                u64_counter_with_unit!(
-                    "apollo.router.telemetry.metrics.cardinality_overflow",
-                    "Counts metrics that have exceeded their cardinality limit",
-                    "count",
-                    1,
-                    [opentelemetry::KeyValue::new(
-                        "metric.name",
-                        metric.name().to_string(),
-                    )]
-                );
-            }
-        }
-    }
+/// Names of the metrics that have overflow data points, excluding our own overflow counter to
+/// avoid recursion.
+fn overflowing_metric_names(metrics: &ResourceMetrics) -> impl Iterator<Item = &str> {
+    metrics
+        .scope_metrics()
+        .flat_map(|scope_metrics| scope_metrics.metrics())
+        .filter(|metric| {
+            metric.name() != CARDINALITY_OVERFLOW_METRIC && has_overflow_data_point(metric)
+        })
+        .map(Metric::name)
+}
+
+fn record_overflow(metric_name: &str) {
+    u64_counter_with_unit!(
+        "apollo.router.telemetry.metrics.cardinality_overflow",
+        "Counts metrics that have exceeded their cardinality limit",
+        "count",
+        1,
+        [opentelemetry::KeyValue::new(
+            "metric.name",
+            metric_name.to_string(),
+        )]
+    );
 }
 
 /// Check if a metric has any data points with the overflow attribute.
@@ -212,6 +250,16 @@ fn has_overflow_attribute<'a>(attrs: impl Iterator<Item = &'a opentelemetry::Key
         .any(|kv| kv.key.as_str() == OTEL_METRIC_OVERFLOW_KEY && kv.value == Value::Bool(true))
 }
 
+/// Check if any series in a scraped Prometheus family carries the overflow marker.
+fn family_has_overflow(family: &MetricFamily) -> bool {
+    family.get_metric().iter().any(|metric| {
+        metric
+            .get_label()
+            .iter()
+            .any(|label| label.name() == PROMETHEUS_OVERFLOW_LABEL && label.value() == "true")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use opentelemetry::KeyValue;
@@ -224,6 +272,8 @@ mod tests {
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
     use opentelemetry_sdk::metrics::reader::MetricReader;
+    use prometheus::proto::LabelPair;
+    use prometheus::proto::Metric as PrometheusMetric;
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
@@ -319,6 +369,14 @@ mod tests {
         .await
     }
 
+    #[test]
+    fn prometheus_label_is_the_sanitized_overflow_key() {
+        assert_eq!(
+            OTEL_METRIC_OVERFLOW_KEY.replace('.', "_"),
+            PROMETHEUS_OVERFLOW_LABEL
+        );
+    }
+
     fn overflowing_provider(
         reader: OverflowMetricReader<ClonableManualReader>,
     ) -> SdkMeterProvider {
@@ -326,18 +384,43 @@ mod tests {
             .with_reader(reader)
             .with_resource(Resource::builder_empty().build())
             .with_view(|instrument: &opentelemetry_sdk::metrics::Instrument| {
-                if instrument.name() == "test.pull.overflow.metric" {
-                    Some(
-                        Stream::builder()
-                            .with_cardinality_limit(2)
-                            .build()
-                            .expect("valid stream"),
-                    )
-                } else {
-                    None
-                }
+                instrument.name().starts_with("test.pull.").then(|| {
+                    Stream::builder()
+                        .with_cardinality_limit(2)
+                        .build()
+                        .expect("valid stream")
+                })
             })
             .build()
+    }
+
+    /// Records three attribute sets, one past the provider's limit of two.
+    fn overflow(provider: &SdkMeterProvider, name: &'static str) {
+        let counter = provider.meter("test").u64_counter(name).build();
+        for value in ["value1", "value2", "value3"] {
+            counter.add(1, &[KeyValue::new("key", value)]);
+        }
+    }
+
+    /// A scraped Prometheus family, with the overflow marker on one series if `overflowed`.
+    fn scraped_family(name: &str, overflowed: bool) -> MetricFamily {
+        let label = |name: &str, value: &str| {
+            let mut label = LabelPair::new();
+            label.set_name(name.to_string());
+            label.set_value(value.to_string());
+            label
+        };
+        let mut series = PrometheusMetric::new();
+        series.set_label(vec![label("key", "value1")]);
+        let mut overflow_series = PrometheusMetric::new();
+        overflow_series.set_label(vec![label(
+            PROMETHEUS_OVERFLOW_LABEL,
+            if overflowed { "true" } else { "false" },
+        )]);
+        let mut family = MetricFamily::new();
+        family.set_name(name.to_string());
+        family.set_metric(vec![series, overflow_series]);
+        family
     }
 
     #[tokio::test]
@@ -345,22 +428,18 @@ mod tests {
         async {
             let reader = OverflowMetricReader::new(ClonableManualReader::default());
             let provider = overflowing_provider(reader.clone());
+            overflow(&provider, "test.pull.overflow.metric");
+            let scrape = [scraped_family("test_pull_overflow_metric_total", true)];
 
-            let meter = provider.meter("test");
-            let counter = meter.u64_counter("test.pull.overflow.metric").build();
-            counter.add(1, &[KeyValue::new("key", "value1")]);
-            counter.add(1, &[KeyValue::new("key", "value2")]);
-            counter.add(1, &[KeyValue::new("key", "value3")]); // Overflow
-
-            reader.report_cardinality_overflow();
+            reader.report_cardinality_overflow(&scrape);
             assert_counter!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 1,
                 "metric.name" = "test.pull.overflow.metric"
             );
 
-            // Collecting again does not reset cumulative state: the overflow is still reported.
-            reader.report_cardinality_overflow();
+            // The overflow persists in cumulative state, so every scrape reports it.
+            reader.report_cardinality_overflow(&scrape);
             assert_counter!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 2,
@@ -372,17 +451,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pull_reader_collects_again_only_when_overflowing_families_change() {
+        async {
+            let reader = OverflowMetricReader::new(ClonableManualReader::default());
+            let provider = overflowing_provider(reader.clone());
+            overflow(&provider, "test.pull.first");
+            let first = scraped_family("test_pull_first_total", true);
+
+            reader.report_cardinality_overflow(std::slice::from_ref(&first));
+
+            // A second metric overflows, but the scrape shows the same overflowing families, so
+            // the cached result is reused without collecting.
+            overflow(&provider, "test.pull.second");
+            reader.report_cardinality_overflow(std::slice::from_ref(&first));
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                2,
+                "metric.name" = "test.pull.first"
+            );
+            assert_counter_not_exists!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                u64,
+                "metric.name" = "test.pull.second"
+            );
+
+            // Once the scrape shows the new family, the reader collects again.
+            reader.report_cardinality_overflow(&[
+                first,
+                scraped_family("test_pull_second_total", true),
+            ]);
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                3,
+                "metric.name" = "test.pull.first"
+            );
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                1,
+                "metric.name" = "test.pull.second"
+            );
+        }
+        .with_metrics()
+        .await
+    }
+
+    #[tokio::test]
     async fn pull_reader_does_not_report_without_overflow() {
         async {
             let reader = OverflowMetricReader::new(ClonableManualReader::default());
             let provider = overflowing_provider(reader.clone());
+            // The scrape decides whether to look: an overflow it doesn't show isn't reported.
+            overflow(&provider, "test.pull.overflow.metric");
 
-            let meter = provider.meter("test");
-            let counter = meter.u64_counter("test.pull.overflow.metric").build();
-            counter.add(1, &[KeyValue::new("key", "value1")]);
-            counter.add(1, &[KeyValue::new("key", "value2")]);
-
-            reader.report_cardinality_overflow();
+            reader.report_cardinality_overflow(&[scraped_family(
+                "test_pull_overflow_metric_total",
+                false,
+            )]);
             assert_counter_not_exists!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 u64,
@@ -418,7 +542,10 @@ mod tests {
             counter.add(1, &[KeyValue::new("metric.name", "a")]);
             counter.add(1, &[KeyValue::new("metric.name", "b")]);
 
-            reader.report_cardinality_overflow();
+            reader.report_cardinality_overflow(&[scraped_family(
+                "apollo_router_telemetry_metrics_cardinality_overflow_total",
+                true,
+            )]);
             assert_counter_not_exists!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 u64,
