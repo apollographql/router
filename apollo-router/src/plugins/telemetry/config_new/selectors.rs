@@ -1,10 +1,7 @@
 use std::time::Duration;
 
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum OperationName {
     /// The raw operation name.
     String,
@@ -12,9 +9,9 @@ pub(crate) enum OperationName {
     Hash,
 }
 
+#[apollo_configuration::configuration]
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[derive(PartialEq)]
 pub(crate) enum ErrorRepr {
     // /// The error code if available
     // Code,
@@ -22,8 +19,8 @@ pub(crate) enum ErrorRepr {
     Reason,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum Query {
     /// The raw query kind.
     String,
@@ -37,8 +34,8 @@ pub(crate) enum Query {
     RootFields,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum ResponseStatus {
     /// The http status code.
     Code,
@@ -46,8 +43,8 @@ pub(crate) enum ResponseStatus {
     Reason,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum ActiveSubgraphRequests {
     /// The number of active subgraph requests as a count.
     Count,
@@ -55,42 +52,38 @@ pub(crate) enum ActiveSubgraphRequests {
     Bool,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
-#[serde(rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
+#[serde(untagged)]
 pub(crate) enum EntityType {
+    #[config(default)]
     All(All),
     Named(String),
 }
 
-impl Default for EntityType {
-    fn default() -> Self {
-        Self::All(All::All)
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq)]
 pub(crate) enum All {
-    #[default]
+    #[config(default)]
     All,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum CacheKind {
     Hit,
     Miss,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum CacheStatus {
     Hit,
     Miss,
@@ -98,8 +91,8 @@ pub(crate) enum CacheStatus {
     Status,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum CacheControlSelector {
     /// Returns the scope, either `public` or `private`
     Scope,
@@ -109,8 +102,8 @@ pub(crate) enum CacheControlSelector {
     MaxAge,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) enum DurationUnit {
     /// Duration in milliseconds (integer)
     Milliseconds,

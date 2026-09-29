@@ -1,6 +1,4 @@
 use opentelemetry::KeyValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use crate::Context;
@@ -11,8 +9,8 @@ use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(crate) struct CacheAttributes {
     /// Entity type
     #[serde(rename = "graphql.type.name")]

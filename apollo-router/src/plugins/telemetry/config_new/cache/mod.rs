@@ -3,8 +3,6 @@ use std::sync::Arc;
 use attributes::CacheAttributes;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
@@ -27,8 +25,7 @@ pub(crate) const RESPONSE_CACHE_METRIC: &str = "apollo.router.response.cache";
 const ENTITY_TYPE: Key = Key::from_static_str("graphql.type.name");
 const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct CacheInstrumentsConfig {
     /// A counter of times we have a cache hit or cache miss
     #[serde(rename = "apollo.router.response.cache")]
