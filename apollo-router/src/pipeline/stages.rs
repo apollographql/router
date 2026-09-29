@@ -274,7 +274,7 @@ pub(crate) fn build_subgraph_services(
 
 /// Builds the request service stack for each connector source, keyed by
 /// `source_config_key()`.
-fn build_connector_request_services(
+pub(crate) fn build_connector_request_services(
     connector_http_services: IndexMap<String, http::BoxCloneService>,
     plugins: &Arc<Plugins>,
 ) -> ConnectorRequestServices {
@@ -289,6 +289,20 @@ fn build_connector_request_services(
                     h.connector_headers_layer(&source)
                 })
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
+                // Placed for the same reasons as in [`build_subgraph_service`]. Connector
+                // sources have no deduplication.
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_admission_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_timeout_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_compression_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_backpressure_buffer_layer(&source)
+                })
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })

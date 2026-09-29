@@ -410,20 +410,6 @@ impl PluginPrivate for TrafficShaping {
             .service(service)
             .boxed_clone()
     }
-
-    fn connector_request_service(
-        &self,
-        service: connector::request_service::BoxCloneService,
-        source_name: String,
-    ) -> connector::request_service::BoxCloneService {
-        ServiceBuilder::new()
-            .layer(self.connector_source_admission_layer(&source_name))
-            .layer(self.connector_source_timeout_layer(&source_name))
-            .layer(self.connector_source_compression_layer(&source_name))
-            .layer(self.connector_source_backpressure_buffer_layer(&source_name))
-            .service(service)
-            .boxed_clone()
-    }
 }
 
 impl TrafficShaping {
@@ -709,18 +695,7 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 mod test {
     use std::sync::Arc;
 
-    use apollo_compiler::name;
-    use apollo_federation::connectors::ConnectId;
-    use apollo_federation::connectors::ConnectSpec;
-    use apollo_federation::connectors::Connector;
-    use apollo_federation::connectors::HttpJsonTransport;
-    use apollo_federation::connectors::JSONSelection;
-    use apollo_federation::connectors::SourceName;
-    use apollo_federation::connectors::runtime::errors::Error;
-    use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
-    use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
-    use http::HeaderMap;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
@@ -732,7 +707,6 @@ mod test {
 
     use super::*;
     use crate::Configuration;
-    use crate::Context;
     use crate::json_ext::Object;
     use crate::pipeline::build_apq_expander;
     use crate::pipeline::build_query_plan_cache;
@@ -741,13 +715,11 @@ mod test {
     use crate::pipeline::connect_query_plan_redis;
     use crate::pipeline::create_plugins;
     use crate::plugin::DynPlugin;
-    use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
-    use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
     use crate::spec::Schema;
@@ -928,71 +900,6 @@ mod test {
             .expect("Plugin not created")
     }
 
-    fn get_fake_connector_request(
-        headers: Option<HeaderMap<HeaderValue>>,
-        data: String,
-    ) -> ConnectorRequest {
-        let context = Context::default();
-        let connector = Arc::new(Connector {
-            spec: ConnectSpec::V0_1,
-            schema_subtypes_map: Default::default(),
-            id: ConnectId::new(
-                "test_subgraph".into(),
-                Some(SourceName::cast("test_sourcename")),
-                name!(Query),
-                name!(hello),
-                None,
-                0,
-            ),
-            transport: Some(HttpJsonTransport {
-                source_template: "http://localhost/api".parse().ok(),
-                connect_template: "/path".parse().unwrap(),
-                ..Default::default()
-            }),
-            selection: JSONSelection::parse("$.data").unwrap(),
-            entity_resolver: None,
-            config: Default::default(),
-            max_requests: None,
-            batch_settings: None,
-            request_headers: Default::default(),
-            response_headers: Default::default(),
-            request_variable_keys: Default::default(),
-            response_variable_keys: Default::default(),
-            error_settings: Default::default(),
-            output_type: None,
-            label: "test label".into(),
-        });
-        let key = ResponseKey::RootField {
-            name: "hello".to_string(),
-            inputs: Default::default(),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        };
-        let mapping_problems = Default::default();
-
-        let mut request_builder = http::Request::builder();
-        if let Some(headers) = headers {
-            for (header_name, header_value) in headers.iter() {
-                request_builder = request_builder.header(header_name, header_value);
-            }
-        }
-        let request = request_builder.body(data).unwrap();
-
-        let http_request = HttpRequest {
-            inner: request,
-            debug: Default::default(),
-        };
-
-        ConnectorRequest {
-            context,
-            connector,
-            transport_request: http_request.into(),
-            key,
-            mapping_problems,
-            supergraph_request: Default::default(),
-            operation: Default::default(),
-        }
-    }
-
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
         // Variable deduplication is now unconditionally enabled, so an empty
@@ -1002,45 +909,6 @@ mod test {
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
-    }
-
-    #[tokio::test]
-    async fn it_adds_correct_headers_for_compression_for_connector() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        connector:
-            sources:
-                test_subgraph.test_sourcename:
-                    compression: gzip
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = get_fake_connector_request(None, "testing".to_string());
-
-        let test_service =
-            MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-                let TransportRequest::Http(ref http_request) = req.transport_request else {
-                    panic!("expected Http transport request");
-                };
-
-                assert_eq!(
-                    http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
-                    HeaderValue::from_static("gzip")
-                );
-
-                req
-            });
-
-        let _response = plugin
-            .connector_request_service(
-                test_service.boxed_clone(),
-                "test_subgraph.test_sourcename".to_string(),
-            )
-            .oneshot(request)
-            .await
-            .unwrap();
     }
 
     #[test]
@@ -1166,74 +1034,6 @@ mod test {
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
             },
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_rate_limit_connector_requests() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        connector:
-            sources:
-                test_subgraph.test_sourcename:
-                    global_rate_limit:
-                        capacity: 1
-                        interval: 100ms
-                    timeout: 500ms
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = get_fake_connector_request(None, "testing".to_string());
-
-        let test_service = MockConnector::new(hashmap! {
-            "test_request".into() => "test_request".into()
-        });
-
-        let mut svc = plugin.connector_request_service(
-            test_service.boxed_clone(),
-            "test_subgraph.test_sourcename".to_string(),
-        );
-
-        assert!(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(request)
-                .await
-                .unwrap()
-                .transport_result
-                .is_ok()
-        );
-
-        let request = get_fake_connector_request(None, "testing".to_string());
-        let response = svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(request)
-            .await
-            .expect("it responded");
-
-        assert!(response.transport_result.is_err());
-        assert!(matches!(
-            response.transport_result.err().unwrap(),
-            Error::RateLimited
-        ));
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        let request = get_fake_connector_request(None, "testing".to_string());
-        assert!(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(request)
-                .await
-                .unwrap()
-                .transport_result
-                .is_ok()
         );
     }
 
