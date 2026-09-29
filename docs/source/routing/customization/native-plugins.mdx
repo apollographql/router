@@ -61,6 +61,8 @@ struct Conf {
 >
 > Your configuration must also be `Send`, `Sync` and `'static`.
 
+If your plugin's section is a bare `true` or `false`, such as `my_plugin: true`, use `apollo_router::plugin::Enabled` as its configuration instead of declaring a struct. The router also re-exports the crate as `apollo_router::plugin::apollo_configuration`, so a configuration that derives `Deserialize` and `JsonSchema` itself can implement `apollo_configuration::Configuration` by hand without the extra dependency.
+
 Then define the plugin itself and specify the configuration as an associated type:
 
 ```rust title="hello_world.rs"
