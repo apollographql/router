@@ -321,9 +321,28 @@ mod test {
 
     use crate::Configuration;
     use crate::configuration::ConfigurationError;
+    use crate::orbiter::OrbiterRouterSuperServiceFactory;
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
+    use crate::plugins::telemetry::reload::activation::test_utils::counting_tracer_provider;
+    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::router_factory::YamlRouterFactory;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_is_forwarded_to_the_router_factory() {
+        let (tracer_provider, shutdowns) = counting_tracer_provider();
+        let mut factory = OrbiterRouterSuperServiceFactory::new(
+            YamlRouterFactory::with_installed_tracer_provider(tracer_provider),
+        );
+
+        factory.shutdown().await;
+        assert_eq!(
+            shutdowns.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the router factory must shut down its installed tracer provider"
+        );
+    }
 
     #[test]
     fn test_visit_args() {

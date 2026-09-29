@@ -286,6 +286,18 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
     }
 }
 
+#[cfg(test)]
+impl YamlRouterFactory {
+    /// A factory whose routers have already installed `tracer_provider`.
+    pub(crate) fn with_installed_tracer_provider(
+        tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider,
+    ) -> Self {
+        Self {
+            tracer_provider: TracerProviderOwner::installed(tracer_provider),
+        }
+    }
+}
+
 impl YamlRouterFactory {
     async fn inner_create<'a>(
         &'a mut self,

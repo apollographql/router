@@ -369,21 +369,20 @@ fn shutdown(tracer_provider: SdkTracerProvider) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_utils {
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     use opentelemetry::Context;
-    use opentelemetry::trace::Tracer;
     use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use opentelemetry_sdk::trace::Span;
     use opentelemetry_sdk::trace::SpanData;
     use opentelemetry_sdk::trace::SpanProcessor;
-    use tokio::task::JoinError;
 
-    use super::*;
+    use super::TracerProviderOwner;
 
     #[derive(Debug)]
     struct CountShutdowns(Arc<AtomicUsize>);
@@ -404,13 +403,33 @@ mod tests {
     }
 
     /// Builds a tracer provider and a count of how many times it has been shut down.
-    fn counting_tracer_provider() -> (SdkTracerProvider, Arc<AtomicUsize>) {
+    pub(crate) fn counting_tracer_provider() -> (SdkTracerProvider, Arc<AtomicUsize>) {
         let shutdowns = Arc::new(AtomicUsize::new(0));
         let tracer_provider = SdkTracerProvider::builder()
             .with_span_processor(CountShutdowns(shutdowns.clone()))
             .build();
         (tracer_provider, shutdowns)
     }
+
+    impl TracerProviderOwner {
+        /// An owner whose handle already holds `tracer_provider`, as if a router had installed it.
+        pub(crate) fn installed(tracer_provider: SdkTracerProvider) -> Self {
+            let owner = Self::default();
+            owner.0.replace(tracer_provider);
+            owner
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    use opentelemetry::trace::Tracer;
+    use tokio::task::JoinError;
+
+    use super::test_utils::counting_tracer_provider;
+    use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn retired_tracer_provider_is_shut_down_while_a_span_still_holds_it() {
@@ -484,8 +503,7 @@ mod tests {
 
         for panics in [true, false] {
             let (tracer_provider, shutdowns) = counting_tracer_provider();
-            let owner = TracerProviderOwner::default();
-            assert!(owner.handle().replace(tracer_provider).is_none());
+            let owner = TracerProviderOwner::installed(tracer_provider);
 
             let error = run_until_torn_down(owner, panics).await;
             assert_eq!(error.is_panic(), panics);
