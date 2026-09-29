@@ -7,7 +7,7 @@ license-file = "../../../LICENSE"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 anyhow = "1"
-apollo-configuration = "0.7.1"
+apollo-configuration.workspace = true
 apollo-router = { path = "../../../apollo-router", features = ["mock_subgraphs_testing"] }
 async-trait = "0.1"
 serde = "1"
