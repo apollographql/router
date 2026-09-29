@@ -1075,7 +1075,30 @@ impl FieldRoutingSearchSpace {
                 // resolve at least one non-__typename field under it. A
                 // downcast to a subgraph that owns none of the requested
                 // fields would produce an empty fetch.
-                if self.count_local_sub_selections(target, &fragment_selection.selection_set) > 0 {
+                //
+                // Every child must also be local: the downcast drops the type
+                // condition, so a child that hops elsewhere would land under
+                // the interface without it. Such fragments take a key hop to
+                // a subgraph that defines the concrete type instead.
+                let all_children_local =
+                    fragment_selection
+                        .selection_set
+                        .selections
+                        .values()
+                        .all(|sel| match sel {
+                            Selection::Field(f) => {
+                                *f.field.name() == TYPENAME_FIELD
+                                    || self
+                                        .cached_query_graph
+                                        .edge_for_field(target, &f.field)
+                                        .is_some()
+                            }
+                            Selection::InlineFragment(_) => false,
+                        });
+                if all_children_local
+                    && self.count_local_sub_selections(target, &fragment_selection.selection_set)
+                        > 0
+                {
                     options.push(RoutingChoice::Local(EdgeInfo {
                         edge_index: edge_idx,
                         target_subgraph: target_node.source.clone(),

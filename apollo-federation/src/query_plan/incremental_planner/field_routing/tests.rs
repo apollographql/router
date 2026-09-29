@@ -1512,6 +1512,66 @@ fn interface_object_fake_downcast_fetches_concrete_typename() {
     "###);
 }
 
+/// A fake downcast whose fragment also selects a field only the concrete
+/// type defines: that field cannot stay under the io type in B, so it is
+/// fetched from A, where the concrete type exists.
+#[test]
+fn interface_object_fake_downcast_with_concrete_only_field() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "{ stuff { ... on X { desc name } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            stuff {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "a") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+                ... on X {
+                  __typename
+                  id
+                  name
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "b") {
+            {
+              ... on X {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                desc
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
 /// Entering through A (real interface), a concrete-type downcast whose field
 /// only exists on the @interfaceObject copy in B key-hops into B.
 #[test]
