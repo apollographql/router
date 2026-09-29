@@ -18,6 +18,7 @@ pub enum HintCode {
     InconsistentObjectValueTypeField,
     InconsistentInterfaceValueTypeField,
     InconsistentInputObjectField,
+    InconsistentOneOfInputObject,
     InconsistentUnionMember,
     InconsistentEnumValueForInputEnum,
     InconsistentEnumValueForOutputEnum,
@@ -59,6 +60,7 @@ impl HintCode {
                 &INCONSISTENT_INTERFACE_VALUE_TYPE_FIELD
             }
             HintCode::InconsistentInputObjectField => &INCONSISTENT_INPUT_OBJECT_FIELD,
+            HintCode::InconsistentOneOfInputObject => &INCONSISTENT_ONE_OF_INPUT_OBJECT,
             HintCode::InconsistentUnionMember => &INCONSISTENT_UNION_MEMBER,
             HintCode::InconsistentEnumValueForInputEnum => &INCONSISTENT_ENUM_VALUE_FOR_INPUT_ENUM,
             HintCode::InconsistentEnumValueForOutputEnum => {
@@ -206,6 +208,15 @@ pub(crate) static INCONSISTENT_INPUT_OBJECT_FIELD: LazyLock<HintCodeDefinition> 
             "INCONSISTENT_INPUT_OBJECT_FIELD",
             HintLevel::Warn,
             "Input object field is inconsistent across subgraphs",
+        )
+    });
+
+pub(crate) static INCONSISTENT_ONE_OF_INPUT_OBJECT: LazyLock<HintCodeDefinition> =
+    LazyLock::new(|| {
+        HintCodeDefinition::new(
+            "INCONSISTENT_ONE_OF_INPUT_OBJECT",
+            HintLevel::Warn,
+            "Input object type is marked @oneOf in some but not all subgraphs",
         )
     });
 

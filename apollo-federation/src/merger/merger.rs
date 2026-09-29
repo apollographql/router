@@ -100,6 +100,7 @@ use crate::schema::type_and_directive_specification::ArgumentMerger;
 use crate::schema::type_and_directive_specification::StaticArgumentsTransform;
 use crate::schema::validators::access_control::validate_transitive_access_control_requirements_in_the_supergraph;
 use crate::schema::validators::merged::validate_merged_schema;
+use crate::schema::validators::one_of::validate_one_of_default_values;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Validated;
 use crate::supergraph::CompositionHint;
@@ -689,6 +690,7 @@ impl Merger {
             })
         } else {
             validate_merged_schema(&self.merged, &self.subgraphs, &mut errors)?;
+            validate_one_of_default_values(&self.merged, &self.subgraphs, &mut errors);
             if !self.access_control_directives_in_supergraph.is_empty() {
                 validate_transitive_access_control_requirements_in_the_supergraph(
                     self.join_spec_definition,

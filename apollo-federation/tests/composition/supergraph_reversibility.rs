@@ -169,3 +169,40 @@ mod interface_object_tests {
         compose_and_test_reversibility(&[subgraph_s1, subgraph_s2]);
     }
 }
+
+mod one_of_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_one_of_on_input_objects() {
+        let subgraph_s1 = ServiceDefinition {
+            name: "S1",
+            type_defs: r#"
+                type Query {
+                    findFromS1(input: FindInput): String
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let subgraph_s2 = ServiceDefinition {
+            name: "S2",
+            type_defs: r#"
+                type Query {
+                    findFromS2(input: FindInput): String
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        compose_and_test_reversibility(&[subgraph_s1, subgraph_s2]);
+    }
+}
