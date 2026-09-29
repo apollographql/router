@@ -164,7 +164,7 @@ pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxCloneService {
           ..Default::default()
       };
       builder.with_json(
-          json!({"query": "{topProducts{__typename upc name}}"}),
+          json!({"query": "{topProducts{__typename name upc}}"}),
           json!({
               "data": {"topProducts": [
                   {"__typename": "Product", "upc": "1", "name": "Table"},
