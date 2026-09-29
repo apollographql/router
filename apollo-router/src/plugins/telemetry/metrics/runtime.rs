@@ -146,9 +146,56 @@ mod tests {
     const FLUSH_COMPLETION_BOUND: Duration = Duration::from_secs(2);
 
     /// How long the `regular_tokio_runtime_deadlocks_*` tests wait before concluding the
-    /// flush has deadlocked. The deadlock is permanent, so a shorter wait cannot make these
-    /// tests fail; a non-deadlocked flush completes in a few milliseconds.
-    const DEADLOCK_PROBE_BOUND: Duration = Duration::from_millis(250);
+    /// flush has deadlocked. Timeout is a deadlock heuristic; worker scheduling and runtime
+    /// startup must not consume the probe budget, so it only starts once the flushes have
+    /// reached `force_flush` (see [`flushes_complete_within`]).
+    const DEADLOCK_PROBE_BOUND: Duration = Duration::from_millis(500);
+
+    /// How long to wait for the flushes to reach `force_flush` before failing the test. It's
+    /// not part of any verdict, so it can be generous.
+    const FLUSH_STARTUP_BOUND: Duration = Duration::from_secs(30);
+
+    /// Runs `flushes` on a fresh runtime capped to `worker_threads` threads, on its own OS
+    /// thread, and reports whether it completes within `bound`.
+    ///
+    /// Each flush must signal on the given sender right before calling `force_flush`. `bound`
+    /// only starts once `min(worker_threads, flush_count)` flushes have signalled, so a slow
+    /// thread or runtime start can't be mistaken for a deadlock. That many always signal,
+    /// even when they deadlock: the flushes are spawned from outside the runtime's workers,
+    /// so every worker not yet blocked in `force_flush` keeps picking them up.
+    ///
+    /// `startup_delay` is slept before the runtime is built, to check that it's excluded.
+    fn flushes_complete_within<F, Fut>(
+        worker_threads: usize,
+        flush_count: usize,
+        startup_delay: Duration,
+        bound: Duration,
+        flushes: F,
+    ) -> bool
+    where
+        F: FnOnce(std::sync::mpsc::Sender<()>) -> Fut + Send + 'static,
+        Fut: Future<Output = ()>,
+    {
+        let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(startup_delay);
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(worker_threads)
+                .enable_all()
+                .build()
+                .expect("failed to build tokio runtime");
+            rt.block_on(flushes(reached_tx));
+            let _ = done_tx.send(());
+        });
+
+        for _ in 0..worker_threads.min(flush_count) {
+            reached_rx
+                .recv_timeout(FLUSH_STARTUP_BOUND)
+                .expect("flushes did not reach force_flush");
+        }
+        done_rx.recv_timeout(bound).is_ok()
+    }
 
     // ── PeriodicReader tests (Runtime only) ─────────────────────────────────
 
@@ -185,6 +232,7 @@ mod tests {
         runtime: RT,
         worker_threads: usize,
         concurrent_readers: usize,
+        startup_delay: Duration,
         bound: Duration,
     ) -> bool
     where
@@ -195,14 +243,12 @@ mod tests {
         use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
         use opentelemetry_sdk::metrics::reader::MetricReader;
 
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(worker_threads)
-                .enable_all()
-                .build()
-                .expect("failed to build tokio runtime");
-            rt.block_on(async move {
+        flushes_complete_within(
+            worker_threads,
+            concurrent_readers,
+            startup_delay,
+            bound,
+            move |reached| async move {
                 // Keep every provider alive for the duration - dropping one would tear
                 // down its reader early, rather than leaving it competing for threads.
                 let mut providers = Vec::with_capacity(concurrent_readers);
@@ -217,22 +263,29 @@ mod tests {
                             .with_reader(reader.clone())
                             .build(),
                     );
-                    flushes.push(tokio::spawn(async move { reader.force_flush() }));
+                    let reached = reached.clone();
+                    flushes.push(tokio::spawn(async move {
+                        let _ = reached.send(());
+                        reader.force_flush()
+                    }));
                 }
                 for flush in flushes {
                     let _ = flush.await;
                 }
-            });
-            let _ = done_tx.send(());
-        });
-
-        done_rx.recv_timeout(bound).is_ok()
+            },
+        )
     }
 
     #[test]
     fn regular_tokio_runtime_deadlocks_metrics_force_flush_on_a_single_worker_thread() {
         assert!(
-            !metrics_force_flush_completes_within(Tokio, 1, 1, DEADLOCK_PROBE_BOUND),
+            !metrics_force_flush_completes_within(
+                Tokio,
+                1,
+                1,
+                Duration::ZERO,
+                DEADLOCK_PROBE_BOUND
+            ),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              on a single-worker-thread runtime - if this fails, either the upstream SDK \
              changed its blocking behavior, or this test is unreliable"
@@ -247,6 +300,7 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_metrics(),
                 1,
                 1,
+                Duration::ZERO,
                 FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock PeriodicReader::force_flush \
@@ -257,7 +311,13 @@ mod tests {
     #[test]
     fn regular_tokio_runtime_deadlocks_metrics_force_flush_when_demand_exceeds_a_larger_pool() {
         assert!(
-            !metrics_force_flush_completes_within(Tokio, 4, 8, DEADLOCK_PROBE_BOUND),
+            !metrics_force_flush_completes_within(
+                Tokio,
+                4,
+                8,
+                Duration::ZERO,
+                DEADLOCK_PROBE_BOUND
+            ),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              when 8 readers concurrently flush on a 4-worker-thread runtime - if this fails, \
              either the upstream SDK changed, or this test itself is unreliable"
@@ -272,10 +332,29 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_metrics(),
                 4,
                 8,
+                Duration::ZERO,
                 FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock PeriodicReader::force_flush \
              even when 8 readers concurrently flush on a 4-worker-thread runtime"
+        );
+    }
+
+    /// Negative control for the `regular_tokio_runtime_deadlocks_metrics_*` verdicts: a flush
+    /// that completes must pass the deadlock probe even when its thread starts later than the
+    /// probe budget.
+    #[test]
+    fn deadlock_probe_budget_excludes_a_slow_start_for_metrics_force_flush() {
+        assert!(
+            metrics_force_flush_completes_within(
+                BlockingSafeTokioRuntime::new_for_metrics(),
+                4,
+                8,
+                DEADLOCK_PROBE_BOUND + Duration::from_millis(100),
+                DEADLOCK_PROBE_BOUND
+            ),
+            "a completing PeriodicReader::force_flush should pass the deadlock probe \
+             despite a startup delay longer than the probe budget"
         );
     }
 
@@ -288,6 +367,7 @@ mod tests {
         runtime: R,
         worker_threads: usize,
         concurrent_processors: usize,
+        startup_delay: Duration,
         bound: Duration,
     ) -> bool
     where
@@ -297,34 +377,39 @@ mod tests {
         use opentelemetry_sdk::trace::SpanProcessor;
         use opentelemetry_sdk::trace::span_processor_with_async_runtime::BatchSpanProcessor;
 
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(worker_threads)
-                .enable_all()
-                .build()
-                .expect("failed to build tokio runtime");
-            rt.block_on(async move {
+        flushes_complete_within(
+            worker_threads,
+            concurrent_processors,
+            startup_delay,
+            bound,
+            move |reached| async move {
                 let mut flushes = Vec::with_capacity(concurrent_processors);
                 for _ in 0..concurrent_processors {
                     let exporter = InMemorySpanExporterBuilder::new().build();
                     let processor = BatchSpanProcessor::builder(exporter, runtime.clone()).build();
-                    flushes.push(tokio::spawn(async move { processor.force_flush() }));
+                    let reached = reached.clone();
+                    flushes.push(tokio::spawn(async move {
+                        let _ = reached.send(());
+                        processor.force_flush()
+                    }));
                 }
                 for flush in flushes {
                     let _ = flush.await;
                 }
-            });
-            let _ = done_tx.send(());
-        });
-
-        done_rx.recv_timeout(bound).is_ok()
+            },
+        )
     }
 
     #[test]
     fn regular_tokio_runtime_deadlocks_tracing_force_flush_on_a_single_worker_thread() {
         assert!(
-            !tracing_force_flush_completes_within(Tokio, 1, 1, DEADLOCK_PROBE_BOUND),
+            !tracing_force_flush_completes_within(
+                Tokio,
+                1,
+                1,
+                Duration::ZERO,
+                DEADLOCK_PROBE_BOUND
+            ),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              on a single-worker-thread runtime - if this fails, either the upstream SDK \
              changed its blocking behavior, or this test is unreliable"
@@ -339,6 +424,7 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_tracing("test"),
                 1,
                 1,
+                Duration::ZERO,
                 FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock BatchSpanProcessor::force_flush \
@@ -349,7 +435,13 @@ mod tests {
     #[test]
     fn regular_tokio_runtime_deadlocks_tracing_force_flush_when_demand_exceeds_a_larger_pool() {
         assert!(
-            !tracing_force_flush_completes_within(Tokio, 4, 8, DEADLOCK_PROBE_BOUND),
+            !tracing_force_flush_completes_within(
+                Tokio,
+                4,
+                8,
+                Duration::ZERO,
+                DEADLOCK_PROBE_BOUND
+            ),
             "expected the plain opentelemetry_sdk::runtime::Tokio to deadlock force_flush \
              when 8 processors concurrently flush on a 4-worker-thread runtime - if this \
              fails, either the upstream SDK changed, or this test itself is unreliable"
@@ -364,10 +456,29 @@ mod tests {
                 BlockingSafeTokioRuntime::new_for_tracing("test"),
                 4,
                 8,
+                Duration::ZERO,
                 FLUSH_COMPLETION_BOUND
             ),
             "BlockingSafeTokioRuntime should not deadlock BatchSpanProcessor::force_flush \
              even when 8 processors concurrently flush on a 4-worker-thread runtime"
+        );
+    }
+
+    /// Negative control for the `regular_tokio_runtime_deadlocks_tracing_*` verdicts: a flush
+    /// that completes must pass the deadlock probe even when its thread starts later than the
+    /// probe budget.
+    #[test]
+    fn deadlock_probe_budget_excludes_a_slow_start_for_tracing_force_flush() {
+        assert!(
+            tracing_force_flush_completes_within(
+                BlockingSafeTokioRuntime::new_for_tracing("test"),
+                4,
+                8,
+                DEADLOCK_PROBE_BOUND + Duration::from_millis(100),
+                DEADLOCK_PROBE_BOUND
+            ),
+            "a completing BatchSpanProcessor::force_flush should pass the deadlock probe \
+             despite a startup delay longer than the probe budget"
         );
     }
 
