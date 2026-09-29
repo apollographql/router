@@ -3154,6 +3154,88 @@ fn sibling_connector_entity_groups_not_merged() {
     );
 }
 
+const CONNECTOR_INTERFACE_OBJECT_SCHEMA: &str =
+    include_str!("../fixtures/connector_interface_object.graphql");
+
+/// A connector subgraph exposes `Itf` as an @interfaceObject, so the
+/// implementation-specific fragments must be resolved by the GraphQL
+/// subgraph after the connector returns the interface fields.
+#[test]
+fn connector_interface_object_with_implementation_fragments() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_INTERFACE_OBJECT_SCHEMA,
+        "{ itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+              c
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Query_itf_0") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  d
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Itf_e_0") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  e
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "graphql") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  __typename
+                  ... on T2 {
+                    b
+                  }
+                  ... on T1 {
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 

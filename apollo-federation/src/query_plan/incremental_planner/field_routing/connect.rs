@@ -382,6 +382,26 @@ impl FieldRoutingSearchSpace {
                         .as_ref()
                         .map(|t| t.type_name().clone())
                         .unwrap_or_else(|| parent_type.clone());
+                    // The connector cannot resolve a type condition its subgraph
+                    // does not define (e.g. an implementation of an
+                    // @interfaceObject), so regular routing takes the fragment
+                    // from the parent's node.
+                    if fragment_type != *parent_type
+                        && self
+                            .connector_landing_node(source_subgraph, &fragment_type)
+                            .is_none()
+                        && let Some(anchor_node) =
+                            self.connector_landing_node(source_subgraph, parent_type)
+                    {
+                        deferred.push(DeferredConnectorSelection {
+                            selection: selection.clone(),
+                            parent_type: parent_type.clone(),
+                            anchor_node,
+                            op_path: op_path.clone(),
+                            response_path: response_path.clone(),
+                        });
+                        continue;
+                    }
                     let child_op = op_path.pushed(Arc::new(OpPathElement::InlineFragment(
                         fragment_sel.inline_fragment.clone(),
                     )));
