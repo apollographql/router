@@ -1,0 +1,65 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.3", import: ["@connect", "@source"])
+  @source(name: "json", http: { baseURL: "https://jsonplaceholder.typicode.com/" })
+
+# At runtime, isSuccess counts no value, or a value that is not a boolean, as
+# failure. So only an expression that can never be a boolean is an error.
+type Query {
+  # Valid: these may have no value, which counts as failure.
+  mapFirst(ids: [String!]!): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.ids->map(@->eq('a'))->first"
+    )
+  findEq(ids: [String!]!): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.ids->find(@->eq('a'))->eq('a')"
+    )
+  optionalEq(s: String): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.s?->eq('a')"
+    )
+  matchWithoutDefault(s: String): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.s->match(['a', true])"
+    )
+  # Valid: this may be a string, which counts as failure.
+  matchWithStringDefault(s: String): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.s->match(['a', true], [@, 'x'])"
+    )
+  # Invalid: these are never booleans.
+  size(ids: [String!]!): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.ids->size"
+    )
+  matchWithoutBoolean(s: String): [Post]
+    @connect(
+      source: "json"
+      http: { GET: "/posts" }
+      selection: "id"
+      isSuccess: "$args.s->match(['a', 1], [@, 'x'])"
+    )
+}
+
+type Post {
+  id: ID!
+}

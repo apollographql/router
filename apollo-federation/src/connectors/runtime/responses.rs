@@ -895,6 +895,40 @@ mod tests {
         );
     }
 
+    // Validation accepts `isSuccess` expressions that may have no value or may
+    // not be a boolean (see `is_success_could_be_boolean*.graphql`), because
+    // the runtime counts both as failure.
+    #[rstest::rstest]
+    #[case::bool_true("$.ok", true, false)]
+    #[case::bool_false("$.ko", false, false)]
+    #[case::missing("$.items->find(@->eq('x'))->eq('a')", false, false)]
+    #[case::first_of_empty("$.empty->map(@->eq('x'))->first", false, false)]
+    #[case::string("$.items->first->match(['a', true], [@, 'x'])", false, true)]
+    #[case::null("$.none", false, true)]
+    fn is_success_missing_or_non_boolean_fails(
+        #[case] selection: &str,
+        #[case] expected_success: bool,
+        #[case] expected_warning: bool,
+    ) {
+        let data = json!({"ok": true, "ko": false, "items": ["b"], "empty": [], "none": null});
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            let selection = JSONSelection::parse_with_spec(selection, spec).unwrap();
+            let (success, problems) = is_success(
+                Some(&selection),
+                &data,
+                &make_parts(200),
+                &Default::default(),
+                vec![],
+            );
+
+            assert_eq!(success, expected_success, "{spec:?}");
+            let warned = problems
+                .iter()
+                .any(|problem| problem.message.contains("must evaluate to a boolean"));
+            assert_eq!(warned, expected_warning, "{spec:?} problems: {problems:?}");
+        }
+    }
+
     fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
         let mut map = HeaderMap::new();
         for (k, v) in pairs {
