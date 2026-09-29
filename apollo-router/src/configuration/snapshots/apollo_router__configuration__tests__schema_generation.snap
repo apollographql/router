@@ -2884,6 +2884,7 @@ expression: "&schema"
       "type": "object"
     },
     "ConnectorStages": {
+      "additionalProperties": false,
       "description": "Configures the connector coprocessor stages",
       "properties": {
         "all": {
@@ -4066,6 +4067,7 @@ expression: "&schema"
       "type": "object"
     },
     "ExecutionStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -9433,6 +9435,7 @@ expression: "&schema"
       "type": "object"
     },
     "RouterStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -12322,6 +12325,7 @@ expression: "&schema"
       "type": "object"
     },
     "SupergraphStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
