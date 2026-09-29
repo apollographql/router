@@ -52,7 +52,7 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.2:subgraph:products:type:Query:hash:2a6ffbdeac02af8b4a7e5ba3b7a943bf55c8b1063ca7b7f1769f1ff94a5e191c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:products:type:Query:hash:2e2a923511e2880c36ea90d6af1a53c7079e9dfa663e9fcf3834989b7545236b:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "subgraph-products",
       "topProducts",
@@ -71,7 +71,7 @@ expression: cache_keys
     },
     "subgraphName": "products",
     "subgraphRequest": {
-      "query": "{ topProducts { __typename upc name price weight } }"
+      "query": "{ topProducts { __typename name upc price weight } }"
     },
     "source": "subgraph",
     "cacheControl": {

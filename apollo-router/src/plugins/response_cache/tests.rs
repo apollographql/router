@@ -881,7 +881,7 @@ async fn insert_with_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("products", MockSubgraph::builder().with_json(
-            serde_json::json! {{"query":"{ topProducts { __typename upc name price weight } }"}},
+            serde_json::json! {{"query":"{ topProducts { __typename name upc price weight } }"}},
             serde_json::json! {{"data": {"topProducts": [{
                     "__typename": "Product",
                     "upc": "1",
