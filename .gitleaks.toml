@@ -26,6 +26,8 @@
             "58bca0271d5a2046dfa7705a5418781bc456c787",
             # Synthetic Redis, response-cache and OTLP credentials in the redaction tests
             "ba0b7f734eab8c1230fa29d5b70cebf40d632e46",
+            # Not a key: query plan `renameKeyTo` context rewrites in set_context snapshots
+            "5c9c225e02636b76a5aa26230e6862dd7f321cae",
         ]
 
         paths = [
