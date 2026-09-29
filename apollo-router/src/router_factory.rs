@@ -188,8 +188,9 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
 /// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
 pub(crate) struct YamlRouterFactory {
-    /// The tracer provider installed by the routers this factory creates. Each router's telemetry
-    /// plugin retires the previous provider when it installs a new one.
+    /// The tracer provider installed by the routers this factory creates. Every plugin this factory
+    /// creates is given it, so each telemetry plugin retires the previous provider when it installs
+    /// a new one.
     tracer_provider: TracerProviderHandle,
 }
 
@@ -244,12 +245,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .license(license.clone())
                     .full_config(configuration.validated_yaml.clone())
                     .and_original_config_yaml(configuration.raw_yaml.clone())
-                    .build();
+                    .build()
+                    .with_tracer_provider(self.tracer_provider.clone());
 
                 match factory.create_instance(telemetry_init).await {
                     Ok(plugin) => {
                         if let Some(telemetry) = plugin.as_any().downcast_ref::<Telemetry>() {
-                            telemetry.lend_installed_tracer_provider(&self.tracer_provider);
                             telemetry.activate();
                         }
                         initial_telemetry_plugin = Some(plugin);
@@ -386,18 +387,13 @@ impl YamlRouterFactory {
                 extra_plugins,
                 license,
                 previous_router,
+                &self.tracer_provider,
             )
             .instrument(span)
             .await?
             .into_iter()
             .collect(),
         );
-        if let Some(telemetry) = plugins
-            .get("apollo.telemetry")
-            .and_then(|plugin| plugin.as_any().downcast_ref::<Telemetry>())
-        {
-            telemetry.lend_installed_tracer_provider(&self.tracer_provider);
-        }
 
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(planner);
@@ -605,6 +601,7 @@ pub(crate) async fn add_plugin(
     license: Arc<LicenseState>,
     full_config: Option<Value>,
     original_config_yaml: Option<Arc<str>>,
+    tracer_provider: &TracerProviderHandle,
 ) {
     let plugin_init = PluginInit::builder()
         .config(plugin_config.clone())
@@ -618,7 +615,8 @@ pub(crate) async fn add_plugin(
         .license(license)
         .and_full_config(full_config)
         .and_original_config_yaml(original_config_yaml)
-        .build();
+        .build()
+        .with_tracer_provider(tracer_provider.clone());
 
     match factory.create_instance(plugin_init).await {
         Ok(plugin) => {
@@ -631,6 +629,7 @@ pub(crate) async fn add_plugin(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
@@ -639,6 +638,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     license: Arc<LicenseState>,
     previous_router: Option<&crate::services::router::service::RouterCreator>,
+    tracer_provider: &TracerProviderHandle,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
     let supergraph_schema_id = schema.schema_id.clone().into_inner();
@@ -709,6 +709,7 @@ pub(crate) async fn create_plugins(
                 license.clone(),
                 $maybe_full_config,
                 configuration.raw_yaml.clone(),
+                tracer_provider,
             )
             .await;
         }};

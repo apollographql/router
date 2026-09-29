@@ -29,7 +29,8 @@
 //!
 //! The global OpenTelemetry API does not hand back the provider it replaces, so the router keeps its
 //! own [`TracerProviderHandle`]. The router factory owns it for the lifetime of the state machine and
-//! lends it to each [`Activation`]; commit swaps the new provider into it and retires the old one.
+//! supplies it to each telemetry plugin it creates, which passes it to [`Activation::commit()`].
+//! Commit swaps the new provider into it and retires the old one.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -62,10 +63,6 @@ pub(crate) struct Activation {
     /// The new tracer provider. None means leave the existing one.
     /// After commit this holds the retired provider, which is shut down on drop.
     new_trace_provider: Option<SdkTracerProvider>,
-
-    /// The router's handle to the installed tracer provider, lent by the router factory.
-    /// None if this activation was prepared outside the router factory.
-    installed_trace_provider: Option<TracerProviderHandle>,
 
     /// The new tracer propagator. None means leave the existing one
     new_trace_propagator: Option<TextMapCompositePropagator>,
@@ -131,7 +128,6 @@ impl Activation {
     pub(crate) fn new() -> Self {
         Self {
             new_trace_provider: None,
-            installed_trace_provider: None,
             new_trace_propagator: None,
             new_meter_providers: HashMap::default(),
             // We can remove this is we allow state to be maintained across plugin reloads
@@ -185,10 +181,6 @@ impl Activation {
         }
     }
 
-    pub(crate) fn with_installed_tracer_provider(&mut self, installed: TracerProviderHandle) {
-        self.installed_trace_provider = Some(installed);
-    }
-
     pub(crate) fn with_prometheus_registry(&mut self, prometheus_registry: Option<Registry>) {
         self.prometheus_registry = prometheus_registry;
         #[cfg(test)]
@@ -211,7 +203,7 @@ impl Activation {
     /// Commits the prepared telemetry state to global OpenTelemetry providers (Phase 2 of reload lifecycle).
     ///
     /// This method atomically updates all global telemetry state:
-    /// 1. Swaps in new tracer provider and updates the hot-reload handle
+    /// 1. Swaps in new tracer provider, records it in `installed` and updates the hot-reload handle
     /// 2. Updates trace context propagation configuration
     /// 3. Swaps in new meter providers for metrics collection
     /// 4. Updates logging format layer
@@ -221,15 +213,15 @@ impl Activation {
     ///
     /// This method cannot not fail - by the time we reach activation, all plugins have been
     /// successfully initialized and we are committed to applying the new configuration.
-    pub(crate) fn commit(mut self) {
-        self.reload_tracing();
+    pub(crate) fn commit(mut self, installed: &TracerProviderHandle) {
+        self.reload_tracing(installed);
         self.reload_trace_propagation();
         self.reload_metrics();
         self.reload_logging();
         *REGISTRY.lock() = self.prometheus_registry.clone();
     }
 
-    fn reload_tracing(&mut self) {
+    fn reload_tracing(&mut self, installed: &TracerProviderHandle) {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get()
@@ -242,10 +234,7 @@ impl Activation {
             let tracer = tracer_provider.tracer_with_scope(scope);
             hot_tracer.reload(tracer);
 
-            let retired = self
-                .installed_trace_provider
-                .as_ref()
-                .and_then(|installed| installed.replace(tracer_provider.clone()));
+            let retired = installed.replace(tracer_provider.clone());
 
             // Install the new provider globally. `set_tracer_provider` drops the provider it
             // replaces rather than returning it. We still hold the retired provider, so that drop
@@ -411,15 +400,12 @@ mod tests {
         let handle = TracerProviderHandle::default();
         assert!(handle.replace(installed).is_none());
 
-        // A reload that leaves tracing unchanged lends the handle but has no new provider.
-        let mut unchanged = Activation::new();
-        unchanged.with_installed_tracer_provider(handle.clone());
-        drop(unchanged);
+        // A reload that leaves tracing unchanged has no new provider.
+        drop(Activation::new());
 
         // A failed reload drops its new provider without committing it.
         let (abandoned, abandoned_shutdowns) = counting_tracer_provider();
         let mut failed = Activation::new();
-        failed.with_installed_tracer_provider(handle.clone());
         failed.with_tracer_provider(abandoned);
         drop(failed);
         assert_eq!(abandoned_shutdowns.load(Ordering::SeqCst), 1);

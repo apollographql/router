@@ -246,6 +246,8 @@ pub(crate) struct Telemetry {
     field_level_instrumentation_ratio: f64,
     builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<Option<Activation>>,
+    /// The router's handle to the tracer provider it has installed, which activation updates.
+    installed_tracer_provider: TracerProviderHandle,
     enabled_features: EnabledFeatures,
 }
 
@@ -389,6 +391,7 @@ impl PluginPrivate for Telemetry {
             supergraph_schema_id: init.supergraph_schema_id,
             field_level_instrumentation_ratio,
             activation: Mutex::new(Some(activation)),
+            installed_tracer_provider: init.tracer_provider,
             builtin_instruments: RwLock::new(create_builtin_instruments(
                 &config.instrumentation.instruments,
             )),
@@ -1378,7 +1381,7 @@ impl PluginPrivate for Telemetry {
         // activation called multiple times during startup due to telemetry needed to be initialized before
         // plugins are initialized
         if let Some(activation) = self.activation.lock().take() {
-            activation.commit();
+            activation.commit(&self.installed_tracer_provider);
             // The reason this exist here is that these instruments use the global meter provider when created.
             // In future, we should directly use the meter provider from activation rather than the global
             // meter provider, this will eliminate the brittle sequencing of instrument creation.
@@ -1389,14 +1392,6 @@ impl PluginPrivate for Telemetry {
 }
 
 impl Telemetry {
-    /// Lends the router's handle to the installed tracer provider to the pending activation, so
-    /// that committing it can retire the provider it replaces. Does nothing once activated.
-    pub(crate) fn lend_installed_tracer_provider(&self, installed: &TracerProviderHandle) {
-        if let Some(activation) = self.activation.lock().as_mut() {
-            activation.with_installed_tracer_provider(installed.clone());
-        }
-    }
-
     fn filter_variables_values(
         variables: &Map<ByteString, Value>,
         forward_rules: &ForwardValues,

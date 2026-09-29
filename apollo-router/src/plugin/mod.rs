@@ -48,6 +48,7 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::notification::Notify;
+use crate::plugins::telemetry::reload::activation::TracerProviderHandle;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -96,6 +97,10 @@ pub struct PluginInit<T> {
 
     /// The full router yaml before it was parsed and env variables expanded
     pub(crate) raw_yaml: Option<Arc<str>>,
+
+    /// The router's handle to the tracer provider it has installed, for use by the telemetry
+    /// plugin ONLY. The router factory supplies its own; otherwise each plugin gets a fresh one.
+    pub(crate) tracer_provider: TracerProviderHandle,
 }
 
 impl<T> PluginInit<T>
@@ -158,6 +163,7 @@ where
             license,
             full_config,
             raw_yaml: original_config_yaml,
+            tracer_provider: Default::default(),
         }
     }
 
@@ -193,6 +199,7 @@ where
             license,
             full_config,
             raw_yaml: original_config_yaml,
+            tracer_provider: Default::default(),
         })
     }
 
@@ -224,7 +231,16 @@ where
             license: license.unwrap_or_default(),
             full_config,
             raw_yaml: original_config_yaml,
+            tracer_provider: Default::default(),
         }
+    }
+}
+
+impl<T> PluginInit<T> {
+    /// Supplies the router's handle to its installed tracer provider.
+    pub(crate) fn with_tracer_provider(mut self, tracer_provider: TracerProviderHandle) -> Self {
+        self.tracer_provider = tracer_provider;
+        self
     }
 }
 
@@ -234,7 +250,7 @@ impl PluginInit<serde_json::Value> {
     where
         T: for<'de> Deserialize<'de>,
     {
-        PluginInit::try_builder()
+        let init = PluginInit::try_builder()
             .config(self.config)
             .and_previous_config(self.previous_config)
             .supergraph_schema(self.supergraph_schema)
@@ -245,7 +261,8 @@ impl PluginInit<serde_json::Value> {
             .license(self.license)
             .and_full_config(self.full_config)
             .and_original_config_yaml(self.raw_yaml)
-            .build()
+            .build()?;
+        Ok(init.with_tracer_provider(self.tracer_provider))
     }
 }
 
