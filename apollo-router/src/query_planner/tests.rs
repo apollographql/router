@@ -1147,8 +1147,6 @@ async fn missing_typename_and_fragments_in_requires() {
                   "__typename": "Stuff",
                   "id": "1",
                   "thing": {
-                    "__typename": "Thing",
-                    "id": "2",
                     "text": "aaa"
                   }
                 }
@@ -1438,8 +1436,6 @@ async fn null_in_requires() {
                   "__typename": "Stuff",
                   "id": "1",
                   "thing": {
-                    "__typename": "Thing",
-                    "id": "2",
                     "a": "A",
                     "text": null
                   }
@@ -1688,7 +1684,6 @@ async fn typename_propagation2() {
                 }},
                 serde_json::json! {{"data": {
                     "_entities": [{
-                        "__typename": "Book",
                         "id": "1"
                     }]
                 } }},
@@ -1708,7 +1703,6 @@ async fn typename_propagation2() {
                 }},
                 serde_json::json! {{"data": {
                     "_entities": [{
-                        "__typename": "Book",
                         "id": "1"
                     }]
                 } }},
@@ -1809,7 +1803,6 @@ async fn typename_propagation3() {
                 }},
                 serde_json::json! {{"data": {
                     "_entities": [{
-                        "__typename": "Book",
                         "id": "1",
                         "author": {
                             "id": "2"
