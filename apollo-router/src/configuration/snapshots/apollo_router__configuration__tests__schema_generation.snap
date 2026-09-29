@@ -6329,7 +6329,7 @@ expression: "&schema"
           "type": "integer"
         },
         "enabled": {
-          "default": false,
+          "default": true,
           "description": "Whether the incremental planner is enabled.",
           "type": "boolean"
         },
@@ -8248,7 +8248,7 @@ expression: "&schema"
           ],
           "default": {
             "beam_width": 16,
-            "enabled": false,
+            "enabled": true,
             "fuel": 5000,
             "timeout": null
           },
@@ -11710,7 +11710,7 @@ expression: "&schema"
             "experimental_plans_limit": null,
             "incremental_planner": {
               "beam_width": 16,
-              "enabled": false,
+              "enabled": true,
               "fuel": 5000,
               "timeout": null
             },
@@ -13324,7 +13324,7 @@ expression: "&schema"
           "experimental_plans_limit": null,
           "incremental_planner": {
             "beam_width": 16,
-            "enabled": false,
+            "enabled": true,
             "fuel": 5000,
             "timeout": null
           },

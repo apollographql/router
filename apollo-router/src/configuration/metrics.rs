@@ -182,7 +182,7 @@ impl InstrumentData {
         );
         populate_config_instrument!(
             apollo.router.config.incremental_planner,
-            "$.supergraph.query_planning.incremental_planner[?(@.enabled == true)]",
+            "$.supergraph.query_planning.incremental_planner[?(@.enabled == false)]",
             opt.beam_width,
             "$[?(@.beam_width)]",
             opt.fuel,

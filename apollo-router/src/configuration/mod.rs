@@ -1205,7 +1205,7 @@ pub(crate) struct IncrementalPlanner {
 impl Default for IncrementalPlanner {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             beam_width: 16,
             fuel: 5_000,
             timeout: None,
