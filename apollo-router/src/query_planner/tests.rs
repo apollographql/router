@@ -1141,7 +1141,7 @@ async fn missing_typename_and_fragments_in_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("sub1", MockSubgraph::builder().with_json(
-            serde_json::json!{{"query": "{stuff{__typename id thing{__typename id text}}}",}},
+            serde_json::json!{{"query": "{stuff{__typename id thing{text}}}",}},
             serde_json::json!{{"data": {
                 "stuff": {
                   "__typename": "Stuff",
@@ -1432,7 +1432,7 @@ async fn null_in_requires() {
 
     let subgraphs = MockedSubgraphs([
         ("sub1", MockSubgraph::builder().with_json(
-            serde_json::json!{{"query": "{stuff{__typename id thing{__typename id a text}}}",}},
+            serde_json::json!{{"query": "{stuff{__typename id thing{a text}}}",}},
             serde_json::json!{{"data": {
                 "stuff": {
                   "__typename": "Stuff",
