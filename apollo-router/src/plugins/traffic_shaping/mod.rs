@@ -515,9 +515,9 @@ impl TrafficShaping {
         )
     }
 
-    /// The rate limit for the target named `key`, created the first time it is asked for and
-    /// reused for the life of this plugin instance.
-    fn shared_rate_limit(
+    /// Caches the rate configuration for this target for the plugin's lifetime. Each service
+    /// built from the layer has an independent counter.
+    fn cached_rate_limit_layer(
         rate_limits: &Mutex<HashMap<String, RateLimitLayer>>,
         key: &str,
         conf: Option<&RateLimitConf>,
@@ -539,7 +539,7 @@ impl TrafficShaping {
         name: &str,
     ) -> OptionLayer<SubgraphAdmissionLayer> {
         option_layer(self.subgraph_shaping(name).map(|shaping| {
-            SubgraphAdmissionLayer::new(Self::shared_rate_limit(
+            SubgraphAdmissionLayer::new(Self::cached_rate_limit_layer(
                 &self.rate_limit_subgraphs,
                 name,
                 shaping.global_rate_limit.as_ref(),
@@ -613,7 +613,7 @@ impl TrafficShaping {
         source: &str,
     ) -> OptionLayer<ConnectorSourceAdmissionLayer> {
         option_layer(self.connector_source_shaping(source).map(|shaping| {
-            ConnectorSourceAdmissionLayer::new(Self::shared_rate_limit(
+            ConnectorSourceAdmissionLayer::new(Self::cached_rate_limit_layer(
                 &self.rate_limit_sources,
                 source,
                 shaping.global_rate_limit.as_ref(),
