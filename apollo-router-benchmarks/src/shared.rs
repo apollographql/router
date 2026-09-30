@@ -139,7 +139,7 @@ pub fn setup() -> TestHarness<'static> {
     }}).build();
 
     let product_service =  MockSubgraph::builder().with_json(json!{{
-        "query": "query TopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}",
+        "query": "query TopProducts__products__0($first:Int){topProducts(first:$first){__typename name upc}}",
         "operationName": "TopProducts__products__0",
         "variables":{
             "first":2u8
