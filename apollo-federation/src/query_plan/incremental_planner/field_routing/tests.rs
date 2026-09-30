@@ -3395,6 +3395,71 @@ fn connector_batch_resolves_fields_outside_root_selection() {
     "###);
 }
 
+/// A @defer fragment whose data the parent connector returns stays in that
+/// connector's fetch, without the @defer directive, which subgraph operations
+/// cannot carry.
+#[test]
+fn connector_defer_strips_directive_from_connector_fetch() {
+    let schema = include_str!("../fixtures/connector_defer.graphql");
+    let supergraph = Supergraph::new_with_router_specs(schema).expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        generate_query_fragments: true,
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "mutation { m { f ... @defer { entity { id f } } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    insta::assert_snapshot!(format!("{plan}"), @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { m { f } }:
+          Sequence {
+            Fetch(service: "connectors_Mutation_m_0") {
+              {
+                m {
+                  f
+                  entity {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "m.entity") {
+              Fetch(service: "connectors_Query_e_0") {
+                {
+                  ... on E {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on E {
+                    f
+                  }
+                }
+              },
+            },
+          },
+        }, [
+          Deferred(depends: [], path: "m") {
+            { entity { id f } }:
+          },
+        ]
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 
