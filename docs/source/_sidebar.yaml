@@ -225,6 +225,8 @@ items:
         children:
           - label: "Native Query Planner"
             href: "./query-planning/native-query-planner"
+          - label: "Incremental Query Planner"
+            href: "./query-planning/incremental-query-planner"
           - label: "Best Practices"
             href: "./query-planning/query-planning-best-practices"
           - label: "Caching"
