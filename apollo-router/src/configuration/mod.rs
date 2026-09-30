@@ -226,6 +226,7 @@ pub struct Configuration {
 
     /// Plugin configuration
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
