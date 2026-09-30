@@ -29,8 +29,8 @@ use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::supergraph;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum SupergraphValue {
     Standard(Standard),
     Event(Event<SupergraphSelector>),
@@ -176,6 +176,11 @@ pub(crate) enum SupergraphSelector {
         context_id: bool,
     },
 }
+
+// SupergraphSelector can't take the configuration attribute: its response error selectors hold a
+// JsonPathInst, which has no Debug impl for the macro's derive, nor a Validate impl. Its other
+// fields are scalars with no nested rules.
+impl apollo_configuration::Validate for SupergraphSelector {}
 
 impl Selector for SupergraphSelector {
     type Request = supergraph::Request;

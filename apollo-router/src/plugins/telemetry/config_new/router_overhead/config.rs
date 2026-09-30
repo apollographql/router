@@ -1,6 +1,4 @@
 use opentelemetry::KeyValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 
 use super::RouterOverheadTracker;
@@ -12,8 +10,7 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 
 /// Empty attributes struct for router overhead - no standard attributes, only custom selectors
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct RouterOverheadAttributes {}
 
 impl Selectors<router::Request, router::Response, ()> for RouterOverheadAttributes {

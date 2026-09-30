@@ -1346,6 +1346,14 @@ fn nested_plugin_sections_reject_unknown_keys() {
             "telemetry:\n  apollo:\n    metrics:\n      usage_reports:\n        batch_processor:\n          scheduled_dealy: 5s\n",
             "scheduled_dealy",
         ),
+        (
+            "telemetry:\n  instrumentation:\n    events:\n      router:\n        my.event:\n          message: sent\n          on: request\n          level: info\n          levle: warn\n",
+            "levle",
+        ),
+        (
+            "telemetry:\n  instrumentation:\n    events:\n      router:\n        request:\n          level: info\n          condition:\n            exists:\n              request_header: x-trace\n          conditon: {}\n",
+            "conditon",
+        ),
     ] {
         assert_rejects_unknown_key(yaml, key);
     }

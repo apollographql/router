@@ -2454,6 +2454,7 @@ expression: "&schema"
               "type": "string"
             },
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -2485,6 +2486,7 @@ expression: "&schema"
               "type": "string"
             },
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -2644,6 +2646,7 @@ expression: "&schema"
                   "type": "null"
                 }
               ],
+              "default": null,
               "description": "Optional default value."
             },
             "request_context": {
@@ -2660,6 +2663,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -3676,6 +3680,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -3723,6 +3728,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event2": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -3770,6 +3776,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event3": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -3817,6 +3824,7 @@ expression: "&schema"
       "type": "object"
     },
     "Event4": {
+      "additionalProperties": false,
       "description": "An event that can be logged as part of a trace.\nThe event has an implicit `type` attribute that matches the name of the event in the yaml\nand a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
@@ -5840,6 +5848,7 @@ expression: "&schema"
           "additionalProperties": false,
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -6180,6 +6189,7 @@ expression: "&schema"
           "description": "A header from the HTTP request",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -6212,6 +6222,7 @@ expression: "&schema"
           "description": "A header from the HTTP response",
           "properties": {
             "default": {
+              "default": null,
               "description": "Optional default value.",
               "type": [
                 "string",
@@ -9706,6 +9717,7 @@ expression: "&schema"
           "$ref": "#/definitions/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/definitions/ConditionConnectorSelector"
@@ -9728,6 +9740,7 @@ expression: "&schema"
           "$ref": "#/definitions/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/definitions/ConditionRouterSelector"
@@ -9750,6 +9763,7 @@ expression: "&schema"
           "$ref": "#/definitions/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/definitions/ConditionSubgraphSelector"
@@ -9772,6 +9786,7 @@ expression: "&schema"
           "$ref": "#/definitions/EventLevelConfig"
         },
         {
+          "additionalProperties": false,
           "properties": {
             "condition": {
               "$ref": "#/definitions/ConditionSupergraphSelector"
