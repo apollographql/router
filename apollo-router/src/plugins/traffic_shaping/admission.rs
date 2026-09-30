@@ -4,11 +4,10 @@
 //! errors as GraphQL responses, a `load_shed`, and the rate limit it sheds for. They stay together
 //! because each part depends on the one around it:
 //!
-//! - `load_shed` turns a rate limit's `Pending` readiness into an [`Overloaded`] error, so it must
-//!   sit directly outside the rate limit.
-//! - The outer buffer must sit before `load_shed`. Without it, Tokio's cooperative-scheduling
-//!   budget can make `poll_ready` return `Pending` spuriously, and `load_shed` would reject a
-//!   request that was never over the limit.
+//! - `load_shed` must observe the rate limiter's readiness without an intervening layer that
+//!   absorbs backpressure.
+//! - The outer buffer drives the admission stack and shares it across service clones. The inner
+//!   buffer polls readiness unconstrained so cooperative scheduling is not mistaken for overload.
 //! - The error mapping renders [`Overloaded`] from `load_shed` and [`Elapsed`] from a timeout
 //!   placed anywhere beneath it, so the per-target timeout layer must be placed below this one.
 
