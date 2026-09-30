@@ -13,6 +13,10 @@ extend schema
 #
 # - `Query.ok`    — `$status` inside `$(false)->and(...)`.
 # - `Query.trace` — `$response.headers.trace` inside `$(true)->or(...)`.
+# - `Query.both`  — one argument records `$status` consumption while a later
+#                   argument carries a type error; the consumption must be
+#                   recorded, but the error must stay silent because no
+#                   argument is ever evaluated at runtime.
 type Query {
   ok: Boolean
     @connect(
@@ -25,6 +29,13 @@ type Query {
     @connect(
       selection: """
         $(true)->or($response.headers.trace)
+      """
+    )
+
+  both: Boolean
+    @connect(
+      selection: """
+        $(false)->and($status, $(1)->gt("x"))
       """
     )
 }

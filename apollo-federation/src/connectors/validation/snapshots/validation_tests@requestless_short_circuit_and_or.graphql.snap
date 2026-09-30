@@ -8,16 +8,23 @@ input_file: apollo-federation/src/connectors/validation/test_data/requestless_sh
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.ok`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            20:23..20:30,
+            24:23..24:30,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.trace`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
         locations: [
-            27:21..27:30,
-            27:31..27:38,
-            27:39..27:44,
+            31:21..31:30,
+            31:31..31:38,
+            31:39..31:44,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.both`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
+        locations: [
+            38:23..38:30,
         ],
     },
 ]
