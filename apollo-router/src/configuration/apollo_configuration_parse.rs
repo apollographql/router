@@ -25,6 +25,7 @@ use super::expansion::Expansion;
 use super::schema::router_config_schema;
 use super::upgrade::UpgradeMode;
 use super::upgrade::upgrade_configuration;
+use super::upgrade::upgrade_configuration_silently;
 
 /// Runs every plugin's validation rules, for a configuration assembled in code. Parsing runs
 /// them through `ParsedConfiguration` instead, which knows which sections the document has.
@@ -498,8 +499,9 @@ pub(crate) fn parse_configuration(
 }
 
 /// Suggests `router config upgrade` for a configuration that fails validation, when that upgrade
-/// would change the operator's `file`. The upgrade is run here without logging, and only on
-/// failure, so a configuration that loads pays nothing for it. A failing upgrade gives no hint.
+/// would change the operator's `file`. The upgrade is run here without logging any of its notices,
+/// and only on failure, so a configuration that loads pays nothing for it. A failing upgrade gives
+/// no hint.
 fn report_error(error: ConfigError, file: &Value) -> ConfigurationError {
     if matches!(error, ConfigError::ValidationError(_)) && upgrade_would_change(file) {
         tracing::warn!(
@@ -511,7 +513,7 @@ fn report_error(error: ConfigError, file: &Value) -> ConfigurationError {
 
 /// Whether the upgrade `router config upgrade` performs changes `file`.
 fn upgrade_would_change(file: &Value) -> bool {
-    upgrade_configuration(file, false, UpgradeMode::Major).is_ok_and(|upgraded| upgraded != *file)
+    upgrade_configuration_silently(file, UpgradeMode::Major).is_ok_and(|upgraded| upgraded != *file)
 }
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
@@ -948,6 +950,14 @@ mod tests {
         assert_logs(
             || parse(text),
             |lines| {
+                // Startup's migration notice, once: checking for the hint logs no notices.
+                let notices = lines
+                    .iter()
+                    .filter(|line| line.contains("CORS configuration has been migrated"))
+                    .count();
+                if notices != 1 {
+                    return Err(format!("expected one CORS migration notice, got {notices}"));
+                }
                 lines
                     .iter()
                     .any(|line| {
@@ -958,6 +968,22 @@ mod tests {
             },
         )
         .expect_err("the key is unknown");
+    }
+
+    /// Checking whether `router config upgrade` would change a file logs nothing.
+    #[test]
+    fn checking_for_the_upgrade_hint_logs_nothing() {
+        let file = json!({ "cors": { "origins": ["https://example.com"] } });
+
+        let changed = assert_logs(
+            || upgrade_would_change(&file),
+            |lines| match lines.first() {
+                Some(line) => Err(format!("unexpected log line: {line}")),
+                None => Ok(()),
+            },
+        );
+
+        assert!(changed, "the CORS migration changes the file");
     }
 
     /// A file that fails validation but that `router config upgrade` would not change gets no
