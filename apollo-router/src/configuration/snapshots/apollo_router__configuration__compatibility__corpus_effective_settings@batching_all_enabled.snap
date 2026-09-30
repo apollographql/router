@@ -5,7 +5,13 @@ expression: changed_settings(&config)
 ---
 {
   "/batching/enabled": true,
-  "/batching/mode": "batch_http_link",
-  "/batching/subgraph/all/enabled": true,
-  "/include_subgraph_errors/all": true
+  "/batching/subgraph": {
+    "all": {
+      "enabled": true
+    },
+    "subgraphs": {}
+  },
+  "/include_subgraph_errors": {
+    "all": true
+  }
 }

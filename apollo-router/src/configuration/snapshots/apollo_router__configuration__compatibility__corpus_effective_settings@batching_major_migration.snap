@@ -4,6 +4,5 @@ description: "experimental_batching renamed to batching (breaking; needs `router
 expression: changed_settings(&config)
 ---
 {
-  "/batching/enabled": true,
-  "/batching/mode": "batch_http_link"
+  "/batching/enabled": true
 }

@@ -5,5 +5,7 @@ expression: changed_settings(&config)
 ---
 {
   "/enhanced_client_awareness": {},
-  "/experimental_diagnostics/enabled": true
+  "/experimental_diagnostics": {
+    "enabled": true
+  }
 }

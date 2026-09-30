@@ -4,9 +4,15 @@ description: flat subscription.deduplication migrates under deduplication.all
 expression: changed_settings(&config)
 ---
 {
-  "/subscription/deduplication/all/enabled": true,
-  "/subscription/deduplication/all/ignored_headers": [
-    "authorization",
-    "x-user-id"
-  ]
+  "/subscription": {
+    "deduplication": {
+      "all": {
+        "enabled": true,
+        "ignored_headers": [
+          "authorization",
+          "x-user-id"
+        ]
+      }
+    }
+  }
 }
