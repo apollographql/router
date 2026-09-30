@@ -694,16 +694,8 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
-<<<<<<< HEAD
-    use crate::services::layers::persisted_queries::PersistedQueryExpander;
-||||||| 46d4e61cc
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
-=======
     use crate::services::connector::request_service::TransportOutcome;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
->>>>>>> 794ca6c
+    use crate::services::layers::persisted_queries::PersistedQueryExpander;
     use crate::services::router;
     use crate::spec::Schema;
 

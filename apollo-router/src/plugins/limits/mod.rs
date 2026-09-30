@@ -414,12 +414,8 @@ mod test {
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
-<<<<<<< HEAD
     use crate::services::connector;
-||||||| 46d4e61cc
-=======
     use crate::services::connector::request_service::TransportOutcome;
->>>>>>> 794ca6c
     use crate::services::router;
 
     async fn body_to_string(resp: router::Response) -> String {

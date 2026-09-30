@@ -15,7 +15,6 @@ use opentelemetry::Key;
 use opentelemetry::StringValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
@@ -149,7 +148,8 @@ impl ConnectorCacheConfiguration {
 }
 
 /// Per connector source configuration for response caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct ConnectorCacheSource {
     /// Redis configuration
@@ -235,7 +235,7 @@ pub(super) struct ConnectorCacheService {
 impl Service<connect::Request> for ConnectorCacheService {
     type Response = connect::Response;
     type Error = BoxError;
-    type Future = <connect::BoxService as Service<connect::Request>>::Future;
+    type Future = <connect::BoxCloneService as Service<connect::Request>>::Future;
 
     fn poll_ready(
         &mut self,
@@ -1240,7 +1240,7 @@ pub(super) struct ConnectorRequestCacheService {
 impl Service<connector::request_service::Request> for ConnectorRequestCacheService {
     type Response = connector::request_service::Response;
     type Error = BoxError;
-    type Future = <connector::request_service::BoxService as Service<
+    type Future = <connector::request_service::BoxCloneService as Service<
         connector::request_service::Request,
     >>::Future;
 
