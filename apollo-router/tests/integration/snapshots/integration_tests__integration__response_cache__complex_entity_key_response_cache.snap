@@ -24,7 +24,7 @@ expression: body.extensions
         },
         "subgraphName": "stuff",
         "subgraphRequest": {
-          "query": "{ getStatus(id: \"1\") { __typename id items { id name } stuffDetails } }"
+          "query": "{ getStatus(id: \"1\") { __typename stuffDetails id items { id name } } }"
         },
         "source": "subgraph",
         "cacheControl": {
@@ -36,14 +36,14 @@ expression: body.extensions
           "data": {
             "getStatus": {
               "__typename": "Status",
+              "stuffDetails": "stuff we have",
               "id": "1",
               "items": [
                 {
                   "id": "i1",
                   "name": "Item"
                 }
-              ],
-              "stuffDetails": "stuff we have"
+              ]
             }
           }
         },

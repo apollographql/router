@@ -6,18 +6,18 @@ expression: v
   "topProducts": [
     {
       "__typename": "Product",
-      "upc": "1",
-      "name": "chair"
+      "name": "chair",
+      "upc": "1"
     },
     {
       "__typename": "Product",
-      "upc": "2",
-      "name": "table"
+      "name": "table",
+      "upc": "2"
     },
     {
       "__typename": "Product",
-      "upc": "3",
-      "name": "plate"
+      "name": "plate",
+      "upc": "3"
     }
   ]
 }

@@ -62,7 +62,7 @@ expression: response
           },
           "subgraphName": "products",
           "subgraphRequest": {
-            "query": "{ topProducts(first: 2) { __typename upc name } }"
+            "query": "{ topProducts(first: 2) { __typename name upc } }"
           },
           "source": "subgraph",
           "cacheControl": {
@@ -76,18 +76,18 @@ expression: response
               "topProducts": [
                 {
                   "__typename": "Product",
-                  "upc": "1",
-                  "name": "chair"
+                  "name": "chair",
+                  "upc": "1"
                 },
                 {
                   "__typename": "Product",
-                  "upc": "2",
-                  "name": "table"
+                  "name": "table",
+                  "upc": "2"
                 },
                 {
                   "__typename": "Product",
-                  "upc": "3",
-                  "name": "plate"
+                  "name": "plate",
+                  "upc": "3"
                 }
               ]
             }
