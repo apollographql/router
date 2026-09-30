@@ -703,9 +703,6 @@ fn rate_limit_error() -> graphql::Error {
 register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
-mod placement_tests;
-
-#[cfg(test)]
 mod test {
     use std::sync::Arc;
 

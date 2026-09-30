@@ -17,10 +17,10 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
 
-use super::APOLLO_TRAFFIC_SHAPING;
 use crate::Configuration;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginUnstable;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
