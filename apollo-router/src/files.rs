@@ -30,10 +30,42 @@ const DEFAULT_WATCH_DURATION: Duration = Duration::from_millis(100);
 /// returns: impl Stream<Item=()>
 ///
 pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> + use<> {
-    watch_with_duration(path, DEFAULT_WATCH_DURATION)
+    watch_with_duration(path, DEFAULT_WATCH_DURATION, |_| ())
 }
 
-fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> + use<> {
+/// What happened to a watcher event forwarded to the stream by [`enqueue`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Enqueued {
+    /// The event is now pending on the stream.
+    Sent,
+    /// An event was already pending, so this one was dropped.
+    AlreadyPending,
+}
+
+/// Forwards a watcher event to the stream without blocking the watcher thread.
+fn enqueue(sender: &mpsc::Sender<()>) -> Enqueued {
+    match sender.try_send(()) {
+        Ok(()) => Enqueued::Sent,
+        // If the channel is full, the receiver hasn't handled the pending event yet. When it
+        // does, it re-reads the files from disk and picks up the latest contents, so it's fine
+        // to drop this one: in effect, it's the same as if we had cancelled the pending event
+        // and pushed a new one (#8336). There is a narrow race where a change that arrives
+        // during the read itself could be missed until a subsequent edit triggers a new
+        // notification.
+        Err(TrySendError::Full(())) => Enqueued::AlreadyPending,
+        Err(err) => panic!("event channel failed: {err}"),
+    }
+}
+
+/// `on_enqueue` is called on the watcher thread with the result of each [`enqueue`].
+fn watch_with_duration<H>(
+    path: &Path,
+    duration: Duration,
+    on_enqueue: H,
+) -> impl Stream<Item = ()> + use<H>
+where
+    H: Fn(Enqueued) + Send + 'static,
+{
     // Due to the vagaries of file watching across multiple platforms, instead of watching the
     // supplied path (file), we are going to watch the parent (directory) of the path.
     let config_file_path = PathBuf::from(path);
@@ -60,16 +92,7 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                         | EventKind::Modify(ModifyKind::Data(DataChange::Any))
                 ) && event.paths.contains(&watched_path)
                 {
-                    match watch_sender.try_send(()) {
-                        Ok(_) => (),
-                        // If the sender is full, it means the receiver hasn't processed the
-                        // update yet, so it's fine to drop the event. In effect, it's the same
-                        // as if we had cancelled the previous event and pushed a new one.
-                        Err(TrySendError::Full(_err)) => (),
-                        Err(err) => {
-                            panic!("event channel failed: {err}");
-                        }
-                    }
+                    on_enqueue(enqueue(&watch_sender));
                 }
             }
             Err(e) => tracing::error!("event error: {:?}", e),
@@ -105,11 +128,19 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
 /// returns: impl Stream<Item=()>
 ///
 pub(crate) fn watch_rhai(path: &Path) -> impl Stream<Item = ()> + use<> {
-    watch_rhai_with_duration(path, DEFAULT_WATCH_DURATION)
+    watch_rhai_with_duration(path, DEFAULT_WATCH_DURATION, |_| ())
 }
 
 // We need different watcher configuration for Rhai source.
-fn watch_rhai_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> + use<> {
+/// `on_enqueue` is called on the watcher thread with the result of each [`enqueue`].
+fn watch_rhai_with_duration<H>(
+    path: &Path,
+    duration: Duration,
+    on_enqueue: H,
+) -> impl Stream<Item = ()> + use<H>
+where
+    H: Fn(Enqueued) + Send + 'static,
+{
     // Due to the vagaries of file watching across multiple platforms, instead of watching the
     // supplied path (file), we are going to watch the parent (directory) of the path.
     let rhai_source_path = PathBuf::from(path);
@@ -148,20 +179,7 @@ fn watch_rhai_with_duration(path: &Path, duration: Duration) -> impl Stream<Item
                         }
 
                         if proceed {
-                            match watch_sender.try_send(()) {
-                                Ok(_) => (),
-                                // Same behaviour as the config file watcher (#8336): if the
-                                // channel is full a reload is already pending, and when it
-                                // runs it will re-read the files from disk and pick up the
-                                // latest contents.  There is a narrow race where a change
-                                // that arrives during the read itself could be missed until
-                                // a subsequent edit triggers a new notification, which is
-                                // the same trade-off accepted for the config watcher.
-                                Err(TrySendError::Full(_)) => (),
-                                Err(err) => {
-                                    panic!("event channel failed: {err}");
-                                }
-                            }
+                            on_enqueue(enqueue(&watch_sender));
                         }
                     }
                 }
@@ -200,35 +218,73 @@ pub(crate) mod tests {
 
     use super::*;
 
+    /// How long to wait for the watcher to report an event before failing the test.
+    const WATCHER_EVENT_BOUND: Duration = Duration::from_secs(10);
+
+    /// Returns an `on_enqueue` hook for [`watch_with_duration`] / [`watch_rhai_with_duration`]
+    /// and the receiver it reports to.
+    fn enqueue_reports() -> (
+        impl Fn(Enqueued) + Send + 'static,
+        tokio::sync::mpsc::UnboundedReceiver<Enqueued>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        (
+            move |enqueued| {
+                let _ = tx.send(enqueued);
+            },
+            rx,
+        )
+    }
+
+    /// Waits for the watcher to report its next event, without consuming the watch stream.
+    async fn next_enqueue(
+        reports: &mut tokio::sync::mpsc::UnboundedReceiver<Enqueued>,
+    ) -> Enqueued {
+        tokio::time::timeout(WATCHER_EVENT_BOUND, reports.recv())
+            .await
+            .expect("watcher did not report an event")
+            .expect("watcher dropped")
+    }
+
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
-        let mut watch = watch_with_duration(&path, Duration::from_millis(100));
-        // This test can be very racy. Without synchronisation, all
-        // we can hope is that if we wait long enough between each
-        // write/flush then the future will become ready.
+        let mtime = file.metadata().unwrap().modified().unwrap();
+        overwrite_in_place(&mut file, "Some data 0", mtime);
+        let (on_enqueue, mut reports) = enqueue_reports();
+        let mut watch = watch_with_duration(&path, Duration::from_millis(100), on_enqueue);
         // Signal telling us we are ready
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "Some data 1").await;
+        overwrite_in_place(&mut file, "Some data 1", mtime);
+        assert_eq!(next_enqueue(&mut reports).await, Enqueued::Sent);
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "Some data 2").await;
+        overwrite_in_place(&mut file, "Some data 2", mtime);
+        assert_eq!(next_enqueue(&mut reports).await, Enqueued::Sent);
         assert!(futures::poll!(watch.next()).is_ready())
     }
 
     #[test(tokio::test)]
     async fn clog_watch() {
         let (path, mut file) = create_temp_file();
-        let mut watch = watch_with_duration(&path, Duration::from_millis(100));
+        let mtime = file.metadata().unwrap().modified().unwrap();
+        overwrite_in_place(&mut file, "Some data 0", mtime);
+        let (on_enqueue, mut reports) = enqueue_reports();
+        let mut watch = watch_with_duration(&path, Duration::from_millis(100), on_enqueue);
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "Some data 1").await;
-        write_and_flush(&mut file, "Some data 2").await;
-        write_and_flush(&mut file, "Some data 3").await;
-        write_and_flush(&mut file, "Some data 4").await;
+        overwrite_in_place(&mut file, "Some data 1", mtime);
+        assert_eq!(next_enqueue(&mut reports).await, Enqueued::Sent);
+        for contents in ["Some data 2", "Some data 3", "Some data 4"] {
+            overwrite_in_place(&mut file, contents, mtime);
+            assert_eq!(
+                next_enqueue(&mut reports).await,
+                Enqueued::AlreadyPending,
+                "the watcher should drop events while one is pending"
+            );
+        }
         assert!(
             futures::poll!(watch.next()).is_ready(),
             "polling the future should notice the event"
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(
             !futures::poll!(watch.next()).is_ready(),
             "should only have one event for multiple updates"
@@ -244,17 +300,26 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let rhai_path = dir.path().join("script.rhai");
         let mut file = std::fs::File::create(&rhai_path).unwrap();
-        let mut watch = watch_rhai_with_duration(&rhai_path, Duration::from_millis(100));
+        let mtime = file.metadata().unwrap().modified().unwrap();
+        overwrite_in_place(&mut file, "// v0", mtime);
+        let (on_enqueue, mut reports) = enqueue_reports();
+        let mut watch =
+            watch_rhai_with_duration(&rhai_path, Duration::from_millis(100), on_enqueue);
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "// v1").await;
-        write_and_flush(&mut file, "// v2").await;
-        write_and_flush(&mut file, "// v3").await;
-        write_and_flush(&mut file, "// v4").await;
+        overwrite_in_place(&mut file, "// v1", mtime);
+        assert_eq!(next_enqueue(&mut reports).await, Enqueued::Sent);
+        for contents in ["// v2", "// v3", "// v4"] {
+            overwrite_in_place(&mut file, contents, mtime);
+            assert_eq!(
+                next_enqueue(&mut reports).await,
+                Enqueued::AlreadyPending,
+                "the watcher should drop events while one is pending"
+            );
+        }
         assert!(
             futures::poll!(watch.next()).is_ready(),
             "polling the future should notice the event"
         );
-        tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(
             !futures::poll!(watch.next()).is_ready(),
             "should only have one event for multiple updates"
@@ -273,5 +338,20 @@ pub(crate) mod tests {
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    /// Overwrites `file` so the poll watcher reports exactly one event for it.
+    ///
+    /// `contents` must differ from the previous contents in a single byte, with no change in
+    /// length, so the watcher never reads a partial write: it only ever sees the old
+    /// contents or the new ones. So the first contents must be written before watching. The watcher also reports a newer mtime (in whole seconds)
+    /// as a change, so restoring `mtime` stops it reporting a write it has already hashed a
+    /// second time, when it checked the mtime just before the write and hashed the contents
+    /// just after.
+    fn overwrite_in_place(file: &mut File, contents: &str, mtime: std::time::SystemTime) {
+        file.rewind().unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+        file.flush().unwrap();
+        file.set_modified(mtime).unwrap();
     }
 }
