@@ -199,6 +199,15 @@ pub struct BulbStats {
     pub termination: BulbTermination,
 }
 
+impl BulbStats {
+    /// Effort spent after the first complete candidate, which is what fuel
+    /// budgets. `None` when no complete candidate was found.
+    pub fn fuel_consumed(&self) -> Option<u64> {
+        self.first_complete_effort
+            .map(|armed_at| self.effort.saturating_sub(armed_at))
+    }
+}
+
 /// Run BULB search on the given search space, returning the best complete
 /// candidate found (if any) along with statistics. `None` means no
 /// candidate satisfying [`BulbSearchSpace::is_complete`] was ever reached.

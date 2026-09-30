@@ -233,7 +233,11 @@ fn resolve_view(
     cardinality_limit: Option<NonZeroU32>,
 ) -> Option<Stream> {
     let is_histogram = instrument.kind() == InstrumentKind::Histogram;
-    let histogram_buckets = is_histogram.then(|| bucket_boundaries.to_vec());
+    let histogram_buckets = is_histogram.then(|| {
+        instrument_default_buckets(instrument.name())
+            .unwrap_or(bucket_boundaries)
+            .to_vec()
+    });
     // First match wins: earlier views take precedence over later wildcards.
     let user_view = user_views
         .iter()
@@ -251,6 +255,18 @@ fn resolve_view(
         None => default_view,
     };
     Some(view.into_stream())
+}
+
+/// Buckets for histograms that don't measure durations, where the global
+/// buckets would put nearly every sample in the overflow bucket.
+fn instrument_default_buckets(name: &str) -> Option<&'static [f64]> {
+    match name {
+        "apollo.router.query_planning.plan.fuel_consumed"
+        | "apollo.router.query_planning.plan.fuel_remaining" => {
+            Some(crate::query_planner::FUEL_BUCKETS)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -387,6 +403,60 @@ mod view_selection_tests {
                 .unwrap_or_default();
             assert_eq!(bounds, BUCKETS);
         });
+    }
+
+    fn u64_histogram_bounds(exporter: &InMemoryMetricExporter, name: &str) -> Vec<f64> {
+        with_metric(exporter, name, |data| {
+            let AggregatedMetrics::U64(MetricData::Histogram(hist)) = data else {
+                panic!("expected Histogram aggregation, got {data:?}")
+            };
+            hist.data_points()
+                .next()
+                .map(|dp| dp.bounds().collect())
+                .unwrap_or_default()
+        })
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fuel_histograms_default_to_fuel_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let provider = meter_provider_with(exporter.clone(), vec![], None);
+
+        for name in [
+            "apollo.router.query_planning.plan.fuel_consumed",
+            "apollo.router.query_planning.plan.fuel_remaining",
+        ] {
+            let histogram = provider.meter("t").u64_histogram(name).build();
+            histogram.record(42, &[]);
+        }
+        provider.force_flush().unwrap();
+
+        for name in [
+            "apollo.router.query_planning.plan.fuel_consumed",
+            "apollo.router.query_planning.plan.fuel_remaining",
+        ] {
+            assert_eq!(
+                u64_histogram_bounds(&exporter, name),
+                crate::query_planner::FUEL_BUCKETS
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn user_view_buckets_override_fuel_buckets() {
+        let exporter = InMemoryMetricExporter::default();
+        let mut view = empty_view("apollo.router.query_planning.plan.fuel_*");
+        view.aggregation = Some(MetricAggregation::Histogram {
+            buckets: vec![10.0, 100.0],
+        });
+        let provider = meter_provider_with(exporter.clone(), vec![view], None);
+
+        let name = "apollo.router.query_planning.plan.fuel_consumed";
+        let histogram = provider.meter("t").u64_histogram(name).build();
+        histogram.record(42, &[]);
+        provider.force_flush().unwrap();
+
+        assert_eq!(u64_histogram_bounds(&exporter, name), vec![10.0, 100.0]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

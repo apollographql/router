@@ -200,6 +200,8 @@ impl QueryPlannerService {
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
+            fuel_consumed: plan.statistics.fuel_consumed.get(),
+            fuel_remaining: plan.statistics.fuel_remaining.get(),
         })
     }
 
@@ -303,6 +305,8 @@ impl QueryPlannerService {
             formatted_query_plan,
             evaluated_plan_count,
             evaluated_plan_paths,
+            fuel_consumed,
+            fuel_remaining,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -337,6 +341,20 @@ impl QueryPlannerService {
             "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
             evaluated_plan_paths
         );
+        if let Some(fuel_consumed) = fuel_consumed {
+            u64_histogram!(
+                "apollo.router.query_planning.plan.fuel_consumed",
+                "Fuel the incremental planner spent improving on its first complete plan",
+                fuel_consumed
+            );
+        }
+        if let Some(fuel_remaining) = fuel_remaining {
+            u64_histogram!(
+                "apollo.router.query_planning.plan.fuel_remaining",
+                "Fuel left when the incremental planner stopped searching; zero means the budget ran out",
+                fuel_remaining
+            );
+        }
 
         Ok(Arc::new(QueryPlan {
             usage_reporting: Arc::new(usage_reporting),
@@ -536,12 +554,28 @@ impl QueryPlannerService {
     }
 }
 
+/// Default buckets for the incremental planner fuel histograms. Decades cover
+/// any `fuel` setting without depending on it, so series stay comparable when
+/// the setting changes, and `0` isolates searches that ran out of fuel.
+pub(crate) const FUEL_BUCKETS: &[f64] = &[
+    0.0,
+    1.0,
+    10.0,
+    100.0,
+    1_000.0,
+    10_000.0,
+    100_000.0,
+    1_000_000.0,
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
     pub(super) evaluated_plan_paths: u64,
+    pub(super) fuel_consumed: Option<u64>,
+    pub(super) fuel_remaining: Option<u64>,
 }
 
 /// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
@@ -621,6 +655,7 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::str::FromStr;
 
     use test_log::test;
     use tower::ServiceExt;
@@ -1216,6 +1251,58 @@ mod tests {
                 .unwrap();
 
             assert_histogram_exists!("apollo.router.query_planning.plan.evaluated_plans", u64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    async fn plan_example_query(config: Configuration) {
+        let config = Arc::new(config);
+        let schema = Arc::new(Schema::parse(EXAMPLE_SCHEMA, &config).unwrap());
+        let mut service = QueryPlannerService::for_test(schema.clone(), config.clone()).unwrap();
+        let query = include_str!("testdata/query.graphql");
+        let document = Query::parse_document(query, None, &schema, &config).unwrap();
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(document.operation.name.as_deref())
+                    .document(document)
+                    .compute_job_type(ComputeJobType::QueryPlanning)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
+            )
+            .await
+            .expect("query plans");
+    }
+
+    #[test(tokio::test)]
+    async fn test_fuel_histograms_with_incremental_planner() {
+        async {
+            let config = Configuration::from_str(
+                "supergraph:\n  query_planning:\n    incremental_planner:\n      enabled: true\n",
+            )
+            .expect("valid configuration");
+            plan_example_query(config).await;
+
+            assert_histogram_exists!("apollo.router.query_planning.plan.fuel_consumed", u64);
+            assert_histogram_exists!("apollo.router.query_planning.plan.fuel_remaining", u64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test(tokio::test)]
+    async fn test_no_fuel_histograms_without_incremental_planner() {
+        async {
+            plan_example_query(Configuration::default()).await;
+
+            assert_histogram_not_exists!("apollo.router.query_planning.plan.fuel_consumed", u64);
+            assert_histogram_not_exists!("apollo.router.query_planning.plan.fuel_remaining", u64);
         }
         .with_metrics()
         .await;

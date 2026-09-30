@@ -255,6 +255,19 @@ pub struct QueryPlanningStatistics {
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
+    /// Incremental planner fuel spent improving on the first complete plan.
+    /// Mutations run one search per top-level field and report the search that
+    /// spent the most. `None` when the incremental planner is disabled.
+    #[serde(default, skip_serializing_if = "cell_is_none")]
+    pub fuel_consumed: Cell<Option<u64>>,
+    /// Fuel left in the search reported by `fuel_consumed`. `Some(0)` means
+    /// the budget ran out.
+    #[serde(default, skip_serializing_if = "cell_is_none")]
+    pub fuel_remaining: Cell<Option<u64>>,
+}
+
+fn cell_is_none(cell: &Cell<Option<u64>>) -> bool {
+    cell.get().is_none()
 }
 
 /// Deserialize helper for f64 that treats null as NaN.
@@ -1624,6 +1637,7 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            ..Default::default()
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
         insta::assert_snapshot!(serialized, @r###"
