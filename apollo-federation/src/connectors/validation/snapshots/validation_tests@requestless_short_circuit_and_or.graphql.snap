@@ -8,46 +8,55 @@ input_file: apollo-federation/src/connectors/validation/test_data/requestless_sh
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.ok`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            26:23..26:30,
+            28:23..28:30,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.trace`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
         locations: [
-            33:21..33:30,
-            33:31..33:38,
-            33:39..33:44,
+            35:21..35:30,
+            35:31..35:38,
+            35:39..35:44,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.both`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            40:23..40:30,
+            42:23..42:30,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.multi`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            50:20..50:27,
+            52:20..52:27,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.multi`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
         locations: [
-            50:29..50:38,
-            50:39..50:46,
-            50:47..50:52,
+            52:29..52:38,
+            52:39..52:46,
+            52:47..52:52,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.lit`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            59:27..59:34,
+            61:27..61:34,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.exact_or`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
+        locations: [
+            70:21..70:30,
+            70:31..70:38,
+            70:39..70:44,
         ],
     },
 ]

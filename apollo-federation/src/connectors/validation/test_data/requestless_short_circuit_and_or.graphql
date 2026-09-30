@@ -19,6 +19,8 @@ extend schema
 #                   argument is ever evaluated at runtime.
 # - `Query.multi` — three arguments, two request-phase namespaces.
 # - `Query.lit`   — short-circuit inside an object-literal value.
+# - `Query.exact_or` — the exact `or.rs` review repro, `$response` path with
+#                      a trailing `->eq(...)` inside the argument.
 type Query {
   ok: Boolean
     @connect(
@@ -57,6 +59,15 @@ type Query {
     @connect(
       selection: """
         { foo: false->and($status) }.foo
+      """
+    )
+
+  # The exact `or.rs` repro from review: a method call on the `$response`
+  # path inside the short-circuited argument.
+  exact_or: Boolean
+    @connect(
+      selection: """
+        $(true)->or($response.headers.trace->eq("x"))
       """
     )
 }
