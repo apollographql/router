@@ -229,8 +229,8 @@ pub(crate) struct OtlpMetricsBatchProcessorConfiguration {
 impl Default for OtlpMetricsBatchProcessorConfiguration {
     fn default() -> Self {
         OtlpMetricsBatchProcessorConfiguration {
-            scheduled_delay: scheduled_delay_default(),
-            max_export_timeout: max_export_timeout_default(),
+            scheduled_delay: *scheduled_delay_default(),
+            max_export_timeout: *max_export_timeout_default(),
         }
     }
 }
@@ -269,9 +269,9 @@ pub(crate) struct ApolloUsageReportsBatchProcessorConfiguration {
 impl Default for ApolloUsageReportsBatchProcessorConfiguration {
     fn default() -> Self {
         ApolloUsageReportsBatchProcessorConfiguration {
-            scheduled_delay: scheduled_delay_default(),
+            scheduled_delay: *scheduled_delay_default(),
             max_queue_size: max_queue_size_default(),
-            max_export_timeout: max_export_timeout_default(),
+            max_export_timeout: *max_export_timeout_default(),
         }
     }
 }
@@ -279,9 +279,9 @@ impl Default for ApolloUsageReportsBatchProcessorConfiguration {
 impl From<&BatchProcessorConfig> for ApolloUsageReportsBatchProcessorConfiguration {
     fn from(value: &BatchProcessorConfig) -> Self {
         ApolloUsageReportsBatchProcessorConfiguration {
-            scheduled_delay: value.scheduled_delay,
+            scheduled_delay: *value.scheduled_delay,
             max_queue_size: value.max_queue_size,
-            max_export_timeout: value.max_export_timeout,
+            max_export_timeout: *value.max_export_timeout,
         }
     }
 }

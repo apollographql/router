@@ -1334,6 +1334,10 @@ fn nested_plugin_sections_reject_unknown_keys() {
             "coprocessor:\n  url: http://127.0.0.1:8081\n  connector:\n    alll: {}\n",
             "alll",
         ),
+        (
+            "telemetry:\n  exporters:\n    tracing:\n      otlp:\n        enabled: false\n        batch_processor:\n          max_queue_sise: 10\n",
+            "max_queue_sise",
+        ),
     ] {
         assert_rejects_unknown_key(yaml, key);
     }

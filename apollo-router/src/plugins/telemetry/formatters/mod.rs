@@ -165,7 +165,7 @@ impl<T> RateLimitFormatter<T> {
                 .lock()
                 .get_mut(&event.metadata().callsite())
             {
-                if now - counter.last < self.config.interval {
+                if now - counter.last < *self.config.interval {
                     counter.count += 1;
 
                     if counter.count >= self.config.capacity {

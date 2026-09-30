@@ -108,7 +108,7 @@ impl Config {
 
         let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
 
         if let Some(endpoint) = endpoint_opt {
@@ -126,7 +126,7 @@ impl Config {
 
         let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_timeout(self.batch_processor.max_export_timeout)
+            .with_timeout(*self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
 
         if let Some(endpoint) = endpoint_opt {
