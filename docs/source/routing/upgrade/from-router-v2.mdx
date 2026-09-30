@@ -131,6 +131,10 @@ struct Conf {
 - Where the attribute can't express your type, such as a tuple struct, derive `Clone`, `Deserialize`, and `JsonSchema` yourself and implement `Validate` and `Configuration` manually. The router re-exports the crate as `apollo_router::plugin::apollo_configuration`, so these impls don't need the extra dependency. For a section that is a bare `true` or `false`, use `apollo_router::plugin::Enabled` instead.
 - `type Config = ()` keeps working.
 
+### `Configuration` no longer implements `Serialize`
+
+`apollo_router::Configuration` can still be deserialized, but it no longer implements `Serialize`. This only affects Rust code that uses the `apollo-router` crate. If your code serializes a `Configuration`, serialize the YAML or JSON document you create it from instead.
+
 ### Renamed Prometheus metrics
 
 Several duration and byte-count metrics gained a UCUM unit (`s` for durations, `By` for bytes). The `opentelemetry-prometheus` exporter appends a suffix derived from the unit to the exported name, so these metrics are renamed on the Prometheus scrape endpoint:
