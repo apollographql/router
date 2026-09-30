@@ -82,13 +82,12 @@ impl ApolloPlugins {
 }
 
 /// Only the empty default serializes, as `null`, for the schema's default. Typed plugin config
-/// has no common `Serialize` bound, so `Configuration` serializes its plugin sections from the
-/// retained document instead.
+/// has no common `Serialize` bound.
 impl Serialize for UserPlugins {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if !self.sections.is_empty() {
             return Err(serde::ser::Error::custom(
-                "typed plugin config cannot be serialized; serialize the Configuration instead",
+                "typed plugin config cannot be serialized; serialize the source configuration document instead",
             ));
         }
         serializer.serialize_none()
