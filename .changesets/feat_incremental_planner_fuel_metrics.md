@@ -1,4 +1,4 @@
-### Add fuel metrics and span attributes for the incremental query planner
+### Add fuel metrics and span attributes for the incremental query planner ([PR #10344](https://github.com/apollographql/router/pull/10344))
 
 When the incremental query planner is enabled, the router now records two histograms per planned operation:
 
@@ -9,4 +9,4 @@ Use them to tune `supergraph.query_planning.incremental_planner.fuel`. Both use 
 
 The same values are recorded on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`, so traces show which operations ran out of fuel.
 
-By [@tninesling](https://github.com/tninesling)
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10344
