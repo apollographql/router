@@ -15,6 +15,8 @@ use serde_json::json;
 use super::Configuration;
 use super::ConfigurationError;
 use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::assert_logs;
+use super::apollo_configuration_parse::migrated_copy_warning;
 use super::apollo_configuration_parse::parse_configuration;
 use super::expansion::Expansion;
 use super::expansion::Override;
@@ -25,7 +27,6 @@ use super::upgrade::upgrade_configuration;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::spec::Schema;
-use crate::test_harness::tracing_test;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -140,6 +141,38 @@ fn load(case: &Case) -> Result<Configuration, ConfigurationError> {
     }
 }
 
+/// The settings `config` runs with: each typed router setting serialized as the router uses it,
+/// and each plugin section as the parser retained it, since typed plugin config has no common
+/// `Serialize` bound. `limits` and `health_check` run with the typed top-level settings.
+fn effective_settings(config: &Configuration) -> Value {
+    let mut settings = json!({
+        "reload": config.reload,
+        "health_check": config.health_check,
+        "sandbox": config.sandbox,
+        "homepage": config.homepage,
+        "server": config.server,
+        "supergraph": config.supergraph,
+        "cors": config.cors,
+        "tls": config.tls,
+        "apq": config.apq,
+        "persisted_queries": config.persisted_queries,
+        "limits": config.limits,
+        "plugins": config.document_section("plugins"),
+        "batching": config.batching,
+        "experimental_type_conditioned_fetching": config.experimental_type_conditioned_fetching,
+        "experimental_hoist_orphan_errors": config.experimental_hoist_orphan_errors,
+    });
+    for (name, _) in config.apollo_plugins.iter() {
+        if name != "limits" && name != "health_check" {
+            let section = config
+                .document_section(name)
+                .unwrap_or_else(|| panic!("the `{name}` plugin section is retained"));
+            settings[name] = section.clone();
+        }
+    }
+    settings
+}
+
 /// Every setting in `config` that differs from the default configuration, keyed by JSON pointer.
 fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
     fn walk(
@@ -165,10 +198,8 @@ fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
         }
     }
 
-    // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
-    let default = serde_json::to_value(parse("").expect("the default configuration is valid"))
-        .expect("Configuration serializes");
-    let value = serde_json::to_value(config).expect("Configuration serializes");
+    let default = effective_settings(&parse("").expect("the default configuration is valid"));
+    let value = effective_settings(config);
     let mut changes = BTreeMap::new();
     walk(Some(&default), &value, &mut String::new(), &mut changes);
     changes
@@ -281,10 +312,10 @@ fn validated_yaml_carries_expansion_and_overrides_for_usage_selectors() {
         1,
         "the usage gauge for `apollo.router.config.persisted_queries` must fire"
     );
-    assert_eq!(
-        config.apollo_plugins.plugins["subscription"]["enabled"],
-        json!(true)
-    );
+    let subscription = config
+        .typed_plugin_config::<SubscriptionConfig>("apollo.subscription")
+        .expect("the override adds a subscription section");
+    assert!(subscription.enabled);
     assert_eq!(config.raw_yaml.as_deref(), Some(text));
 }
 
@@ -327,10 +358,6 @@ fn mandatory_plugin_defaults_are_present_without_being_configured() {
 
     for plugin in ["limits", "health_check"] {
         assert!(
-            config.apollo_plugins.plugins.contains_key(plugin),
-            "the mandatory `{plugin}` plugin entry must be defaulted"
-        );
-        assert!(
             config.plugin_config(&format!("apollo.{plugin}")).is_some(),
             "the mandatory `{plugin}` plugin config must be kept"
         );
@@ -354,7 +381,7 @@ async fn typed_plugin_configs_are_retained_and_construct_plugins() {
         .typed()
         .unwrap();
     let document: SubscriptionConfig =
-        serde_json::from_value(config.apollo_plugins.plugins["subscription"].clone()).unwrap();
+        serde_json::from_value(config.document_section("subscription").unwrap().clone()).unwrap();
     assert_eq!(
         serde_json::to_value(&subscription).unwrap(),
         serde_json::to_value(&document).unwrap(),
@@ -412,34 +439,25 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 }
 
 /// Intentional difference from the previous loader, which fell back to the original document
-/// only when the migrated one failed the schema check. apollo-configuration validates in one call,
-/// so a migrated document rejected after the schema check, here by a plugin's config, falls back
-/// too. Startup migration 2045 fixes the flat deduplication settings, the migrated copy then
-/// fails on the traffic shaping timeout, and so does the file as written.
+/// when the migrated one failed the schema check. Once migration succeeds, the migrated copy is
+/// loaded and its errors are reported. Startup migration 2045 fixes the flat deduplication
+/// settings, so the error is the traffic shaping timeout, not the settings migration fixed.
 #[test]
-fn migrated_document_failing_plugin_config_falls_back_to_the_file() {
-    let _guard = tracing_test::dispatcher_guard();
-
-    let error = parse(include_str!(
-        "testdata/compat/fallback_after_plugin_config_error.yaml"
-    ))
+fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
+    let error = assert_logs(
+        || {
+            parse(include_str!(
+                "testdata/compat/plugin_config_error_after_migration.yaml"
+            ))
+        },
+        migrated_copy_warning,
+    )
     .expect_err("the traffic shaping timeout is invalid")
     .to_string();
 
     assert!(error.contains("apollo.traffic_shaping"), "{error}");
-    // Only the operator's file has this comment; the serialized migrated copy has none.
-    assert!(
-        error.contains("# The schema accepts any string here"),
-        "the diagnostic should quote the operator's file: {error}"
-    );
-    tracing_test::logs_assert(|lines| {
-        lines
-            .iter()
-            .any(|line| line.contains("could not be upgraded automatically"))
-            .then_some(())
-            .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
-    })
-    .unwrap();
+    assert!(error.contains("timeout: not-a-duration"), "{error}");
+    assert!(!error.contains("apollo.subscription"), "{error}");
 }
 
 /// The sandbox checks run once the document has been parsed, so a migrated document that

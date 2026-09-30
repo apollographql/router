@@ -41,7 +41,7 @@
 //!
 //! ## Symbol Resolution Process
 //!
-//! 1. **Extract addresses**: Parse all hex addresses from the heap dump
+//! 1. **Extract addresses**: Parse the frame addresses from the heap dump's `@` stack lines
 //! 2. **Find base address**: Locate the binary's load address from memory mappings
 //! 3. **Calculate relative addresses**: Convert absolute → relative for addr2line
 //! 4. **Resolve symbols**: Use addr2line's symbol table lookup
@@ -118,19 +118,21 @@ impl SymbolResolver {
         Ok((addresses, base_address))
     }
 
-    /// Extract all hex addresses from heap profile content
+    /// Extract the stack frame addresses from heap profile content
+    ///
+    /// Only `@` stack trace lines hold frame addresses. The allocation counters and the
+    /// `MAPPED_LIBRARIES` ranges elsewhere in the profile are not code addresses, and
+    /// counting them would make even a profile with no samples load the whole binary.
     fn extract_addresses(&self, content: &str) -> DiagnosticsResult<HashSet<u64>> {
-        let mut addresses = HashSet::new();
-
-        // Regex to find hex addresses (both 0x prefixed and raw hex)
-        let hex_regex = Regex::new(r"(?m)(?:^|\s)(?:0x)?([0-9a-fA-F]+)(?:\s|$|-[0-9a-fA-F]+)")
-            .expect("regex must be valid");
-
-        for cap in hex_regex.captures_iter(content) {
-            if let Ok(addr) = u64::from_str_radix(&cap[1], 16) {
-                addresses.insert(addr);
-            }
-        }
+        let addresses = content
+            .lines()
+            .filter_map(|line| line.strip_prefix('@'))
+            .flat_map(str::split_whitespace)
+            .filter_map(|token| {
+                let hex = token.strip_prefix("0x").unwrap_or(token);
+                u64::from_str_radix(hex, 16).ok()
+            })
+            .collect();
 
         Ok(addresses)
     }
@@ -374,5 +376,57 @@ impl SymbolResolver {
         std::env::current_exe().map_err(|e| {
             DiagnosticsError::Internal(format!("Failed to get current binary path: {}", e))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolver(content: &str) -> SymbolResolver {
+        SymbolResolver {
+            binary_path: PathBuf::from("/path/to/router"),
+            content: content.to_string(),
+        }
+    }
+
+    #[test]
+    fn extract_addresses_reads_only_stack_lines() {
+        let content = "\
+heap_v2/524288
+  t*: 28106: 56637512 [0: 0]
+  t0: 28106: 56637512 [0: 0]
+@ 0x10a7f9d1b 0x10a7f8e1e
+  t*: 13: 6688 [0: 0]
+@ 0x10a7f8e1e 0x10a7f7f5d
+  t*: 2: 64 [0: 0]
+
+MAPPED_LIBRARIES:
+100000000-10a800000 r-xp 00000000 00:00 0 /path/to/router
+";
+        let resolver = resolver(content);
+        let addresses = resolver.extract_addresses(&resolver.content).unwrap();
+        assert_eq!(
+            addresses,
+            HashSet::from([0x10a7f9d1b, 0x10a7f8e1e, 0x10a7f7f5d])
+        );
+    }
+
+    #[test]
+    fn extract_addresses_is_empty_without_samples() {
+        let content = "\
+heap_v2/524288
+  t*: 0: 0 [0: 0]
+
+MAPPED_LIBRARIES:
+100000000-10a800000 r-xp 00000000 00:00 0 /path/to/router
+";
+        let resolver = resolver(content);
+        assert!(
+            resolver
+                .extract_addresses(&resolver.content)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

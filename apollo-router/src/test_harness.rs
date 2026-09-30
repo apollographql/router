@@ -333,13 +333,13 @@ impl<'a> TestHarness<'a> {
                 Arc::make_mut(&mut config).add_apollo_plugin_if_absent(
                     "experimental_mock_subgraphs",
                     canned::mock_subgraphs,
-                );
+                )?;
             }
             if !self.subgraph_network_requests {
                 Arc::make_mut(&mut config)
                     .add_apollo_plugin_if_absent("experimental_mock_subgraphs", || {
                         serde_json::json!({})
-                    });
+                    })?;
             }
         }
         #[cfg(not(any(test, feature = "mock_subgraphs_testing")))]
