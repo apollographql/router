@@ -21,6 +21,9 @@ pub(crate) use analysis::SelectionAnalysis;
 pub use apply_to::*;
 pub(crate) use lit_expr::LitExpr;
 pub(crate) use location::Ranged;
+// Validation uses this to check an output shape the same way method shapes
+// check their arguments, without denying one that could succeed at runtime.
+pub(crate) use methods::could_satisfy;
 pub use parser::*;
 // Pretty printing is used outside tests now: ->withWarning renders the syntax of
 // a call whose message it had to discard, so the author can find the expression

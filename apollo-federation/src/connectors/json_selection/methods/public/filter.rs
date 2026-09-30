@@ -1,6 +1,5 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
-use shape::ShapeCase;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -10,6 +9,8 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::could_satisfy;
+use crate::connectors::json_selection::methods::common::with_arg_error;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -158,13 +159,9 @@ fn filter_shape(
     let condition_shape =
         first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape);
 
-    // Validate that the condition evaluates to a boolean or
-    // something that could become a boolean
-    if !(matches!(condition_shape.case(), ShapeCase::Bool(_)) ||
-        // This allows Unknown and Name shapes, which can produce boolean
-        // values at runtime, without any runtime errors.
-        condition_shape.accepts(&Shape::unknown([])))
-    {
+    // Validate that the condition could evaluate to a boolean at runtime,
+    // which includes Unknown and Name shapes.
+    if !could_satisfy(&Shape::bool([]), &condition_shape) {
         return Shape::error(
             format!(
                 "->{} condition must return a boolean value",
@@ -174,7 +171,10 @@ fn filter_shape(
         );
     }
 
-    Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
+    with_arg_error(
+        &condition_shape,
+        Shape::list(input_shape.any_item([]), input_shape.locations().cloned()),
+    )
 }
 
 #[cfg(test)]
@@ -353,6 +353,7 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
+    use shape::ShapeCase;
     use shape::location::Location;
     use shape::location::SourceId;
 
