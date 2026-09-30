@@ -280,19 +280,26 @@ pub(crate) fn build_connector_request_services(
 ) -> ConnectorRequestServices {
     let mut map = HashMap::with_capacity(connector_http_services.len());
     for (source, http_client) in connector_http_services.into_iter() {
-        // One buffer per connector source provides per-source backpressure and is
-        // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-        // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
+        // One buffer per connector source provides per-source backpressure and lets
+        // every clone from [`ConnectorRequestServices::get`] share this stack (mirrors
+        // the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
-                // Placed for the same reasons as in [`build_subgraph_service`]. Connector
-                // sources have no deduplication.
+                // Placed as in [`build_subgraph_service`], for the same reasons, including the
+                // unconditional buffer. Connector sources have no deduplication.
+                .buffered()
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-                    t.connector_source_admission_layer(&source)
+                    t.connector_source_error_response_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_load_shed_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_rate_limit_layer(&source)
                 })
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_timeout_layer(&source)

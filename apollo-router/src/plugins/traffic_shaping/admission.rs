@@ -12,8 +12,8 @@
 //!   a GraphQL response. This can't move into the rate limit, which only waits; it is load
 //!   shedding that turns the wait into an error.
 //!
-//! Subgraphs place each part separately, and their timeout answers its own errors. Connector
-//! sources still use one layer for all four, which also answers timeouts.
+//! The subgraph and connector request stages place each part separately. The subgraph timeout
+//! answers its own errors; the connector source error responses also answer timeouts.
 
 use apollo_federation::connectors::runtime::errors::Error;
 use http::StatusCode;
@@ -22,7 +22,6 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
-use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
 use tower::timeout::error::Elapsed;
 use tower::util::BoxService;
@@ -68,29 +67,20 @@ where
     }
 }
 
-/// Layer type for [`TrafficShaping::connector_source_admission_layer`](super::TrafficShaping::connector_source_admission_layer).
-pub(crate) struct ConnectorSourceAdmissionLayer {
-    rate_limit: Option<RateLimitLayer>,
-}
+/// Layer type for [`TrafficShaping::connector_source_error_response_layer`](super::TrafficShaping::connector_source_error_response_layer).
+pub(crate) struct ConnectorSourceErrorResponseLayer;
 
-impl ConnectorSourceAdmissionLayer {
-    pub(super) fn new(rate_limit: Option<RateLimitLayer>) -> Self {
-        Self { rate_limit }
-    }
-}
-
-impl<S> Layer<S> for ConnectorSourceAdmissionLayer
+impl<S> Layer<S> for ConnectorSourceErrorResponseLayer
 where
     S: Service<request_service::Request, Response = request_service::Response, Error = BoxError>
         + Send
         + 'static,
     S::Future: Send + 'static,
 {
-    type Service = request_service::BoxCloneService;
+    type Service = BoxService<request_service::Request, request_service::Response, BoxError>;
 
     fn layer(&self, inner: S) -> Self::Service {
         ServiceBuilder::new()
-            .buffered()
             .map_future_with_request_data(
                 |req: &request_service::Request| {
                     (
@@ -125,10 +115,8 @@ where
                     }
                 },
             )
-            .load_shed()
-            .option_layer(self.rate_limit.clone())
             .service(inner)
-            .boxed_clone()
+            .boxed()
     }
 }
 

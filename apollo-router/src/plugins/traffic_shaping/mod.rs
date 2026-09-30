@@ -33,7 +33,7 @@ use tower::timeout::error::Elapsed;
 use tower::util::MapRequestLayer;
 use tower::util::option_layer;
 
-use self::admission::ConnectorSourceAdmissionLayer;
+use self::admission::ConnectorSourceErrorResponseLayer;
 use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::timeout::SubgraphTimeoutLayer;
@@ -466,8 +466,8 @@ impl TrafficShaping {
 /// A target with no traffic shaping configuration, neither its own block nor `all`, gets an
 /// identity layer from every constructor. The layers go in this order, from the outside in:
 ///
-/// 1. admission: a buffer, error responses, load shedding and rate limit (the subgraph stage
-///    places the subgraph buffer itself)
+/// 1. admission: a buffer, error responses, load shedding and rate limit (the stage places the
+///    buffer itself)
 /// 2. timeout (the subgraph timeout answers its own errors)
 /// 3. deduplication (subgraphs only)
 /// 4. compression
@@ -592,20 +592,42 @@ impl TrafficShaping {
         )
     }
 
-    /// Returns a layer that admits or rejects requests to this connector source, keyed by
-    /// `<subgraph name>.<source name>`. A request over the source's rate limit is answered with
-    /// a rate-limited error, and a timeout raised beneath this layer with a gateway-timeout
-    /// error.
-    pub(crate) fn connector_source_admission_layer(
+    /// Returns a layer that answers a rate-limited request to this connector source, keyed by
+    /// `<subgraph name>.<source name>`, with a rate-limited error, and a timed-out one with a
+    /// gateway-timeout error.
+    pub(crate) fn connector_source_error_response_layer(
         &self,
         source: &str,
-    ) -> OptionLayer<ConnectorSourceAdmissionLayer> {
-        option_layer(self.connector_source_shaping(source).map(|shaping| {
-            ConnectorSourceAdmissionLayer::new(Self::cached_rate_limit_layer(
+    ) -> OptionLayer<ConnectorSourceErrorResponseLayer> {
+        option_layer(
+            self.connector_source_shaping(source)
+                .map(|_| ConnectorSourceErrorResponseLayer),
+        )
+    }
+
+    /// Returns a layer that rejects a request to this connector source when the rate limit
+    /// beneath it is not ready, instead of waiting.
+    pub(crate) fn connector_source_load_shed_layer(
+        &self,
+        source: &str,
+    ) -> OptionLayer<LoadShedLayer> {
+        option_layer(
+            self.connector_source_shaping(source)
+                .map(|_| LoadShedLayer::new()),
+        )
+    }
+
+    /// Returns this connector source's rate limit, when `global_rate_limit` is configured for it.
+    pub(crate) fn connector_source_rate_limit_layer(
+        &self,
+        source: &str,
+    ) -> OptionLayer<RateLimitLayer> {
+        option_layer(self.connector_source_shaping(source).and_then(|shaping| {
+            Self::cached_rate_limit_layer(
                 &self.rate_limit_sources,
                 source,
                 shaping.global_rate_limit.as_ref(),
-            ))
+            )
         }))
     }
 
