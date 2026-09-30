@@ -13,6 +13,9 @@ use apollo_compiler::ExecutableDocument;
 
 use super::super::CorrectnessError;
 use crate::Supergraph;
+use crate::query_plan::PlanNode;
+use crate::query_plan::QueryPlan;
+use crate::query_plan::TopLevelPlanNode;
 use crate::query_plan::query_planner::QueryPlanner;
 
 const SUPERGRAPH: &str = include_str!("testdata/entity_requires.graphql");
@@ -230,4 +233,93 @@ fn a_path_that_reaches_a_type_is_not_reported() {
     ] {
         check_path_reaches_a_type(&path).expect("should not be reported");
     }
+}
+
+fn init_operations(planner: &QueryPlanner, node: &mut PlanNode) {
+    match node {
+        PlanNode::Fetch(fetch) => {
+            let schema = planner.subgraph_schemas()[&fetch.subgraph_name].schema();
+            fetch
+                .operation_document
+                .init_parsed(schema)
+                .expect("valid subgraph operation");
+        }
+        PlanNode::Flatten(flatten) => init_operations(planner, &mut flatten.node),
+        _ => unimplemented!("not needed by the written plans"),
+    }
+}
+
+fn written_plan(planner: &QueryPlanner, json: &str) -> QueryPlan {
+    let mut node: TopLevelPlanNode = serde_json::from_str(json).expect("valid plan json");
+    let TopLevelPlanNode::Sequence(sequence) = &mut node else {
+        unimplemented!("not needed by the written plans");
+    };
+    for node in &mut sequence.nodes {
+        init_operations(planner, node);
+    }
+    QueryPlan {
+        node: Some(node),
+        statistics: Default::default(),
+    }
+}
+
+// A planner may alias a `@requires` input, for example when two fetches need the same field with
+// different subselections, and rename it back with an input rewrite. The router applies input
+// rewrites to each representation before sending it, so `reviews` still receives `isbn`.
+#[test]
+fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
+    let planner = planner();
+    let plan = written_plan(
+        &planner,
+        r#"{ "Sequence": { "nodes": [
+            { "Fetch": {
+                "subgraph_name": "locations",
+                "variable_usages": [],
+                "operation_document": "{ feed { __typename ... on Book { __typename id __require_0_isbn: isbn } } }",
+                "operation_kind": "query",
+                "input_rewrites": [],
+                "output_rewrites": [],
+                "context_rewrites": []
+            } },
+            { "Flatten": {
+                "path": [{ "Key": ["feed", null] }, { "AnyIndex": null }],
+                "node": { "Fetch": {
+                    "subgraph_name": "reviews",
+                    "variable_usages": [],
+                    "requires": [{
+                        "kind": "InlineFragment",
+                        "typeCondition": "Book",
+                        "selections": [
+                            { "kind": "Field", "name": "__typename" },
+                            { "kind": "Field", "name": "id" },
+                            { "kind": "Field", "alias": "__require_0_isbn", "name": "isbn" }
+                        ]
+                    }],
+                    "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Book { blurb } } }",
+                    "operation_kind": "query",
+                    "input_rewrites": [{ "KeyRenamer": {
+                        "path": [{ "Key": ["__require_0_isbn", null] }],
+                        "rename_key_to": "isbn"
+                    } }],
+                    "output_rewrites": [],
+                    "context_rewrites": []
+                } }
+            } }
+        ] } }"#,
+    );
+    let operation = ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ feed { ... on Book { blurb } } }",
+        "operation.graphql",
+    )
+    .expect("valid operation");
+
+    crate::correctness::check_plan(
+        planner.api_schema(),
+        planner.supergraph_schema(),
+        planner.subgraph_schemas(),
+        &operation,
+        &plan,
+    )
+    .unwrap();
 }
