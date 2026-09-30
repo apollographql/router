@@ -25,6 +25,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::limit::RateLimitLayer;
+use tower::load_shed::LoadShedLayer;
 use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
@@ -32,7 +33,7 @@ use tower::util::MapRequestLayer;
 use tower::util::option_layer;
 
 use self::admission::ConnectorSourceAdmissionLayer;
-use self::admission::SubgraphAdmissionLayer;
+use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
@@ -477,14 +478,14 @@ impl TrafficShaping {
 /// A target with no traffic shaping configuration, neither its own block nor `all`, gets an
 /// identity layer from every constructor. The layers go in this order, from the outside in:
 ///
-/// 1. admission: outer buffer, error mapping, load shedding and rate limit
+/// 1. admission: a buffer, error responses, load shedding and rate limit (the subgraph stage
+///    places the subgraph buffer itself)
 /// 2. timeout
 /// 3. deduplication (subgraphs only)
 /// 4. compression
 /// 5. backpressure buffer
 ///
-/// Admission renders the errors of the timeout beneath it, so the timeout must stay below
-/// admission. The [`admission`] module explains why admission is one layer.
+/// The [`admission`] module explains the order of the admission parts.
 impl TrafficShaping {
     /// This subgraph's shaping: its own block merged over `all`, or `all` alone.
     fn subgraph_shaping(&self, name: &str) -> Option<Shaping> {
@@ -516,19 +517,32 @@ impl TrafficShaping {
         })
     }
 
-    /// Returns a layer that admits or rejects requests to this subgraph. A request over the
-    /// subgraph's rate limit is answered with a `503`, and a timeout raised beneath this layer
-    /// with a `504`.
-    pub(crate) fn subgraph_admission_layer(
+    /// Returns a layer that answers a rate-limited request to this subgraph with a `503`, and a
+    /// timed-out one with a `504`.
+    pub(crate) fn subgraph_error_response_layer(
         &self,
         name: &str,
-    ) -> OptionLayer<SubgraphAdmissionLayer> {
-        option_layer(self.subgraph_shaping(name).map(|shaping| {
-            SubgraphAdmissionLayer::new(Self::cached_rate_limit_layer(
+    ) -> OptionLayer<SubgraphErrorResponseLayer> {
+        option_layer(
+            self.subgraph_shaping(name)
+                .map(|_| SubgraphErrorResponseLayer),
+        )
+    }
+
+    /// Returns a layer that rejects a request to this subgraph when the rate limit beneath it
+    /// is not ready, instead of waiting.
+    pub(crate) fn subgraph_load_shed_layer(&self, name: &str) -> OptionLayer<LoadShedLayer> {
+        option_layer(self.subgraph_shaping(name).map(|_| LoadShedLayer::new()))
+    }
+
+    /// Returns this subgraph's rate limit, when `global_rate_limit` is configured for it.
+    pub(crate) fn subgraph_rate_limit_layer(&self, name: &str) -> OptionLayer<RateLimitLayer> {
+        option_layer(self.subgraph_shaping(name).and_then(|shaping| {
+            Self::cached_rate_limit_layer(
                 &self.rate_limit_subgraphs,
                 name,
                 shaping.global_rate_limit.as_ref(),
-            ))
+            )
         }))
     }
 
