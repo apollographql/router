@@ -108,20 +108,32 @@ The router checks its configuration more thoroughly at startup and on reload, so
 - If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
 - Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
 
-### Native plugin configuration must be `Clone`, `Send`, `Sync` and `'static`
+### Native plugin configuration must use `apollo-configuration`
 
-The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `Clone + Send + Sync + 'static`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins).
+The `Config` associated type of the `Plugin` and `PluginUnstable` traits now requires `apollo_configuration::Configuration + Clone + Send + Sync + 'static`, in place of `JsonSchema + DeserializeOwned`. This only affects [native Rust plugins](/graphos/routing/customization/native-plugins).
 
-**Upgrade step**:
+The router parses its configuration with the [`apollo-configuration`](https://crates.io/crates/apollo-configuration) crate, and now parses and validates each plugin's configuration in the same step. Validation rules that a plugin defines run at parse time. A value they reject fails startup or reload with an error at that value's line in the file, alongside every other rule failure. The router checks a `Configuration` that tests deserialize with serde the same way.
 
-- Add `Clone` to your plugin configuration type's derives:
+**Upgrade steps**:
+
+- Add `apollo-configuration` as a dependency, using the same version as the router.
+- Define your plugin configuration with the `#[configuration]` attribute, in place of the `serde` and `schemars` derives. The attribute derives `Clone`, `Deserialize`, and `JsonSchema`, and implements `Configuration`. It makes every field optional with its type's default unless you mark it `#[config(required)]` or `#[config(default = ...)]`, and it rejects unknown keys:
 
 ```rust
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {
+    #[config(required)]
     name: String,
 }
 ```
+
+- Move configuration-only checks from your plugin's `new` into a validation function, so they run at parse time and report the offending lines: `#[apollo_configuration::configuration(validate = validate_conf)]`, with `fn validate_conf(conf: &Conf, errors: apollo_configuration::ErrorCollector<'_>)`.
+- Where the attribute can't express your type, such as a tuple struct, derive `Clone`, `Deserialize`, and `JsonSchema` yourself and implement `Validate` and `Configuration` manually. The router re-exports the crate as `apollo_router::plugin::apollo_configuration`, so these impls don't need the extra dependency. For a section that is a bare `true` or `false`, use `apollo_router::plugin::Enabled` instead.
+- `type Config = ()` keeps working.
+
+### `Configuration` no longer implements `Serialize`
+
+`apollo_router::Configuration` can still be deserialized, but it no longer implements `Serialize`. This only affects Rust code that uses the `apollo-router` crate. If your code serializes a `Configuration`, serialize the YAML or JSON document you create it from instead.
 
 ### Renamed Prometheus metrics
 

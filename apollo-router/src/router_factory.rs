@@ -82,7 +82,7 @@ impl RouterServiceFactory for PipelineFactory {
 ///
 /// not meant to be used directly
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
-    let config: Configuration = serde_yaml::from_str(configuration).unwrap();
+    let config: Configuration = configuration.parse().unwrap();
     let schema = Arc::new(Schema::parse(schema, &config).unwrap());
 
     let is_telemetry_disabled = false;

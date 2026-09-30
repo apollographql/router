@@ -96,6 +96,24 @@ pub(crate) fn upgrade_configuration(
     log_warnings: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
+    upgrade(config, log_warnings, true, upgrade_mode)
+}
+
+/// Upgrades `config` without logging anything, including each migration's own notices, to check
+/// what an upgrade would change.
+pub(crate) fn upgrade_configuration_silently(
+    config: &serde_json::Value,
+    upgrade_mode: UpgradeMode,
+) -> Result<serde_json::Value, super::ConfigurationError> {
+    upgrade(config, false, false, upgrade_mode)
+}
+
+fn upgrade(
+    config: &serde_json::Value,
+    log_warnings: bool,
+    log_notices: bool,
+    upgrade_mode: UpgradeMode,
+) -> Result<serde_json::Value, super::ConfigurationError> {
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
     let files = Asset::iter().sorted().filter(|f| match upgrade_mode {
@@ -120,6 +138,9 @@ pub(crate) fn upgrade_configuration(
     let mut effective_descriptions: Vec<String> = Vec::new();
 
     for migration in &migrations {
+        if log_notices {
+            log_migration_notices(&config, migration)?;
+        }
         let new_config = apply_migration(&config, migration)?;
 
         // If the config has been modified by the migration then let the user know
@@ -292,6 +313,38 @@ fn migrate_connectors_subgraphs_to_sources(config: &mut Value) -> (bool, Vec<Str
     (migrated_any, subgraphs_with_config)
 }
 
+/// Logs the notices of `migration`'s `Log` actions that apply to `config`.
+fn log_migration_notices(config: &Value, migration: &Migration) -> Result<(), ConfigurationError> {
+    for action in &migration.actions {
+        let Action::Log {
+            path,
+            level,
+            log,
+            condition,
+        } = action
+        else {
+            continue;
+        };
+        let level = Level::from_str(level).map_err(migration_failure_error)?;
+
+        let values = jsonpath_lib::select(config, &format!("$.{path}")).unwrap_or_default();
+        let should_log = match condition {
+            LogCondition::NonEmpty => !values.is_empty(),
+            LogCondition::IsString => values.iter().any(|v| v.is_string()),
+        };
+        if should_log {
+            match level {
+                Level::INFO => tracing::info!("{log}"),
+                Level::ERROR => tracing::error!("{log}"),
+                Level::WARN => tracing::warn!("{log}"),
+                Level::TRACE => tracing::trace!("{log}"),
+                Level::DEBUG => tracing::debug!("{log}"),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, ConfigurationError> {
     let mut transformer_builder = TransformBuilder::default();
     //We always copy the entire doc to the destination first
@@ -354,29 +407,8 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                         .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);
                 }
             }
-            Action::Log {
-                path,
-                level,
-                log,
-                condition,
-            } => {
-                let level = Level::from_str(level).map_err(migration_failure_error)?;
-
-                let values = jsonpath_lib::select(config, &format!("$.{path}")).unwrap_or_default();
-                let should_log = match condition {
-                    LogCondition::NonEmpty => !values.is_empty(),
-                    LogCondition::IsString => values.iter().any(|v| v.is_string()),
-                };
-                if should_log {
-                    match level {
-                        Level::INFO => tracing::info!("{log}"),
-                        Level::ERROR => tracing::error!("{log}"),
-                        Level::WARN => tracing::warn!("{log}"),
-                        Level::TRACE => tracing::trace!("{log}"),
-                        Level::DEBUG => tracing::debug!("{log}"),
-                    }
-                }
-            }
+            // Logged by `log_migration_notices` instead, so an upgrade can run without them.
+            Action::Log { .. } => {}
         }
     }
     let transformer = transformer_builder.build()?;

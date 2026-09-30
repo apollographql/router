@@ -814,6 +814,21 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "BuiltInValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test built-in plugin with a validated nested setting.",
+      "properties": {
+        "inner": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NestedName"
+            }
+          ],
+          "description": "A setting with its own validation rule."
+        }
+      },
+      "type": "object"
+    },
     "CSRFConfig": {
       "additionalProperties": false,
       "description": "CSRF protection configuration.\n\nSee <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.",
@@ -7484,6 +7499,18 @@ expression: "&schema"
       "description": "Config for the test plugin",
       "type": "object"
     },
+    "NestedName": {
+      "additionalProperties": false,
+      "description": "A nested setting with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "OTLPConfig": {
       "additionalProperties": false,
       "properties": {
@@ -7804,6 +7831,9 @@ expression: "&schema"
         },
         "test.records_previous_config": {
           "$ref": "#/definitions/Conf"
+        },
+        "test.validated": {
+          "$ref": "#/definitions/ValidatedConfig"
         }
       },
       "type": [
@@ -12759,6 +12789,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test plugin with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "WebSocketConfiguration": {
       "additionalProperties": false,
       "description": "WebSocket configuration for a specific subgraph",
@@ -13338,6 +13380,9 @@ expression: "&schema"
     },
     "telemetry": {
       "$ref": "#/definitions/TelemetryConfig"
+    },
+    "test_validated": {
+      "$ref": "#/definitions/BuiltInValidatedConfig"
     },
     "tls": {
       "allOf": [

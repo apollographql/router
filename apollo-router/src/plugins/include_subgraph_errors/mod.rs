@@ -31,6 +31,19 @@ static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
+/// `config` with every subgraph's errors included, as `--dev` sets `all: true`. Without a
+/// config, starts from the plugin's defaults.
+pub(crate) fn with_all_errors_included(
+    config: Option<&crate::plugin::PluginConfig>,
+) -> crate::plugin::PluginConfig {
+    let mut config = config
+        .and_then(|config| config.downcast_ref::<Config>())
+        .cloned()
+        .unwrap_or_default();
+    config.all = ErrorMode::Included(true);
+    crate::plugin::PluginConfig::new(config)
+}
+
 /// Layer type for [`IncludeSubgraphErrors::redact_subgraph_errors_layer`].
 pub(crate) struct RedactSubgraphErrorsLayer {
     config: Arc<EffectiveConfig>,
