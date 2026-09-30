@@ -246,7 +246,7 @@ One GraphQL operation can produce many connector requests, so this hook runs onc
 
 <Note>
 
-This hook is available on the `PluginUnstable` trait, not the stable `Plugin` trait, and its signature may change in future releases. Implementing `PluginUnstable` requires an explicit `unstable_method` implementation, which makes adoption a visible opt-in rather than an implied stability promise. A plugin that implements only `Plugin` gets the passthrough default and no connector hook.
+This hook is available on the `PluginUnstable` trait, not the stable `Plugin` trait, and its signature may change in future releases. Implementing `PluginUnstable` requires an explicit `unstable_method` implementation, making adoption a visible opt-in. A plugin that implements only `Plugin` gets the passthrough default and no connector hook.
 
 </Note>
 
@@ -265,8 +265,9 @@ impl PluginUnstable for MyPlugin {
     }
 
     // Called once per connector source, with the service that makes that
-    // source's HTTP requests. The `source_name` parameter is the `@source`
-    // name, useful for applying a customization to specific connectors.
+    // source's HTTP requests. The `source_name` parameter identifies the
+    // source as `subgraph_name.source_name` (for example, `products.rest`),
+    // the same key used for per-source connector configuration.
     fn connector_request_service(
         &self,
         service: request_service::BoxService,
@@ -288,7 +289,7 @@ The surface deliberately matches what the coprocessor [`ConnectorRequest` and `C
 
 On the request:
 
-- `request.transport_request` carries the outgoing `http::Request`, so the URI, method, headers, and body are all readable and mutable.
+- `request.transport_request` carries the outgoing request as a `TransportRequest`, which is either `Http` (wrapping an `http::Request<String>` at its `inner` field, so the URI, method, headers, and body are all readable and mutable) or `MappingOnly` for a connector that makes no HTTP call. `TransportRequest` comes from the `apollo-federation` crate (`apollo_federation::connectors::runtime::http_json_transport`), which your plugin must depend on at the same version as the router.
 - `request.supergraph_request()` returns the router request that produced this connector call, for reading.
 - `request.context` is readable and writable for request-scoped state.
 - `request.into_error_response(message, code, extensions)` fails the connector request without making it. This is the in-process equivalent of a coprocessor returning `Control::Break`, useful for circuit breaking.
@@ -296,12 +297,14 @@ On the request:
 On the response:
 
 - `response.context` is readable and writable.
-- `response.transport_outcome` exposes the raw transport outcome: status, headers, and transport-level errors.
+- `response.transport_outcome` exposes the raw transport outcome: an HTTP response with status and headers, a transport-level error, or a mapping-only response that made no HTTP call and has neither.
 - `response.data()` / `set_data()` and `response.error()` / `set_error_message()` / `set_error_code()` read and change what is returned to the client.
+
+The setters cannot turn a failed call into a success or the reverse: `set_data` does nothing on an error response, and `set_error_message` and `set_error_code` do nothing on a successful one. To fail a connector request deliberately, use `into_error_response` on the request.
 
 ### Differences from a coprocessor
 
-Two places where a plugin and a coprocessor genuinely differ:
+Two places where a plugin and a coprocessor differ:
 
 - A plugin can rewrite the HTTP method. The coprocessor protocol sends the method to your coprocessor but ignores a modified method sent back, so the coprocessor stages cannot change it.
 - Changing `response.transport_outcome` does not recompute the mapped response, so telemetry reports the transport outcome you set while the client receives the unchanged mapped data. The coprocessor stages have the same trap. Change both, or neither.
