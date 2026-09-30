@@ -301,11 +301,18 @@ impl FetchGraph {
 
         // Every label in the operation gets a block, even with no fetch
         // nodes of its own: data riding an enclosing fetch still needs a
-        // data-only block (node: None). Labels with fetch nodes keep their
-        // deterministic (commit-order) position; node-less labels are
-        // appended in sorted order.
+        // data-only block (node: None). Labels with fetch nodes come first,
+        // in operation order; node-less labels are appended in sorted order.
         let all_labels: Vec<String> = {
             let mut labels: Vec<String> = deferred_nodes.keys().cloned().collect();
+            // Synthesized labels follow operation order, so sibling blocks
+            // are emitted in the order the client wrote them.
+            labels.sort_by_key(|label| {
+                defer_info
+                    .client_labels
+                    .get_index_of(label.as_str())
+                    .unwrap_or(usize::MAX)
+            });
             let mut node_less: Vec<&String> = defer_info
                 .blocks
                 .keys()
