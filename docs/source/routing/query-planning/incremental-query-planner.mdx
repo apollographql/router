@@ -103,6 +103,8 @@ The router records two histograms for each operation planned by the incremental 
 
 Mutations are planned one top-level field at a time. For a mutation, both values come from the field whose search consumed the most fuel.
 
+The same values are recorded on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`. Use the span attributes to find which operations ran out of fuel, since the histograms don't identify operations.
+
 How to read them:
 
 - If most operations finish with fuel remaining, the planner is exploring every alternative it considers worthwhile within the budget. Raising `fuel` won't change their plans.
