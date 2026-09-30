@@ -12,8 +12,6 @@ use std::sync::Mutex;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower::util::BoxCloneService;
@@ -42,7 +40,7 @@ struct ObservingPlugin {
     observed: Arc<Mutex<Observed>>,
 }
 
-#[derive(Clone, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {}
 
 #[async_trait::async_trait]

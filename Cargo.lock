@@ -198,9 +198,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-configuration"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "885659ffa793dcfae8b568c0ca243db9dc31b3eba7c79e87a3e8dd4b6884b67d"
+checksum = "58a4a9eeabea42bbebf42bed269e8835a5156d2c51fb226a348ce35ce61d7d0a"
 dependencies = [
  "apollo-configuration-macros",
  "apollo-errors",
@@ -408,6 +408,7 @@ dependencies = [
  "docker_credential",
  "ecdsa 0.17.0",
  "encoding_rs",
+ "erased-serde",
  "flate2",
  "fred",
  "futures",
@@ -654,10 +655,10 @@ name = "async-allow-client-id"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
- "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",
@@ -2714,6 +2715,7 @@ name = "external-subgraph"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "bytes",
@@ -2721,7 +2723,6 @@ dependencies = [
  "http 1.5.0",
  "http-body-util",
  "multimap",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -3463,9 +3464,9 @@ name = "hello-world"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -5747,10 +5748,10 @@ name = "propagate-status-code"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apollo-configuration",
  "apollo-router",
  "async-trait",
  "http 1.5.0",
- "schemars",
  "serde",
  "serde_json",
  "tokio",

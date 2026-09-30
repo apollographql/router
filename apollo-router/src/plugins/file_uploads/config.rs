@@ -121,12 +121,14 @@ pub(crate) struct FileUploadProtocols {
 }
 
 /// Configuration for File Uploads plugin
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Default)]
 pub(crate) struct FileUploadsConfig {
     /// Whether the file upload plugin should be enabled (default: false)
+    #[config(required)]
     pub(crate) enabled: bool,
 
     /// Supported protocol configurations for file uploads
+    #[config(required, skip_validate)]
     pub(crate) protocols: FileUploadProtocols,
 }

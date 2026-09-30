@@ -537,12 +537,16 @@ fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_fiel
     );
 }
 
-/// With legacy CORS settings, startup migrates the document first. The migrated copy fails on
-/// the timeout, so the file as written is parsed and only its errors are reported. The anchored
-/// secret is not printed, whether the variable or the reference's default supplies it.
+/// With legacy CORS settings, startup migrates the document first and loads the migrated copy,
+/// which fails on the timeout. Pins the same known limitation as above: the copy has no YAML
+/// aliases, so the error quotes the value the anchored reference resolved to, whether the variable
+/// or the reference's default supplies it. The secret field itself stays redacted.
 #[test]
-fn migrated_anchored_expansions_that_fall_back_do_not_print_the_secret() {
-    for secret in [Some("synthetic-secret"), None] {
+fn migrated_anchored_expansions_quote_the_value_aliased_into_a_secret_field() {
+    for (secret, value) in [
+        (Some("synthetic-secret"), "synthetic-secret"),
+        (None, "fallback-secret-value"),
+    ] {
         let mut expansion = Expansion::builder().supported_mode("env");
         if let Some(secret) = secret {
             expansion = expansion.mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", secret);
@@ -552,13 +556,15 @@ fn migrated_anchored_expansions_that_fall_back_do_not_print_the_secret() {
             expansion.build(),
             Migration::WithinMajor,
         )
-        .expect_err("the unmigrated origins key is invalid in the file")
+        .expect_err("the Redis timeout is invalid")
         .to_string();
 
-        assert!(error.contains("'origins' was unexpected"), "{error}");
-        for value in ["synthetic-secret", "fallback-secret-value"] {
-            assert!(!error.contains(value), "{value} was printed: {error}");
-        }
+        assert!(error.contains("invalid value"), "{error}");
+        assert!(error.contains("password: [REDACTED]"), "{error}");
+        assert!(
+            error.contains(value),
+            "expected the known limitation; update this test if anchors survive migration: {error}"
+        );
     }
 }
 
@@ -927,25 +933,16 @@ fn default_config_matches_parsing_an_empty_document() {
         "equality compares the retained documents"
     );
     assert_eq!(default.raw_yaml, parsed.raw_yaml);
-    assert_eq!(
-        serde_json::to_value(&default).unwrap(),
-        serde_json::to_value(&parsed).unwrap()
-    );
-    assert_eq!(
-        default.apollo_plugins.plugins,
-        parsed.apollo_plugins.plugins
-    );
-    assert!(!default.apollo_plugins.plugins.is_empty());
-    for name in default.apollo_plugins.plugins.keys() {
-        let full_name = format!("apollo.{name}");
-        assert!(
-            default.plugin_configs.apollo(&full_name).is_some()
-                && parsed.plugin_configs.apollo(&full_name).is_some(),
-            "{full_name} has retained config"
-        );
-    }
-    assert!(default.plugin_configs.errors().is_empty());
-    assert_eq!(default.plugin_configs.user_plugins().count(), 0);
+    let names = |config: &Configuration| -> Vec<String> {
+        config
+            .apollo_plugins
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect()
+    };
+    assert_eq!(names(&default), ["health_check", "limits"]);
+    assert_eq!(names(&default), names(&parsed));
+    assert_eq!(default.plugins.iter().count(), 0);
 }
 
 #[test]
@@ -1274,6 +1271,49 @@ fn test_deserialize_derive_default() {
 
     if !errors.is_empty() {
         panic!("Serde errors found:\n{}", errors.join("\n"));
+    }
+}
+
+/// Parses `yaml`, which must fail because of the unknown `key`, and checks that the error names it.
+fn assert_rejects_unknown_key(yaml: &str, key: &str) {
+    let error = Configuration::from_str(yaml)
+        .expect_err("the section contains an unknown key")
+        .to_string();
+    assert!(error.contains(key), "{error}");
+}
+
+#[test]
+fn authorization_rejects_unknown_keys() {
+    assert_rejects_unknown_key(
+        "authorization:\n  require_authentcation: true\n",
+        "require_authentcation",
+    );
+}
+
+#[test]
+fn fleet_detector_rejects_unknown_keys() {
+    assert_rejects_unknown_key("fleet_detector:\n  enabeld: false\n", "enabeld");
+}
+
+#[test]
+fn enhanced_client_awareness_rejects_unknown_keys() {
+    assert_rejects_unknown_key("enhanced_client_awareness:\n  enabeld: false\n", "enabeld");
+}
+
+#[test]
+fn progressive_override_rejects_unknown_keys() {
+    assert_rejects_unknown_key("progressive_override:\n  enabeld: false\n", "enabeld");
+}
+
+#[test]
+fn settingless_plugin_sections_accept_empty_and_omitted_sections() {
+    for yaml in [
+        "",
+        "fleet_detector: {}\n",
+        "enhanced_client_awareness: {}\n",
+        "progressive_override: {}\n",
+    ] {
+        Configuration::from_str(yaml).unwrap_or_else(|error| panic!("{yaml:?}: {error}"));
     }
 }
 

@@ -610,6 +610,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationConfig": {
+      "additionalProperties": false,
       "description": "Authorization plugin",
       "properties": {
         "directives": {
@@ -809,6 +810,21 @@ expression: "&schema"
           "default": false,
           "description": "Send the extensions field",
           "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "BuiltInValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test built-in plugin with a validated nested setting.",
+      "properties": {
+        "inner": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NestedName"
+            }
+          ],
+          "description": "A setting with its own validation rule."
         }
       },
       "type": "object"
@@ -1921,6 +1937,7 @@ expression: "&schema"
       ]
     },
     "Conf": {
+      "additionalProperties": false,
       "description": "Configuration for the test plugin",
       "properties": {
         "name": {
@@ -1934,6 +1951,7 @@ expression: "&schema"
       "type": "object"
     },
     "Conf2": {
+      "additionalProperties": false,
       "description": "The fleet detector plugin has no configuration.",
       "type": "object"
     },
@@ -1950,6 +1968,7 @@ expression: "&schema"
       "description": "Subgraph URL mappings"
     },
     "Config": {
+      "additionalProperties": false,
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1963,6 +1982,7 @@ expression: "&schema"
       "type": "object"
     },
     "Config2": {
+      "additionalProperties": false,
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1976,6 +1996,7 @@ expression: "&schema"
       "type": "object"
     },
     "Config3": {
+      "additionalProperties": false,
       "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
@@ -2006,6 +2027,7 @@ expression: "&schema"
       "type": "object"
     },
     "Config5": {
+      "additionalProperties": false,
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
@@ -2052,6 +2074,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Global invalidation configuration"
         },
         "private_queries_buffer_size": {
@@ -4087,10 +4110,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ExposeQueryPlanConfig": {
-      "description": "Expose query plan",
-      "type": "boolean"
-    },
     "ExposeTraceId": {
       "additionalProperties": false,
       "properties": {
@@ -5634,10 +5653,6 @@ expression: "&schema"
         "protocols"
       ],
       "type": "object"
-    },
-    "ForbidMutationsConfig": {
-      "description": "Forbid mutations configuration",
-      "type": "boolean"
     },
     "ForwardHeaders": {
       "description": "Forward headers",
@@ -7480,7 +7495,20 @@ expression: "&schema"
       ]
     },
     "MyTestPluginConfig": {
+      "additionalProperties": false,
       "description": "Config for the test plugin",
+      "type": "object"
+    },
+    "NestedName": {
+      "additionalProperties": false,
+      "description": "A nested setting with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "OTLPConfig": {
@@ -7803,6 +7831,9 @@ expression: "&schema"
         },
         "test.records_previous_config": {
           "$ref": "#/definitions/Conf"
+        },
+        "test.validated": {
+          "$ref": "#/definitions/ValidatedConfig"
         }
       },
       "type": [
@@ -8370,6 +8401,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "storage_path": {
+          "default": null,
           "description": "The path to the directory where recordings will be stored. Defaults to\nthe current working directory.",
           "type": [
             "string",
@@ -8635,6 +8667,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "main": {
+          "default": null,
           "description": "The main entry point for Rhai script evaluation",
           "type": [
             "string",
@@ -8642,6 +8675,7 @@ expression: "&schema"
           ]
         },
         "scripts": {
+          "default": null,
           "description": "The directory where Rhai scripts can be found",
           "type": [
             "string",
@@ -12755,6 +12789,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test plugin with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "WebSocketConfiguration": {
       "additionalProperties": false,
       "description": "WebSocket configuration for a specific subgraph",
@@ -13029,6 +13075,7 @@ expression: "&schema"
       "additionalProperties": {
         "$ref": "#/definitions/SubgraphConfig"
       },
+      "description": "Configuration for the `mock_subgraphs` plugin\n\n\nExample `router.yaml`:\n\n```yaml\nexperimental_mock_subgraphs:\n  subgraph1_name:\n    headers:\n      cache-control: public\n    query:\n      rootField:\n        subField: \"value\"\n        __cacheTags: [\"rootField\"]\n    entities:\n      - __typename: Something\n        id: 4\n        field: [42, 7]\n        __cacheTags: [\"something-4\"]\n```",
       "type": "object"
     },
     "^response_cache$": {
@@ -13157,13 +13204,15 @@ expression: "&schema"
       "type": "boolean"
     },
     "expose_query_plan": {
-      "$ref": "#/definitions/ExposeQueryPlanConfig"
+      "description": "Set to `true` to enable, or `false` to disable.",
+      "type": "boolean"
     },
     "fleet_detector": {
       "$ref": "#/definitions/Conf2"
     },
     "forbid_mutations": {
-      "$ref": "#/definitions/ForbidMutationsConfig"
+      "description": "Set to `true` to enable, or `false` to disable.",
+      "type": "boolean"
     },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"
@@ -13331,6 +13380,9 @@ expression: "&schema"
     },
     "telemetry": {
       "$ref": "#/definitions/TelemetryConfig"
+    },
+    "test_validated": {
+      "$ref": "#/definitions/BuiltInValidatedConfig"
     },
     "tls": {
       "allOf": [

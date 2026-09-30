@@ -47,7 +47,43 @@ emitted for each:
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
 
+### Support `@oneOf` input object composition ([PR #10124](https://github.com/apollographql/router/pull/10124))
+
+The `@oneOf` directive on input object types is now preserved during
+composition. If any subgraph marks an input type with `@oneOf`, the
+supergraph will include `@oneOf` on that type. Subgraphs are not
+required to agree on whether `@oneOf` is present, but composition emits an
+`INCONSISTENT_ONE_OF_INPUT_OBJECT` warning when they disagree.
+
+Once any subgraph applies `@oneOf` to a type, the other subgraphs' uses of
+that type must also satisfy the `@oneOf` rules: its fields must be nullable,
+and default values of that type must specify exactly one non-null field.
+Composition reports violations against the subgraph that declares them.
+
+The supergraph doesn't record which subgraphs applied `@oneOf`, so
+subgraphs extracted from it mark the type `@oneOf` in every subgraph that
+defines it.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10124>
+
 ## 🐛 Fixes
+
+### Error on fields provided by multiple `@interfaceObject`s ([PR #10323](https://github.com/apollographql/router/pull/10323))
+
+When an implementation type is missing a field that several of its interfaces
+provide through `@interfaceObject`, composition copied the definition from the
+first interface in the `implements` clause. If the definitions differed, the
+result depended on that order: one order composed, while the other failed with a
+raw schema validation error. Even when composition succeeded, query planning
+could resolve the field through an `@interfaceObject` whose field doesn't match
+the copied definition.
+
+Composition now reports an `INTERFACE_OBJECT_USAGE_ERROR` when a field of an
+implementation type is provided through more than one `@interfaceObject`, even
+if the definitions are identical. Supergraphs that relied on this now fail to
+compose.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10323>
 
 ### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
 

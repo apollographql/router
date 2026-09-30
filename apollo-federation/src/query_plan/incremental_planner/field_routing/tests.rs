@@ -1512,6 +1512,66 @@ fn interface_object_fake_downcast_fetches_concrete_typename() {
     "###);
 }
 
+/// A fake downcast whose fragment also selects a field only the concrete
+/// type defines: that field cannot stay under the io type in B, so it is
+/// fetched from A, where the concrete type exists.
+#[test]
+fn interface_object_fake_downcast_with_concrete_only_field() {
+    let plan_str = plan_query(
+        &interface_object_schema(),
+        "{ stuff { ... on X { desc name } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "b") {
+          {
+            stuff {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "a") {
+            {
+              ... on I {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                __typename
+                ... on X {
+                  __typename
+                  id
+                  name
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "stuff.@") {
+          Fetch(service: "b") {
+            {
+              ... on X {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on I {
+                desc
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
 /// Entering through A (real interface), a concrete-type downcast whose field
 /// only exists on the @interfaceObject copy in B key-hops into B.
 #[test]
@@ -2787,16 +2847,21 @@ type Query
     "###);
 }
 
-/// Build the pieces `build_bulb_plan` needs directly, so tests can plan from
-/// heads the public planner never uses (it always enters at the federated
-/// root).
-fn bulb_test_parameters(
+/// Plan `query` with `build_bulb_plan` from subgraph `subgraph`'s Query
+/// root, which the public planner never uses as a head (it always enters at
+/// the federated root). Returns the planning statistics alongside the
+/// result because the public planner drops them on failure.
+fn plan_from_subgraph_root(
     schema: &str,
+    subgraph: &str,
+    query: &str,
 ) -> (
-    Supergraph,
-    Arc<crate::query_graph::QueryGraph>,
+    Result<super::super::BulbPlan, FederationError>,
     crate::query_plan::query_planner::QueryPlanningStatistics,
 ) {
+    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+    use crate::schema::position::SchemaRootDefinitionKind;
+
     let supergraph = Supergraph::new(schema).expect("supergraph parse");
     let api_schema = supergraph
         .to_api_schema(Default::default())
@@ -2810,32 +2875,16 @@ fn bulb_test_parameters(
         )
         .expect("query graph"),
     );
-    let statistics = Default::default();
-    (supergraph, query_graph, statistics)
-}
-
-/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
-/// root fetch group up front instead of fanning out from the federated root.
-/// The public planner always enters at the federated root, so this drives
-/// build_bulb_plan directly with the subgraph's own Query node as head.
-#[test]
-fn bulb_plan_from_concrete_subgraph_root_head() {
-    use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
-    use crate::schema::position::SchemaRootDefinitionKind;
-
-    let (supergraph, query_graph, statistics) = bulb_test_parameters(SCHEMA);
+    let statistics = crate::query_plan::query_planner::QueryPlanningStatistics::default();
     let head = *query_graph
-        .root_kinds_to_nodes_by_source("a")
+        .root_kinds_to_nodes_by_source(subgraph)
         .expect("subgraph root kinds")
         .get(&SchemaRootDefinitionKind::Query)
         .expect("subgraph query root");
 
-    let operation = crate::operation::Operation::parse(
-        supergraph.schema.clone(),
-        "{ user { name email } }",
-        "test.graphql",
-    )
-    .expect("operation parse");
+    let operation =
+        crate::operation::Operation::parse(supergraph.schema.clone(), query, "test.graphql")
+            .expect("operation parse");
     let selection_set = operation.selection_set.clone();
     let parameters = QueryPlanningParameters {
         supergraph_schema: supergraph.schema.clone(),
@@ -2860,19 +2909,107 @@ fn bulb_plan_from_concrete_subgraph_root_head() {
     };
 
     let mut naming = super::super::OperationNaming::new(false);
-    let bulb = super::super::build_bulb_plan(
+    let result = super::super::build_bulb_plan(
         &parameters,
         &selection_set,
         SchemaRootDefinitionKind::Query,
         &mut naming,
         false,
-    )
-    .expect("bulb plan");
-    let plan = bulb.plan.expect("plan node");
+    );
+    (result, statistics)
+}
+
+/// Planning from a concrete subgraph root type (a SchemaType head) seeds the
+/// root fetch group up front instead of fanning out from the federated root.
+#[test]
+fn bulb_plan_from_concrete_subgraph_root_head() {
+    let (result, _) = plan_from_subgraph_root(SCHEMA, "a", "{ user { name email } }");
+    let plan = result.expect("bulb plan").plan.expect("plan node");
     let plan_str = format!("{plan}");
     assert!(
         plan_str.contains("name") && plan_str.contains("email"),
         "Plan from subgraph root head should fetch both fields: {plan_str}"
+    );
+}
+
+/// Schema where `target` is only reachable through T's circular key, so it
+/// is dropped on every path. Each `s1..=sN` field is shared by A and B,
+/// giving the search a real choice per field.
+fn dropped_field_schema(shared_fields: usize) -> String {
+    let shared: String = (1..=shared_fields)
+        .map(|i| format!("  s{i}: E @join__field(graph: A) @join__field(graph: B)\n"))
+        .collect();
+    format!(
+        r#"
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+{{
+  query: Query
+}}
+
+directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {{
+  A @join__graph(name: "a", url: "http://a")
+  B @join__graph(name: "b", url: "http://b")
+  T @join__graph(name: "t", url: "http://t")
+}}
+
+scalar link__Import
+
+enum link__Purpose {{
+  SECURITY
+  EXECUTION
+}}
+
+type Query
+  @join__type(graph: A)
+{{
+  entry: E @join__field(graph: A)
+}}
+
+type E
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: T, key: "c {{ cid cm }}")
+{{
+  id: ID! @join__field(graph: A) @join__field(graph: B)
+  c: C @join__field(graph: A) @join__field(graph: T)
+  target: String @join__field(graph: T)
+{shared}}}
+
+type C
+  @join__type(graph: A)
+  @join__type(graph: T, key: "cid cm")
+{{
+  cid: ID! @join__field(graph: A) @join__field(graph: T)
+  cm: String @join__field(graph: T)
+}}
+"#
+    )
+}
+
+/// Nothing below the drop can complete, so the search should give up
+/// without walking the remaining choices.
+#[test]
+fn dropped_field_prunes_remaining_choices() {
+    let (result, statistics) = plan_from_subgraph_root(
+        &dropped_field_schema(6),
+        "a",
+        "{ entry { target s1 { id } s2 { id } s3 { id } s4 { id } s5 { id } s6 { id } } }",
+    );
+    assert!(result.is_err(), "target is unreachable, planning must fail");
+    assert_eq!(
+        statistics.evaluated_plan_count.get(),
+        0,
+        "no terminal below the dropped field should be evaluated"
     );
 }
 
@@ -3075,6 +3212,147 @@ fn sibling_connector_entity_groups_not_merged() {
         coordinates.contains(&"connectors:Query.userDetails[0]"),
         "{plan}"
     );
+}
+
+const CONNECTOR_INTERFACE_OBJECT_SCHEMA: &str =
+    include_str!("../fixtures/connector_interface_object.graphql");
+
+/// A connector subgraph exposes `Itf` as an @interfaceObject, so the
+/// implementation-specific fragments must be resolved by the GraphQL
+/// subgraph after the connector returns the interface fields.
+#[test]
+fn connector_interface_object_with_implementation_fragments() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_INTERFACE_OBJECT_SCHEMA,
+        "{ itfs { __typename id c d e ... on T1 { a } ... on T2 { b } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+              c
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Query_itf_0") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  d
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Itf_e_0") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  e
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "graphql") {
+              {
+                ... on Itf {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  __typename
+                  ... on T2 {
+                    b
+                  }
+                  ... on T1 {
+                    a
+                  }
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// A fragment on an implementation that mixes a field the @interfaceObject
+/// connector provides with one only the GraphQL subgraph defines.
+#[test]
+fn connector_interface_object_with_mixed_implementation_fragment() {
+    let plan_str = plan_query_with_router_specs(
+        CONNECTOR_INTERFACE_OBJECT_SCHEMA,
+        "{ itfs { id ... on T1 { c a } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on Itf {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                __typename
+                ... on T1 {
+                  __typename
+                  id
+                  a
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "connectors_Query_itf_0") {
+            {
+              ... on T1 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                c
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
 }
 
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =

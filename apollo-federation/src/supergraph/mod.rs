@@ -812,13 +812,17 @@ fn add_empty_type(
                     )?;
                 }
                 TypeDefinitionPosition::InputObject(pos) => {
+                    // The supergraph doesn't record which subgraphs applied `@oneOf`, so every
+                    // subgraph gets it. Composition already checked that its fields and defaults
+                    // satisfy `@oneOf` in each of them.
+                    let one_of = directives.get("oneOf").cloned();
                     pos.pre_insert(&mut subgraph.schema)?;
                     pos.insert(
                         &mut subgraph.schema,
                         Node::new(InputObjectType {
                             description: None,
                             name: pos.type_name.clone(),
-                            directives: Default::default(),
+                            directives: one_of.into_iter().collect(),
                             fields: Default::default(),
                         }),
                     )?;
@@ -3023,7 +3027,7 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);

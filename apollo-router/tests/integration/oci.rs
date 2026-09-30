@@ -27,6 +27,7 @@ use crate::integration::common::LICENSE_SIX_MONTHS_SECS;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::mint_license_jwt;
+use crate::integration::common::mint_version_incompatible_license_jwt;
 
 /// Helper function to create a query for the count field
 fn query_count_field() -> Query {
@@ -98,8 +99,13 @@ async fn setup_mock_subgraphs() -> (MockServer, HashMap<String, String>) {
 /// resolves the license in two round trips: it reads the entitlement id
 /// annotation off the graph@variant manifest, then fetches the entitlement's
 /// own manifest (and license layer) from a separate `entitlements/{id}`
-/// repository on the same registry.
-async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
+/// repository on the same registry. `license_jwt` is served verbatim as the
+/// entitlement's license layer, so callers can pass a valid, expired, or
+/// otherwise crafted JWT.
+async fn setup_mock_oci_server_with_license(
+    schema_content: &str,
+    license_jwt: &str,
+) -> (MockServer, String) {
     let mock_server = MockServer::start().await;
     let graph_id = "test-graph-id";
 
@@ -170,7 +176,7 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
         .mount(&mock_server)
         .await;
 
-    mount_entitlement_mocks(&mock_server, TEST_ENTITLEMENT_ID).await;
+    mount_entitlement_mocks(&mock_server, TEST_ENTITLEMENT_ID, license_jwt).await;
 
     let artifact_reference = format!("{}/{}@{}", mock_server.address(), graph_id, manifest_digest);
     (mock_server, artifact_reference)
@@ -179,10 +185,15 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
 /// Mount the entitlement's own manifest + license blob under the
 /// `entitlements/{entitlement_id}` repository, tagged `latest` — the second
 /// round trip `stream_license_from_oci` makes once it has read the entitlement id
-/// off the graph manifest.
-async fn mount_entitlement_mocks(mock_server: &MockServer, entitlement_id: &str) {
+/// off the graph manifest. `license_jwt` is served verbatim as the license
+/// layer's content, so callers can pass a valid, expired, or malformed JWT.
+async fn mount_entitlement_mocks(
+    mock_server: &MockServer,
+    entitlement_id: &str,
+    license_jwt: &str,
+) {
     let license_layer = ImageLayer {
-        data: mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS).into(),
+        data: license_jwt.to_string().into(),
         media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
         annotations: None,
     };
@@ -306,6 +317,307 @@ async fn setup_mock_oci_server_no_entitlement(schema_content: &str) -> (MockServ
 
     let artifact_reference = format!("{}/{}@{}", mock_server.address(), graph_id, manifest_digest);
     (mock_server, artifact_reference)
+}
+
+/// Helper function to set up a mock OCI registry server whose graph manifest is
+/// exactly like `setup_mock_oci_server`'s (static, with the entitlement id
+/// annotation), but whose entitlement repository serves `initial_license_bytes`
+/// (e.g. malformed or version-incompatible JWT content) at the `latest` tag
+/// until the caller arms the returned switch, after which it serves a freshly
+/// minted valid six-month license. Used to prove the router treats a bad
+/// entitlement artifact as retryable rather than collapsing to unlicensed, and
+/// recovers on its own once the artifact is corrected — without a restart.
+async fn setup_mock_oci_server_with_recovering_entitlement(
+    schema_content: &str,
+    initial_license_bytes: Vec<u8>,
+) -> (MockServer, String, Arc<AtomicBool>) {
+    let mock_server = MockServer::start().await;
+    let graph_id = "test-graph-id";
+    let recovered = Arc::new(AtomicBool::new(false));
+
+    let schema_layer = ImageLayer {
+        data: schema_content.to_string().into(),
+        media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let blob_digest = schema_layer.sha256_digest();
+
+    let mut manifest_annotations = BTreeMap::new();
+    manifest_annotations.insert(
+        APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION.to_string(),
+        TEST_ENTITLEMENT_ID.to_string(),
+    );
+    let oci_manifest = OciManifest::Image(OciImageManifest {
+        schema_version: 2,
+        media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+        config: Default::default(),
+        layers: vec![OciDescriptor {
+            media_type: schema_layer.media_type.clone(),
+            digest: blob_digest.clone(),
+            size: schema_layer.data.len().try_into().unwrap(),
+            urls: None,
+            annotations: None,
+            artifact_type: None,
+        }],
+        subject: None,
+        artifact_type: None,
+        annotations: Some(manifest_annotations),
+    });
+    let manifest_digest: String = calculate_manifest_digest(&oci_manifest);
+
+    Mock::given(method("GET"))
+        .and(path("/v2/"))
+        .respond_with(ResponseTemplate::new(200).append_header("content-type", "application/json"))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!("/v2/{}/blobs/{}", graph_id, blob_digest)))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(schema_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/manifests/{}",
+            graph_id, manifest_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let recovered_jwt = mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS);
+    let initial_license_layer = ImageLayer {
+        data: initial_license_bytes.into(),
+        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let recovered_license_layer = ImageLayer {
+        data: recovered_jwt.into(),
+        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let initial_blob_digest = initial_license_layer.sha256_digest();
+    let recovered_blob_digest = recovered_license_layer.sha256_digest();
+
+    let entitlement_repository = format!("entitlements/{TEST_ENTITLEMENT_ID}");
+
+    let build_entitlement_manifest = |digest: &str, size: usize| {
+        OciManifest::Image(OciImageManifest {
+            schema_version: 2,
+            media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+            config: Default::default(),
+            layers: vec![OciDescriptor {
+                media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+                digest: digest.to_string(),
+                size: size.try_into().unwrap(),
+                urls: None,
+                annotations: None,
+                artifact_type: None,
+            }],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+        })
+    };
+    let initial_entitlement_manifest =
+        build_entitlement_manifest(&initial_blob_digest, initial_license_layer.data.len());
+    let recovered_entitlement_manifest =
+        build_entitlement_manifest(&recovered_blob_digest, recovered_license_layer.data.len());
+
+    // Blobs are content-addressed, so both are mounted statically; only the
+    // manifest needs to switch which digest it points at.
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            entitlement_repository, initial_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(initial_license_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            entitlement_repository, recovered_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(recovered_license_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/manifests/latest",
+            entitlement_repository
+        )))
+        .respond_with({
+            let recovered = recovered.clone();
+            move |_req: &wiremock::Request| {
+                let manifest = if recovered.load(Ordering::SeqCst) {
+                    &recovered_entitlement_manifest
+                } else {
+                    &initial_entitlement_manifest
+                };
+                ResponseTemplate::new(200)
+                    .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                    .set_body_bytes(serde_json::to_vec(manifest).unwrap())
+            }
+        })
+        .mount(&mock_server)
+        .await;
+
+    let artifact_reference = format!("{}/{}@{}", mock_server.address(), graph_id, manifest_digest);
+    (mock_server, artifact_reference, recovered)
+}
+
+/// Helper function to set up a mock OCI registry server whose graph manifest is
+/// exactly like `setup_mock_oci_server`'s, but whose entitlement manifest fetch
+/// returns 403 Forbidden until the caller arms the returned switch, after which
+/// it serves a valid license. Used to prove a 403 is treated as a transient
+/// error (see `OciError::is_transient_not_found`) — retried without collapsing
+/// the router to unlicensed — and that the router recovers on its own once
+/// access is restored.
+async fn setup_mock_oci_server_with_unauthorized_entitlement(
+    schema_content: &str,
+) -> (MockServer, String, Arc<AtomicBool>) {
+    let mock_server = MockServer::start().await;
+    let graph_id = "test-graph-id";
+    let authorized = Arc::new(AtomicBool::new(false));
+
+    let schema_layer = ImageLayer {
+        data: schema_content.to_string().into(),
+        media_type: APOLLO_SCHEMA_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let blob_digest = schema_layer.sha256_digest();
+
+    let mut manifest_annotations = BTreeMap::new();
+    manifest_annotations.insert(
+        APOLLO_MANIFEST_ENTITLEMENT_ID_ANNOTATION.to_string(),
+        TEST_ENTITLEMENT_ID.to_string(),
+    );
+    let oci_manifest = OciManifest::Image(OciImageManifest {
+        schema_version: 2,
+        media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+        config: Default::default(),
+        layers: vec![OciDescriptor {
+            media_type: schema_layer.media_type.clone(),
+            digest: blob_digest.clone(),
+            size: schema_layer.data.len().try_into().unwrap(),
+            urls: None,
+            annotations: None,
+            artifact_type: None,
+        }],
+        subject: None,
+        artifact_type: None,
+        annotations: Some(manifest_annotations),
+    });
+    let manifest_digest: String = calculate_manifest_digest(&oci_manifest);
+
+    Mock::given(method("GET"))
+        .and(path("/v2/"))
+        .respond_with(ResponseTemplate::new(200).append_header("content-type", "application/json"))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!("/v2/{}/blobs/{}", graph_id, blob_digest)))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(schema_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/manifests/{}",
+            graph_id, manifest_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                .set_body_bytes(serde_json::to_vec(&oci_manifest).unwrap()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let license_layer = ImageLayer {
+        data: mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS).into(),
+        media_type: ENTITLEMENT_MEDIA_TYPE.to_string(),
+        annotations: None,
+    };
+    let license_blob_digest = license_layer.sha256_digest();
+    let entitlement_repository = format!("entitlements/{TEST_ENTITLEMENT_ID}");
+    let entitlement_manifest = OciManifest::Image(OciImageManifest {
+        schema_version: 2,
+        media_type: Some(IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
+        config: Default::default(),
+        layers: vec![OciDescriptor {
+            media_type: license_layer.media_type.clone(),
+            digest: license_blob_digest.clone(),
+            size: license_layer.data.len().try_into().unwrap(),
+            urls: None,
+            annotations: None,
+            artifact_type: None,
+        }],
+        subject: None,
+        artifact_type: None,
+        annotations: None,
+    });
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/blobs/{}",
+            entitlement_repository, license_blob_digest
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("content-type", "application/octet-stream")
+                .set_body_bytes(license_layer.data.clone()),
+        )
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v2/{}/manifests/latest",
+            entitlement_repository
+        )))
+        .respond_with({
+            let authorized = authorized.clone();
+            move |_req: &wiremock::Request| {
+                if authorized.load(Ordering::SeqCst) {
+                    ResponseTemplate::new(200)
+                        .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
+                        .set_body_bytes(serde_json::to_vec(&entitlement_manifest).unwrap())
+                } else {
+                    ResponseTemplate::new(403)
+                }
+            }
+        })
+        .mount(&mock_server)
+        .await;
+
+    let artifact_reference = format!("{}/{}@{}", mock_server.address(), graph_id, manifest_digest);
+    (mock_server, artifact_reference, authorized)
 }
 
 /// Helper function to set up a mock OCI registry server with tag-based references.
@@ -436,7 +748,12 @@ async fn setup_mock_oci_server_with_tag(
 
     // Entitlement's own manifest + license blob, shared by both the initial
     // and updated graph manifests via the entitlement id annotation.
-    mount_entitlement_mocks(&mock_server, TEST_ENTITLEMENT_ID).await;
+    mount_entitlement_mocks(
+        &mock_server,
+        TEST_ENTITLEMENT_ID,
+        &mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS),
+    )
+    .await;
 
     // Manifest - initial
     Mock::given(method("GET"))
@@ -537,7 +854,11 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
         return Ok(());
     }
 
-    let (_mock_server, artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
+    let (_mock_server, artifact_reference) = setup_mock_oci_server_with_license(
+        LOCAL_SCHEMA,
+        &mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS),
+    )
+    .await;
     // Set up mock subgraph servers
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
@@ -791,6 +1112,201 @@ async fn test_router_oci_tag_404_after_first() -> Result<(), BoxError> {
         .wait_for_log_message("error fetching manifest digest from oci registry")
         .await;
     router.execute_query(query_count_field()).await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// An entitlement whose JWT has already passed `haltAt` must still let the
+/// router start: `haltAt` in the past resolves immediately to `LicensedHalt`
+/// (see `license_stream::reset_checks_for_licenses`), which restricts
+/// commercial features but does not prevent the router from serving traffic.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_boots_halted_with_expired_license() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let expired_jwt = mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, -60);
+    let (_mock_server, artifact_reference) =
+        setup_mock_oci_server_with_license(LOCAL_SCHEMA, &expired_jwt).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([(
+            String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+            artifact_reference.into(),
+        )]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(LicensedHalt") {
+        router
+            .wait_for_log_message("UpdateLicense(LicensedHalt")
+            .await;
+    }
+    // LicensedHalt is soft-enforced: unrestricted queries keep working.
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// A garbled (non-JWT) entitlement layer must not be treated as "no license":
+/// `OciError::LicenseParse` with a decode failure that isn't version-incompatible
+/// is a retryable error (see `oci_error_reason` / `record_license_fetch_failure`
+/// in `router/event/license.rs`), so the router keeps polling instead of
+/// collapsing to `Unlicensed`. Once the entitlement artifact is corrected, the
+/// router picks up the valid license on its own, without a restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_recovers_after_invalid_license() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_mock_server, artifact_reference, recovered) =
+        setup_mock_oci_server_with_recovering_entitlement(
+            LOCAL_SCHEMA,
+            b"this-is-not-a-jwt".to_vec(),
+        )
+        .await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([
+            (
+                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+                OsString::from(artifact_reference),
+            ),
+            (
+                String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+                OsString::from("1"),
+            ),
+        ]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    // The router cannot reach `Running` until it has a license (see
+    // `state_machine::attempt_reload`), so wait for the router to have
+    // observed and retried the bad entitlement before arming the fix.
+    router
+        .wait_for_log_message("transient error fetching license from oci registry, will retry")
+        .await;
+
+    recovered.store(true, Ordering::SeqCst);
+
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(Licensed") {
+        router.wait_for_log_message("UpdateLicense(Licensed").await;
+    }
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// A JWT missing a required claim (`haltAt`) is classified as
+/// version-incompatible rather than generically invalid, but takes the same
+/// retryable path as a malformed JWT: the router keeps polling instead of
+/// treating the graph as unlicensed, and recovers once given a JWT this
+/// router version understands.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_recovers_after_version_incompatible_license() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_mock_server, artifact_reference, recovered) =
+        setup_mock_oci_server_with_recovering_entitlement(
+            LOCAL_SCHEMA,
+            mint_version_incompatible_license_jwt().into_bytes(),
+        )
+        .await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([
+            (
+                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+                OsString::from(artifact_reference),
+            ),
+            (
+                String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+                OsString::from("1"),
+            ),
+        ]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message("transient error fetching license from oci registry, will retry")
+        .await;
+
+    recovered.store(true, Ordering::SeqCst);
+
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(Licensed") {
+        router.wait_for_log_message("UpdateLicense(Licensed").await;
+    }
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+/// A 403 on the entitlement manifest fetch must be treated as transient (an
+/// access problem or a blip), never as a signal that the graph has no license:
+/// only a 404 means "unlicensed" (see `OciError::is_transient_not_found` and
+/// ROUTER-2085). The router keeps polling and recovers on its own once access
+/// is restored.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_oci_recovers_after_unauthorized_entitlement_fetch() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let (_mock_server, artifact_reference, authorized) =
+        setup_mock_oci_server_with_unauthorized_entitlement(LOCAL_SCHEMA).await;
+    let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
+
+    let mut router = IntegrationTest::builder()
+        .config(MIN_CONFIG)
+        .env(HashMap::from([
+            (
+                String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
+                OsString::from(artifact_reference),
+            ),
+            (
+                String::from("TEST_APOLLO_OCI_POLL_INTERVAL"),
+                OsString::from("1"),
+            ),
+        ]))
+        .subgraph_overrides(subgraph_overrides)
+        .hot_reload(false)
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message("transient error fetching license from oci registry, will retry")
+        .await;
+
+    authorized.store(true, Ordering::SeqCst);
+
+    router.assert_started().await;
+    if !router.log_contains("UpdateLicense(Licensed") {
+        router.wait_for_log_message("UpdateLicense(Licensed").await;
+    }
+    router.execute_default_query().await;
     router.graceful_shutdown().await;
     Ok(())
 }

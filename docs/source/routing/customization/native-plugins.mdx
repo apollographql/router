@@ -37,8 +37,6 @@ Most plugins should start by including the following set of `use` declarations:
 use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::*;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::{BoxError, ServiceBuilder, ServiceExt};
 ```
 
@@ -48,18 +46,42 @@ When your plugin is complete, the compiler will provide helpful warnings if any 
 
 All plugins require an associated configuration. At a minimum, this configuration contains a boolean that indicates whether the plugin is enabled, but it can include anything that can be deserialized by `serde`.
 
-Create your configuration struct like so:
+Declare your configuration struct with the `#[configuration]` attribute of the [`apollo-configuration`](https://crates.io/crates/apollo-configuration) crate. Add the crate as a dependency, using the same version as the router:
 
 ```rust title="hello_world.rs"
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {
     // Put your plugin configuration here. It's deserialized from YAML automatically.
+    #[config(required)]
+    name: String,
 }
 ```
 
-> **Note:** You need to `derive` `JsonSchema` so that your configuration can participate in [JSON schema generation](/router/configuration/overview/#configuration-awareness-in-your-text-editor).
+> **Note:** The attribute derives `Clone`, `Debug`, `Deserialize` and `JsonSchema`, so your configuration can participate in [JSON schema generation](/router/configuration/overview/#configuration-awareness-in-your-text-editor), and implements apollo-configuration's `Configuration` trait. The configuration rejects unknown keys. Every field is optional and takes its type's default, unless you mark it `#[config(required)]` or give it a value with `#[config(default = ...)]`.
 >
-> Your configuration must also be `Clone`, `Send`, `Sync` and `'static`.
+> Your configuration must also be `Send`, `Sync` and `'static`.
+
+A plugin's `Config` must implement `apollo_configuration::Configuration`, so native plugin configuration uses `apollo-configuration` and its `#[configuration]` attribute. The router parses and validates each plugin's section while it parses its configuration. To reject values the schema allows, add a validation function. It runs at parse time and reports its errors at the offending value in your plugin's section of the file:
+
+```rust title="hello_world.rs"
+use apollo_configuration::ErrorCollector;
+
+#[apollo_configuration::configuration(validate = validate_conf)]
+struct Conf {
+    #[config(required)]
+    name: String,
+}
+
+fn validate_conf(conf: &Conf, mut errors: ErrorCollector<'_>) {
+    if conf.name.is_empty() {
+        errors.nest("name").report_simple("name must not be empty");
+    }
+}
+```
+
+If your plugin's section is a bare `true` or `false`, such as `my_plugin: true`, use `apollo_router::plugin::Enabled` as its configuration instead of defining a struct. A plugin without configuration can use `type Config = ();`.
+
+If the attribute can't express your configuration type, for example a tuple struct, derive `Clone`, `Deserialize`, and `JsonSchema` yourself and implement `Validate` and `Configuration` manually. The router re-exports the crate as `apollo_router::plugin::apollo_configuration`, so these impls don't need the extra dependency.
 
 Then define the plugin itself and specify the configuration as an associated type:
 

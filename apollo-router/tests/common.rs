@@ -185,6 +185,34 @@ pub fn mint_license_jwt(
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
 }
 
+/// Mint a test license JWT, signed with the same bundled HS256 test secret as
+/// [`mint_license_jwt`], that omits the required `haltAt` claim.
+/// `License::from_str`'s `set_required_spec_claims` rejects this with
+/// `jsonwebtoken::errors::ErrorKind::MissingRequiredClaim`, which
+/// `Error::is_version_incompatible()` classifies as a version-incompatible
+/// license (the router doesn't understand this license's shape) rather than a
+/// generically invalid/corrupt one.
+#[allow(dead_code)]
+pub fn mint_version_incompatible_license_jwt() -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": 10000000000_u64,
+        // haltAt is deliberately omitted.
+    });
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
+
 /// Stand up a per-test wiremock that stands in for
 /// `uplink.api.apollographql.com`. The harness wires this server's URL
 /// into the spawned router as `APOLLO_UPLINK_ENDPOINTS` whenever the

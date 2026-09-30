@@ -1075,7 +1075,30 @@ impl FieldRoutingSearchSpace {
                 // resolve at least one non-__typename field under it. A
                 // downcast to a subgraph that owns none of the requested
                 // fields would produce an empty fetch.
-                if self.count_local_sub_selections(target, &fragment_selection.selection_set) > 0 {
+                //
+                // Every child must also be local: the downcast drops the type
+                // condition, so a child that hops elsewhere would land under
+                // the interface without it. Such fragments take a key hop to
+                // a subgraph that defines the concrete type instead.
+                let all_children_local =
+                    fragment_selection
+                        .selection_set
+                        .selections
+                        .values()
+                        .all(|sel| match sel {
+                            Selection::Field(f) => {
+                                *f.field.name() == TYPENAME_FIELD
+                                    || self
+                                        .cached_query_graph
+                                        .edge_for_field(target, &f.field)
+                                        .is_some()
+                            }
+                            Selection::InlineFragment(_) => false,
+                        });
+                if all_children_local
+                    && self.count_local_sub_selections(target, &fragment_selection.selection_set)
+                        > 0
+                {
                     options.push(RoutingChoice::Local(EdgeInfo {
                         edge_index: edge_idx,
                         target_subgraph: target_node.source.clone(),
@@ -1212,8 +1235,25 @@ impl FieldRoutingSearchSpace {
         type_name: &Name,
         field_name: &Name,
     ) {
-        let Some(resolvers) = self.connector_index.entity_resolvers(type_name) else {
-            return;
+        // An implementation of an @interfaceObject is resolved through the
+        // connectors on the interface, which is the only one of the two the
+        // connector subgraph defines.
+        let inherited: Vec<Arc<IndexedConnector>>;
+        let resolvers = match self.connector_index.entity_resolvers(type_name) {
+            Some(resolvers) => resolvers,
+            None => {
+                inherited = self
+                    .supergraph_schema
+                    .schema()
+                    .get_object(type_name)
+                    .into_iter()
+                    .flat_map(|object| object.implements_interfaces.iter())
+                    .filter_map(|itf| self.connector_index.entity_resolvers(itf))
+                    .flatten()
+                    .cloned()
+                    .collect();
+                &inherited
+            }
         };
         for entry in resolvers {
             if !self

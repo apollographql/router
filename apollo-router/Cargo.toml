@@ -60,7 +60,7 @@ mock_subgraphs_testing = []
 addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-configuration = "0.7"
+apollo-configuration.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
 apollo-redaction = { version = "0.3.2", features = ["schemars"] }
 async-compression = { version = "0.4.6", features = [
@@ -96,6 +96,7 @@ derive_more = { version = "2.0.0", default-features = false, features = [
 dhat = { version = "0.3.3", optional = true }
 diff = "0.1.13"
 displaydoc = "0.2"
+erased-serde = "0.3.31"
 flate2 = "1.0.30"
 fred = { version = "10.1.0", features = [
     "enable-rustls",

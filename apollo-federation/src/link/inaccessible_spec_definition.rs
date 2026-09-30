@@ -126,7 +126,7 @@ impl InaccessibleSpecDefinition {
             locations,
             Some(DirectiveCompositionOptions {
                 supergraph_specification: &|v| {
-                    INACCESSIBLE_VERSIONS.get_dyn_minimum_required_version(v)
+                    INACCESSIBLE_VERSIONS.get_dyn_maximum_allowed_version(v)
                 },
                 static_argument_transform: None,
                 use_join_directive: false,
