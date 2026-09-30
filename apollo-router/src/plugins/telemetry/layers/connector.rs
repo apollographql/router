@@ -13,12 +13,14 @@ use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::apollo::instruments::ApolloConnectorInstruments;
+use crate::plugins::telemetry::config_new::cache::ConnectorCacheInstruments;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::span_factory;
+use crate::services::connect;
 use crate::services::connector;
 
 /// Layer type for [Telemetry::instrument_connector_layer].
@@ -154,6 +156,73 @@ where
     }
 }
 
+/// Layer type for [Telemetry::connector_cache_layer].
+#[derive(Clone)]
+pub(crate) struct ConnectorCacheLayer {
+    config: Arc<config::Conf>,
+    static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
+}
+
+impl ConnectorCacheLayer {
+    fn new(
+        config: Arc<config::Conf>,
+        static_cache_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> Self {
+        Self {
+            config,
+            static_cache_instruments,
+        }
+    }
+}
+
+impl<S> tower::Layer<S> for ConnectorCacheLayer
+where
+    S: tower::Service<connect::Request, Response = connect::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = connect::BoxCloneService;
+
+    fn layer(&self, service: S) -> Self::Service {
+        let config = self.config.clone();
+        let static_cache_instruments = self.static_cache_instruments.clone();
+        ServiceBuilder::new()
+            .map_future_with_request_data(
+                move |request: &connect::Request| {
+                    // Cache instruments are per connector source, and the source is only
+                    // reachable through the query plan's connector map at this layer.
+                    let connectors =
+                        crate::plugins::connectors::query_plans::get_connectors(&request.context);
+                    let source_name = connectors
+                        .as_ref()
+                        .and_then(|c| c.get(&request.service_name))
+                        .map(|c| c.source_config_key())
+                        .unwrap_or_default();
+                    let cache_instruments = config
+                        .instrumentation
+                        .instruments
+                        .new_connector_cache_instruments(
+                            static_cache_instruments.clone(),
+                            source_name,
+                        );
+                    (request.context.clone(), cache_instruments)
+                },
+                move |(context, cache_instruments): (Context, ConnectorCacheInstruments),
+                      f| async move {
+                    let result: Result<connect::Response, BoxError> = f.await;
+                    if result.is_ok() {
+                        cache_instruments.on_response(&context);
+                    }
+                    result
+                },
+            )
+            .service(service)
+            .boxed_clone()
+    }
+}
+
 impl Telemetry {
     /// Returns a layer that instruments a connector request service with both Apollo and custom
     /// instrumentation.
@@ -173,5 +242,17 @@ impl Telemetry {
             static_connector_instruments,
             static_apollo_connector_instruments,
         )
+    }
+
+    /// Returns a layer that records connector response-cache instruments. This sits at the
+    /// `connect::` level rather than the request-service level, because a connector cache hit
+    /// is resolved above the fan-out into per-source HTTP requests.
+    pub(crate) fn connector_cache_layer(&self) -> ConnectorCacheLayer {
+        let static_cache_instruments = self
+            .builtin_instruments
+            .read()
+            .cache_custom_instruments
+            .clone();
+        ConnectorCacheLayer::new(self.config.clone(), static_cache_instruments)
     }
 }

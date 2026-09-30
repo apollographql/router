@@ -301,6 +301,7 @@ fn build_connector_services(
         // HTTP requests, so it is the hook that sees an entity fetch as one unit. Response
         // caching relies on it for entity-level caching; without it that path never runs.
         let service = ServiceBuilder::new()
+            .apply_plugin_layer(plugins, Telemetry::connector_cache_layer)
             .rust_plugins(plugins.clone(), |plugin, service| {
                 plugin.connector_service(service)
             })
