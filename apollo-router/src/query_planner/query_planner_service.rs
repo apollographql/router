@@ -341,7 +341,9 @@ impl QueryPlannerService {
             "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
             evaluated_plan_paths
         );
+        let span = tracing::Span::current();
         if let Some(fuel_consumed) = fuel_consumed {
+            span.record("query_planning.fuel_consumed", fuel_consumed);
             u64_histogram!(
                 "apollo.router.query_planning.plan.fuel_consumed",
                 "Fuel the incremental planner spent improving on its first complete plan",
@@ -349,6 +351,7 @@ impl QueryPlannerService {
             );
         }
         if let Some(fuel_remaining) = fuel_remaining {
+            span.record("query_planning.fuel_remaining", fuel_remaining);
             u64_histogram!(
                 "apollo.router.query_planning.plan.fuel_remaining",
                 "Fuel left when the incremental planner stopped searching; zero means the budget ran out",
@@ -1306,5 +1309,65 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    /// Captures u64 values recorded on spans after creation.
+    #[derive(Clone, Default)]
+    struct RecordedU64s(Arc<parking_lot::Mutex<HashMap<String, u64>>>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RecordedU64s {
+        fn on_record(
+            &self,
+            _span: &tracing::span::Id,
+            values: &tracing::span::Record<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            struct Visitor<'a>(&'a mut HashMap<String, u64>);
+            impl tracing_core::field::Visit for Visitor<'_> {
+                fn record_u64(&mut self, field: &tracing_core::Field, value: u64) {
+                    self.0.insert(field.name().to_string(), value);
+                }
+                fn record_debug(&mut self, _: &tracing_core::Field, _: &dyn std::fmt::Debug) {}
+            }
+            values.record(&mut Visitor(&mut self.0.lock()));
+        }
+    }
+
+    async fn recorded_on_query_planning_span(config: Configuration) -> HashMap<String, u64> {
+        use tracing_futures::Instrument as _;
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        let recorded = RecordedU64s::default();
+        let subscriber = tracing_subscriber::Registry::default().with(recorded.clone());
+        let _guard = tracing::subscriber::set_default(subscriber);
+        plan_example_query(config)
+            .instrument(crate::services::supergraph::service::query_planning_span())
+            .await;
+        recorded.0.lock().clone()
+    }
+
+    #[test(tokio::test)]
+    async fn test_fuel_recorded_on_query_planning_span_with_incremental_planner() {
+        let config = Configuration::from_str(
+            "supergraph:\n  query_planning:\n    incremental_planner:\n      enabled: true\n      fuel: 5000\n",
+        )
+        .expect("valid configuration");
+        let recorded = recorded_on_query_planning_span(config).await;
+
+        let consumed = recorded
+            .get("query_planning.fuel_consumed")
+            .expect("fuel consumed is recorded");
+        let remaining = recorded
+            .get("query_planning.fuel_remaining")
+            .expect("fuel remaining is recorded");
+        assert_eq!(consumed + remaining, 5000);
+    }
+
+    #[test(tokio::test)]
+    async fn test_no_fuel_on_query_planning_span_without_incremental_planner() {
+        let recorded = recorded_on_query_planning_span(Configuration::default()).await;
+
+        assert!(!recorded.contains_key("query_planning.fuel_consumed"));
+        assert!(!recorded.contains_key("query_planning.fuel_remaining"));
     }
 }
