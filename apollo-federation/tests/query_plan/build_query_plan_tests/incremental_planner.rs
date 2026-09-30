@@ -1512,63 +1512,73 @@ fn inc_mutation_statistics_accumulate_across_fields() {
     );
 }
 
-const FUEL_CHOICE_A: &str = r#"
-  type Query {
-    user: User
-  }
-
-  type User @key(fields: "id") {
-    id: ID!
-  }
-"#;
-
-const FUEL_CHOICE_B: &str = r#"
-  type User @key(fields: "id") {
-    id: ID!
-    profile: Profile @shareable
-  }
-
-  type Profile @key(fields: "id") {
-    id: ID!
-  }
-"#;
-
-const FUEL_CHOICE_C: &str = r#"
-  type User @key(fields: "id") {
-    id: ID!
-    profile: Profile @shareable
-  }
-
-  type Profile @key(fields: "id") {
-    id: ID!
-    detail: String
-  }
-"#;
-
-fn plan_statistics(
-    planner: &apollo_federation::query_plan::query_planner::QueryPlanner,
-) -> apollo_federation::query_plan::query_planner::QueryPlanningStatistics {
-    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        "{ user { profile { detail } } }",
-        "test.graphql",
-    )
-    .expect("valid graphql document");
-    planner
-        .build_query_plan(&document, None, Default::default())
-        .expect("query plans")
-        .statistics
-}
-
+/// One supergraph backs all three cases, since planner config doesn't affect
+/// composition and each composed test needs its own fixture file.
 #[test]
-fn inc_statistics_report_fuel_consumed_and_remaining() {
-    let planner = planner!(
-        config = incremental_config_with_fuel(100_000),
-        a: FUEL_CHOICE_A,
-        b: FUEL_CHOICE_B,
-        c: FUEL_CHOICE_C,
+fn statistics_report_fuel() {
+    let supergraph = crate::query_plan::build_query_plan_support::compose(
+        insta::_function_name!(),
+        &[
+            (
+                "a",
+                r#"
+                  type Query {
+                    user: User
+                  }
+
+                  type User @key(fields: "id") {
+                    id: ID!
+                  }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                  type User @key(fields: "id") {
+                    id: ID!
+                    profile: Profile @shareable
+                  }
+
+                  type Profile @key(fields: "id") {
+                    id: ID!
+                  }
+                "#,
+            ),
+            (
+                "c",
+                r#"
+                  type User @key(fields: "id") {
+                    id: ID!
+                    profile: Profile @shareable
+                  }
+
+                  type Profile @key(fields: "id") {
+                    id: ID!
+                    detail: String
+                  }
+                "#,
+            ),
+        ],
     );
-    let stats = plan_statistics(&planner);
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    let plan_statistics = |config: QueryPlannerConfig| {
+        let planner =
+            apollo_federation::query_plan::query_planner::QueryPlanner::new(&supergraph, config)
+                .expect("can create query planner");
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            "{ user { profile { detail } } }",
+            "test.graphql",
+        )
+        .expect("valid graphql document");
+        planner
+            .build_query_plan(&document, None, Default::default())
+            .expect("query plans")
+            .statistics
+    };
+
+    let stats = plan_statistics(incremental_config_with_fuel(100_000));
     let consumed = stats
         .fuel_consumed
         .get()
@@ -1579,41 +1589,40 @@ fn inc_statistics_report_fuel_consumed_and_remaining() {
         .expect("fuel remaining is reported");
     assert!(
         consumed > 0,
-        "the profile choice is revisited after the first plan"
+        "with ample fuel, the profile choice is revisited after the first plan"
     );
-    assert_eq!(consumed + remaining, 100_000);
-}
+    assert_eq!(
+        consumed + remaining,
+        100_000,
+        "with ample fuel, consumed and remaining add up to the budget"
+    );
 
-#[test]
-fn inc_statistics_report_no_fuel_remaining_when_exhausted() {
-    let planner = planner!(
-        config = incremental_config_with_fuel(1),
-        a: FUEL_CHOICE_A,
-        b: FUEL_CHOICE_B,
-        c: FUEL_CHOICE_C,
-    );
-    let stats = plan_statistics(&planner);
+    let stats = plan_statistics(incremental_config_with_fuel(1));
     assert!(
         stats
             .fuel_consumed
             .get()
             .expect("fuel consumed is reported")
-            >= 1
+            >= 1,
+        "with a budget of 1, the search consumes all of it"
     );
-    assert_eq!(stats.fuel_remaining.get(), Some(0));
-}
+    assert_eq!(
+        stats.fuel_remaining.get(),
+        Some(0),
+        "with a budget of 1, no fuel remains"
+    );
 
-#[test]
-fn legacy_statistics_report_no_fuel() {
-    let planner = planner!(
-        config = QueryPlannerConfig::default(),
-        a: FUEL_CHOICE_A,
-        b: FUEL_CHOICE_B,
-        c: FUEL_CHOICE_C,
+    let stats = plan_statistics(QueryPlannerConfig::default());
+    assert_eq!(
+        stats.fuel_consumed.get(),
+        None,
+        "the default planner reports no fuel consumed"
     );
-    let stats = plan_statistics(&planner);
-    assert_eq!(stats.fuel_consumed.get(), None);
-    assert_eq!(stats.fuel_remaining.get(), None);
+    assert_eq!(
+        stats.fuel_remaining.get(),
+        None,
+        "the default planner reports no fuel remaining"
+    );
 }
 
 // ---------------------------------------------------------------------------
