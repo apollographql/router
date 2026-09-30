@@ -3503,6 +3503,82 @@ fn connector_entity_keys_with_join_directive_link() {
     "###);
 }
 
+/// An implementation of an @interfaceObject with an entity connector of its
+/// own still routes the interface's connector fields through the interface's
+/// connectors.
+#[test]
+fn connector_interface_object_implementation_with_own_connector() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_interface_object_two_connectors.graphql"),
+        "{ itfs { id ... on T1 { d f } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on Itf {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                __typename
+                ... on T1 {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors2_Query_t1_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T1 {
+                  f
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Query_itf_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  d
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 
