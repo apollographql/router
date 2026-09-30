@@ -126,6 +126,8 @@ impl Plugin for HelloWorld {
 }
 ```
 
+The `PluginUnstable` trait offers the same hooks plus experimental ones whose signatures may change, such as [`connector_request_service`](#customizing-connector-requests) for intercepting individual connector HTTP requests. Implement `PluginUnstable` instead of `Plugin` to use them.
+
 ### 4. Define individual hooks
 
 To define custom logic for a service hook, you can use [`ServiceBuilder`](https://docs.rs/tower/0.3.1/tower/builder/struct.ServiceBuilder.html).
@@ -235,6 +237,74 @@ plugins:
   example.hello_world:
     # Any values here are passed to the plugin as part of your configuration
 ```
+
+## Customizing connector requests
+
+If your supergraph uses [connectors](/graphos/schema-design/connectors/) to call REST APIs, a native plugin can wrap the service that makes individual connector HTTP requests. Define the `connector_request_service` hook to inspect or rewrite each outbound request, for example to attach authentication signatures, route conditionally on request arguments, or circuit break on an upstream the plugin knows to be unhealthy.
+
+One GraphQL operation can produce many connector requests, so this hook runs once per outbound HTTP request, not once per operation.
+
+<Note>
+
+This hook is available on the `PluginUnstable` trait, not the stable `Plugin` trait, and its signature may change in future releases. Implementing `PluginUnstable` requires an explicit `unstable_method` implementation, which makes adoption a visible opt-in rather than an implied stability promise. A plugin that implements only `Plugin` gets the passthrough default and no connector hook.
+
+</Note>
+
+```rust
+use apollo_router::plugin::PluginInit;
+use apollo_router::plugin::PluginUnstable;
+use apollo_router::services::connector::request_service;
+use tower::BoxError;
+
+#[async_trait::async_trait]
+impl PluginUnstable for MyPlugin {
+    type Config = Conf;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(MyPlugin { configuration: init.config })
+    }
+
+    // Called once per connector source, with the service that makes that
+    // source's HTTP requests. The `source_name` parameter is the `@source`
+    // name, useful for applying a customization to specific connectors.
+    fn connector_request_service(
+        &self,
+        service: request_service::BoxService,
+        source_name: String,
+    ) -> request_service::BoxService {
+        service
+    }
+
+    // The explicit opt-in marker required by `PluginUnstable`.
+    fn unstable_method(&self) {}
+}
+```
+
+Registration works the same as for any other plugin: `register_plugin!` accepts any type implementing `PluginUnstable`, which includes every `Plugin` implementation.
+
+### What a connector request plugin can reach
+
+The surface deliberately matches what the coprocessor [`ConnectorRequest` and `ConnectorResponse` stages](/graphos/routing/customization/coprocessor/reference/#connectorrequest) allow, so a customization can move between the two without gaining or losing reach. The difference is that a plugin runs in process, without a round trip per connector request.
+
+On the request:
+
+- `request.transport_request` carries the outgoing `http::Request`, so the URI, method, headers, and body are all readable and mutable.
+- `request.supergraph_request()` returns the router request that produced this connector call, for reading.
+- `request.context` is readable and writable for request-scoped state.
+- `request.into_error_response(message, code, extensions)` fails the connector request without making it. This is the in-process equivalent of a coprocessor returning `Control::Break`, useful for circuit breaking.
+
+On the response:
+
+- `response.context` is readable and writable.
+- `response.transport_outcome` exposes the raw transport outcome: status, headers, and transport-level errors.
+- `response.data()` / `set_data()` and `response.error()` / `set_error_message()` / `set_error_code()` read and change what is returned to the client.
+
+### Differences from a coprocessor
+
+Two places where a plugin and a coprocessor genuinely differ:
+
+- A plugin can rewrite the HTTP method. The coprocessor protocol sends the method to your coprocessor but ignores a modified method sent back, so the coprocessor stages cannot change it.
+- Changing `response.transport_outcome` does not recompute the mapped response, so telemetry reports the transport outcome you set while the client receives the unchanged mapped data. The coprocessor stages have the same trap. Change both, or neither.
 
 <a id="using-macros"></a> {/* to keep old links working */}
 ## Observability
