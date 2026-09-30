@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::num::NonZeroU32;
 
-use derivative::Derivative;
 use num_traits::ToPrimitive;
 use opentelemetry::Array;
 use opentelemetry::Value;
@@ -60,8 +59,6 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
-    // Telemetry's nested config tree converts to the configuration attribute separately.
-    #[config(skip_validate)]
     pub(crate) apollo: apollo::Config,
 
     /// Instrumentation configuration
@@ -418,24 +415,23 @@ impl TraceIdFormat {
 }
 
 /// Apollo usage report signature normalization algorithm
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) enum ApolloSignatureNormalizationAlgorithm {
     /// Use the algorithm that matches the JavaScript-based implementation.
     Legacy,
     /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
     /// edge cases from the JS implementation that affected normalization.
-    #[default]
+    #[config(default)]
     Enhanced,
 }
 
 /// Apollo usage report reference generation modes.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "lowercase")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 pub(crate) enum ApolloMetricsReferenceMode {
     /// Use the extended mode to report input object fields and enum value references as well as object fields.
-    #[default]
+    #[config(default)]
     Extended,
     /// Use the standard mode that only reports referenced object fields.
     Standard,
