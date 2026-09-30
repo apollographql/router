@@ -6,6 +6,8 @@ switcher:
       href: ./
     - label: v1
       href: ./v1
+    - label: v3 (Preview)
+      href: ./v3
 items:
   - label: "Overview"
     href: "."
