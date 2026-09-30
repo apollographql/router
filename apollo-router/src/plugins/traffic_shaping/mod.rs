@@ -714,6 +714,7 @@ mod test {
     use apollo_federation::connectors::HttpJsonTransport;
     use apollo_federation::connectors::JSONSelection;
     use apollo_federation::connectors::SourceName;
+    use apollo_federation::connectors::runtime::errors::Error;
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use bytes::Bytes;
@@ -726,8 +727,6 @@ mod test {
     use tokio::task::JoinSet;
     use tokio::time::sleep;
     use tower::Service;
-
-    use apollo_federation::connectors::runtime::errors::Error;
 
     use super::*;
     use crate::Configuration;
