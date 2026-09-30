@@ -3460,6 +3460,49 @@ fn connector_defer_strips_directive_from_connector_fetch() {
     "###);
 }
 
+/// Supergraphs that link the connect spec only through `@join__directive`
+/// still get entity keys for their connectors.
+#[test]
+fn connector_entity_keys_with_join_directive_link() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_join_directive_link.graphql"),
+        "{ post(id: 1) { id author { name } title } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_post_0") {
+          {
+            post(id: 1) {
+              id
+              title
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "post.author") {
+          Fetch(service: "connectors_Query_user_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 
