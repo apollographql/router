@@ -162,6 +162,20 @@ pub(super) struct PrivateQueryKey {
     pub(super) has_private_id: bool,
 }
 
+/// Adds a query to the known-private queries and updates their size gauge.
+pub(super) async fn remember_private_query(
+    private_queries: &RwLock<LruCache<PrivateQueryKey, ()>>,
+    private_query_key: PrivateQueryKey,
+    lru_size_instrument: &LruSizeInstrument,
+) {
+    let size = {
+        let mut private_queries = private_queries.write().await;
+        private_queries.put(private_query_key, ());
+        private_queries.len()
+    };
+    lru_size_instrument.update(size as u64);
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct StorageInterface {
     all: Option<Arc<OnceLock<Storage>>>,
@@ -1667,12 +1681,12 @@ impl CacheService {
                 if cache_control.private() {
                     // we did not know in advance that this was a query with a private scope, so we update the cache key
                     if !is_known_private {
-                        let size = {
-                            let mut private_queries = self.private_queries.write().await;
-                            private_queries.put(private_query_key.clone(), ());
-                            private_queries.len()
-                        };
-                        self.lru_size_instrument.update(size as u64);
+                        remember_private_query(
+                            &self.private_queries,
+                            private_query_key,
+                            &self.lru_size_instrument,
+                        )
+                        .await;
 
                         if let Some(s) = private_id.as_ref() {
                             root_cache_key = format!("{root_cache_key}:{s}");
@@ -1712,7 +1726,9 @@ impl CacheService {
                         data: serde_json_bytes::to_value(response.response.body().clone())
                             .unwrap_or_default(),
                         warnings: Vec::new(),
-                        should_store: true,
+                        // Mirrors `cache_store_root_from_response`.
+                        should_store: response.response.body().data.is_some()
+                            && response.response.body().errors.is_empty(),
                         indexes: *self.indexes,
                     }
                     .update_metadata();
@@ -1809,7 +1825,7 @@ impl CacheService {
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
                                 }),
                             warnings: Vec::new(),
-                            should_store: false,
+                            should_store: true,
                             indexes: *self.indexes,
                         }.update_metadata())
                     });
@@ -1884,10 +1900,12 @@ impl CacheService {
                 }
 
                 if !is_known_private && store_cache_control.private() {
-                    self.private_queries
-                        .write()
-                        .await
-                        .put(private_query_key, ());
+                    remember_private_query(
+                        &self.private_queries,
+                        private_query_key,
+                        &self.lru_size_instrument,
+                    )
+                    .await;
                 }
 
                 cache_store_entities_from_response(
@@ -2075,7 +2093,7 @@ async fn cache_lookup_root(
                         cache_control: debug_value.control.clone(),
                         data: serde_json_bytes::json!({"data": debug_value.data.clone()}),
                         warnings: Vec::new(),
-                        should_store: false,
+                        should_store: true,
                         indexes: *indexes,
                     }
                     .update_metadata();
@@ -2463,7 +2481,7 @@ async fn cache_lookup_entities(
                         cache_control: cache_entry.control.clone(),
                         data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
                         warnings: Vec::new(),
-                        should_store: false,
+                        should_store: true,
                         indexes: *indexes,
                     }
                     .update_metadata()
@@ -3448,6 +3466,8 @@ pub(super) fn build_entity_store_document(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_entity_debug_entry(
     miss: &EntityCacheMiss<'_>,
+    // Whether the router stores this entity when its `Cache-Control` allows it.
+    should_store: bool,
     hashed_private_id: Option<String>,
     subgraph_name: &str,
     source: CacheKeySource,
@@ -3472,7 +3492,7 @@ pub(super) fn build_entity_debug_entry(
         cache_control: cache_control.clone(),
         data: serde_json_bytes::json!({"data": miss.value.clone()}),
         warnings: Vec::new(),
-        should_store: false,
+        should_store,
         indexes,
     }
     .update_metadata()
@@ -3610,6 +3630,7 @@ async fn insert_entities_in_result(
                 if let Some(subgraph_request) = &subgraph_request {
                     debug_ctx_entries.push(build_entity_debug_entry(
                         &miss,
+                        !has_errors,
                         private_id_for_dbg.clone(),
                         subgraph_name,
                         CacheKeySource::Subgraph,
