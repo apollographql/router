@@ -135,6 +135,8 @@ impl SelectionAnalysis {
 mod tests {
     use std::sync::Arc;
 
+    use shape::ShapeCase;
+
     use super::SelectionAnalysis;
     use crate::connectors::ConnectSpec;
     use crate::connectors::json_selection::JSONSelection;
@@ -280,6 +282,153 @@ mod tests {
         let first = analysis.output_shape().pretty_print();
         let second = analysis.output_shape().pretty_print();
         assert_eq!(first, second);
+    }
+
+    // ---- Short-circuited `->and` / `->or` (PR #10316 review feedback).
+    // The runtime short-circuits left to right, so a statically-false
+    // `->and` receiver (or statically-true `->or` receiver) means no
+    // argument is ever evaluated. Static analysis still considers every
+    // argument: their variable consumption must be recorded (requestless
+    // connectors are diagnosed from this trie), while their errors must
+    // stay out of the output shape, since they can never occur. ----
+
+    #[test]
+    fn and_short_circuit_records_arg_consumption_without_arg_errors() {
+        let analysis = analyze("false->and($status)");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn or_short_circuit_records_arg_consumption_without_arg_errors() {
+        let analysis = analyze("true->or($response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$response { headers { trace } }"
+        );
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_consider_every_argument() {
+        // Multiple right-hand arguments: all of their consumption is
+        // recorded, even positions after one that would (at runtime, for a
+        // non-literal receiver) end the evaluation.
+        let analysis = analyze("false->and($status, $response.headers.trace, $args.flag)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$args { flag } $response { headers { trace } } $status"
+        );
+
+        let analysis = analyze("true->or($status, $args.flag, $response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$args { flag } $response { headers { trace } } $status"
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_suppress_never_evaluated_arg_errors() {
+        // `1->gt("x")` is a static type error, but the argument can never be
+        // evaluated at runtime, so the error must not reach the output shape.
+        let analysis = analyze("false->and($status, 1->gt(\"x\"))");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+
+        let analysis = analyze("true->or(2->lt(\"y\"), $response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$response { headers { trace } }"
+        );
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_without_short_circuit_still_surface_arg_errors() {
+        // Control: when the receiver does not statically short-circuit, the
+        // same argument error does surface (and consumption is recorded).
+        let analysis = analyze("true->and(1->gt(\"x\"))");
+        assert!(
+            !matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected the ->gt error to surface, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+
+        let analysis = analyze("false->or(1->gt(\"x\"))");
+        assert!(
+            !matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected the ->gt error to surface, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_through_literal_object_paths() {
+        // A path into a literal object preserves the literal field shape, so
+        // the receiver still folds to a known `false`, and a method call
+        // works as an object-literal value (v0.4+).
+        let analysis = analyze("{ foo: false->and($status) }.foo");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+
+        // The non-short-circuited form works too: a statically-true `->and`
+        // receiver evaluates its argument, producing an unknown Bool.
+        let analysis = analyze("{ foo: true->and(false) }.foo");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn and_or_short_circuit_through_literal_array_first() {
+        // `->first` of a literal array preserves the literal element shape,
+        // so the receiver folds to a known `true`.
+        let analysis = analyze("[true, false]->first->or($status)");
+        assert_eq!(analysis.consumption().to_string(), "$status");
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
+    }
+
+    #[test]
+    fn nested_short_circuit_composes_with_normal_evaluation() {
+        // The inner `false->and(...)` short-circuits (consumption of $status
+        // recorded, `->gt` error suppressed); its unknown-Bool result feeds
+        // an outer `->or` that evaluates its argument normally.
+        let analysis = analyze("false->and($status, 1->gt(\"x\"))->or($response.headers.trace)");
+        assert_eq!(
+            analysis.consumption().to_string(),
+            "$response { headers { trace } } $status"
+        );
+        assert!(
+            matches!(analysis.output_shape().case(), ShapeCase::Bool(None)),
+            "expected clean Bool shape, got {}",
+            analysis.output_shape().pretty_print(),
+        );
     }
 
     #[test]

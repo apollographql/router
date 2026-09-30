@@ -8,23 +8,46 @@ input_file: apollo-federation/src/connectors/validation/test_data/requestless_sh
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.ok`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            24:23..24:30,
+            26:23..26:30,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.trace`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
         locations: [
-            31:21..31:30,
-            31:31..31:38,
-            31:39..31:44,
+            33:21..33:30,
+            33:31..33:38,
+            33:39..33:44,
         ],
     },
     Message {
         code: RequestlessSelectionUsesRequestData,
         message: "`@connect(selection:)` on `Query.both`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
         locations: [
-            38:23..38:30,
+            40:23..40:30,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.multi`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
+        locations: [
+            50:20..50:27,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.multi`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
+        locations: [
+            50:29..50:38,
+            50:39..50:46,
+            50:47..50:52,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.lit`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
+        locations: [
+            59:27..59:34,
         ],
     },
 ]
