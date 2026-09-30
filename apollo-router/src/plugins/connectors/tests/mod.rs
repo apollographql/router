@@ -44,6 +44,7 @@ mod content_type;
 mod error_handling;
 mod mock_api;
 mod progressive_override;
+mod public_plugin;
 mod query_plan;
 mod quickstart;
 mod req_asserts;
@@ -2292,6 +2293,61 @@ mod quickstart_tests {
         }
         "###);
     }
+}
+
+/// Like [`execute`], but registers an out-of-tree-style plugin through the public
+/// [`PluginUnstable`][crate::plugin::PluginUnstable] interface.
+///
+/// This goes through `TestHarness` rather than `YamlRouterFactory` directly, because
+/// `extra_unstable_plugin` is the only way to reach the `DynPlugin` ->
+/// `PluginUnstable` forwarding that the public plugin hooks depend on. `TestHarness`
+/// builds through `YamlRouterFactory::inner_create_supergraph`, so connectors are
+/// extracted the same way they are in [`execute`].
+async fn execute_with_unstable_plugin<P: crate::plugin::PluginUnstable>(
+    schema: &str,
+    uri: &str,
+    query: &str,
+    plugin: P,
+) -> serde_json::Value {
+    let config = serde_json::json!({
+        "include_subgraph_errors": { "all": true },
+        "override_subgraph_url": { "graphql": format!("{uri}/graphql") },
+        "connectors": {
+            "sources": {
+                "connectors.json": {
+                    "override_url": format!("{uri}/"),
+                    // `Query.me` in the steel thread schema is `/users/{$config.id}`.
+                    "$config": { "id": 1 }
+                }
+            }
+        }
+    });
+
+    let service = crate::TestHarness::builder()
+        .schema(schema)
+        .configuration_json(config)
+        .unwrap()
+        .extra_unstable_plugin(plugin)
+        .with_subgraph_network_requests()
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .header("x-client-header", "client-header-value")
+        .build()
+        .unwrap();
+
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    serde_json::to_value(response).unwrap()
 }
 
 async fn execute(

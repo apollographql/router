@@ -2095,6 +2095,14 @@ expression: "&schema"
           },
           "description": "Propagation of aggregated response_cache cache tags to the supergraph response.\nOff by default; opt in to surface cache tags to a CDN for tag-based purging. See\n`CdnInvalidationConfig` for the individual fields."
         },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCacheConfiguration"
+            }
+          ],
+          "description": "Configure response caching per connector source"
+        },
         "debug": {
           "default": false,
           "description": "Enable debug mode for the debugger",
@@ -2134,12 +2142,19 @@ expression: "&schema"
               "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
             }
           ],
+          "default": {
+            "all": {
+              "enabled": false,
+              "invalidation": null,
+              "private_id": null,
+              "redis": null,
+              "ttl": null
+            },
+            "subgraphs": {}
+          },
           "description": "Configure invalidation per subgraph"
         }
       },
-      "required": [
-        "subgraph"
-      ],
       "type": "object"
     },
     "Config9": {
@@ -2258,6 +2273,107 @@ expression: "&schema"
       "required": [
         "urls"
       ],
+      "type": "object"
+    },
+    "ConnectorCacheConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for connector response caching: global defaults plus per-source overrides",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConnectorCacheSource"
+            }
+          ],
+          "default": {
+            "cache_key_headers": null,
+            "enabled": null,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+          },
+          "description": "Options applying to all connector sources"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorCacheSource"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorCacheSource": {
+      "additionalProperties": false,
+      "description": "Per connector source configuration for response caching",
+      "properties": {
+        "cache_key_headers": {
+          "default": null,
+          "description": "The client request header names whose values are folded into this source's cache key.\n\n**Required on `all`**: the router refuses to start if connector caching is enabled and\n`all.cache_key_headers` is unset (see the plugin's startup validation). This is a deliberate\nsafety decision — the operator must consciously choose which request headers distinguish one\ncached connector response from another before enabling the feature. Because a plain value\ncannot express \"unset\" separately from \"explicitly empty\", the field is an `Option` and that\nrequirement is enforced at startup rather than at deserialization.\n\n**Optional per source**: a listed source inherits `all`'s value when this is `None`\n(omitted), or overrides it (including with an explicit empty list) when set.\n\nSemantics of the resolved list:\n- Header matching is case-insensitive; all values of a listed header (sorted) are hashed.\n- An empty list (`[]`) is a valid, explicit choice meaning \"no request header partitions\n  the cache\" — every caller with otherwise-equal inputs shares one entry.\n- Any header your REST API varies its response on that is NOT listed here will cause\n  different callers to share a cached response (a cross-user data-disclosure risk); any\n  header listed here that does not affect the response needlessly fragments the cache.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": null,
+          "description": "Activates caching for this connector source, overrides the global configuration",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "invalidation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubgraphInvalidationConfig2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Invalidation configuration"
+        },
+        "private_id": {
+          "default": null,
+          "description": "Context key used to separate cache sections per user",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "redis": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Config9"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis configuration"
+        },
+        "ttl": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Ttl2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses"
+        }
+      },
       "type": "object"
     },
     "ConnectorConnectorLimitsConfiguration": {
@@ -8846,7 +8962,7 @@ expression: "&schema"
         },
         "max_depth": {
           "default": null,
-          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
+          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -8856,7 +8972,7 @@ expression: "&schema"
         },
         "max_height": {
           "default": null,
-          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_HEIGHT_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```",
           "format": "uint32",
           "minimum": 0,
           "type": [

@@ -3953,3 +3953,72 @@ async fn invalid_input_enum_inaccessible_value() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
     Ok(())
 }
+
+/// A labeled `@defer` in a fragment spread multiple times (the pattern Relay generates) must
+/// produce one deferred response per spread position, all with the user's label,
+/// distinguished by path.
+#[tokio::test]
+async fn defer_labeled_fragment_spread_multiple_times() {
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{__typename id}otherUser{__typename id}}"}},
+                serde_json::json!{{"data": {
+                    "currentUser": { "__typename": "User", "id": "1" },
+                    "otherUser": { "__typename": "User", "id": "2" }
+                }}}
+            )
+            .with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "variables": {"representations":[{"__typename": "User", "id":"1"}]}
+                }},
+                serde_json::json!{{"data": {"_entities": [{ "name": "Ada" }]}}}
+            )
+            .with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "variables": {"representations":[{"__typename": "User", "id":"2"}]}
+                }},
+                serde_json::json!{{"data": {"_entities": [{ "name": "Grace" }]}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "supergraph": {
+                "generate_query_fragments": false,
+            }
+        }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .context(defer_context())
+        .query(
+            r#"query {
+              currentUser { ...UserFrag }
+              otherUser { ...UserFrag }
+            }
+            fragment UserFrag on User {
+              id
+              ... @defer(label: "UserFrag") {
+                name
+              }
+            }"#,
+        )
+        .build()
+        .unwrap();
+
+    let mut stream = service.oneshot(request).await.unwrap();
+
+    insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    assert!(stream.next_response().await.is_none());
+}

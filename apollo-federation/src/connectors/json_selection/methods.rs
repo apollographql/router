@@ -10,6 +10,7 @@ use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::spec::ConnectSpec;
 
 mod common;
+pub(crate) use common::could_satisfy;
 
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
@@ -67,6 +68,8 @@ pub(super) enum ArrowMethod {
     Trim,
     TrimStart,
     TrimEnd,
+    WithWarning,
+    WithError,
 
     // Future methods:
     TypeOf,
@@ -188,6 +191,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::Trim => &public::TrimMethod,
             Self::TrimStart => &public::TrimStartMethod,
             Self::TrimEnd => &public::TrimEndMethod,
+            Self::WithWarning => &public::WithWarningMethod,
+            Self::WithError => &public::WithErrorMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -252,6 +257,8 @@ impl ArrowMethod {
             "trim" => Some(Self::Trim),
             "trimStart" => Some(Self::TrimStart),
             "trimEnd" => Some(Self::TrimEnd),
+            "withWarning" => Some(Self::WithWarning),
+            "withError" => Some(Self::WithError),
             _ => None,
         };
 
@@ -306,6 +313,8 @@ impl ArrowMethod {
                 | Self::Trim
                 | Self::TrimStart
                 | Self::TrimEnd
+                | Self::WithWarning
+                | Self::WithError
         )
     }
 }
