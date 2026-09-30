@@ -10,6 +10,7 @@ use shape::Shape;
 use shape::ShapeCase;
 use tracing::trace;
 
+use super::super::defer::strip_defer_directive;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
@@ -407,7 +408,7 @@ impl FieldRoutingSearchSpace {
                         continue;
                     }
                     let child_op = op_path.pushed(Arc::new(OpPathElement::InlineFragment(
-                        fragment_sel.inline_fragment.clone(),
+                        strip_defer_directive(&fragment_sel.inline_fragment),
                     )));
                     let child_kept = self.partition_connector_selections(
                         &fragment_sel.selection_set,
@@ -423,7 +424,9 @@ impl FieldRoutingSearchSpace {
                     {
                         kept.insert(Selection::InlineFragment(Arc::new(
                             InlineFragmentSelection {
-                                inline_fragment: fragment_sel.inline_fragment.clone(),
+                                inline_fragment: strip_defer_directive(
+                                    &fragment_sel.inline_fragment,
+                                ),
                                 selection_set: child_kept,
                             },
                         )));
