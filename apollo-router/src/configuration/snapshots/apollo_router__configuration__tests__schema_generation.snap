@@ -409,6 +409,7 @@ expression: "&schema"
       "description": "Specify assumed role configuration.",
       "properties": {
         "external_id": {
+          "default": null,
           "description": "Unique identifier that might be required when you assume a role in another account.",
           "type": [
             "string",
@@ -630,6 +631,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationDirectivesConfig": {
+      "additionalProperties": false,
       "properties": {
         "dry_run": {
           "default": false,
@@ -662,6 +664,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationErrorConfig": {
+      "additionalProperties": false,
       "properties": {
         "log": {
           "default": true,
@@ -2882,6 +2885,7 @@ expression: "&schema"
       "type": "object"
     },
     "ConnectorStages": {
+      "additionalProperties": false,
       "description": "Configures the connector coprocessor stages",
       "properties": {
         "all": {
@@ -3408,6 +3412,7 @@ expression: "&schema"
           "description": "Specify assumed role configuration."
         },
         "profile_name": {
+          "default": null,
           "description": "The profile name used by this provider",
           "type": [
             "string",
@@ -4064,6 +4069,7 @@ expression: "&schema"
       "type": "object"
     },
     "ExecutionStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -6988,6 +6994,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "audiences": {
+          "default": null,
           "description": "Expected audiences for tokens verified by that JWKS\n\nIf not specified, the audience will not be checked.",
           "items": {
             "type": "string"
@@ -7006,6 +7013,7 @@ expression: "&schema"
           "type": "array"
         },
         "issuers": {
+          "default": null,
           "description": "Expected issuers for tokens verified by that JWKS\n\nIf not specified, the issuer will not be checked.",
           "items": {
             "type": "string"
@@ -8374,7 +8382,7 @@ expression: "&schema"
       "description": "Configuration options pertaining to the readiness health interval sub-component.",
       "properties": {
         "sampling": {
-          "default": "0s",
+          "default": "5s",
           "description": "The sampling interval (default: 5s)",
           "type": [
             "string",
@@ -9388,6 +9396,7 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "concurrency_limit": {
+          "default": null,
           "description": "The global concurrency limit",
           "format": "uint",
           "minimum": 0,
@@ -9430,6 +9439,7 @@ expression: "&schema"
       "type": "object"
     },
     "RouterStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -11291,6 +11301,7 @@ expression: "&schema"
           "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)"
         },
         "deduplicate_query": {
+          "default": null,
           "description": "Enable query deduplication",
           "type": [
             "boolean",
@@ -11645,6 +11656,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Enable callback mode for subgraph(s)"
         },
         "passthrough": {
@@ -11656,6 +11668,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Enable passthrough mode for subgraph(s)"
         }
       },
@@ -12316,6 +12329,7 @@ expression: "&schema"
       "type": "object"
     },
     "SupergraphStage": {
+      "additionalProperties": false,
       "properties": {
         "request": {
           "allOf": [
@@ -12797,8 +12811,35 @@ expression: "&schema"
           "default": "",
           "description": "Any name except `reserved`.",
           "type": "string"
+        },
+        "nested": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ValidatedNestedConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A nested section with its own rule."
         }
       },
+      "type": "object"
+    },
+    "ValidatedNestedConfig": {
+      "additionalProperties": false,
+      "description": "A nested section whose rule runs because its parent's field doesn't skip validation.",
+      "properties": {
+        "limit": {
+          "description": "At least 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "limit"
+      ],
       "type": "object"
     },
     "WebSocketConfiguration": {

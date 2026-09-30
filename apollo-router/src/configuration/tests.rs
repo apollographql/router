@@ -1305,6 +1305,40 @@ fn progressive_override_rejects_unknown_keys() {
     assert_rejects_unknown_key("progressive_override:\n  enabeld: false\n", "enabeld");
 }
 
+/// Nested plugin config types use the configuration attribute, so their sections reject unknown
+/// keys too. Each case is a section that accepted, and ignored, unknown keys before.
+#[test]
+fn nested_plugin_sections_reject_unknown_keys() {
+    for (yaml, key) in [
+        (
+            "authorization:\n  directives:\n    errors:\n      lgo: false\n",
+            "lgo",
+        ),
+        (
+            "authorization:\n  directives:\n    enabeld: false\n",
+            "enabeld",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  router:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  supergraph:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  execution:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  connector:\n    alll: {}\n",
+            "alll",
+        ),
+    ] {
+        assert_rejects_unknown_key(yaml, key);
+    }
+}
+
 #[test]
 fn settingless_plugin_sections_accept_empty_and_omitted_sections() {
     for yaml in [

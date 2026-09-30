@@ -65,9 +65,9 @@ pub(crate) struct SubscriptionConfig {
     #[config(default = true)]
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
-    #[config(skip_validate)]
     pub(crate) mode: SubscriptionModeConfig,
     /// Configure subgraph subscription deduplication
+    // Generic with a hand-written merging Deserialize, which the macro can't express.
     #[config(skip_validate)]
     pub(crate) deduplication: SubgraphConfiguration<DeduplicationConfig>,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
@@ -75,10 +75,8 @@ pub(crate) struct SubscriptionConfig {
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
     /// Maximum lifetime of a subscription. After this duration the subscription will be closed. Accepts durations like '10m', '1h', '30s'. By default there is no limit.
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "Option<String>", default)]
-    #[config(skip_validate)]
-    pub(crate) max_lifetime: Option<Duration>,
+    pub(crate) max_lifetime: Option<apollo_configuration::types::Duration>,
 }
 
 /// Subscription deduplication configuration
@@ -113,8 +111,8 @@ impl Default for DeduplicationConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) struct SubscriptionModeConfig {
     /// Enable callback mode for subgraph(s)
     pub(crate) callback: Option<CallbackMode>,
@@ -150,8 +148,8 @@ impl SubscriptionModeConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) struct SubgraphPassthroughMode {
     /// Configuration for all subgraphs
     pub(crate) all: Option<WebSocketConfiguration>,
@@ -168,18 +166,21 @@ pub(crate) enum SubscriptionMode {
 }
 
 /// Using a callback url
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 pub(crate) struct CallbackMode {
     #[schemars(with = "String")]
     /// URL used to access this router instance, including the path configured on the Router
-    pub(crate) public_url: url::Url,
+    #[config(required)]
+    pub(crate) public_url: apollo_configuration::types::Url,
 
     /// Heartbeat interval for callback mode (default: 5secs)
-    #[serde(default = "HeartbeatInterval::new_enabled")]
+    #[config(default = HeartbeatInterval::new_enabled())]
     pub(crate) heartbeat_interval: HeartbeatInterval,
     // `skip_serializing` We don't need it in the context
     /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
+    #[config(skip_validate)]
     #[serde(skip_serializing)]
     pub(crate) listen: Option<ListenAddr>,
     // `skip_serializing` We don't need it in the context
@@ -189,21 +190,22 @@ pub(crate) struct CallbackMode {
 
     /// Specify on which subgraph we enable the callback mode for subscription
     /// If empty it applies to all subgraphs (passthrough mode takes precedence)
-    #[serde(default)]
+    // HashSet has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) subgraphs: HashSet<String>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub(crate) enum HeartbeatInterval {
     /// disable heartbeat
     Disabled(Disabled),
     /// enable with default interval of 5s
     Enabled(Enabled),
     /// enable with custom interval, e.g. '100ms', '10s' or '1m'
-    #[serde(with = "humantime_serde")]
     #[schemars(with = "String")]
-    Duration(Duration),
+    Duration(apollo_configuration::types::Duration),
 }
 
 impl HeartbeatInterval {
@@ -217,44 +219,40 @@ impl HeartbeatInterval {
         match self {
             Self::Disabled(_) => None,
             Self::Enabled(_) => Some(Duration::from_secs(5)),
-            Self::Duration(duration) => Some(duration),
+            Self::Duration(duration) => Some(*duration),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum Disabled {
     Disabled,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq, Eq, Serialize)]
 pub(crate) enum Enabled {
     Enabled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq, Eq, Serialize)]
 /// WebSocket configuration for a specific subgraph
 pub(crate) struct WebSocketConfiguration {
     /// Path on which WebSockets are listening
-    #[serde(default)]
     pub(crate) path: Option<String>,
     /// Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)
-    #[serde(default)]
     pub(crate) protocol: WebSocketProtocol,
     /// Heartbeat interval for graphql-ws protocol (default: disabled)
-    #[serde(default = "HeartbeatInterval::new_disabled")]
+    #[config(default = HeartbeatInterval::new_disabled())]
     pub(crate) heartbeat_interval: HeartbeatInterval,
     /// Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.
     /// The default is 0 (no reconnection attempts).
-    #[serde(default)]
     pub(crate) max_reconnect_attempts: u32,
     /// Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "Option<String>", default)]
-    pub(crate) reconnect_delay: Option<Duration>,
+    pub(crate) reconnect_delay: Option<apollo_configuration::types::Duration>,
 }
 
 fn default_callback_path() -> String {
@@ -1129,7 +1127,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600)));
+        assert_eq!(config.max_lifetime, Some(Duration::from_secs(600).into()));
 
         let config_no_lifetime: SubscriptionConfig = serde_json::from_value(serde_json::json!({
             "enabled": true,
@@ -1174,7 +1172,7 @@ mod tests {
             other => panic!("expected passthrough config, got {other:?}"),
         };
         assert_eq!(all_cfg.max_reconnect_attempts, 5);
-        assert_eq!(all_cfg.reconnect_delay, Some(Duration::from_secs(2)));
+        assert_eq!(all_cfg.reconnect_delay, Some(Duration::from_secs(2).into()));
 
         // A subgraph that doesn't set the fields falls back to their defaults (no reconnection).
         let no_reconnect_cfg = match config.mode.get_subgraph_config("no_reconnect") {

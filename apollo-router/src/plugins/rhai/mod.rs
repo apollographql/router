@@ -59,6 +59,7 @@ fn default_intern_strings() -> bool {
 #[schemars(rename = "RhaiConfig")]
 pub(crate) struct Conf {
     /// The directory where Rhai scripts can be found
+    // PathBuf has no Validate impl.
     #[config(skip_validate)]
     scripts: Option<PathBuf>,
     /// The main entry point for Rhai script evaluation

@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use futures::future;
 use futures::stream;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -21,14 +19,18 @@ use crate::services::header_masking::MaskingRulesMap;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SupergraphRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -41,14 +43,18 @@ pub(super) struct SupergraphRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SupergraphResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
@@ -60,8 +66,8 @@ pub(super) struct SupergraphResponseConf {
     pub(super) url: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SupergraphStage {
     /// The request configuration
     pub(super) request: SupergraphRequestConf,

@@ -1062,6 +1062,24 @@ mod tests {
         pub(super) struct ValidatedConfig {
             /// Any name except `reserved`.
             name: String,
+            /// A nested section with its own rule.
+            nested: Option<ValidatedNestedConfig>,
+        }
+
+        /// A nested section whose rule runs because its parent's field doesn't skip validation.
+        #[configuration(validate = reject_zero_limit)]
+        pub(super) struct ValidatedNestedConfig {
+            /// At least 1.
+            #[config(required)]
+            limit: u32,
+        }
+
+        fn reject_zero_limit(config: &ValidatedNestedConfig, mut errors: ErrorCollector<'_>) {
+            if config.limit == 0 {
+                errors
+                    .nest("limit")
+                    .report_simple("limit must be at least 1");
+            }
         }
 
         fn reject_reserved_name(config: &ValidatedConfig, mut errors: ErrorCollector<'_>) {
@@ -1102,6 +1120,19 @@ mod tests {
         );
         assert!(error.contains("[4:11]"), "{error}");
         assert!(error.contains("name: reserved"), "{error}");
+    }
+
+    /// A nested type's rule runs too, and its error quotes the nested key.
+    #[test]
+    fn nested_validation_rules_reject_schema_valid_values_at_their_key() {
+        let text = "plugins:\n  test.validated:\n    nested:\n      limit: 0\n";
+
+        let error = parse_configuration(text, ExternalValues::default(), Migration::None)
+            .expect_err("the nested rule rejects the limit")
+            .to_string();
+
+        assert!(error.contains("limit must be at least 1"), "{error}");
+        assert!(error.contains("[4:14]"), "{error}");
     }
 
     #[test]
