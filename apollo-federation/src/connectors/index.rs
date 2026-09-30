@@ -236,9 +236,16 @@ fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> 
 pub(crate) fn add_connector_entity_keys(
     supergraph: &ValidFederationSchema,
 ) -> Result<ValidFederationSchema, FederationError> {
+    // The connect spec is linked either directly or, in older supergraphs,
+    // through a `@join__directive` on the schema definition.
+    let connect_identity = ConnectSpec::identity();
+    let connect_url = format!("{}/{}/v", connect_identity.domain, connect_identity.name);
     let uses_connectors = supergraph
-        .metadata()
-        .is_some_and(|links| links.for_identity(&ConnectSpec::identity()).is_some());
+        .schema()
+        .schema_definition
+        .directives
+        .iter()
+        .any(|directive| directive.to_string().contains(&connect_url));
     if !uses_connectors {
         return Ok(supergraph.clone());
     }
