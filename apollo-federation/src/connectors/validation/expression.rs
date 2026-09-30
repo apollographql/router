@@ -1218,6 +1218,116 @@ mod tests {
         }
     }
 
+    // Validation and the runtime should agree on whether each expression has
+    // an error, in every version.
+    #[rstest]
+    // `->contains` and `->in` skip elements with no value, which become `null`
+    // from connect/v0.5, and `null` elements, which never match.
+    #[case::contains_missing_element(r#"$(["b", $([])->first])->contains("a")"#, true)]
+    #[case::in_missing_element(r#"$("a")->in([$([])->first, "b"])"#, true)]
+    #[case::contains_null_element(r#"$(["b", null])->contains("a")"#, true)]
+    #[case::in_null_element(r#"$("a")->in([null, "b"])"#, true)]
+    // `->joinNotNull` skips both, too.
+    #[case::join_not_null_missing_element(r#"$([$([])->first, "a"])->joinNotNull(",")"#, true)]
+    #[case::join_not_null_null_element(r#"$([null, "a"])->joinNotNull(",")"#, true)]
+    // An error in one branch of a union condition is still an error.
+    #[case::filter_union_condition_error(
+        r#"$([1])->filter($->match([1, $(1)->gt("x")], [@, true]))"#,
+        false
+    )]
+    #[case::find_union_condition_error(
+        r#"$([1])->find($->match([1, $(1)->gt("x")], [@, true]))"#,
+        false
+    )]
+    #[case::filter_maybe_missing_condition_error(
+        r#"$([1])->filter($(true)->match([true, $(1)->gt("x")]))->joinNotNull(",")"#,
+        false
+    )]
+    #[case::find_maybe_missing_condition_error(
+        r#"$([1])->find($(true)->match([true, $(1)->gt("x")]))"#,
+        false
+    )]
+    // Errors inside other arguments are reported too.
+    #[case::and_arg_error(r#"$(true)->and($(1)->gt("x"))"#, false)]
+    #[case::or_arg_error(r#"$(false)->or($(1)->gt("x"))"#, false)]
+    #[case::not_input_error(r#"$(1)->gt("x")->not"#, false)]
+    #[case::eq_arg_error(r#"$(true)->eq($(1)->gt("x"))"#, false)]
+    #[case::in_arg_error(r#"$(true)->in([$(1)->gt("x")])"#, false)]
+    #[case::contains_arg_error(r#"$([true])->contains($(1)->gt("x"))"#, false)]
+    #[case::add_arg_error(r#"$(1)->add($(1)->gt("x")->match([true, 1], [@, 2]))"#, false)]
+    #[case::split_separator_error(
+        r#"$("a,b")->split($(1)->gt("x")->match([true, ","], [@, ";"]))"#,
+        false
+    )]
+    #[case::join_not_null_separator_error(
+        r#"$(["a"])->joinNotNull($(1)->gt("x")->match([true, ","], [@, ";"]))"#,
+        false
+    )]
+    #[case::get_arg_error(r#"$([1])->get($(1)->gt("x")->match([true, 0], [@, 1]))"#, false)]
+    #[case::parse_int_base_error(
+        r#"$("10")->parseInt($(1)->gt("x")->match([true, 10], [@, 16]))"#,
+        false
+    )]
+    #[case::nested_call_arg_error(r#"$(true)->and($(true)->and($(1)->gt("x")))"#, false)]
+    #[case::object_arg_error(r#"$({ a: 1 })->eq({ a: $(1)->gt("x") })"#, false)]
+    // Arguments are checked as the method evaluates them, with `@` bound to
+    // each element for `->filter`, so this is not an error.
+    #[case::element_bound_condition("$([1, 2])->filter(@->gt(1))->size", true)]
+    #[case::element_bound_map(r#"$(["a"])->map(@->eq("a"))->first->and(true)"#, true)]
+    // Arguments that are never evaluated can't report an error.
+    #[case::or_true_skips_arg_error(r#"$(true)->or($(1)->gt("x"))"#, true)]
+    #[case::and_false_skips_arg_error(r#"$(false)->and($(1)->gt("x"))"#, true)]
+    #[case::or_true_skips_non_bool(r#"$(true)->or("not a bool")"#, true)]
+    fn shapes_agree_with_runtime(#[case] selection: &str, #[case] valid: bool) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            let (_, runtime_errors) = JSONSelection::parse_with_spec(selection, spec)
+                .expect("selection parses")
+                .apply_to(&serde_json_bytes::json!(1));
+            assert_eq!(
+                runtime_errors.is_empty(),
+                valid,
+                "{spec:?} runtime errors: {runtime_errors:?}"
+            );
+
+            let result = validate_with_context(selection, Shape::unknown([]), spec);
+            assert_eq!(result.is_ok(), valid, "{spec:?} validation: {result:?}");
+        }
+    }
+
+    // Skipping missing and `null` elements does not stop `->contains` and
+    // `->in` from rejecting elements of another type, although the runtime
+    // just returns false for them.
+    #[rstest]
+    #[case::contains(r#"$(["b", $([])->first, 1])->contains("a")"#)]
+    #[case::in_array(r#"$("a")->in([$([])->first, null, 1])"#)]
+    fn mismatched_elements_still_rejected(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            validate_with_context(selection, Shape::unknown([]), spec)
+                .expect_err("elements of another type are rejected");
+        }
+    }
+
+    // Validation accepts these, but they always fail at runtime, because the
+    // argument errors are not recorded (see `ArrowMethodImpl::shape`). An
+    // error in a `->match` pattern is a known gap: if that case starts
+    // failing, the gap is closed, so move it to `shapes_agree_with_runtime`.
+    // An error in an `->as` expression is intentionally reported only where
+    // its variable is used.
+    #[rstest]
+    #[case::match_pattern_error(r#"$(1)->match([$(1)->gt("x"), 1], [@, 2])"#)]
+    #[case::unused_as_expression_error(r#"$(1)->as($e, $(1)->gt("x"))->echo(1)"#)]
+    fn known_disagreements(#[case] selection: &str) {
+        for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
+            let (_, runtime_errors) = JSONSelection::parse_with_spec(selection, spec)
+                .expect("selection parses")
+                .apply_to(&serde_json_bytes::json!(1));
+            assert!(!runtime_errors.is_empty(), "{spec:?}: no runtime errors");
+
+            validate_with_context(selection, Shape::unknown([]), spec)
+                .expect("validation still misses this error");
+        }
+    }
+
     #[rstest]
     #[case::args_object_as_echo_bool_var_mismatch("$args.object->as($obj)->echo($o.bool)")]
     #[case::args_object_as_echo_missing_string("$args.object->as($o)->echo($o.string)")]

@@ -10,7 +10,6 @@ use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
 use crate::connectors::json_selection::methods::common::could_satisfy;
-use crate::connectors::json_selection::methods::common::with_arg_error;
 use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
@@ -171,10 +170,7 @@ fn filter_shape(
         );
     }
 
-    with_arg_error(
-        &condition_shape,
-        Shape::list(input_shape.any_item([]), input_shape.locations().cloned()),
-    )
+    Shape::list(input_shape.any_item([]), input_shape.locations().cloned())
 }
 
 #[cfg(test)]

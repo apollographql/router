@@ -121,19 +121,33 @@ fn and_shape(
     }
 
     // At runtime, a false input gives false without evaluating any argument,
-    // so a missing argument cannot make the result missing.
-    let short_circuits = matches!(input_shape.case(), ShapeCase::Bool(Some(false)));
+    // so no argument can make the result missing or report an error.
+    if matches!(input_shape.case(), ShapeCase::Bool(Some(false))) {
+        // Still compute each argument's shape for its side effect of
+        // recording variable consumption (used by requestless-connector
+        // validation), but with a context that does not record argument
+        // shapes, since the errors they carry must not surface for arguments
+        // that are never evaluated at runtime.
+        if let Some(MethodArgs { args, .. }) = method_args {
+            let arg_context = context.without_method_call();
+            for arg in args {
+                let _ = arg.compute_output_shape(
+                    &arg_context,
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                );
+            }
+        }
+        return Shape::bool(method_name.shape_location(context.source_id()));
+    }
 
     let mut maybe_missing = false;
     if let Some(MethodArgs { args, .. }) = method_args {
         for (i, arg) in args.iter().enumerate() {
             let arg_shape =
                 arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-            maybe_missing |= !short_circuits && may_be_missing(&arg_shape);
+            maybe_missing |= may_be_missing(&arg_shape);
             let Some(arg_shape) = present_arg(context, &arg_shape) else {
-                if short_circuits {
-                    continue;
-                }
                 // The method produces no value when an argument has none.
                 return Shape::none();
             };

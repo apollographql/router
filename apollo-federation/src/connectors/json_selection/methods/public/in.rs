@@ -11,13 +11,13 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
+use crate::connectors::json_selection::methods::common::compared_element;
 use crate::connectors::json_selection::methods::common::could_satisfy;
 use crate::connectors::json_selection::methods::common::is_same_type_comparison;
 use crate::connectors::json_selection::methods::common::may_be_missing;
 use crate::connectors::json_selection::methods::common::number_value_as_float;
 use crate::connectors::json_selection::methods::common::or_missing;
 use crate::connectors::json_selection::methods::common::present_arg;
-use crate::connectors::json_selection::methods::common::present_part;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(InMethod, in_method, in_shape);
@@ -156,13 +156,9 @@ fn in_shape(
     };
 
     // Ensures that the input is of the same type as all the array elements... this includes covering cases like int/float and unknown/name
-    if let Some(item) = prefix
-        .iter()
-        // Items with no value are skipped at runtime.
-        .find(|item| {
-            present_part(item).is_some_and(|item| !is_same_type_comparison(&input_shape, &item))
-        })
-    {
+    if let Some(item) = prefix.iter().find(|item| {
+        compared_element(item).is_some_and(|item| !is_same_type_comparison(&input_shape, &item))
+    }) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {input_shape} == {item}.",
@@ -174,7 +170,7 @@ fn in_shape(
     }
 
     // Also check the tail for type mismatch
-    if !present_part(tail).is_none_or(|tail| is_same_type_comparison(&input_shape, &tail)) {
+    if !compared_element(tail).is_none_or(|tail| is_same_type_comparison(&input_shape, &tail)) {
         return Shape::error_with_partial(
             format!(
                 "Method ->{} can only compare values of the same type. Got {input_shape} == {tail}.",
