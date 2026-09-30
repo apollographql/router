@@ -1,9 +1,9 @@
 //! Regression corpus for configuration loading with apollo-configuration.
 //!
 //! These fixtures were compared against the router's previous loader before it was removed, and
-//! both produced the same effective settings. The snapshots record what each fixture changes
-//! from the default configuration, so a change in loading behaviour shows up as a snapshot
-//! difference.
+//! both produced the same effective settings. The snapshots record every setting each fixture
+//! sets, as the parser retains it after migration, expansion and overrides, so a change in
+//! loading behaviour shows up as a snapshot difference.
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -141,7 +141,9 @@ fn load(case: &Case) -> Result<Configuration, ConfigurationError> {
     }
 }
 
-/// Every setting in `config` that differs from the default configuration, keyed by JSON pointer.
+/// Every setting in the document `config` was parsed from that differs from the default
+/// configuration's, keyed by JSON pointer. The document is the one the parser validated, after
+/// migration, expansion and overrides. Each non-empty object is walked down to its settings.
 fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
     fn walk(
         default: Option<&Value>,
@@ -150,28 +152,41 @@ fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
         changes: &mut BTreeMap<String, Value>,
     ) {
         match (default, value) {
-            (Some(Value::Object(default)), Value::Object(entries)) => {
+            (Some(default), value) if default == value => {}
+            (_, Value::Object(entries)) if !entries.is_empty() => {
                 for (key, entry) in entries {
                     let prefix_len = path.len();
                     path.push('/');
                     path.push_str(&key.replace('~', "~0").replace('/', "~1"));
-                    walk(default.get(key), entry, path, changes);
+                    walk(
+                        default.and_then(|default| default.get(key)),
+                        entry,
+                        path,
+                        changes,
+                    );
                     path.truncate(prefix_len);
                 }
             }
-            (Some(default), value) if default == value => {}
             _ => {
                 changes.insert(path.clone(), value.clone());
             }
         }
     }
 
-    // Configuration::eq compares only validated_yaml. Serialize to compare effective settings.
-    let default = serde_json::to_value(parse("").expect("the default configuration is valid"))
-        .expect("Configuration serializes");
-    let value = serde_json::to_value(config).expect("Configuration serializes");
+    let default = parse("").expect("the default configuration is valid");
+    let document = |config: &Configuration| {
+        config
+            .validated_yaml
+            .clone()
+            .expect("parsed configurations retain their document")
+    };
     let mut changes = BTreeMap::new();
-    walk(Some(&default), &value, &mut String::new(), &mut changes);
+    walk(
+        Some(&document(&default)),
+        &document(config),
+        &mut String::new(),
+        &mut changes,
+    );
     changes
 }
 
@@ -185,8 +200,10 @@ fn changed_settings_name_each_setting() {
     let changes = changed_settings(&config);
 
     assert_eq!(changes["/supergraph/listen"], json!("127.0.0.1:4001"));
-    let redis = &changes["/supergraph/query_planning/cache/redis"];
-    assert_eq!(redis["urls"], json!(["redis://localhost"]));
+    assert_eq!(
+        changes["/supergraph/query_planning/cache/redis/urls"],
+        json!(["redis://localhost"])
+    );
 }
 
 /// Each fixture, loaded as an operator would load it, keeps the effective settings recorded in
@@ -662,6 +679,14 @@ fn schema_declared_top_level_defaults_match_the_default_configuration() {
         .as_object()
         .expect("the root schema declares properties");
 
+    // The typed settings, without the documents they were parsed from.
+    let settings = |mut config: Configuration| {
+        config.validated_yaml = None;
+        config.raw_yaml = None;
+        format!("{config:?}")
+    };
+    let omitted = settings(parse("").expect("the default configuration is valid"));
+
     let mut checked = 0usize;
     for (key, property_schema) in properties {
         let Some(default) = property_schema.get("default") else {
@@ -677,10 +702,10 @@ fn schema_declared_top_level_defaults_match_the_default_configuration() {
         let config = parse(&format!("{key}: {default}\n")).unwrap_or_else(|error| {
             panic!("[{key}] loading rejected its own schema-declared default: {error}")
         });
-        let changes = changed_settings(&config);
-        assert!(
-            changes.is_empty(),
-            "[{key}, set to the schema's own declared default] changed {changes:?}"
+        assert_eq!(
+            settings(config),
+            omitted,
+            "[{key}, set to the schema's own declared default] changed the typed settings"
         );
     }
 
@@ -702,8 +727,13 @@ fn rate_limit_settings_are_applied() {
         });
         let changes = changed_settings(&config);
         assert_eq!(
-            changes["/traffic_shaping"]["all"]["global_rate_limit"],
-            json!({ "capacity": capacity, "interval": interval }),
+            changes["/traffic_shaping/all/global_rate_limit/capacity"],
+            json!(capacity),
+            "{changes:?}"
+        );
+        assert_eq!(
+            changes["/traffic_shaping/all/global_rate_limit/interval"],
+            json!(interval),
             "{changes:?}"
         );
     }

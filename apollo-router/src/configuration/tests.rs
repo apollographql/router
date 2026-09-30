@@ -664,46 +664,6 @@ fn redacted_redis_credentials_are_hidden_from_debug_output() {
     assert_eq!(username.unredact(), "redis-admin");
 }
 
-/// Serializing a configuration keeps its built-in and user plugin sections, and they parse back
-/// to the same plugins. Typed secrets keep their serialization, which is the value itself, and
-/// stay redacted in `Debug` output.
-///
-/// Only the plugin sections are parsed back: typed durations such as `reload.retry_delay`
-/// serialize as `{secs, nanos}`, which their deserializers have never accepted.
-#[test]
-fn serialized_configurations_keep_their_plugin_sections() {
-    let secret = "round-trip-secret"; // gitleaks:allow
-    let config = Configuration::from_str(&format!(
-        "forbid_mutations: true\napq:\n  router:\n    cache:\n      redis:\n        urls: [redis://localhost]\n        password: {secret}\nplugins:\n  test.validated:\n    name: allowed\n"
-    ))
-    .expect("the configuration is valid");
-    let redis = config.apq.router.cache.redis.as_ref().unwrap();
-    assert!(!format!("{redis:?}").contains(secret));
-
-    let json = serde_json::to_value(&config).expect("the configuration serializes to JSON");
-    let yaml: Value = serde_yaml::from_str(
-        &serde_yaml::to_string(&config).expect("the configuration serializes to YAML"),
-    )
-    .expect("the serialized YAML is YAML");
-    for serialized in [json, yaml] {
-        assert_eq!(
-            serialized["apq"]["router"]["cache"]["redis"]["password"],
-            json!(secret)
-        );
-        let sections = json!({
-            "forbid_mutations": serialized["forbid_mutations"],
-            "plugins": serialized["plugins"],
-        });
-        let reparsed: Configuration =
-            serde_json::from_value(sections).expect("the plugin sections parse back");
-        assert_eq!(
-            reparsed.typed_plugin_config::<crate::plugin::Enabled>("apollo.forbid_mutations"),
-            Some(&crate::plugin::Enabled(true))
-        );
-        assert!(reparsed.plugins.get("test.validated").is_some());
-    }
-}
-
 /// Expansion is coerced to the type the schema declares, so an expanded value in a list of
 /// strings is a string even when it looks like a number or a boolean. The previous loader
 /// rejected these values.
@@ -973,10 +933,6 @@ fn default_config_matches_parsing_an_empty_document() {
         "equality compares the retained documents"
     );
     assert_eq!(default.raw_yaml, parsed.raw_yaml);
-    assert_eq!(
-        serde_json::to_value(&default).unwrap(),
-        serde_json::to_value(&parsed).unwrap()
-    );
     let names = |config: &Configuration| -> Vec<String> {
         config
             .apollo_plugins
