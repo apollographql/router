@@ -1,0 +1,30 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+
+# Requestless `@connect` directives whose selections reference request-phase
+# data only inside the argument of a short-circuited `->and`/`->or` call. Even
+# though the argument is never evaluated at runtime (the receiver is a literal
+# `false`/`true`), computing its shape must still record the variable
+# consumption, so both fields below should trigger
+# `RequestlessSelectionUsesRequestData`:
+#
+# - `Query.ok`    — `$status` inside `$(false)->and(...)`.
+# - `Query.trace` — `$response.headers.trace` inside `$(true)->or(...)`.
+type Query {
+  ok: Boolean
+    @connect(
+      selection: """
+        $(false)->and($status->eq(200))
+      """
+    )
+
+  trace: Boolean
+    @connect(
+      selection: """
+        $(true)->or($response.headers.trace)
+      """
+    )
+}

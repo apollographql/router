@@ -332,6 +332,19 @@ impl ShapeContext {
         }
     }
 
+    /// Returns a clone of this context that shares the consumption trie but
+    /// is not the child of any method call, so shapes computed with it are
+    /// not recorded as method argument shapes. For computing an argument's
+    /// shape only for its consumption side effects, when the argument is
+    /// never evaluated at runtime (a short-circuited `->and`/`->or`), so its
+    /// errors must not be carried into the method's result shape.
+    pub(crate) fn without_method_call(&self) -> Self {
+        Self {
+            method_call: None,
+            ..self.clone()
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn spec(&self) -> ConnectSpec {
         self.spec

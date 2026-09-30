@@ -123,6 +123,21 @@ fn or_shape(
     // At runtime, a true input gives true without evaluating any argument,
     // so no argument can make the result missing or report an error.
     if matches!(input_shape.case(), ShapeCase::Bool(Some(true))) {
+        // Still compute each argument's shape for its side effect of
+        // recording variable consumption (used by requestless-connector
+        // validation), but with a context that does not record argument
+        // shapes, since the errors they carry must not surface for arguments
+        // that are never evaluated at runtime.
+        if let Some(MethodArgs { args, .. }) = method_args {
+            let arg_context = context.without_method_call();
+            for arg in args {
+                let _ = arg.compute_output_shape(
+                    &arg_context,
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                );
+            }
+        }
         return Shape::bool(method_name.shape_location(context.source_id()));
     }
 

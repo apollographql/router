@@ -1,0 +1,23 @@
+---
+source: apollo-federation/src/connectors/validation/mod.rs
+expression: errors
+input_file: apollo-federation/src/connectors/validation/test_data/requestless_short_circuit_and_or.graphql
+---
+[
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.ok`: selection consumes `$status` (the response status) but the directive has no transport (no `http:`)\nDetails: $status",
+        locations: [
+            20:23..20:30,
+        ],
+    },
+    Message {
+        code: RequestlessSelectionUsesRequestData,
+        message: "`@connect(selection:)` on `Query.trace`: selection consumes `$response` (the response headers) but the directive has no transport (no `http:`)\nDetails: $response { headers { trace } }",
+        locations: [
+            27:21..27:30,
+            27:31..27:38,
+            27:39..27:44,
+        ],
+    },
+]
