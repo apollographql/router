@@ -1,6 +1,5 @@
 //! Parses router configuration with `apollo-configuration`.
 
-use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt;
@@ -70,13 +69,6 @@ pub(crate) fn check_plugin_rules(value: &impl Validate) -> Result<(), Configurat
     apollo_configuration::validate(ByRef(value))
         .map(|_| ())
         .map_err(|errors| ConfigError::ValidationError(errors).into())
-}
-
-thread_local! {
-    /// Set when plugin validation rules reported an error during the current parse.
-    /// apollo-configuration returns schema and rule failures as the same error variant, so the
-    /// migration fallback reads this to tell them apart.
-    static PLUGIN_RULES_FAILED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The configuration a document deserializes to, and the top-level keys it has. The keys decide
@@ -162,14 +154,8 @@ impl<'de> Visitor<'de> for ConfigurationVisitor {
 
 /// Runs the validation rules of every plugin section the document has.
 impl Validate for ParsedConfiguration {
-    fn validate<'a>(&self, mut errors: ErrorCollector<'a>) {
-        let before = errors.len();
-        validate_plugin_sections(&self.config, errors.inner(), |name| {
-            self.keys.contains(name)
-        });
-        if errors.len() > before {
-            PLUGIN_RULES_FAILED.set(true);
-        }
+    fn validate<'a>(&self, errors: ErrorCollector<'a>) {
+        validate_plugin_sections(&self.config, errors, |name| self.keys.contains(name));
     }
 }
 
@@ -407,18 +393,18 @@ impl ConfigurationParser {
             })?
         };
         let mut config = match migrate(&file, migration) {
-            Ok(None) => parse_document(text, self).map_err(report_error),
-            Ok(Some(migrated)) => parse_document(&migrated, self).map_err(|failure| {
+            Ok(None) => parse_document(text, self).map_err(|error| report_error(error, &file)),
+            Ok(Some(migrated)) => parse_document(&migrated, self).map_err(|error| {
                 tracing::warn!(
                     "Configuration was upgraded automatically, then failed to load. Error locations refer to the upgraded configuration, not to your file."
                 );
-                report_error(failure)
+                report_error(error, &file)
             }),
             Err(error) => {
                 tracing::warn!(
                     "Configuration could not be upgraded automatically, so it is loaded as written: {error}. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
                 );
-                parse_document(text, self).map_err(report_error)
+                parse_document(text, self).map_err(|error| report_error(error, &file))
             }
         }?;
         if self.dev_mode {
@@ -511,30 +497,21 @@ pub(crate) fn parse_configuration(
         .parse_with_migration(text, migration)
 }
 
-/// Suggests `router config upgrade` for a configuration that fails schema validation. Upgrading
-/// cannot fix a plugin's own validation rules, so their failures get no hint.
-fn report_error(failure: ParseFailure) -> ConfigurationError {
-    if matches!(failure.error, ConfigError::ValidationError(_)) && !failure.plugin_rules {
+/// Suggests `router config upgrade` for a configuration that fails validation, when that upgrade
+/// would change the operator's `file`. The upgrade is run here without logging, and only on
+/// failure, so a configuration that loads pays nothing for it. A failing upgrade gives no hint.
+fn report_error(error: ConfigError, file: &Value) -> ConfigurationError {
+    if matches!(error, ConfigError::ValidationError(_)) && upgrade_would_change(file) {
         tracing::warn!(
             "Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you are upgrading from Router 2.x, please refer to the upgrade guide: {UPGRADE_GUIDE}"
         );
     }
-    ConfigurationError::from(failure.error)
+    ConfigurationError::from(error)
 }
 
-/// A document that failed to parse, and whether only plugin validation rules rejected it.
-struct ParseFailure {
-    error: ConfigError,
-    plugin_rules: bool,
-}
-
-impl From<ConfigError> for ParseFailure {
-    fn from(error: ConfigError) -> Self {
-        Self {
-            error,
-            plugin_rules: false,
-        }
-    }
+/// Whether the upgrade `router config upgrade` performs changes `file`.
+fn upgrade_would_change(file: &Value) -> bool {
+    upgrade_configuration(file, false, UpgradeMode::Major).is_ok_and(|upgraded| upgraded != *file)
 }
 
 /// Parses the typed configuration, then the expanded document, with the same options. The retained
@@ -542,16 +519,8 @@ impl From<ConfigError> for ParseFailure {
 ///
 /// apollo-configuration returns the typed value only, not the expanded document it validated, so
 /// the document is read by a second parser that shares the first's provider snapshot.
-fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ParseFailure> {
-    PLUGIN_RULES_FAILED.set(false);
-    let ParsedConfiguration { mut config, .. } =
-        parser
-            .config
-            .parse_yaml(text)
-            .map_err(|error| ParseFailure {
-                error,
-                plugin_rules: PLUGIN_RULES_FAILED.replace(false),
-            })?;
+fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configuration, ConfigError> {
+    let ParsedConfiguration { mut config, .. } = parser.config.parse_yaml(text)?;
     let ExpandedDocument(mut document) = parser.document.parse_yaml(text)?;
     if let Some(plugins) = document
         .get_mut("plugins")
@@ -970,12 +939,14 @@ mod tests {
         );
     }
 
-    /// A configuration that fails validation may only need `router config upgrade`, so the
-    /// operator is told about it.
+    /// A file that fails validation and that `router config upgrade` would change gets a hint to
+    /// run it.
     #[test]
-    fn validation_errors_suggest_router_config_upgrade() {
+    fn validation_errors_suggest_router_config_upgrade_when_it_would_change_the_file() {
+        let text = "cors:\n  origins:\n    - https://example.com\nthis_key_does_not_exist_anywhere: true\n";
+
         assert_logs(
-            || parse("this_key_does_not_exist_anywhere: true\n"),
+            || parse(text),
             |lines| {
                 lines
                     .iter()
@@ -985,6 +956,17 @@ mod tests {
                     .then_some(())
                     .ok_or_else(|| "expected a hint to run `router config upgrade`".to_string())
             },
+        )
+        .expect_err("the key is unknown");
+    }
+
+    /// A file that fails validation but that `router config upgrade` would not change gets no
+    /// hint.
+    #[test]
+    fn validation_errors_do_not_suggest_router_config_upgrade_when_it_changes_nothing() {
+        assert_logs(
+            || parse("this_key_does_not_exist_anywhere: true\n"),
+            no_upgrade_hint,
         )
         .expect_err("the key is unknown");
     }
@@ -1194,21 +1176,14 @@ mod tests {
     }
 
     /// A migrated copy that fails only its plugins' rules is not replaced by the file, which
-    /// would fail on the settings migration fixed and hide the rule's error. There is no hint to
-    /// run `router config upgrade`, which cannot fix a rule failure.
+    /// would fail on the settings migration fixed and hide the rule's error.
     #[test]
     fn migrated_documents_failing_plugin_rules_report_the_rule() {
         let text = "cors:\n  origins:\n    - https://example.com\nplugins:\n  test.validated:\n    name: reserved\n";
 
-        let error = assert_logs(
-            || parse(text),
-            |lines| {
-                no_upgrade_hint(lines)?;
-                migrated_copy_warning(lines)
-            },
-        )
-        .expect_err("the plugin's rule rejects the name")
-        .to_string();
+        let error = assert_logs(|| parse(text), migrated_copy_warning)
+            .expect_err("the plugin's rule rejects the name")
+            .to_string();
 
         assert!(
             error.contains("the name `reserved` is not allowed"),
@@ -1217,7 +1192,8 @@ mod tests {
         assert!(!error.contains("origins"), "{error}");
     }
 
-    /// A rule failure in a file that needs no migration gets no `router config upgrade` hint.
+    /// A file that fails only a plugin's rule, which `router config upgrade` would not change,
+    /// gets no hint.
     #[test]
     fn plugin_rule_failures_do_not_suggest_router_config_upgrade() {
         assert_logs(
@@ -1268,7 +1244,8 @@ mod tests {
     }
 
     /// When migration itself fails, the file is loaded as written, so its diagnostics quote the
-    /// file. Here the legacy `origins` cannot be moved into a `policies` that is not a list.
+    /// file. Here the legacy `origins` cannot be moved into a `policies` that is not a list. The
+    /// `router config upgrade` dry run fails the same way, so there is no hint to run it.
     #[test]
     fn failed_migrations_load_the_file_as_written() {
         let text =
@@ -1277,6 +1254,7 @@ mod tests {
         let error = assert_logs(
             || parse(text),
             |lines| {
+                no_upgrade_hint(lines)?;
                 lines
                     .iter()
                     .any(|line| line.contains("could not be upgraded automatically"))
