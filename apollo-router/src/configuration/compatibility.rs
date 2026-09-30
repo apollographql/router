@@ -15,6 +15,8 @@ use serde_json::json;
 use super::Configuration;
 use super::ConfigurationError;
 use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::assert_logs;
+use super::apollo_configuration_parse::migrated_copy_warning;
 use super::apollo_configuration_parse::parse_configuration;
 use super::expansion::Expansion;
 use super::expansion::Override;
@@ -25,7 +27,6 @@ use super::upgrade::upgrade_configuration;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::spec::Schema;
-use crate::test_harness::tracing_test;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -413,31 +414,20 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 /// settings, so the error is the traffic shaping timeout, not the settings migration fixed.
 #[test]
 fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
-    let _guard = tracing_test::dispatcher_guard();
-
-    let error = parse(include_str!(
-        "testdata/compat/plugin_config_error_after_migration.yaml"
-    ))
+    let error = assert_logs(
+        || {
+            parse(include_str!(
+                "testdata/compat/plugin_config_error_after_migration.yaml"
+            ))
+        },
+        migrated_copy_warning,
+    )
     .expect_err("the traffic shaping timeout is invalid")
     .to_string();
 
     assert!(error.contains("apollo.traffic_shaping"), "{error}");
     assert!(error.contains("timeout: not-a-duration"), "{error}");
     assert!(!error.contains("apollo.subscription"), "{error}");
-    tracing_test::logs_assert(|lines| {
-        if let Some(line) = lines
-            .iter()
-            .find(|line| line.contains("could not be upgraded automatically"))
-        {
-            return Err(format!("the file must not be loaded instead: {line}"));
-        }
-        lines
-            .iter()
-            .any(|line| line.contains("refer to the upgraded configuration"))
-            .then_some(())
-            .ok_or_else(|| "the warning must say which document the errors refer to".into())
-    })
-    .unwrap();
 }
 
 /// The sandbox checks run once the document has been parsed, so a migrated document that

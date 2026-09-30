@@ -563,6 +563,43 @@ fn parse_document(text: &str, parser: &ConfigurationParser) -> Result<Configurat
     Ok(config)
 }
 
+/// Runs `run` inside a span unique to this call, then checks the lines logged in that span. Tests
+/// share one log buffer, so a check that a line is absent must look only at its own lines.
+#[cfg(test)]
+pub(crate) fn assert_logs<T>(
+    run: impl FnOnce() -> T,
+    check: impl Fn(&[&str]) -> Result<(), String>,
+) -> T {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    use crate::test_harness::tracing_test;
+
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let _guard = tracing_test::dispatcher_guard();
+    let result = tracing::info_span!("assert_logs", call).in_scope(run);
+    tracing_test::logs_with_scope_assert(&format!("assert_logs{{call={call}}}"), check).unwrap();
+    result
+}
+
+/// Checks that the migrated copy's errors were reported, with a warning that says so, and that
+/// the file as written was not loaded instead.
+#[cfg(test)]
+pub(crate) fn migrated_copy_warning(lines: &[&str]) -> Result<(), String> {
+    if let Some(line) = lines
+        .iter()
+        .find(|line| line.contains("could not be upgraded automatically"))
+    {
+        return Err(format!("the file must not be loaded instead: {line}"));
+    }
+    lines
+        .iter()
+        .any(|line| line.contains("refer to the upgraded configuration"))
+        .then_some(())
+        .ok_or_else(|| "the warning must say which document the errors refer to".into())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicUsize;
@@ -573,7 +610,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::test_harness::tracing_test;
 
     fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
         parse_configuration(text, ExternalValues::default(), Migration::WithinMajor)
@@ -872,53 +908,53 @@ mod tests {
 
     #[test]
     fn migration_reports_what_it_changed() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        parse(include_str!(
-            "testdata/compat/needs_minor_migration_cors_origins.yaml"
-        ))
+        assert_logs(
+            || {
+                parse(include_str!(
+                    "testdata/compat/needs_minor_migration_cors_origins.yaml"
+                ))
+            },
+            |lines| {
+                lines
+                    .iter()
+                    .any(|line| line.contains("needs to be upgraded"))
+                    .then_some(())
+                    .ok_or_else(|| {
+                        "the adapter must report applied migrations like the production loader"
+                            .to_string()
+                    })
+            },
+        )
         .expect("the adapter migrates legacy CORS settings");
-
-        tracing_test::logs_assert(|lines| {
-            lines
-                .iter()
-                .any(|line| line.contains("needs to be upgraded"))
-                .then_some(())
-                .ok_or_else(|| {
-                    "the adapter must report applied migrations like the production loader"
-                        .to_string()
-                })
-        })
-        .unwrap();
     }
 
     /// `router config validate` reports migrations itself, so its parse omits the summary error.
     /// Each migration's own notice still prints, as it does at startup.
     #[test]
     fn quiet_migration_omits_the_upgrade_required_error() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        parse_configuration(
-            include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
-            ExternalValues::default(),
-            Migration::WithinMajorQuietly,
+        assert_logs(
+            || {
+                parse_configuration(
+                    include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
+                    ExternalValues::default(),
+                    Migration::WithinMajorQuietly,
+                )
+            },
+            |lines| {
+                if let Some(line) = lines
+                    .iter()
+                    .find(|line| line.contains("needs to be upgraded"))
+                {
+                    return Err(format!("unexpected upgrade-required error: {line}"));
+                }
+                lines
+                    .iter()
+                    .any(|line| line.contains("CORS configuration has been migrated"))
+                    .then_some(())
+                    .ok_or_else(|| "the CORS migration's own notice must still print".to_string())
+            },
         )
         .expect("the adapter migrates legacy CORS settings");
-
-        tracing_test::logs_assert(|lines| {
-            if let Some(line) = lines
-                .iter()
-                .find(|line| line.contains("needs to be upgraded"))
-            {
-                return Err(format!("unexpected upgrade-required error: {line}"));
-            }
-            lines
-                .iter()
-                .any(|line| line.contains("CORS configuration has been migrated"))
-                .then_some(())
-                .ok_or_else(|| "the CORS migration's own notice must still print".to_string())
-        })
-        .unwrap();
     }
 
     #[test]
@@ -938,20 +974,19 @@ mod tests {
     /// operator is told about it.
     #[test]
     fn validation_errors_suggest_router_config_upgrade() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        parse("this_key_does_not_exist_anywhere: true\n").expect_err("the key is unknown");
-
-        tracing_test::logs_assert(|lines| {
-            lines
-                .iter()
-                .any(|line| {
-                    line.contains("router config upgrade") && line.contains("from-router-v2")
-                })
-                .then_some(())
-                .ok_or_else(|| "expected a hint to run `router config upgrade`".to_string())
-        })
-        .unwrap();
+        assert_logs(
+            || parse("this_key_does_not_exist_anywhere: true\n"),
+            |lines| {
+                lines
+                    .iter()
+                    .any(|line| {
+                        line.contains("router config upgrade") && line.contains("from-router-v2")
+                    })
+                    .then_some(())
+                    .ok_or_else(|| "expected a hint to run `router config upgrade`".to_string())
+            },
+        )
+        .expect_err("the key is unknown");
     }
 
     /// Parsing stops at the first plugin section that fails to deserialize, and reports it at the
@@ -1163,52 +1198,33 @@ mod tests {
     /// run `router config upgrade`, which cannot fix a rule failure.
     #[test]
     fn migrated_documents_failing_plugin_rules_report_the_rule() {
-        let _guard = tracing_test::dispatcher_guard();
         let text = "cors:\n  origins:\n    - https://example.com\nplugins:\n  test.validated:\n    name: reserved\n";
 
-        let error = parse(text)
-            .expect_err("the plugin's rule rejects the name")
-            .to_string();
+        let error = assert_logs(
+            || parse(text),
+            |lines| {
+                no_upgrade_hint(lines)?;
+                migrated_copy_warning(lines)
+            },
+        )
+        .expect_err("the plugin's rule rejects the name")
+        .to_string();
 
         assert!(
             error.contains("the name `reserved` is not allowed"),
             "{error}"
         );
         assert!(!error.contains("origins"), "{error}");
-        tracing_test::logs_assert(|lines| {
-            if let Some(line) = lines.iter().find(|line| {
-                line.contains("could not be upgraded automatically")
-                    || line.contains("router config upgrade")
-            }) {
-                return Err(format!("unexpected fallback or upgrade hint: {line}"));
-            }
-            lines
-                .iter()
-                .any(|line| line.contains("refer to the upgraded configuration"))
-                .then_some(())
-                .ok_or_else(|| "the warning must say which document the errors refer to".into())
-        })
-        .unwrap();
     }
 
     /// A rule failure in a file that needs no migration gets no `router config upgrade` hint.
     #[test]
     fn plugin_rule_failures_do_not_suggest_router_config_upgrade() {
-        let _guard = tracing_test::dispatcher_guard();
-
-        parse("plugins:\n  test.validated:\n    name: reserved\n")
-            .expect_err("the plugin's rule rejects the name");
-
-        tracing_test::logs_assert(|lines| {
-            match lines
-                .iter()
-                .find(|line| line.contains("router config upgrade"))
-            {
-                Some(line) => Err(format!("unexpected upgrade hint: {line}")),
-                None => Ok(()),
-            }
-        })
-        .unwrap();
+        assert_logs(
+            || parse("plugins:\n  test.validated:\n    name: reserved\n"),
+            no_upgrade_hint,
+        )
+        .expect_err("the plugin's rule rejects the name");
     }
 
     /// Once migration succeeds, the migrated copy is the document that is loaded. A schema error in
@@ -1216,10 +1232,9 @@ mod tests {
     /// written is not parsed again.
     #[test]
     fn schema_errors_after_migration_are_reported_from_the_migrated_copy() {
-        let _guard = tracing_test::dispatcher_guard();
         let text = "# operator comment\ncors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
 
-        let error = parse(text)
+        let error = assert_logs(|| parse(text), migrated_copy_warning)
             .expect_err("the unknown key is invalid in the migrated copy")
             .to_string();
 
@@ -1231,67 +1246,60 @@ mod tests {
         // on line 5 of the file.
         assert!(error.contains("[6:1]"), "{error}");
         assert!(!error.contains("[5:1]"), "{error}");
-        assert_migrated_copy_warning();
     }
 
     /// Expansion errors after a successful migration are reported from the migrated copy too.
     #[test]
     fn expansion_errors_after_migration_are_reported_from_the_migrated_copy() {
-        let _guard = tracing_test::dispatcher_guard();
         // Migration 2045 moves the unresolvable reference under `deduplication.all`.
         let text =
             "# operator comment\nsubscription:\n  deduplication:\n    enabled: ${env.MISSING}\n";
 
-        let error = parse_configuration(text, env("PRESENT", "1"), Migration::WithinMajor)
-            .expect_err("the reference cannot be resolved")
-            .to_string();
+        let error = assert_logs(
+            || parse_configuration(text, env("PRESENT", "1"), Migration::WithinMajor),
+            migrated_copy_warning,
+        )
+        .expect_err("the reference cannot be resolved")
+        .to_string();
 
         assert!(error.contains("expansion value not present"), "{error}");
         assert!(error.contains("all:"), "{error}");
         assert!(!error.contains("# operator comment"), "{error}");
-        assert_migrated_copy_warning();
     }
 
     /// When migration itself fails, the file is loaded as written, so its diagnostics quote the
     /// file. Here the legacy `origins` cannot be moved into a `policies` that is not a list.
     #[test]
     fn failed_migrations_load_the_file_as_written() {
-        let _guard = tracing_test::dispatcher_guard();
         let text =
             "# operator comment\ncors:\n  origins:\n    - \"https://example.com\"\n  policies: 3\n";
 
-        let error = parse(text)
-            .expect_err("the file as written is invalid")
-            .to_string();
+        let error = assert_logs(
+            || parse(text),
+            |lines| {
+                lines
+                    .iter()
+                    .any(|line| line.contains("could not be upgraded automatically"))
+                    .then_some(())
+                    .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
+            },
+        )
+        .expect_err("the file as written is invalid")
+        .to_string();
 
         // The file's own lines: the comment makes `origins` line 3 and `policies` line 5.
         assert!(error.contains("'origins' was unexpected"), "{error}");
         assert!(error.contains("[3:3]"), "{error}");
         assert!(error.contains("[5:13]"), "{error}");
-        tracing_test::logs_assert(|lines| {
-            lines
-                .iter()
-                .any(|line| line.contains("could not be upgraded automatically"))
-                .then_some(())
-                .ok_or_else(|| "the fallback must warn that the upgrade failed".to_string())
-        })
-        .unwrap();
     }
 
-    fn assert_migrated_copy_warning() {
-        tracing_test::logs_assert(|lines| {
-            if let Some(line) = lines
-                .iter()
-                .find(|line| line.contains("could not be upgraded automatically"))
-            {
-                return Err(format!("the file must not be loaded instead: {line}"));
-            }
-            lines
-                .iter()
-                .any(|line| line.contains("refer to the upgraded configuration"))
-                .then_some(())
-                .ok_or_else(|| "the warning must say which document the errors refer to".into())
-        })
-        .unwrap();
+    fn no_upgrade_hint(lines: &[&str]) -> Result<(), String> {
+        match lines
+            .iter()
+            .find(|line| line.contains("router config upgrade"))
+        {
+            Some(line) => Err(format!("unexpected upgrade hint: {line}")),
+            None => Ok(()),
+        }
     }
 }
