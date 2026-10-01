@@ -595,6 +595,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 "User",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: POST /create/user",
         ),
@@ -829,6 +830,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /filter/users",
         ),
@@ -1198,6 +1200,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /by-company/{$args.company.name}",
         ),
@@ -1997,6 +2000,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/realist
                 "User",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /{$args.id}",
         ),

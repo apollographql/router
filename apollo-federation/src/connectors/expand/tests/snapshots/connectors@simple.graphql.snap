@@ -157,6 +157,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                 ),
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /",
         ),
@@ -404,6 +405,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                 "User",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /{$args.id}",
         ),
@@ -653,6 +655,7 @@ input_file: apollo-federation/src/connectors/expand/tests/schemas/expand/simple.
                 "String",
             ),
         ),
+        methods: None,
         label: Label(
             "connectors.example http: GET /{$this.c}/d",
         ),

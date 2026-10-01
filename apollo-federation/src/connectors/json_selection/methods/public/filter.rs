@@ -2,6 +2,7 @@ use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::connectors::json_selection::ApplyContext;
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
 use crate::connectors::json_selection::MethodArgs;
@@ -10,7 +11,6 @@ use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
-use crate::connectors::spec::ConnectSpec;
 use crate::impl_arrow_method;
 
 impl_arrow_method!(FilterMethod, filter_method, filter_shape);
@@ -33,8 +33,9 @@ fn filter_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    spec: ConnectSpec,
+    context: &ApplyContext,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
+    let spec = context.spec();
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return (
             None,
@@ -55,7 +56,7 @@ fn filter_method(
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
             let (applied_opt, arg_errors) =
-                first_arg.apply_to_path(element, vars, &input_path, spec);
+                first_arg.apply_to_path(element, vars, &input_path, context);
             errors.extend(arg_errors);
 
             match applied_opt {
@@ -90,7 +91,7 @@ fn filter_method(
         // For non-array inputs, treat as single-element array
         // Apply filter condition and return either [value] or []
         let (condition_result, mut condition_errors) =
-            first_arg.apply_to_path(data, vars, input_path, spec);
+            first_arg.apply_to_path(data, vars, input_path, context);
 
         match condition_result {
             Some(JSON::Bool(true)) => (Some(JSON::Array(vec![data.clone()])), condition_errors),
