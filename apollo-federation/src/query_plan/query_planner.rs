@@ -177,7 +177,7 @@ pub struct QueryPlanningStatistics {
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
-    /// `non_local_selections_count` can be `None`, if 
+    /// `non_local_selections_count` can be `None`, if
     /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
     pub non_local_selections_count: Option<u64>,
 }
