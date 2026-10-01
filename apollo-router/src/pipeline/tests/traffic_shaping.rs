@@ -1,26 +1,26 @@
 //! Subgraph traffic shaping as the subgraph stage places it.
 //!
 //! Each test builds the real subgraph stack with [`build_subgraph_services`]. A stub plugin
-//! answers every request from its subgraph hook, so it sits beneath traffic shaping, and time is
+//! replaces the subgraph service with a [`tower_test::mock`] from its subgraph hook, so the mock
+//! sits beneath traffic shaping and the tests see what the subgraph actually receives. Time is
 //! paused, so timeouts and rate-limit intervals elapse deterministically.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower_test::mock::Mock;
 
 use crate::Configuration;
 use crate::pipeline::build_subgraph_services;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginUnstable;
+use crate::plugin::test::assert_no_mock_calls;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
@@ -30,14 +30,11 @@ use crate::services::subgraph;
 
 const SUBGRAPH: &str = "test";
 
-type Responder = Arc<
-    dyn Fn(SubgraphRequest) -> BoxFuture<'static, Result<SubgraphResponse, BoxError>> + Send + Sync,
->;
+type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
 
-/// Replaces the subgraph service with `respond`, and counts the requests that reach it.
+/// Replaces the subgraph service with `mock`.
 struct StubSubgraph {
-    respond: Responder,
-    calls: Arc<AtomicUsize>,
+    mock: Mock<SubgraphRequest, SubgraphResponse>,
 }
 
 #[async_trait::async_trait]
@@ -53,27 +50,15 @@ impl PluginUnstable for StubSubgraph {
         _subgraph_name: &str,
         _service: subgraph::BoxCloneService,
     ) -> subgraph::BoxCloneService {
-        let respond = self.respond.clone();
-        let calls = self.calls.clone();
-        tower::service_fn(move |req| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            respond(req)
-        })
-        .boxed_clone()
+        self.mock.clone().boxed_clone()
     }
 
     fn unstable_method(&self) {}
 }
 
-/// The subgraph services built with `traffic_shaping` config, answered by `respond`, and the
-/// count of requests that reached `respond`.
-async fn subgraph_services(
-    traffic_shaping: serde_json::Value,
-    respond: impl Fn(SubgraphRequest) -> BoxFuture<'static, Result<SubgraphResponse, BoxError>>
-    + Send
-    + Sync
-    + 'static,
-) -> (SubgraphServices, Arc<AtomicUsize>) {
+/// The subgraph services built with `traffic_shaping` config, and the handle of the mock that
+/// stands in for the subgraph.
+async fn subgraph_services(traffic_shaping: serde_json::Value) -> (SubgraphServices, Handle) {
     let mut plugins = Plugins::default();
     // The plugins the subgraph stage requires, in the order the router registers them.
     for (name, config) in [
@@ -89,12 +74,8 @@ async fn subgraph_services(
             .expect("plugin builds");
         plugins.insert(name.to_string(), plugin);
     }
-    let calls = Arc::new(AtomicUsize::new(0));
-    let stub = StubSubgraph {
-        respond: Arc::new(respond),
-        calls: calls.clone(),
-    };
-    plugins.insert("stub".to_string(), Box::new(stub));
+    let (mock, handle) = tower_test::mock::pair();
+    plugins.insert("stub".to_string(), Box::new(StubSubgraph { mock }));
 
     let http_services = [(
         SUBGRAPH.to_string(),
@@ -104,36 +85,32 @@ async fn subgraph_services(
     .collect();
     let services =
         build_subgraph_services(http_services, &Arc::new(plugins), &Configuration::default());
-    (services, calls)
+    (services, handle)
 }
 
 /// Like [`subgraph_services`], for one clone of the test subgraph's service.
 async fn subgraph_service(
     traffic_shaping: serde_json::Value,
-    respond: impl Fn(SubgraphRequest) -> BoxFuture<'static, Result<SubgraphResponse, BoxError>>
-    + Send
-    + Sync
-    + 'static,
-) -> (subgraph::BoxCloneService, Arc<AtomicUsize>) {
-    let (services, calls) = subgraph_services(traffic_shaping, respond).await;
+) -> (subgraph::BoxCloneService, Handle) {
+    let (services, handle) = subgraph_services(traffic_shaping).await;
     (
         services.get(SUBGRAPH).expect("the subgraph has a service"),
-        calls,
+        handle,
     )
 }
 
-/// Answers every request successfully after `delay`.
-fn respond_after(
-    delay: Duration,
-) -> impl Fn(SubgraphRequest) -> BoxFuture<'static, Result<SubgraphResponse, BoxError>> + Clone {
-    move |req| {
-        Box::pin(async move {
-            tokio::time::sleep(delay).await;
-            Ok(SubgraphResponse::fake_builder()
-                .context(req.context)
-                .build())
-        })
-    }
+/// Answers the next request the subgraph receives successfully, and returns that request.
+async fn answer_next(handle: &mut Handle) -> SubgraphRequest {
+    let (request, response) = handle
+        .next_request()
+        .await
+        .expect("the subgraph receives a request");
+    response.send_response(
+        SubgraphResponse::fake_builder()
+            .context(request.context.clone())
+            .build(),
+    );
+    request
 }
 
 fn rate_limit_of_one_per_100ms() -> serde_json::Value {
@@ -158,37 +135,41 @@ fn error_code(response: &SubgraphResponse) -> Option<String> {
 
 #[tokio::test(start_paused = true)]
 async fn timeout_is_answered_with_gateway_timeout() {
-    let (mut service, _) = subgraph_service(
-        serde_json::json!({ "subgraphs": { SUBGRAPH: { "timeout": "100ms" } } }),
-        respond_after(Duration::from_secs(1)),
-    )
-    .await;
+    let (mut service, mut handle) =
+        subgraph_service(serde_json::json!({ "subgraphs": { SUBGRAPH: { "timeout": "100ms" } } }))
+            .await;
 
+    // The subgraph never answers.
     let response = send(&mut service).await;
     assert_eq!(response.response.status(), StatusCode::GATEWAY_TIMEOUT);
     assert_eq!(error_code(&response).as_deref(), Some("GATEWAY_TIMEOUT"));
+    assert!(handle.next_request().await.is_some());
 }
 
 #[tokio::test(start_paused = true)]
 async fn subgraph_without_shaping_config_is_not_shaped() {
-    // With no `all` or subgraph block, not even the 30 second default timeout applies.
-    let (mut service, _) = subgraph_service(
-        serde_json::json!({}),
-        respond_after(Duration::from_secs(60)),
-    )
-    .await;
+    let (mut service, mut handle) = subgraph_service(serde_json::json!({})).await;
 
-    let response = send(&mut service).await;
+    // With no `all` or subgraph block, not even the 30 second default timeout applies.
+    let (response, ()) = tokio::join!(send(&mut service), async {
+        let (request, response) = handle.next_request().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        response.send_response(
+            SubgraphResponse::fake_builder()
+                .context(request.context)
+                .build(),
+        );
+    });
     assert_eq!(response.response.status(), StatusCode::OK);
     assert!(response.response.body().errors.is_empty());
 }
 
 #[tokio::test(start_paused = true)]
 async fn rate_limited_request_never_reaches_the_subgraph() {
-    let (mut service, calls) =
-        subgraph_service(rate_limit_of_one_per_100ms(), respond_after(Duration::ZERO)).await;
+    let (mut service, mut handle) = subgraph_service(rate_limit_of_one_per_100ms()).await;
 
-    assert_eq!(send(&mut service).await.response.status(), StatusCode::OK);
+    let (first, _) = tokio::join!(send(&mut service), answer_next(&mut handle));
+    assert_eq!(first.response.status(), StatusCode::OK);
 
     let limited = send(&mut service).await;
     assert_eq!(limited.response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -196,74 +177,83 @@ async fn rate_limited_request_never_reaches_the_subgraph() {
         error_code(&limited).as_deref(),
         Some("REQUEST_RATE_LIMITED")
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
 
     tokio::time::advance(Duration::from_millis(100)).await;
 
-    assert_eq!(send(&mut service).await.response.status(), StatusCode::OK);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let (after_interval, _) = tokio::join!(send(&mut service), answer_next(&mut handle));
+    assert_eq!(after_interval.response.status(), StatusCode::OK);
+    // Only the first and last of the three requests reached the subgraph.
+    assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn clones_of_the_service_share_one_rate_limit() {
-    let (services, calls) =
-        subgraph_services(rate_limit_of_one_per_100ms(), respond_after(Duration::ZERO)).await;
+    let (services, mut handle) = subgraph_services(rate_limit_of_one_per_100ms()).await;
     let mut first = services.get(SUBGRAPH).unwrap();
     let mut second = services.get(SUBGRAPH).unwrap();
 
-    assert_eq!(send(&mut first).await.response.status(), StatusCode::OK);
+    let (ok, _) = tokio::join!(send(&mut first), answer_next(&mut handle));
+    assert_eq!(ok.response.status(), StatusCode::OK);
     assert_eq!(
         send(&mut second).await.response.status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_no_mock_calls(handle).await;
 }
 
-/// Sends two identical requests concurrently and returns how many reached the subgraph.
-async fn concurrent_identical_requests(deduplicate_query: bool) -> usize {
-    let (service, calls) = subgraph_service(
+/// Sends two identical requests concurrently, and checks that `expected` of them reach the
+/// subgraph.
+async fn identical_requests_reach_the_subgraph(deduplicate_query: bool, expected: usize) {
+    let (service, mut handle) = subgraph_service(
         serde_json::json!({ "subgraphs": { SUBGRAPH: { "deduplicate_query": deduplicate_query } } }),
-        respond_after(Duration::from_secs(1)),
     )
     .await;
 
-    let (first, second) = tokio::join!(
+    let answer = async {
+        let mut received = Vec::new();
+        for _ in 0..expected {
+            received.push(handle.next_request().await.unwrap());
+        }
+        // Paused time only advances once every task is idle, so the other request has reached
+        // deduplication before the subgraph answers.
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        for (request, response) in received {
+            response.send_response(
+                SubgraphResponse::fake_builder()
+                    .context(request.context)
+                    .build(),
+            );
+        }
+    };
+    let (first, second, ()) = tokio::join!(
         service
             .clone()
             .oneshot(SubgraphRequest::fake_builder().build()),
         service.oneshot(SubgraphRequest::fake_builder().build()),
+        answer,
     );
     assert_eq!(first.unwrap().response.status(), StatusCode::OK);
     assert_eq!(second.unwrap().response.status(), StatusCode::OK);
-
-    calls.load(Ordering::SeqCst)
+    assert_no_mock_calls(handle).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn deduplication_shares_one_in_flight_request() {
-    assert_eq!(concurrent_identical_requests(true).await, 1);
-    assert_eq!(concurrent_identical_requests(false).await, 2);
+    identical_requests_reach_the_subgraph(true, 1).await;
+    identical_requests_reach_the_subgraph(false, 2).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn compression_sets_content_encoding() {
-    let (mut service, _) = subgraph_service(
+    let (mut service, mut handle) = subgraph_service(
         serde_json::json!({ "subgraphs": { SUBGRAPH: { "compression": "gzip" } } }),
-        |req: SubgraphRequest| {
-            let encoding = req
-                .subgraph_request
-                .headers()
-                .get(CONTENT_ENCODING)
-                .cloned();
-            Box::pin(async move {
-                assert_eq!(encoding, Some(HeaderValue::from_static("gzip")));
-                Ok(SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .build())
-            })
-        },
     )
     .await;
 
-    assert_eq!(send(&mut service).await.response.status(), StatusCode::OK);
+    let (response, request) = tokio::join!(send(&mut service), answer_next(&mut handle));
+    assert_eq!(response.response.status(), StatusCode::OK);
+    assert_eq!(
+        request.subgraph_request.headers().get(CONTENT_ENCODING),
+        Some(&HeaderValue::from_static("gzip"))
+    );
 }
