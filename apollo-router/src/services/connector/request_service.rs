@@ -175,6 +175,9 @@ impl Request {
     /// a connector request deliberately, for example to circuit break on an upstream a
     /// plugin knows to be unhealthy.
     ///
+    /// The router's own circuit breaker counts the failure against the connector source,
+    /// like any other failure of a request it has admitted.
+    ///
     /// The error's remaining fields are derived from the request and are not settable,
     /// for the same reason the coprocessor does not let a coprocessor set them: the
     /// path and response key are what merge the failure back into the right place in

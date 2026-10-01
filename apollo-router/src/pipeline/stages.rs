@@ -25,6 +25,7 @@ use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::circuit_breaker::CircuitBreaker;
 use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::headers::Headers;
@@ -233,6 +234,11 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
+        // The circuit judges execution, never admission: what admission turns away never
+        // reaches it, and the timeout and every plugin hook are beneath it, so an expired
+        // timeout or a failing coprocessor counts against the subgraph. Below deduplication,
+        // one call to the subgraph is one sample, and every joined request shares its answer.
+        .apply_plugin_layer(plugins, |c: &CircuitBreaker| c.subgraph_circuit_layer(name))
         // Below deduplication, one timeout covers every request joined to the same fetch, and it
         // bounds the plugins and the call beneath it.
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
@@ -306,6 +312,9 @@ pub(crate) fn build_connector_request_services(
                 // The operation's `max_requests` is admission too: a request over it is never sent,
                 // so no plugin hook sees it.
                 .layer(RequestLimitLayer)
+                .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
+                    c.connector_source_circuit_layer(&source)
+                })
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_timeout_layer(&source)
                 })

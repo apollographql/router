@@ -145,6 +145,10 @@ pub(crate) async fn create_plugins(
     // A test-only built-in plugin with validation rules (see `apollo_configuration_parse`).
     #[cfg(test)]
     registrar.add_optional("test_validated").await;
+
+    // Implements no wrap hook, so this position only sets construction order: its layers are
+    // placed in `pipeline::stages`, outside every plugin's subgraph and connector request hooks.
+    registrar.add_optional("circuit_breaker").await;
     registrar.add_user_plugins(extra).await;
 
     // Because this plugin intercepts subgraph requests
