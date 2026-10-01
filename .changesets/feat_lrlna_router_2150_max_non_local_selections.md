@@ -8,4 +8,4 @@ This additional adds a metric for tracking current number of non-local
 selections, which is a histogram available under
 `apollo.router.query_planning.plan.non_local_selections`.
 
-By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/
+By [@lrlna](https://github.com/lrlna) in https://github.com/apollographql/router/pull/10349
