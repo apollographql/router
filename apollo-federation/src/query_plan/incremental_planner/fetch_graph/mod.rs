@@ -857,21 +857,26 @@ impl FetchGraph {
         // serialized plan.
         #[allow(clippy::type_complexity)]
         let mut groups: IndexMap<
-            (Arc<str>, Option<String>, Vec<FetchDataPathElement>),
+            (
+                Arc<str>,
+                Option<String>,
+                Vec<FetchDataPathElement>,
+                Option<String>,
+            ),
             Vec<NodeIndex>,
         > = IndexMap::new();
         for node_idx in self.graph.node_indices() {
             let node = &self.graph[node_idx];
-            // Each connector resolution is its own fetch; merging two would
-            // send one connector's fields to the other's endpoint.
-            if node.connector.is_some() {
-                continue;
-            }
             if let FetchGroupKind::Entity { merge_at } = &node.kind {
+                // Only nodes for the same connector merge; merging two
+                // connectors would send one's fields to the other's endpoint.
                 let key = (
                     node.subgraph.clone(),
                     node.defer_ref.clone(),
                     strip_merge_at_conditions(merge_at),
+                    node.connector
+                        .as_ref()
+                        .map(|connector| connector.id.synthetic_name()),
                 );
                 groups.entry(key).or_default().push(node_idx);
             }

@@ -356,7 +356,13 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        let supergraph_schema = supergraph.schema.clone();
+        // The incremental planner plans connectors without expanding them, so
+        // it needs the entity keys expansion would have synthesized.
+        let supergraph_schema = if config.incremental_planner.enabled {
+            crate::connectors::index::add_connector_entity_keys(&supergraph.schema)?
+        } else {
+            supergraph.schema.clone()
+        };
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: config.incremental_delivery.enable_defer,
             ..Default::default()

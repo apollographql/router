@@ -3,6 +3,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Value;
+use apollo_compiler::name;
+use apollo_compiler::schema::ExtendedType;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -10,10 +16,13 @@ use super::id::ConnectorPosition;
 use super::json_selection::SelectionAnalysis;
 use super::models::Connector;
 use super::models::EntityResolver;
+use super::spec::ConnectSpec;
 use crate::error::FederationError;
 use crate::operation::FragmentSpreadCache;
 use crate::operation::SelectionSet;
+use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
+use crate::supergraph::extract_subgraphs_from_supergraph;
 
 /// Lookup table from (type, field) to connectors that can resolve it.
 ///
@@ -122,18 +131,7 @@ impl ConnectorIndex {
                 }
 
                 // Entity resolvers, keyed by the entity type they resolve.
-                let entity_type = match (&connector.id.directive, &connector.entity_resolver) {
-                    // Type-level connectors are always entity resolvers.
-                    (ConnectorPosition::Type(pos), _) => Some(pos.type_name.clone()),
-                    (ConnectorPosition::Field(_), Some(EntityResolver::Explicit)) => {
-                        connector.id.directive.base_type_name(schema.schema())
-                    }
-                    (ConnectorPosition::Field(_), Some(_)) => {
-                        connector.id.directive.parent_type_name()
-                    }
-                    (ConnectorPosition::Field(_), None) => None,
-                };
-                if let Some(entity_type) = entity_type {
+                if let Some(entity_type) = resolver_entity_type(connector, schema.schema()) {
                     index
                         .entity_resolvers
                         .entry(entity_type)
@@ -215,6 +213,110 @@ impl ConnectorIndex {
             .iter()
             .map(|(service, subgraph)| (service.as_str(), subgraph.as_ref()))
     }
+}
+
+/// The entity type an entity-resolver connector produces: the type itself for
+/// type-level connectors, the field's type for `Explicit` resolvers, and the
+/// parent type for `Implicit` resolvers.
+fn resolver_entity_type(connector: &Connector, schema: &Schema) -> Option<Name> {
+    match (&connector.id.directive, &connector.entity_resolver) {
+        (ConnectorPosition::Type(pos), _) => Some(pos.type_name.clone()),
+        (ConnectorPosition::Field(_), Some(EntityResolver::Explicit)) => {
+            connector.id.directive.base_type_name(schema)
+        }
+        (ConnectorPosition::Field(_), Some(_)) => connector.id.directive.parent_type_name(),
+        (ConnectorPosition::Field(_), None) => None,
+    }
+}
+
+/// Adds to the supergraph the `@key` that connector expansion synthesizes for
+/// each entity-resolver connector whose type has no key in its subgraph. The
+/// connector's subgraph then defines the `_Entity` union and `_entities` field
+/// that entity fetches through the connector are written against.
+pub(crate) fn add_connector_entity_keys(
+    supergraph: &ValidFederationSchema,
+) -> Result<ValidFederationSchema, FederationError> {
+    // The connect spec is linked either directly or, in older supergraphs,
+    // through a `@join__directive` on the schema definition.
+    let connect_identity = ConnectSpec::identity();
+    let connect_url = format!("{}/{}/v", connect_identity.domain, connect_identity.name);
+    let uses_connectors = supergraph
+        .schema()
+        .schema_definition
+        .directives
+        .iter()
+        .any(|directive| directive.to_string().contains(&connect_url));
+    if !uses_connectors {
+        return Ok(supergraph.clone());
+    }
+    let (_, join_spec, _) = crate::validate_supergraph_for_query_planning(supergraph)?;
+    let graph_directive = join_spec.graph_directive_definition(supergraph)?;
+    let mut graph_enum_values: HashMap<String, Name> = HashMap::new();
+    for (value_name, value) in join_spec.graph_enum_definition(supergraph)?.values.iter() {
+        if let Some(application) = value.directives.get(&graph_directive.name) {
+            let arguments = join_spec.graph_directive_arguments(application)?;
+            graph_enum_values.insert(arguments.name.to_owned(), value_name.clone());
+        }
+    }
+
+    let mut keys: Vec<(Name, Name, String)> = Vec::new();
+    for (subgraph_name, subgraph) in extract_subgraphs_from_supergraph(supergraph, Some(false))? {
+        let schema = subgraph.schema.schema();
+        let Some(graph) = graph_enum_values.get(subgraph_name.as_ref()) else {
+            continue;
+        };
+        for connector in Connector::from_schema(schema, &subgraph_name)? {
+            let Some(entity_type) = resolver_entity_type(&connector, schema) else {
+                continue;
+            };
+            let Ok(Some(field_set)) = connector.resolvable_key(schema) else {
+                continue;
+            };
+            // Extraction rejects a key whose fields the subgraph doesn't define.
+            let fields_defined = field_set.selection_set.selections.iter().all(|selection| {
+                selection
+                    .as_field()
+                    .is_some_and(|field| schema.type_field(&entity_type, &field.name).is_ok())
+            });
+            let fields = field_set.serialize().no_indent().to_string();
+            let known = keys.iter().any(|(g, t, _)| g == graph && *t == entity_type);
+            if fields_defined && !known {
+                keys.push((graph.clone(), entity_type, fields));
+            }
+        }
+    }
+    if keys.is_empty() {
+        return Ok(supergraph.clone());
+    }
+
+    let type_directive_name = join_spec
+        .type_directive_definition(supergraph)?
+        .name
+        .clone();
+    let mut schema = supergraph.schema().clone().into_inner();
+    for (graph, type_name, fields) in keys {
+        let directives = match schema.types.get_mut(&type_name) {
+            Some(ExtendedType::Object(object)) => &mut object.make_mut().directives,
+            Some(ExtendedType::Interface(interface)) => &mut interface.make_mut().directives,
+            _ => continue,
+        };
+        let Some(application) = directives.iter_mut().find(|directive| {
+            directive.name == type_directive_name
+                && directive
+                    .specified_argument_by_name("graph")
+                    .and_then(|value| value.as_enum())
+                    == Some(&graph)
+        }) else {
+            continue;
+        };
+        if application.specified_argument_by_name("key").is_none() {
+            application.make_mut().arguments.push(Node::new(Argument {
+                name: name!("key"),
+                value: Node::new(Value::String(fields)),
+            }));
+        }
+    }
+    FederationSchema::new(schema)?.assume_valid()
 }
 
 #[cfg(test)]
