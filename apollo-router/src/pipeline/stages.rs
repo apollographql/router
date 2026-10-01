@@ -290,9 +290,6 @@ pub(crate) fn build_connector_request_services(
                     h.connector_headers_layer(&source)
                 })
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
-                // Placed as in [`build_subgraph_service`], for the same reasons, including the
-                // unconditional buffer and a timeout that answers its own errors. Connector
-                // sources have no deduplication.
                 .buffered()
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_error_response_layer(&source)

@@ -59,8 +59,6 @@ async fn stage_plugins(traffic_shaping: serde_json::Value, stub: Box<dyn DynPlug
     plugins
 }
 
-// Subgraphs
-
 type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
 
 /// Replaces the subgraph service with `mock`.
@@ -274,8 +272,6 @@ async fn compression_sets_content_encoding() {
     );
 }
 
-// Connector sources
-
 type SourceHandle = tower_test::mock::Handle<request_service::Request, request_service::Response>;
 
 /// Replaces the connector source's request service with `mock`.
@@ -320,7 +316,6 @@ async fn source_services(
     (move || services.get(SOURCE.to_string()), handle)
 }
 
-/// Answers the next request the connector source receives successfully, and returns that request.
 async fn answer_next_source(handle: &mut SourceHandle) -> request_service::Request {
     let (request, response) = handle
         .next_request()
@@ -346,7 +341,6 @@ fn source_rate_limit_of_one_per_100ms() -> serde_json::Value {
     } } })
 }
 
-/// Sends a request to the source and returns its transport result.
 async fn send_to_source(service: &mut request_service::BoxCloneService) -> Result<(), Error> {
     service
         .ready()
