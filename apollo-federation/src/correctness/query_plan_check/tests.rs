@@ -263,63 +263,93 @@ fn written_plan(planner: &QueryPlanner, json: &str) -> QueryPlan {
     }
 }
 
-// A planner may alias a `@requires` input, for example when two fetches need the same field with
-// different subselections, and rename it back with an input rewrite. The router applies input
-// rewrites to each representation before sending it, so `reviews` still receives `isbn`.
-#[test]
-fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
-    let planner = planner();
-    let plan = written_plan(
-        &planner,
-        r#"{ "Sequence": { "nodes": [
-            { "Fetch": {
-                "subgraph_name": "locations",
+/// A plan whose `reviews` fetch reads `isbn` from the key `__require_0_isbn` and renames it back
+/// with an input rewrite. `locations_operation` is what the first fetch selects.
+fn aliased_requires_plan(planner: &QueryPlanner, locations_operation: &str) -> QueryPlan {
+    let json = r#"{ "Sequence": { "nodes": [
+        { "Fetch": {
+            "subgraph_name": "locations",
+            "variable_usages": [],
+            "operation_document": "LOCATIONS_OPERATION",
+            "operation_kind": "query",
+            "input_rewrites": [],
+            "output_rewrites": [],
+            "context_rewrites": []
+        } },
+        { "Flatten": {
+            "path": [{ "Key": ["feed", null] }, { "AnyIndex": null }],
+            "node": { "Fetch": {
+                "subgraph_name": "reviews",
                 "variable_usages": [],
-                "operation_document": "{ feed { __typename ... on Book { __typename id __require_0_isbn: isbn } } }",
+                "requires": [{
+                    "kind": "InlineFragment",
+                    "typeCondition": "Book",
+                    "selections": [
+                        { "kind": "Field", "name": "__typename" },
+                        { "kind": "Field", "name": "id" },
+                        { "kind": "Field", "alias": "__require_0_isbn", "name": "isbn" }
+                    ]
+                }],
+                "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Book { blurb } } }",
                 "operation_kind": "query",
-                "input_rewrites": [],
+                "input_rewrites": [{ "KeyRenamer": {
+                    "path": [{ "Key": ["__require_0_isbn", null] }],
+                    "rename_key_to": "isbn"
+                } }],
                 "output_rewrites": [],
                 "context_rewrites": []
-            } },
-            { "Flatten": {
-                "path": [{ "Key": ["feed", null] }, { "AnyIndex": null }],
-                "node": { "Fetch": {
-                    "subgraph_name": "reviews",
-                    "variable_usages": [],
-                    "requires": [{
-                        "kind": "InlineFragment",
-                        "typeCondition": "Book",
-                        "selections": [
-                            { "kind": "Field", "name": "__typename" },
-                            { "kind": "Field", "name": "id" },
-                            { "kind": "Field", "alias": "__require_0_isbn", "name": "isbn" }
-                        ]
-                    }],
-                    "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Book { blurb } } }",
-                    "operation_kind": "query",
-                    "input_rewrites": [{ "KeyRenamer": {
-                        "path": [{ "Key": ["__require_0_isbn", null] }],
-                        "rename_key_to": "isbn"
-                    } }],
-                    "output_rewrites": [],
-                    "context_rewrites": []
-                } }
             } }
-        ] } }"#,
-    );
+        } }
+    ] } }"#;
+    written_plan(
+        planner,
+        &json.replace("LOCATIONS_OPERATION", locations_operation),
+    )
+}
+
+fn check_blurb_plan(planner: &QueryPlanner, plan: &QueryPlan) -> Result<(), CorrectnessError> {
     let operation = ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
         "{ feed { ... on Book { blurb } } }",
         "operation.graphql",
     )
     .expect("valid operation");
-
     crate::correctness::check_plan(
         planner.api_schema(),
         planner.supergraph_schema(),
         planner.subgraph_schemas(),
         &operation,
-        &plan,
+        plan,
     )
-    .unwrap();
+}
+
+// A planner may alias a `@requires` input, for example when two fetches need the same field with
+// different subselections, and rename it back with an input rewrite. The router applies input
+// rewrites to each representation before sending it, so `reviews` still receives `isbn`.
+#[test]
+fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
+    let planner = planner();
+    let plan = aliased_requires_plan(
+        &planner,
+        "{ feed { __typename ... on Book { __typename id __require_0_isbn: isbn } } }",
+    );
+    check_blurb_plan(&planner, &plan).unwrap();
+}
+
+// The rename reads from `__require_0_isbn`, so fetching `isbn` under its own name leaves the
+// representation without it.
+#[test]
+fn an_input_rewrite_from_a_key_the_plan_never_fetched_is_rejected() {
+    let planner = planner();
+    let plan = aliased_requires_plan(
+        &planner,
+        "{ feed { __typename ... on Book { __typename id isbn } } }",
+    );
+    let error = check_blurb_plan(&planner, &plan).expect_err("isbn never reaches reviews");
+    assert!(
+        error
+            .to_string()
+            .contains("has not fetched what the subgraph demands"),
+        "{error}"
+    );
 }
