@@ -21,12 +21,23 @@ use shape::Shape;
 /// you can get an [`&ExtendedType`] by calling [`SchemaTypeRef::extended`], you
 /// can pretty much always safely use a [`SchemaTypeRef`] where you would have
 /// previously used an [`ExtendedType`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SchemaTypeRef<'schema> {
     schema: &'schema Schema,
     name: &'schema Name,
     ext: &'schema ExtendedType,
 }
+
+/// Two refs are equal when they name the same type in the same schema. A derived
+/// `PartialEq` would compare the referenced `Schema` and `ExtendedType` by value,
+/// making every comparison walk the whole schema.
+impl PartialEq for SchemaTypeRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.schema, other.schema) && self.name == other.name
+    }
+}
+
+impl Eq for SchemaTypeRef<'_> {}
 
 impl<'schema> SchemaTypeRef<'schema> {
     pub(super) fn new(schema: &'schema Schema, name: &str) -> Option<Self> {
