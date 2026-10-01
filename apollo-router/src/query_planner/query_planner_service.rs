@@ -207,6 +207,7 @@ impl QueryPlannerService {
             evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
             fuel_consumed: plan.statistics.fuel_consumed.get(),
             fuel_remaining: plan.statistics.fuel_remaining.get(),
+            non_local_selections_count: plan.statistics.non_local_selections_count,
         })
     }
 
@@ -312,6 +313,7 @@ impl QueryPlannerService {
             evaluated_plan_paths,
             fuel_consumed,
             fuel_remaining,
+            non_local_selections_count,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -346,6 +348,9 @@ impl QueryPlannerService {
             "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
             evaluated_plan_paths
         );
+        if let Some(non_local_selections_count) = non_local_selections_count {
+            metric_query_planning_non_local_selections(non_local_selections_count);
+        }
         let span = tracing::Span::current();
         if let Some(fuel_consumed) = fuel_consumed {
             span.record("query_planning.fuel_consumed", fuel_consumed);
@@ -584,6 +589,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) evaluated_plan_paths: u64,
     pub(super) fuel_consumed: Option<u64>,
     pub(super) fuel_remaining: Option<u64>,
+    pub(super) non_local_selections_count: Option<u64>,
 }
 
 /// The outcome of a query-planning attempt. Shared across query-planning metrics (e.g.
@@ -638,6 +644,15 @@ pub(crate) fn metric_query_planning_plan_duration(
         "planner" = planner,
         "outcome" = outcome,
         "job.type" = compute_job_type
+    );
+}
+
+pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
+    u64_histogram_with_unit!(
+        "apollo.router.query_planning.plan.non_local_selections",
+        "Number of non-local selections estimated during query planning traversal, used for optimising plan option exploration",
+        "{selection}",
+        count
     );
 }
 
@@ -1314,6 +1329,27 @@ mod tests {
             )
             .await
             .expect("query plans");
+    }
+    
+    #[test(tokio::test)]
+    async fn test_non_local_selections_histogram() {
+        async {
+            let _ = plan(
+                EXAMPLE_SCHEMA,
+                include_str!("testdata/query.graphql"),
+                include_str!("testdata/query.graphql"),
+                None,
+                PlanOptions::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_histogram_exists!("apollo.router.query_planning.plan.non_local_selections", u64);
+            assert_histogram_count!("apollo.router.query_planning.plan.non_local_selections", 1 as u64);
+            assert_histogram_sum!("apollo.router.query_planning.plan.non_local_selections", 7 as u64);
+        }
+        .with_metrics()
+        .await;
     }
 
     #[test(tokio::test)]

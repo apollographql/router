@@ -264,6 +264,9 @@ pub struct QueryPlanningStatistics {
     /// the budget ran out.
     #[serde(default, skip_serializing_if = "cell_is_none")]
     pub fuel_remaining: Cell<Option<u64>>,
+    /// `non_local_selections_count` can be `None`, if 
+    /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
+    pub non_local_selections_count: Option<u64>,
 }
 
 fn cell_is_none(cell: &Cell<Option<u64>>) -> bool {
@@ -687,6 +690,7 @@ impl QueryPlanner {
             node: root_node,
             statistics: QueryPlanningStatistics {
                 best_plan_cost: cost,
+                non_local_selections_count: non_local_selection_state.as_ref().map(|s| s.count),
                 ..statistics
             },
         };
@@ -1645,6 +1649,7 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            non_local_selections_count: Some(30),
             ..Default::default()
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
@@ -1652,7 +1657,8 @@ type User
         {
           "evaluated_plan_count": 10,
           "evaluated_plan_paths": 20,
-          "best_plan_cost": null
+          "best_plan_cost": null,
+          "non_local_selections_count": 30
         }
         "###);
 
