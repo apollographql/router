@@ -682,7 +682,7 @@ pub(crate) fn metric_query_planning_plan_duration(
 pub(crate) fn metric_query_planning_non_local_selections(count: u64) {
     u64_histogram_with_unit!(
         "apollo.router.query_planning.plan.non_local_selections",
-        "Number of non-local selections estimated during query planning traversal, used for optimising plan option exploration",
+        "Number of non-local selections estimated during query planning traversal, used for optimizing plan option exploration",
         "{selection}",
         count
     );
