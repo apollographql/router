@@ -6,11 +6,12 @@
 //! `apollo.router.telemetry.metrics.cardinality_overflow`.
 //!
 //! For the public meter provider the counter goes up when a metric starts overflowing, not on
-//! every collection; see [`OverflowTracker`]. Push exporters (OTLP) are checked on every export,
-//! with OpenTelemetry metric names. The Prometheus exporter serves scrapes from its own internal
-//! collector, which never calls back into a reader wrapper, so the Prometheus endpoint checks each
-//! scrape itself, with Prometheus family names. The Apollo usage-reporting exporters count every
-//! export that has overflow, as they always have.
+//! every collection; see [`OverflowTracker`]. Push exporters (OTLP, Apollo usage reporting) are
+//! checked on every export, with OpenTelemetry metric names. The Prometheus exporter is a pull
+//! exporter: it serves scrapes from its own internal collector, which never calls back into a
+//! reader wrapper, so the Prometheus endpoint checks each scrape itself, with Prometheus family
+//! names. The Apollo usage-reporting exporters don't track starts: they count every export that
+//! has overflow, as they always have.
 //!
 //! Each meter provider must count an overflow once. The metrics builder decides which source
 //! counts for the public meter provider; see [`OverflowCountSwitch`].
@@ -34,10 +35,10 @@ use parking_lot::Mutex;
 use prometheus::proto::MetricFamily;
 
 const OTEL_METRIC_OVERFLOW_KEY: &str = "otel.metric.overflow";
-/// [`OTEL_METRIC_OVERFLOW_KEY`] as the Prometheus exporter writes it, with dots sanitized.
+/// [`OTEL_METRIC_OVERFLOW_KEY`] for the Prometheus exporter.
 const PROMETHEUS_OVERFLOW_LABEL: &str = "otel_metric_overflow";
 const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardinality_overflow";
-/// The Prometheus family of [`CARDINALITY_OVERFLOW_METRIC`].
+/// [`CARDINALITY_OVERFLOW_METRIC`] for the Prometheus exporter.
 const PROMETHEUS_CARDINALITY_OVERFLOW_FAMILY: &str =
     "apollo_router_telemetry_metrics_cardinality_overflow_total";
 
@@ -62,7 +63,7 @@ impl OverflowCountSwitch {
     }
 }
 
-/// The metrics a counting source saw overflowing in its last collection.
+/// Metrics observed overflowing during the last collection by a counting source.
 ///
 /// The counter goes up once when a metric starts overflowing, not again while it stays
 /// overflowed. Cumulative sums and histograms keep an overflow until their pipeline is rebuilt,

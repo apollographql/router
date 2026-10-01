@@ -93,13 +93,16 @@ impl MetricsConfigurator for Config {
     }
 }
 
-/// The registry backing the Prometheus endpoint, with the state used to count cardinality
-/// overflow.
+/// What the Prometheus endpoint serves scrapes from: the metrics registry, and the tracker that
+/// scrapes use to count cardinality overflow.
 #[derive(Clone, Debug)]
 pub(crate) struct PrometheusRegistry {
+    /// The metrics each scrape gathers.
     pub(crate) registry: Registry,
-    /// Present when scrapes count cardinality overflow on the public meter provider, which is when
-    /// Prometheus is its only exporter. `None` when a push exporter counts instead.
+    /// The families that were overflowing in the last scrape, so that a scrape counts only those
+    /// that started overflowing since. Present when scrapes count cardinality overflow on the
+    /// public meter provider, which is when Prometheus is its only exporter. `None` when a push
+    /// exporter counts instead.
     pub(crate) overflow_tracker: Option<OverflowTracker>,
 }
 
