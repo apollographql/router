@@ -291,13 +291,52 @@ impl BaseQueryGraphBuilder {
     /// Precompute which followup edges for a given edge are non-trivial.
     fn precompute_non_trivial_followup_edges(&mut self) -> Result<(), FederationError> {
         let mut out_edges_cache = IndexMap::default();
+        let mut root_followups: IndexMap<NodeIndex, Vec<EdgeIndex>> = Default::default();
         for edge in self.query_graph.graph.edge_indices() {
             let edge_weight = self.query_graph.edge_weight(edge)?.clone();
             let (_, tail) = self.query_graph.edge_endpoints(edge)?;
             let out_edges = out_edges_cache
                 .entry(tail)
                 .or_insert_with(|| self.query_graph.out_edge_ids(tail));
-            let mut non_trivial_followups = Vec::with_capacity(out_edges.len());
+            if matches!(
+                edge_weight.transition,
+                QueryGraphEdgeTransition::RootTypeResolution { .. }
+                    | QueryGraphEdgeTransition::SubgraphEnteringTransition
+            ) {
+                // Root transitions reject every outgoing root-resolution edge. Cache the
+                // final result by destination, in addition to the sorted candidate list.
+                if let Some(followups) = root_followups.get(&tail) {
+                    self.query_graph
+                        .non_trivial_followup_edges
+                        .insert(edge, followups.clone());
+                } else {
+                    let mut followups = Vec::new();
+                    for followup_edge in out_edges {
+                        let followup_weight = self.query_graph.edge_weight(*followup_edge)?;
+                        if !matches!(
+                            followup_weight.transition,
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
+                        ) {
+                            followups.push(*followup_edge);
+                        }
+                    }
+                    root_followups.insert(tail, followups.clone());
+                    self.query_graph
+                        .non_trivial_followup_edges
+                        .insert(edge, followups);
+                }
+                continue;
+            }
+            // Key followups can discard most candidates. Other transitions reach this
+            // point only when every candidate survives, so reserve their exact size.
+            let mut non_trivial_followups = if matches!(
+                edge_weight.transition,
+                QueryGraphEdgeTransition::KeyResolution
+            ) {
+                Vec::new()
+            } else {
+                Vec::with_capacity(out_edges.len())
+            };
             for followup_edge in out_edges {
                 let followup_edge_weight = self.query_graph.edge_weight(*followup_edge)?;
                 match edge_weight.transition {
