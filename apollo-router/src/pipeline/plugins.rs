@@ -40,8 +40,6 @@ pub(crate) async fn create_plugins(
     license: Arc<LicenseState>,
     previous_config: Option<Arc<Configuration>>,
 ) -> Result<Plugins, BoxError> {
-    check_plugin_configs(configuration)?;
-
     let extra = extra_plugins.unwrap_or_default();
     let apollo_telemetry_plugin_mandatory = apollo_opentelemetry_initialized();
 
@@ -144,6 +142,9 @@ pub(crate) async fn create_plugins(
     registrar.add_optional("coprocessor").await;
     registrar.add_optional("response_cache").await;
     registrar.add_optional("expose_query_plan").await;
+    // A test-only built-in plugin with validation rules (see `apollo_configuration_parse`).
+    #[cfg(test)]
+    registrar.add_optional("test_validated").await;
     registrar.add_user_plugins(extra).await;
 
     // Because this plugin intercepts subgraph requests
@@ -211,7 +212,7 @@ impl PluginRegistrar<'_> {
             let plugin_config = match self.configuration.plugin_config(&full_name) {
                 Some(config) => config.clone(),
                 // Without a section, the plugin runs with its default config.
-                None => match factory.parse_config(Value::Object(Map::new())) {
+                None => match factory.parse_config_value(Value::Object(Map::new())) {
                     Ok(config) => config,
                     Err(error) => {
                         self.errors.push(ConfigurationError::PluginConfiguration {
@@ -278,17 +279,12 @@ impl PluginRegistrar<'_> {
     /// Instantiates every configured user plugin in configuration order, then appends
     /// the pre-built `extra` instances (supplied by tests) verbatim.
     async fn add_user_plugins(&mut self, extra: Vec<(String, Box<dyn DynPlugin>)>) {
-        let configs = &self.configuration.plugin_configs;
-        for name in configs.unknown_plugins() {
-            self.errors
-                .push(ConfigurationError::PluginUnknown(name.clone()));
-        }
-        for (name, parsed) in configs.user_plugins() {
+        for (name, parsed) in self.configuration.plugins.iter() {
             let user_span = tracing::info_span!("user_plugin", "name" = name);
             async {
                 let previous_config = self
                     .previous_config
-                    .and_then(|previous| previous.plugin_configs.user(name))
+                    .and_then(|previous| previous.plugins.get(name))
                     .map(|previous| previous.config.clone());
                 self.add_plugin(
                     name.to_string(),
@@ -369,24 +365,6 @@ impl PluginRegistrar<'_> {
             Ok(self.plugin_instances)
         }
     }
-}
-
-/// Fails if any plugin's config could not be deserialized. Configuration parsing rejects such a
-/// configuration when it loads, but one deserialized directly with serde still carries the errors.
-pub(crate) fn check_plugin_configs(configuration: &Configuration) -> Result<(), BoxError> {
-    let errors: Vec<ConfigurationError> = configuration
-        .plugin_configs
-        .errors()
-        .iter()
-        .map(|error| error.to_configuration_error())
-        .collect();
-    if errors.is_empty() {
-        return Ok(());
-    }
-    for error in &errors {
-        tracing::error!("{:#}", error);
-    }
-    Err(configuration_errors(&errors))
 }
 
 /// Combines configuration errors into one error that lists each of them.

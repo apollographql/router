@@ -3015,9 +3015,13 @@ async fn missing_entities() {
         .build()
         .unwrap();
     let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys = get_cache_keys_context(&response).expect("missing cache keys");
     let mut response = response.next_response().await.unwrap();
     assert!(remove_debug_extensions_key(&mut response));
     insta::assert_json_snapshot!(response);
+
+    // The second request reads what the first one cached, and cache writes are asynchronous
+    wait_for_cache(&storage, expected_cached_keys(&cache_keys)).await;
 
     // Reuse the same namespace so cached entities from the first request are accessible
     let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
@@ -3132,7 +3136,7 @@ async fn invalidate_by_cache_tag() {
         });
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_cache_tag"), drop_rx)
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
         let map = [
@@ -4457,7 +4461,7 @@ async fn invalidate_by_type() {
         });
 
         let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
-        let storage = Storage::new(&Config::test(false,"test_invalidate_by_subgraph"), drop_rx)
+        let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
         let map = [

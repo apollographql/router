@@ -3395,9 +3395,9 @@ fn connector_batch_resolves_fields_outside_root_selection() {
     "###);
 }
 
-/// A @defer fragment whose data the parent connector returns stays in that
-/// connector's fetch, without the @defer directive, which subgraph operations
-/// cannot carry.
+/// Under a @defer fragment, the field the parent connector returns (`id`)
+/// stays in that connector's fetch without the @defer directive, and the
+/// entity hop for the rest runs in the deferred block.
 #[test]
 fn connector_defer_strips_directive_from_connector_fetch() {
     let schema = include_str!("../fixtures/connector_defer.graphql");
@@ -3422,18 +3422,20 @@ fn connector_defer_strips_directive_from_connector_fetch() {
       Defer {
         Primary {
           { m { f } }:
-          Sequence {
-            Fetch(service: "connectors_Mutation_m_0") {
-              {
-                m {
-                  f
-                  entity {
-                    __typename
-                    id
-                  }
+          Fetch(service: "connectors_Mutation_m_0", id: 0) {
+            {
+              m {
+                f
+                entity {
+                  __typename
+                  id
                 }
               }
-            },
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "m") {
+            { entity { id f } }:
             Flatten(path: "m.entity") {
               Fetch(service: "connectors_Query_e_0") {
                 {
@@ -3449,10 +3451,6 @@ fn connector_defer_strips_directive_from_connector_fetch() {
                 }
               },
             },
-          },
-        }, [
-          Deferred(depends: [], path: "m") {
-            { entity { id f } }:
           },
         ]
       },
@@ -3496,6 +3494,82 @@ fn connector_entity_keys_with_join_directive_link() {
                 name
               }
             }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// An implementation of an @interfaceObject with an entity connector of its
+/// own still routes the interface's connector fields through the interface's
+/// connectors.
+#[test]
+fn connector_interface_object_implementation_with_own_connector() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_interface_object_two_connectors.graphql"),
+        "{ itfs { id ... on T1 { d f } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on Itf {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                __typename
+                ... on T1 {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors2_Query_t1_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T1 {
+                  f
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Query_itf_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  d
+                }
+              }
+            },
           },
         },
       },
