@@ -1,16 +1,15 @@
 //! Subgraph and connector source traffic shaping as their stages place it.
 //!
 //! Each test builds the real stack with [`build_subgraph_services`] or
-//! [`build_connector_request_services`]. A stub plugin replaces the subgraph or connector source
-//! service with a [`tower_test::mock`] from its hook, so the mock sits beneath traffic shaping and
-//! the tests see what the target actually receives. Time is paused, so timeouts and rate-limit
-//! intervals elapse deterministically.
+//! [`build_connector_request_services`] around a [`tower_test::mock`] that sits beneath traffic
+//! shaping, so the tests see what the target actually receives. For a subgraph, a stub plugin
+//! returns the mock from its hook. For a connector source, the mock is the source's HTTP client.
+//! Time is paused, so timeouts and rate-limit intervals elapse deterministically.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_federation::connectors::runtime::errors::Error;
-use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
@@ -22,7 +21,6 @@ use tower_test::mock::Mock;
 use crate::Configuration;
 use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_subgraph_services;
-use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginUnstable;
 use crate::plugin::test::assert_no_mock_calls;
@@ -32,6 +30,9 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServices;
 use crate::services::connector::request_service;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
+use crate::services::router;
 use crate::services::subgraph;
 
 const SUBGRAPH: &str = "test";
@@ -39,8 +40,8 @@ const SUBGRAPH: &str = "test";
 /// [`request_service::Request::test_new`].
 const SOURCE: &str = "test_subgraph.test_sourcename";
 
-/// The plugins both stages require, in the order the router registers them, then `stub`.
-async fn stage_plugins(traffic_shaping: serde_json::Value, stub: Box<dyn DynPlugin>) -> Plugins {
+/// The plugins both stages require, in the order the router registers them.
+async fn stage_plugins(traffic_shaping: serde_json::Value) -> Plugins {
     let mut plugins = Plugins::default();
     for (name, config) in [
         ("apollo.include_subgraph_errors", serde_json::json!({})),
@@ -55,7 +56,6 @@ async fn stage_plugins(traffic_shaping: serde_json::Value, stub: Box<dyn DynPlug
             .expect("plugin builds");
         plugins.insert(name.to_string(), plugin);
     }
-    plugins.insert("stub".to_string(), stub);
     plugins
 }
 
@@ -89,7 +89,8 @@ impl PluginUnstable for StubSubgraph {
 /// stands in for the subgraph.
 async fn subgraph_services(traffic_shaping: serde_json::Value) -> (SubgraphServices, Handle) {
     let (mock, handle) = tower_test::mock::pair();
-    let plugins = stage_plugins(traffic_shaping, Box::new(StubSubgraph { mock })).await;
+    let mut plugins = stage_plugins(traffic_shaping).await;
+    plugins.insert("stub".to_string(), Box::new(StubSubgraph { mock }));
 
     let http_services = [(
         SUBGRAPH.to_string(),
@@ -272,31 +273,7 @@ async fn compression_sets_content_encoding() {
     );
 }
 
-type SourceHandle = tower_test::mock::Handle<request_service::Request, request_service::Response>;
-
-/// Replaces the connector source's request service with `mock`.
-struct StubConnectorSource {
-    mock: Mock<request_service::Request, request_service::Response>,
-}
-
-#[async_trait::async_trait]
-impl PluginUnstable for StubConnectorSource {
-    type Config = ();
-
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        unreachable!("inserted into the plugin registry directly")
-    }
-
-    fn connector_request_service(
-        &self,
-        _service: request_service::BoxCloneService,
-        _source_name: String,
-    ) -> request_service::BoxCloneService {
-        self.mock.clone().boxed_clone()
-    }
-
-    fn unstable_method(&self) {}
-}
+type SourceHandle = tower_test::mock::Handle<HttpRequest, HttpResponse>;
 
 /// A function that hands out clones of [`SOURCE`]'s request service, built with
 /// `traffic_shaping` config, and the handle of the mock that stands in for the source.
@@ -304,19 +281,16 @@ async fn source_services(
     traffic_shaping: serde_json::Value,
 ) -> (impl Fn() -> request_service::BoxCloneService, SourceHandle) {
     let (mock, handle) = tower_test::mock::pair();
-    let plugins = stage_plugins(traffic_shaping, Box::new(StubConnectorSource { mock })).await;
+    let plugins = stage_plugins(traffic_shaping).await;
 
-    let http_services = [(
-        SOURCE.to_string(),
-        crate::services::http::test_http_client_service(SOURCE),
-    )]
-    .into_iter()
-    .collect();
+    let http_services = [(SOURCE.to_string(), mock.boxed_clone())]
+        .into_iter()
+        .collect();
     let services = build_connector_request_services(http_services, &Arc::new(plugins));
     (move || services.get(SOURCE.to_string()), handle)
 }
 
-async fn answer_next_source(handle: &mut SourceHandle) -> request_service::Request {
+async fn answer_next_source(handle: &mut SourceHandle) -> HttpRequest {
     let (request, response) = handle
         .next_request()
         .await
@@ -325,14 +299,11 @@ async fn answer_next_source(handle: &mut SourceHandle) -> request_service::Reque
     request
 }
 
-fn source_response(request: &request_service::Request) -> request_service::Response {
-    request_service::Response::test_new(
-        request.context.clone(),
-        request.key.clone(),
-        Vec::new(),
-        Default::default(),
-        None,
-    )
+fn source_response(request: &HttpRequest) -> HttpResponse {
+    HttpResponse {
+        http_response: http::Response::new(router::body::empty()),
+        context: request.context.clone(),
+    }
 }
 
 fn source_rate_limit_of_one_per_100ms() -> serde_json::Value {
@@ -436,11 +407,8 @@ async fn source_compression_sets_content_encoding() {
         answer_next_source(&mut handle)
     );
     assert!(result.is_ok());
-    let TransportRequest::Http(http_request) = request.transport_request else {
-        panic!("expected an HTTP transport request");
-    };
     assert_eq!(
-        http_request.inner.headers().get(CONTENT_ENCODING),
+        request.http_request.headers().get(CONTENT_ENCODING),
         Some(&HeaderValue::from_static("gzip"))
     );
 }
