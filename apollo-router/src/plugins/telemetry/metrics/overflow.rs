@@ -14,13 +14,11 @@
 //! has overflow, as they always have.
 //!
 //! Each meter provider must count an overflow once. The metrics builder decides which source
-//! counts for the public meter provider; see [`OverflowCountSwitch`].
+//! counts for the public meter provider; see [`OverflowCounting`].
 
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use opentelemetry::Value;
@@ -42,25 +40,17 @@ const CARDINALITY_OVERFLOW_METRIC: &str = "apollo.router.telemetry.metrics.cardi
 const PROMETHEUS_CARDINALITY_OVERFLOW_FAMILY: &str =
     "apollo_router_telemetry_metrics_cardinality_overflow_total";
 
-/// Whether an [`OverflowMetricExporter`] counts the overflow it sees.
-///
-/// Shared with the metrics builder, which turns it on once every exporter is configured, so it
-/// can choose a single counting source for a meter provider. Off by default.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct OverflowCountSwitch(Arc<AtomicBool>);
-
-impl OverflowCountSwitch {
-    fn new(is_on: bool) -> Self {
-        Self(Arc::new(AtomicBool::new(is_on)))
-    }
-
-    pub(crate) fn turn_on(&self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
-
-    fn is_on(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
+/// How an [`OverflowMetricExporter`] counts the overflow it sees.
+#[derive(Clone, Debug)]
+pub(crate) enum OverflowCounting {
+    /// Count every export that has overflow. Used by the Apollo meter providers, which each have
+    /// a single exporter.
+    EveryExport,
+    /// Count when a metric starts overflowing. Used by the public meter provider's counting
+    /// source.
+    Starts(OverflowTracker),
+    /// Don't count, because another source on the same meter provider does.
+    Off,
 }
 
 /// Metrics observed overflowing during the last collection by a counting source.
@@ -125,57 +115,24 @@ fn track_starts<'a>(
 }
 
 /// Wrapper for push metric exporters that detects cardinality overflow.
+///
+/// Exporters on the public meter provider are created through
+/// `MetricsBuilder::public_overflow_exporter`, which chooses their [`OverflowCounting`] so that
+/// only one source counts.
+#[derive(Clone, Debug)]
 pub(crate) struct OverflowMetricExporter<T> {
     inner: T,
-    is_overflow_counted: OverflowCountSwitch,
-    /// Tracks starts of overflow; `None` counts every export that has overflow.
-    tracker: Option<OverflowTracker>,
-}
-
-impl<T: Clone> Clone for OverflowMetricExporter<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            is_overflow_counted: self.is_overflow_counted.clone(),
-            tracker: self.tracker.clone(),
-        }
-    }
+    counting: OverflowCounting,
 }
 
 impl<T> OverflowMetricExporter<T> {
-    /// Create a wrapper for the public meter provider that counts starts of overflow, only while
-    /// `is_overflow_counted` is on. Exporters on the public meter provider are created through
-    /// `MetricsBuilder::public_overflow_exporter` so that only one source counts.
-    pub(crate) fn new(inner: T, is_overflow_counted: OverflowCountSwitch) -> Self {
-        Self {
-            inner,
-            is_overflow_counted,
-            tracker: Some(OverflowTracker::default()),
-        }
-    }
-
-    /// Create a wrapper that counts every export that has overflow. Only for the Apollo meter
-    /// providers, which each have a single exporter.
-    pub(crate) fn with_every_export_counted(inner: T) -> Self {
-        Self {
-            inner,
-            is_overflow_counted: OverflowCountSwitch::new(true),
-            tracker: None,
-        }
+    pub(crate) fn new(inner: T, counting: OverflowCounting) -> Self {
+        Self { inner, counting }
     }
 
     #[cfg(test)]
-    pub(crate) fn is_overflow_counted(&self) -> bool {
-        self.is_overflow_counted.is_on()
-    }
-}
-
-impl<T: Debug> Debug for OverflowMetricExporter<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OverflowMetricExporter")
-            .field("inner", &self.inner)
-            .field("is_overflow_counted", &self.is_overflow_counted.is_on())
-            .finish()
+    pub(crate) fn is_counting(&self) -> bool {
+        !matches!(self.counting, OverflowCounting::Off)
     }
 }
 
@@ -185,12 +142,12 @@ impl<T: PushMetricExporter> PushMetricExporter for OverflowMetricExporter<T> {
         &self,
         metrics: &ResourceMetrics,
     ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        if self.is_overflow_counted.is_on() {
-            let overflowing = overflowing_otel_names(metrics);
-            match &self.tracker {
-                Some(tracker) => tracker.record(overflowing),
-                None => overflowing.for_each(record_cardinality_overflow),
+        match &self.counting {
+            OverflowCounting::EveryExport => {
+                overflowing_otel_names(metrics).for_each(record_cardinality_overflow)
             }
+            OverflowCounting::Starts(tracker) => tracker.record(overflowing_otel_names(metrics)),
+            OverflowCounting::Off => {}
         }
         self.inner.export(metrics)
     }
@@ -381,7 +338,7 @@ mod tests {
         async {
             let exporter = OverflowMetricExporter::new(
                 InMemoryMetricExporter::default(),
-                OverflowCountSwitch::new(true),
+                OverflowCounting::Starts(OverflowTracker::default()),
             );
             let overflowing = collected(3);
 
@@ -413,8 +370,9 @@ mod tests {
     #[tokio::test]
     async fn apollo_push_exporter_counts_every_overflowing_export() {
         async {
-            let exporter = OverflowMetricExporter::with_every_export_counted(
+            let exporter = OverflowMetricExporter::new(
                 InMemoryMetricExporter::default(),
+                OverflowCounting::EveryExport,
             );
             let overflowing = collected(3);
 
@@ -431,27 +389,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn push_exporter_counts_only_while_switched_on() {
+    async fn push_exporter_does_not_count_when_counting_is_off() {
         async {
-            let is_overflow_counted = OverflowCountSwitch::default();
             let exporter = OverflowMetricExporter::new(
                 InMemoryMetricExporter::default(),
-                is_overflow_counted.clone(),
+                OverflowCounting::Off,
             );
-            let overflowing = collected(3);
 
-            exporter.export(&overflowing).await.unwrap();
+            exporter.export(&collected(3)).await.unwrap();
             assert_counter_not_exists!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 u64,
-                "metric.name" = OVERFLOW_METRIC
-            );
-
-            is_overflow_counted.turn_on();
-            exporter.export(&overflowing).await.unwrap();
-            assert_counter!(
-                "apollo.router.telemetry.metrics.cardinality_overflow",
-                1,
                 "metric.name" = OVERFLOW_METRIC
             );
         }
@@ -485,10 +433,13 @@ mod tests {
             let mut resource_metrics = ResourceMetrics::default();
             reader.collect(&mut resource_metrics).unwrap();
 
-            OverflowMetricExporter::with_every_export_counted(InMemoryMetricExporter::default())
-                .export(&resource_metrics)
-                .await
-                .unwrap();
+            OverflowMetricExporter::new(
+                InMemoryMetricExporter::default(),
+                OverflowCounting::EveryExport,
+            )
+            .export(&resource_metrics)
+            .await
+            .unwrap();
             assert_counter_not_exists!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 u64,
