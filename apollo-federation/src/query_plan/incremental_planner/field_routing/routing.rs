@@ -1235,27 +1235,26 @@ impl FieldRoutingSearchSpace {
         type_name: &Name,
         field_name: &Name,
     ) {
-        // An implementation of an @interfaceObject is resolved through the
-        // connectors on the interface, which is the only one of the two the
-        // connector subgraph defines.
-        let inherited: Vec<Arc<IndexedConnector>>;
-        let resolvers = match self.connector_index.entity_resolvers(type_name) {
-            Some(resolvers) => resolvers,
-            None => {
-                inherited = self
-                    .supergraph_schema
+        // An implementation of an @interfaceObject can also be resolved
+        // through the connectors on the interface, which the connector
+        // subgraph defines in its place.
+        let resolvers: Vec<Arc<IndexedConnector>> = self
+            .connector_index
+            .entity_resolvers(type_name)
+            .into_iter()
+            .flatten()
+            .chain(
+                self.supergraph_schema
                     .schema()
                     .get_object(type_name)
                     .into_iter()
                     .flat_map(|object| object.implements_interfaces.iter())
                     .filter_map(|itf| self.connector_index.entity_resolvers(itf))
-                    .flatten()
-                    .cloned()
-                    .collect();
-                &inherited
-            }
-        };
-        for entry in resolvers {
+                    .flatten(),
+            )
+            .cloned()
+            .collect();
+        for entry in &resolvers {
             if !self
                 .connector_index
                 .resolver_provides(&entry.coordinate, field_name.as_str())

@@ -828,6 +828,8 @@ impl FetchGraph {
 
     /// Whether `to` is reachable from `from` via directed edges.
     pub(crate) fn is_reachable(&self, from: NodeIndex, to: NodeIndex) -> bool {
+        #[cfg(test)]
+        tests::REACHABILITY_CHECKS.with(|checks| checks.set(checks.get() + 1));
         petgraph::algo::has_path_connecting(&self.graph, from, to, None)
     }
 
@@ -855,21 +857,26 @@ impl FetchGraph {
         // serialized plan.
         #[allow(clippy::type_complexity)]
         let mut groups: IndexMap<
-            (Arc<str>, Option<String>, Vec<FetchDataPathElement>),
+            (
+                Arc<str>,
+                Option<String>,
+                Vec<FetchDataPathElement>,
+                Option<String>,
+            ),
             Vec<NodeIndex>,
         > = IndexMap::new();
         for node_idx in self.graph.node_indices() {
             let node = &self.graph[node_idx];
-            // Each connector resolution is its own fetch; merging two would
-            // send one connector's fields to the other's endpoint.
-            if node.connector.is_some() {
-                continue;
-            }
             if let FetchGroupKind::Entity { merge_at } = &node.kind {
+                // Only nodes for the same connector merge; merging two
+                // connectors would send one's fields to the other's endpoint.
                 let key = (
                     node.subgraph.clone(),
                     node.defer_ref.clone(),
                     strip_merge_at_conditions(merge_at),
+                    node.connector
+                        .as_ref()
+                        .map(|connector| connector.id.synthetic_name()),
                 );
                 groups.entry(key).or_default().push(node_idx);
             }
@@ -883,6 +890,11 @@ impl FetchGraph {
             // Partition into sets with no transitive dependency between members.
             let merge_sets = self.partition_by_reachability(&group);
 
+            // The partition proved each set's members mutually unreachable, so
+            // the pairwise re-check below is only needed once a merge has
+            // changed the graph. Skipping it before then avoids a quadratic
+            // number of reachability searches on large sets.
+            let mut graph_changed = false;
             for set in merge_sets {
                 if set.len() <= 1 {
                     continue;
@@ -899,9 +911,12 @@ impl FetchGraph {
                         let mut safe = vec![remaining[0]];
                         let mut rest = Vec::new();
                         for &member in &remaining[1..] {
-                            if safe.iter().all(|&kept| {
-                                !self.is_reachable(kept, member) && !self.is_reachable(member, kept)
-                            }) {
+                            if !graph_changed
+                                || safe.iter().all(|&kept| {
+                                    !self.is_reachable(kept, member)
+                                        && !self.is_reachable(member, kept)
+                                })
+                            {
                                 safe.push(member);
                             } else {
                                 rest.push(member);
@@ -911,6 +926,7 @@ impl FetchGraph {
                             let survivor = safe[0];
                             self.union_merge_at_conditions(&safe);
                             self.merge_nodes_into(survivor, &safe[1..]);
+                            graph_changed = true;
                         }
                         remaining = rest;
                     }
@@ -1172,7 +1188,13 @@ pub(super) fn strip_merge_at_conditions(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    thread_local! {
+        pub(super) static REACHABILITY_CHECKS: Cell<usize> = const { Cell::new(0) };
+    }
 
     fn dummy_root_type() -> CompositeTypeDefinitionPosition {
         CompositeTypeDefinitionPosition::Object(
@@ -1783,6 +1805,35 @@ mod tests {
 
         g.pipeline_depths()
             .expect("sibling merging must never create a dependency cycle");
+    }
+
+    #[test]
+    fn merge_sibling_entities_checks_reachability_linearly_for_independent_siblings() {
+        let mut g = FetchGraph::new();
+        let root_sg: Arc<str> = Arc::from("A");
+        let sg: Arc<str> = Arc::from("B");
+        let root = g.get_or_create_root_group(&root_sg, dummy_root_type());
+        // Polymorphic fan-out produces one entity fetch per concrete type
+        // combination, all leaves under the same parent. Production operations
+        // reach 15k such siblings, where a pairwise re-check dominates planning.
+        let siblings = 200;
+        let first = g.add_entity_group(&sg, user_path(None));
+        g.add_dependency(root, first, vec![]);
+        for _ in 1..siblings {
+            let sibling = g.add_entity_group(&sg, user_path(None));
+            g.add_dependency(root, sibling, vec![]);
+        }
+
+        REACHABILITY_CHECKS.with(|checks| checks.set(0));
+        g.merge_sibling_entities();
+
+        assert_eq!(g.node_count(), 2);
+        assert!(g.has_edge(root, first));
+        let checks = REACHABILITY_CHECKS.with(|checks| checks.get());
+        assert!(
+            checks <= siblings,
+            "{checks} reachability checks for {siblings} independent siblings",
+        );
     }
 
     #[test]
