@@ -10,6 +10,8 @@ use shape::Shape;
 use shape::ShapeCase;
 use tracing::trace;
 
+use super::super::defer::extract_defer_label;
+use super::super::defer::strip_defer_directive;
 use super::super::fetch_graph::InputContribution;
 use super::super::fetch_graph::InputRewriteInfo;
 use super::super::shared_path::SharedPath;
@@ -43,6 +45,9 @@ struct DeferredConnectorSelection {
     op_path: SharedPath<Arc<OpPathElement>>,
     /// Response path (within the connector's fetch group) to the parent.
     response_path: SharedPath<FetchDataPathElement>,
+    /// The defer label the selection is under, including any @defer fragment
+    /// crossed during partitioning.
+    defer_ref: Option<String>,
 }
 
 /// Strip array wrappers off a shape: a selection set on a list-typed field
@@ -244,6 +249,7 @@ impl FieldRoutingSearchSpace {
                         source_subgraph,
                         &child_op_path,
                         &child_response_path,
+                        &defer_for_children,
                         &mut deferred,
                     )?
                 }
@@ -277,7 +283,7 @@ impl FieldRoutingSearchSpace {
                         .at(deferred_selection.anchor_node, fetch_node)
                         .with_op_path(deferred_selection.op_path)
                         .with_response_path(deferred_selection.response_path)
-                        .with_defer(defer_for_children.clone())
+                        .with_defer(deferred_selection.defer_ref)
                         .with_parent_types(parent_types),
                 );
             }
@@ -308,6 +314,7 @@ impl FieldRoutingSearchSpace {
         source_subgraph: &Arc<str>,
         op_path: &SharedPath<Arc<OpPathElement>>,
         response_path: &SharedPath<FetchDataPathElement>,
+        defer_ref: &Option<String>,
         deferred: &mut Vec<DeferredConnectorSelection>,
     ) -> Result<Option<SelectionSet>, FederationError> {
         let ShapeCase::Object { fields, .. } = shape.case() else {
@@ -330,6 +337,7 @@ impl FieldRoutingSearchSpace {
                                 anchor_node,
                                 op_path: op_path.clone(),
                                 response_path: response_path.clone(),
+                                defer_ref: defer_ref.clone(),
                             }),
                             None => {
                                 kept.insert(selection.clone());
@@ -362,6 +370,7 @@ impl FieldRoutingSearchSpace {
                                 source_subgraph,
                                 &child_op,
                                 &child_response,
+                                defer_ref,
                                 deferred,
                             )?;
                             match child_kept {
@@ -403,12 +412,15 @@ impl FieldRoutingSearchSpace {
                             anchor_node,
                             op_path: op_path.clone(),
                             response_path: response_path.clone(),
+                            defer_ref: defer_ref.clone(),
                         });
                         continue;
                     }
                     let child_op = op_path.pushed(Arc::new(OpPathElement::InlineFragment(
-                        fragment_sel.inline_fragment.clone(),
+                        strip_defer_directive(&fragment_sel.inline_fragment),
                     )));
+                    let child_defer = extract_defer_label(&fragment_sel.inline_fragment)
+                        .or_else(|| defer_ref.clone());
                     let child_kept = self.partition_connector_selections(
                         &fragment_sel.selection_set,
                         shape,
@@ -416,6 +428,7 @@ impl FieldRoutingSearchSpace {
                         source_subgraph,
                         &child_op,
                         response_path,
+                        &child_defer,
                         deferred,
                     )?;
                     if let Some(child_kept) = child_kept
@@ -423,7 +436,9 @@ impl FieldRoutingSearchSpace {
                     {
                         kept.insert(Selection::InlineFragment(Arc::new(
                             InlineFragmentSelection {
-                                inline_fragment: fragment_sel.inline_fragment.clone(),
+                                inline_fragment: strip_defer_directive(
+                                    &fragment_sel.inline_fragment,
+                                ),
                                 selection_set: child_kept,
                             },
                         )));

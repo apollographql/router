@@ -3355,6 +3355,228 @@ fn connector_interface_object_with_mixed_implementation_fragment() {
     "###);
 }
 
+const CONNECTOR_BATCH_SCHEMA: &str = include_str!("../fixtures/connector_batch.graphql");
+
+/// Fields the root connector does not select are resolved by the batch
+/// connector on the type, even though the type has no @key.
+#[test]
+fn connector_batch_resolves_fields_outside_root_selection() {
+    let plan_str =
+        plan_query_with_router_specs(CONNECTOR_BATCH_SCHEMA, "{ users { id name username } }");
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_users_0") {
+          {
+            users {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "users.@") {
+          Fetch(service: "connectors_User_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                username
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// Under a @defer fragment, the field the parent connector returns (`id`)
+/// stays in that connector's fetch without the @defer directive, and the
+/// entity hop for the rest runs in the deferred block.
+#[test]
+fn connector_defer_strips_directive_from_connector_fetch() {
+    let schema = include_str!("../fixtures/connector_defer.graphql");
+    let supergraph = Supergraph::new_with_router_specs(schema).expect("supergraph parse");
+    let config = QueryPlannerConfig {
+        incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
+        generate_query_fragments: true,
+        ..default_config()
+    };
+    let planner = QueryPlanner::new(&supergraph, config).expect("planner creation");
+    let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "mutation { m { f ... @defer { entity { id f } } } }",
+        "test.graphql",
+    )
+    .expect("query parse");
+    let plan = planner
+        .build_query_plan(&document, None, Default::default())
+        .expect("query plan");
+    insta::assert_snapshot!(format!("{plan}"), @r###"
+    QueryPlan {
+      Defer {
+        Primary {
+          { m { f } }:
+          Fetch(service: "connectors_Mutation_m_0", id: 0) {
+            {
+              m {
+                f
+                entity {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "m") {
+            { entity { id f } }:
+            Flatten(path: "m.entity") {
+              Fetch(service: "connectors_Query_e_0") {
+                {
+                  ... on E {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on E {
+                    f
+                  }
+                }
+              },
+            },
+          },
+        ]
+      },
+    }
+    "###);
+}
+
+/// Supergraphs that link the connect spec only through `@join__directive`
+/// still get entity keys for their connectors.
+#[test]
+fn connector_entity_keys_with_join_directive_link() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_join_directive_link.graphql"),
+        "{ post(id: 1) { id author { name } title } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_post_0") {
+          {
+            post(id: 1) {
+              id
+              title
+              author {
+                __typename
+                id
+              }
+            }
+          }
+        },
+        Flatten(path: "post.author") {
+          Fetch(service: "connectors_Query_user_0") {
+            {
+              ... on User {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on User {
+                name
+              }
+            }
+          },
+        },
+      },
+    }
+    "###);
+}
+
+/// An implementation of an @interfaceObject with an entity connector of its
+/// own still routes the interface's connector fields through the interface's
+/// connectors.
+#[test]
+fn connector_interface_object_implementation_with_own_connector() {
+    let plan_str = plan_query_with_router_specs(
+        include_str!("../fixtures/connector_interface_object_two_connectors.graphql"),
+        "{ itfs { id ... on T1 { d f } } }",
+    );
+    insta::assert_snapshot!(plan_str, @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "connectors_Query_itfs_0") {
+          {
+            itfs {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "itfs.@") {
+          Fetch(service: "graphql") {
+            {
+              ... on Itf {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Itf {
+                __typename
+                ... on T1 {
+                  __typename
+                  id
+                }
+              }
+            }
+          },
+        },
+        Parallel {
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors2_Query_t1_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on T1 {
+                  f
+                }
+              }
+            },
+          },
+          Flatten(path: "itfs.@") {
+            Fetch(service: "connectors_Query_itf_0") {
+              {
+                ... on T1 {
+                  __typename
+                  id
+                }
+              } =>
+              {
+                ... on Itf {
+                  d
+                }
+              }
+            },
+          },
+        },
+      },
+    }
+    "###);
+}
+
 const CONNECTOR_OUTPUT_SHAPE_SCHEMA: &str =
     include_str!("../fixtures/connector_output_shape.graphql");
 

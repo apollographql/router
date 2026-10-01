@@ -82,6 +82,8 @@ pub(crate) use self::acquire::parse_http_client_inputs;
 pub(crate) use self::plugins::create_plugins;
 pub(crate) use self::stages::build_apq_expander;
 #[cfg(test)]
+pub(crate) use self::stages::build_connector_request_services;
+#[cfg(test)]
 pub(crate) use self::stages::build_http_client_service;
 pub(crate) use self::stages::build_http_services;
 pub(crate) use self::stages::build_query_parsing_service;
