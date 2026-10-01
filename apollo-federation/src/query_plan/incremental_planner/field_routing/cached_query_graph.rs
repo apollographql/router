@@ -10,14 +10,28 @@ use apollo_compiler::Name;
 use hashbrown::HashMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
 
 use crate::operation::Field;
 use crate::operation::InlineFragment;
+use crate::operation::SelectionSet;
 use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
 
 type EdgeForFieldCache = RefCell<HashMap<(NodeIndex, Name), Option<EdgeIndex>>>;
 type EdgeForFragmentCache = RefCell<HashMap<(NodeIndex, Option<Name>), Option<EdgeIndex>>>;
+type KeyExitsCache = RefCell<HashMap<NodeIndex, Arc<[KeyExit]>>>;
+
+/// A key-resolution edge leaving a node for another subgraph.
+pub(crate) struct KeyExit {
+    pub(crate) target: NodeIndex,
+    /// Index into [`CachedQueryGraph::subgraph_count`] slots, so visited
+    /// sets can be indexed instead of comparing names.
+    pub(crate) subgraph: usize,
+    pub(crate) subgraph_name: Arc<str>,
+    pub(crate) conditions: Option<Arc<SelectionSet>>,
+}
 
 /// Wraps an immutable `QueryGraph` with caches for lookups that recur
 /// heavily during planning. Every cache is monotonic (grow-only) and keyed
@@ -27,6 +41,7 @@ pub(crate) struct CachedQueryGraph {
     override_conditions: OverrideConditions,
     edge_for_field: EdgeForFieldCache,
     edge_for_fragment: EdgeForFragmentCache,
+    key_exits: KeyExitsCache,
 }
 
 impl CachedQueryGraph {
@@ -39,7 +54,53 @@ impl CachedQueryGraph {
             override_conditions,
             edge_for_field: RefCell::new(HashMap::new()),
             edge_for_fragment: RefCell::new(HashMap::new()),
+            key_exits: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Slots for [`Self::subgraph_index`]: one per subgraph schema, plus one
+    /// shared by sources without a schema.
+    pub(super) fn subgraph_count(&self) -> usize {
+        self.query_graph.subgraph_schemas().len() + 1
+    }
+
+    pub(super) fn subgraph_index(&self, source: &str) -> usize {
+        self.query_graph
+            .subgraph_schemas()
+            .get_index_of(source)
+            .unwrap_or(self.query_graph.subgraph_schemas().len())
+    }
+
+    /// Key-resolution edges out of `node` into other nodes, in edge order.
+    /// Chained key-hop search walks these for every field it routes, and
+    /// scanning all of a node's out edges for them each time dominated it.
+    pub(super) fn key_exits(&self, node: NodeIndex) -> Arc<[KeyExit]> {
+        if let Some(cached) = self.key_exits.borrow().get(&node) {
+            return cached.clone();
+        }
+        let exits: Arc<[KeyExit]> = self
+            .query_graph
+            .out_edges(node)
+            .into_iter()
+            .filter(|edge| {
+                matches!(
+                    edge.weight().transition,
+                    QueryGraphEdgeTransition::KeyResolution
+                )
+            })
+            .filter_map(|edge| {
+                let target = edge.target();
+                let source = &self.query_graph.node_weight(target).ok()?.source;
+                Some(KeyExit {
+                    target,
+                    subgraph: self.subgraph_index(source),
+                    subgraph_name: source.clone(),
+                    conditions: edge.weight().conditions.clone(),
+                })
+            })
+            .collect();
+        self.key_exits.borrow_mut().insert(node, exits.clone());
+        exits
     }
 
     /// Cached lookup: which edge from `node` resolves `field`?

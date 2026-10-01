@@ -509,10 +509,11 @@ impl FieldRoutingSearchSpace {
             first_conditions_unroutable = !self.conditions_routable(origin_node, conds)?;
         }
 
-        let mut visited: Vec<Arc<str>> = vec![
-            origin_source.clone(),
-            self.qg().node_weight(first_intermediate)?.source.clone(),
-        ];
+        let mut visited = vec![false; self.cached_query_graph.subgraph_count()];
+        visited[self.cached_query_graph.subgraph_index(origin_source)] = true;
+        visited[self
+            .cached_query_graph
+            .subgraph_index(&self.qg().node_weight(first_intermediate)?.source)] = true;
 
         // Breadth-first over key edges, each subgraph visited once, stop at
         // the first depth with hits so the returned chains are shortest.
@@ -593,23 +594,17 @@ impl FieldRoutingSearchSpace {
     fn chain_exits(
         &self,
         current: NodeIndex,
-        visited: &mut Vec<Arc<str>>,
+        visited: &mut [bool],
     ) -> Result<Vec<IntermediateKeyHop>, FederationError> {
         let mut exits = Vec::new();
-        for key_edge_idx in self.qg().out_edges(current).into_iter().map(|e| e.id()) {
-            let key_edge = self.qg().edge_weight(key_edge_idx)?;
-            if !matches!(key_edge.transition, QueryGraphEdgeTransition::KeyResolution) {
+        for exit in self.cached_query_graph.key_exits(current).iter() {
+            if visited[exit.subgraph] || self.disabled_subgraphs.contains(&exit.subgraph_name) {
                 continue;
             }
-            let (_, target) = self.qg().edge_endpoints(key_edge_idx)?;
-            let subgraph = &self.qg().node_weight(target)?.source;
-            if visited.contains(subgraph) || self.disabled_subgraphs.contains(subgraph) {
-                continue;
-            }
-            visited.push(subgraph.clone());
+            visited[exit.subgraph] = true;
             exits.push(IntermediateKeyHop {
-                target_node: target,
-                entry_key: key_edge.conditions.clone(),
+                target_node: exit.target,
+                entry_key: exit.conditions.clone(),
             });
         }
         Ok(exits)
@@ -1646,6 +1641,30 @@ mod tests {
                 "#,
             ),
         ])
+    }
+
+    #[test]
+    fn key_exits_list_only_key_edges_into_other_subgraphs() {
+        let space = search_space();
+        let qg = &space.cached_query_graph;
+        let s1_t = test_support::node_for(&space, "S1", "T");
+        let s2_t = test_support::node_for(&space, "S2", "T");
+
+        let exits = qg.key_exits(s1_t);
+        assert_eq!(exits.len(), 1);
+        assert_eq!(exits[0].target, s2_t);
+        assert_eq!(exits[0].subgraph_name.as_ref(), "S2");
+        assert_eq!(exits[0].subgraph, qg.subgraph_index("S2"));
+        assert_ne!(qg.subgraph_index("S1"), qg.subgraph_index("S2"));
+        assert_eq!(
+            exits[0]
+                .conditions
+                .as_ref()
+                .expect("key conditions")
+                .to_string(),
+            "{ k }",
+        );
+        assert!(Arc::ptr_eq(&exits, &qg.key_exits(s1_t)));
     }
 
     fn key_selection(space: &FieldRoutingSearchSpace, text: &str) -> Arc<SelectionSet> {
