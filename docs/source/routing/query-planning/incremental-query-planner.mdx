@@ -1,11 +1,11 @@
 ---
 title: Incremental Query Planner
 subtitle: Plan operations faster with bounded search
-description: Learn how to enable and tune the incremental query planner in GraphOS Router, which builds query plans field by field with a bounded search budget.
+description: Learn how to enable and tune the incremental query planner in GraphOS Router, which quickly finds a draft query plan and then optimizes it within an effort budget.
 minVersion: Router v3.0.0
 ---
 
-The incremental query planner is an alternative query planner for GraphOS Router. It builds a query plan one field at a time and bounds how much effort it spends looking for a better plan. On large or highly connected supergraphs, this keeps query planning time predictable where the default planner can slow down.
+The incremental query planner is an alternative query planner for GraphOS Router. It quickly finds a draft of a query plan, then spends a bounded effort budget optimizing it. On large or highly connected graphs, this keeps query planning time predictable where the default planner can slow down.
 
 ## How it differs from the default planner
 
@@ -13,11 +13,11 @@ The default query planner considers many complete candidate plans for an operati
 
 The incremental planner works differently:
 
-1. It walks the operation field by field. Fields that only one subgraph can resolve are planned immediately.
-2. For each field with more than one option, it picks the cheapest one. This first pass always produces a complete plan.
-3. It then spends a configurable budget revisiting earlier choices, keeping any plan that is cheaper than the best one found so far.
+1. It drafts a plan by taking the cheapest option for each field. Fields that only one subgraph can resolve are planned immediately.
+2. If a choice leads to a dead end, the planner backtracks and tries other options until it reaches a complete plan. Finding this draft does not use the effort budget.
+3. It then spends the effort budget revisiting earlier choices, keeping any plan that is cheaper than the best one found so far.
 
-Because the search is bounded, planning time depends mostly on the size of the operation rather than the number of possible plans. The trade-off is that when the budget runs out, the plan returned may not be the cheapest one possible.
+Because the search is bounded, planning time depends mostly on the size of the operation rather than the number of possible plans. The trade-off is that when the budget runs out, the plan returned might not be the cheapest one possible.
 
 ## Enable the incremental planner
 
@@ -30,7 +30,7 @@ supergraph:
       enabled: true
 ```
 
-When enabled, the incremental planner plans every operation. The router doesn't fall back to the default planner.
+When enabled, the incremental planner plans every operation. The router does not fall back to the default planner.
 
 ## Configuration options
 
@@ -47,16 +47,16 @@ supergraph:
 | Option | Default | Description |
 | --- | --- | --- |
 | `enabled` | `false` | Use the incremental planner for all operations. |
-| `beam_width` | `16` | How many of the cheapest options for each field are considered together when revisiting choices. Wider values explore more alternatives per pass. |
+| `beam_width` | `16` | How many of the cheapest options for each field are considered together when revisiting choices. Wider values explore more alternatives per pass. Narrower values use less memory but need more backtracking to reach the same alternatives. |
 | `fuel` | `5000` | How much additional effort the planner can spend improving on its first plan. `0` returns the first complete plan. |
 | `timeout` | none | Optional time limit for planning a single operation, for example `500ms` or `5s`. When the limit is reached, the planner returns the best plan found so far. |
 
 ### Tuning recommendations
 
-- Start with the defaults. They're sized to keep planning fast on large supergraphs.
-- Adjust `fuel` first. Lower values reduce planning time and return plans closer to the first pass. Higher values give the planner more room to find cheaper plans.
-- Leave `beam_width` at its default unless you've measured a benefit from changing it.
-- Only set `timeout` if you need a hard upper bound on planning time. With a timeout, the plan you get for an operation can depend on how busy the router is, so the same operation may produce different plans at different times. Without a timeout, the same operation and supergraph always produce the same plan.
+- Start with the defaults. They are sized to keep planning fast on large graphs.
+- Adjust `fuel` first. Lower values reduce planning time and return plans closer to the draft. Higher values give the planner more room to find cheaper plans.
+- Leave `beam_width` at its default unless you have measured a benefit from changing it. Lowering it reduces memory use during planning at the cost of more backtracking.
+- Only set `timeout` if you need a hard upper bound on planning time. With a timeout, the plan you get for an operation can depend on how busy the router is, so the same operation might produce different plans at different times. Without a timeout, the same operation and supergraph always produce the same plan.
 
 ## Behavior changes when enabled
 
@@ -66,19 +66,9 @@ The incremental planner's configuration is part of the [query plan cache](/graph
 
 Disabling the incremental planner restores the cache keys used by the default planner.
 
-### Apollo Connectors
-
-With the incremental planner enabled, the router plans [Apollo Connectors](/graphos/connectors/router) directly instead of first expanding each connector into a separate internal subgraph. This reduces schema loading time and memory for supergraphs with many connectors. Connector requests and responses are unchanged.
-
 ### Query plans and subgraph operations
 
-The incremental planner can choose a different plan than the default planner for the same operation. Both planners produce plans that return the same data, but the fetches, their order, and the generated subgraph operations may differ.
-
-<Note>
-
-The subgraph operations generated by the query planner may change with each release. Don't rely on their exact shape.
-
-</Note>
+The incremental planner can choose a different plan than the default planner for the same operation. Both planners produce plans that return the same data, but the fetches, their order, and the generated subgraph operations might differ.
 
 ### Unused limits
 
@@ -88,30 +78,32 @@ The subgraph operations generated by the query planner may change with each rele
 
 The standard [query planning instruments](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-planning) apply to the incremental planner:
 
-- `apollo.router.query_planning.plan.duration`: time spent planning each operation. Compare this before and after enabling the incremental planner. Its `planner` attribute is `rust` for both planners, so compare across deployments or time ranges rather than by attribute.
-- `apollo.router.query_planning.plan.evaluated_plans`: the number of complete candidate plans the planner reached.
-- `apollo.router.query_planning.plan.evaluated_paths`: the number of fields with more than one option that the planner evaluated.
+- `apollo.router.query_planning.plan.duration`: time spent planning each operation
+- `apollo.router.query_planning.plan.evaluated_plans`: the number of candidate plans the search finished, including ones it discarded
+- `apollo.router.query_planning.plan.evaluated_paths`: the number of times the search expanded a field with more than one option, counting revisits
 
-The last two measure search effort and aren't directly comparable to the same metrics from the default planner.
+Compare `plan.duration` before and after enabling the incremental planner. Its `planner` attribute is `rust` for both planners, so compare across deployments or time ranges rather than by attribute. The other two metrics measure search effort and are not directly comparable to the same metrics from the default planner.
 
 ### Fuel metrics
 
 The router records two histograms for each operation planned by the incremental planner. Use them to tune `fuel`:
 
-- `apollo.router.query_planning.plan.fuel_consumed`: fuel the planner spent improving on its first complete plan.
-- `apollo.router.query_planning.plan.fuel_remaining`: fuel left when the planner stopped searching. A value of `0` means the planner ran out of fuel before it finished exploring alternatives.
+- `apollo.router.query_planning.plan.fuel_consumed`: fuel the planner spends improving on its first complete plan
+- `apollo.router.query_planning.plan.fuel_remaining`: fuel left when the planner stops searching
+
+A `fuel_remaining` value of `0` means the planner ran out of fuel before it finished exploring alternatives.
 
 Mutations are planned one top-level field at a time. For a mutation, both values come from the field whose search consumed the most fuel.
 
-The same values are recorded on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`. Use the span attributes to find which operations ran out of fuel, since the histograms don't identify operations.
+The same values are recorded on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`. Use the span attributes to find which operations ran out of fuel, because the histograms do not identify operations.
 
 How to read them:
 
-- If most operations finish with fuel remaining, the planner is exploring every alternative it considers worthwhile within the budget. Raising `fuel` won't change their plans.
-- If many operations finish with `0` remaining, the budget is cutting the search short. Raising `fuel` lets the search go further and may find cheaper plans, at the cost of longer planning.
-- Operations planned from the query plan cache don't record these metrics, because no search runs.
+- If most operations finish with fuel remaining, the planner is exploring every alternative it considers worthwhile within the budget. Raising `fuel` does not change their plans.
+- If many operations finish with `0` remaining, the budget is cutting the search short. Raising `fuel` lets the search go further and might find cheaper plans, at the cost of longer planning.
+- Operations served from the query plan cache do not record these metrics, because no search runs.
 
-Both histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000`, regardless of the global [`buckets`](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#buckets) setting. The `0` bucket of `fuel_remaining` counts searches that ran out of fuel. The boundaries don't depend on your `fuel` setting, so series stay comparable when you change it. To use finer buckets around your `fuel` value, add a [view](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#customizing-metric-attributes-and-buckets):
+Both histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000`, regardless of the global [`buckets`](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#buckets) setting. The `0` bucket of `fuel_remaining` counts searches that ran out of fuel. The boundaries do not depend on your `fuel` setting, so series stay comparable when you change it. To use finer buckets around your `fuel` value, add a [view](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#customizing-metric-attributes-and-buckets):
 
 ```yaml title="router.yaml"
 telemetry:
@@ -126,9 +118,3 @@ telemetry:
 ```
 
 To stop exporting either metric, [drop it with a view](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#dropping-metrics).
-
-## Rolling out
-
-1. Run the router with the incremental planner in a non-production environment against representative traffic.
-2. Compare `apollo.router.query_planning.plan.duration` and response correctness against the default planner.
-3. Roll out to production gradually, expecting a query plan cache warm-up on each instance where you enable it.
