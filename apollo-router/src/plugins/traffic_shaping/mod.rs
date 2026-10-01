@@ -36,6 +36,7 @@ use tower::util::option_layer;
 use self::admission::ConnectorSourceErrorResponseLayer;
 use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
+use self::timeout::ConnectorSourceTimeoutLayer;
 use self::timeout::SubgraphTimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
@@ -468,7 +469,7 @@ impl TrafficShaping {
 ///
 /// 1. admission: a buffer, error responses, load shedding and rate limit (the stage places the
 ///    buffer itself)
-/// 2. timeout (the subgraph timeout answers its own errors)
+/// 2. timeout, which answers its own errors
 /// 3. deduplication (subgraphs only)
 /// 4. compression
 /// 5. backpressure buffer
@@ -592,9 +593,8 @@ impl TrafficShaping {
         )
     }
 
-    /// Returns a layer that answers a rate-limited request to this connector source, keyed by
-    /// `<subgraph name>.<source name>`, with a rate-limited error, and a timed-out one with a
-    /// gateway-timeout error.
+    /// Returns a layer that answers a request to this connector source, keyed by
+    /// `<subgraph name>.<source name>`, that load shedding rejected with a rate-limited error.
     pub(crate) fn connector_source_error_response_layer(
         &self,
         source: &str,
@@ -631,13 +631,15 @@ impl TrafficShaping {
         }))
     }
 
-    /// Returns a layer that fails a request to this connector source once it runs past the
-    /// source's timeout (30 seconds by default).
-    pub(crate) fn connector_source_timeout_layer(&self, source: &str) -> OptionLayer<TimeoutLayer> {
-        option_layer(
-            self.connector_source_shaping(source)
-                .map(|shaping| TimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))),
-        )
+    /// Returns a layer that answers a request to this connector source with a gateway-timeout
+    /// error once it runs past the source's timeout (30 seconds by default).
+    pub(crate) fn connector_source_timeout_layer(
+        &self,
+        source: &str,
+    ) -> OptionLayer<ConnectorSourceTimeoutLayer> {
+        option_layer(self.connector_source_shaping(source).map(|shaping| {
+            ConnectorSourceTimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))
+        }))
     }
 
     /// Returns a layer that sets `Content-Encoding` on HTTP requests to this connector source,
