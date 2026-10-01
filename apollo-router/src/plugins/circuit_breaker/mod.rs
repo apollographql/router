@@ -298,12 +298,17 @@ fn subgraph_response_is_failure(response: &subgraph::Response) -> bool {
 /// execution, or when the source answered with a 5xx or a `429` status or with a body that never
 /// arrived in full.
 ///
-/// Every error a connector response carries from beneath the circuit is execution failing: the
-/// source not answering, the target timeout expiring, or a coprocessor or plugin failing the
-/// fetch. The errors the router raises when it declines to send a request, such as
-/// `Error::RateLimited` and `Error::RequestLimitExceeded`, are raised above the circuit and never
-/// reach it.
+/// A coprocessor that breaks the request gives it a status, and that status is judged the way a
+/// subgraph response's is: a `401` break says something about the request, a `503` break says the
+/// path to the source is failing. Every other error a connector response carries from beneath the
+/// circuit is execution failing: the source not answering, the target timeout expiring, or a
+/// plugin failing the fetch without a status. The errors the router raises when it declines to
+/// send a request, such as `Error::RateLimited` and `Error::RequestLimitExceeded`, are raised
+/// above the circuit and never reach it.
 fn connector_response_is_failure(response: &connector::request_service::Response) -> bool {
+    if let Some(status) = response.break_status {
+        return status_is_failure(status);
+    }
     match &response.transport_result {
         Err(_) => true,
         Ok(TransportResponse::Http(http_response)) => {

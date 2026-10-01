@@ -960,6 +960,7 @@ mod test {
                 key: req.key.clone(),
                 problems: vec![],
             },
+            break_status: None,
         }
     }
 

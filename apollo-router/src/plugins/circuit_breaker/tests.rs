@@ -394,6 +394,7 @@ fn connector_response(status: StatusCode, request: &ConnectorRequest) -> Connect
             problems: Vec::new(),
             key: response_key(),
         },
+        break_status: None,
     }
 }
 
@@ -1203,6 +1204,161 @@ async fn a_coprocessor_failure_counts_against_the_subgraph() {
         subgraph_error_code(&response).as_deref(),
         Some(Error::CircuitBreakerOpen.code()),
         "the coprocessor's failure should have opened the circuit"
+    );
+}
+
+/// A coprocessor that breaks every request at `stage` with `status`.
+async fn breaking_coprocessor(stage: &str, status: u16) -> wiremock::MockServer {
+    let coprocessor = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": 1,
+                "stage": stage,
+                "control": { "break": status },
+                "body": "the coprocessor turned this request away",
+            })),
+        )
+        .mount(&coprocessor)
+        .await;
+    coprocessor
+}
+
+/// Two requests to subgraph `products` through a coprocessor that breaks each with `status`, and
+/// the answers they get, with the subgraph's circuit opening after one failure.
+async fn subgraph_behind_a_break(status: u16) -> [subgraph::Response; 2] {
+    let coprocessor = breaking_coprocessor("SubgraphRequest", status).await;
+    let target = Target::answering(StatusCode::OK);
+    let service = subgraph_stack(
+        &[
+            ("apollo.traffic_shaping", serde_json::json!({})),
+            (
+                "apollo.circuit_breaker",
+                serde_json::json!({ "all": { "consecutive_failures": 1 } }),
+            ),
+            (
+                "apollo.coprocessor",
+                serde_json::json!({
+                    "url": coprocessor.uri(),
+                    "subgraph": { "all": { "request": { "body": true } } },
+                }),
+            ),
+        ],
+        target.subgraph(Duration::ZERO),
+    )
+    .await;
+
+    let mut responses = Vec::new();
+    for _ in 0..2 {
+        responses.push(
+            service
+                .clone()
+                .oneshot(subgraph::Request::fake_builder().build())
+                .await
+                .expect("answered"),
+        );
+    }
+    assert_eq!(target.calls(), 0, "every request was broken");
+    responses.try_into().expect("two responses")
+}
+
+/// A coprocessor breaking a request with a `401` says the request is at fault, not the path to
+/// the subgraph, so it counts as a success like the subgraph answering `401` would.
+#[tokio::test]
+async fn a_subgraph_request_a_coprocessor_breaks_with_a_4xx_is_a_success() {
+    let [first, second] = subgraph_behind_a_break(401).await;
+
+    assert_eq!(first.response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        second.response.status(),
+        StatusCode::UNAUTHORIZED,
+        "the circuit should still be closed"
+    );
+}
+
+/// A coprocessor breaking a request with a `503` counts against the subgraph's circuit, like the
+/// subgraph answering `503` would.
+#[tokio::test]
+async fn a_subgraph_request_a_coprocessor_breaks_with_a_5xx_is_a_failure() {
+    let [first, second] = subgraph_behind_a_break(503).await;
+
+    assert_ne!(
+        subgraph_error_code(&first).as_deref(),
+        Some(Error::CircuitBreakerOpen.code())
+    );
+    assert_eq!(
+        subgraph_error_code(&second).as_deref(),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the break should have opened the circuit"
+    );
+}
+
+/// The connector counterpart of [`subgraph_behind_a_break`], for source `products.api`.
+async fn source_behind_a_break(status: u16) -> [ConnectorResponse; 2] {
+    let coprocessor = breaking_coprocessor("ConnectorRequest", status).await;
+    let target = Target::answering(StatusCode::OK);
+    let service = source_stack(
+        &[
+            ("apollo.traffic_shaping", serde_json::json!({})),
+            (
+                "apollo.circuit_breaker",
+                serde_json::json!({ "connector": { "all": { "consecutive_failures": 1 } } }),
+            ),
+            (
+                "apollo.coprocessor",
+                serde_json::json!({
+                    "url": coprocessor.uri(),
+                    "connector": { "all": { "request": { "body": true } } },
+                }),
+            ),
+        ],
+        target.source(),
+    )
+    .await;
+
+    let mut responses = Vec::new();
+    for _ in 0..2 {
+        responses.push(
+            service
+                .clone()
+                .oneshot(connector_request())
+                .await
+                .expect("answered"),
+        );
+    }
+    assert_eq!(target.calls(), 0, "every request was broken");
+    responses.try_into().expect("two responses")
+}
+
+/// A connector request carries no HTTP status of its own when a coprocessor breaks it, so the
+/// break's status is what the circuit judges: a `401` is a success.
+#[tokio::test]
+async fn a_connector_request_a_coprocessor_breaks_with_a_4xx_is_a_success() {
+    let [first, second] = source_behind_a_break(401).await;
+
+    for response in [&first, &second] {
+        assert_ne!(
+            connector_error_code(response),
+            Some(Error::CircuitBreakerOpen.code()),
+            "the circuit should still be closed"
+        );
+        assert!(response.error().is_some(), "the coprocessor broke it");
+    }
+}
+
+/// The connector counterpart of [`a_subgraph_request_a_coprocessor_breaks_with_a_5xx_is_a_failure`].
+#[tokio::test]
+async fn a_connector_request_a_coprocessor_breaks_with_a_5xx_is_a_failure() {
+    let [first, second] = source_behind_a_break(503).await;
+
+    assert_ne!(
+        connector_error_code(&first),
+        Some(Error::CircuitBreakerOpen.code())
+    );
+    assert_eq!(
+        connector_error_code(&second),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the break should have opened the circuit"
     );
 }
 
