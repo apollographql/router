@@ -239,6 +239,7 @@ mod tests {
                         key: request.key.clone(),
                         problems: vec![],
                     },
+                    break_status: None,
                 });
             });
 
@@ -343,6 +344,7 @@ mod tests {
                         key: request.key.clone(),
                         problems: vec![],
                     },
+                    break_status: None,
                 });
             });
 

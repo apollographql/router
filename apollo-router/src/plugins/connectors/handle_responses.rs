@@ -271,6 +271,7 @@ where
         subgraph_name: connector.id.subgraph_name.to_string(),
         transport_result: result,
         mapped_response,
+        break_status: None,
     }
 }
 
@@ -346,6 +347,7 @@ fn log_connectors_event(
                     key: response_key,
                     problems: vec![],
                 },
+                break_status: None,
             };
             if event.condition.evaluate_response(&response) {
                 Some(event.level)

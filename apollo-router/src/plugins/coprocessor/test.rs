@@ -7539,6 +7539,7 @@ mod tests {
                         key: create_test_response_key(),
                         problems: Vec::new(),
                     },
+                    break_status: None,
                 })
             })
             .boxed_clone()
