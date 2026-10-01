@@ -25,6 +25,7 @@ use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::headers::Headers;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
@@ -302,6 +303,9 @@ pub(crate) fn build_connector_request_services(
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
                 })
+                // The operation's `max_requests` is admission too: a request over it is never sent,
+                // so no plugin hook sees it.
+                .layer(RequestLimitLayer)
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_timeout_layer(&source)
                 })

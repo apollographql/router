@@ -33,7 +33,6 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
-use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -429,21 +428,12 @@ impl tower::Service<Request> for ConnectorRequestService {
         let mut http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         // Load the information needed from the context
-        let (debug, connector_request_event, request_limit) =
-            request.context.extensions().with_lock(|lock| {
-                (
-                    lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
-                    lock.get::<ConnectorEventRequest>().cloned(),
-                    lock.get::<Arc<RequestLimits>>()
-                        .map(|limits| {
-                            limits.get(
-                                request.connector.as_ref().into(),
-                                request.connector.max_requests,
-                            )
-                        })
-                        .unwrap_or(None),
-                )
-            });
+        let (debug, connector_request_event) = request.context.extensions().with_lock(|lock| {
+            (
+                lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
+                lock.get::<ConnectorEventRequest>().cloned(),
+            )
+        });
 
         let log_request_level = connector_request_event.and_then(|s| {
             if s.condition.lock().evaluate_request(&request) == Some(true) {
@@ -485,49 +475,40 @@ impl tower::Service<Request> for ConnectorRequestService {
                 }
 
                 TransportRequest::Http(http_request) => {
-                    let mut debug_request = (None, Default::default());
-                    let result = if request_limit
-                        .is_some_and(|request_limit| !request_limit.allow())
-                    {
-                        Err(Error::RequestLimitExceeded)
-                    } else {
-                        debug_request = http_request.debug;
+                    let debug_request = http_request.debug;
 
-                        log_request(
-                            &http_request.inner,
-                            log_request_level,
-                            request.connector.label.as_ref(),
-                            &request.context,
-                            &original_subgraph_name,
+                    log_request(
+                        &http_request.inner,
+                        log_request_level,
+                        request.connector.label.as_ref(),
+                        &request.context,
+                        &original_subgraph_name,
+                    );
+
+                    let (parts, body) = http_request.inner.into_parts();
+                    let http_request =
+                        http::Request::from_parts(parts, router::body::from_bytes(body));
+
+                    let result = http_client
+                        .call(crate::services::http::HttpRequest {
+                            http_request,
+                            context: request.context.clone(),
+                        })
+                        .await
+                        .map(|result| result.http_response)
+                        .map_err(|e|
+                            // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                            // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                            Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
                         );
 
-                        let (parts, body) = http_request.inner.into_parts();
-                        let http_request =
-                            http::Request::from_parts(parts, router::body::from_bytes(body));
-
-                        let result = http_client
-                            .call(crate::services::http::HttpRequest {
-                                http_request,
-                                context: request.context.clone(),
-                            })
-                            .await
-                            .map(|result| result.http_response)
-                            .map_err(|e|
-                                // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                            );
-
-                        u64_counter!(
-                            "apollo.router.operations.connectors",
-                            "Total number of requests to connectors",
-                            1,
-                            "connector.type" = CONNECTOR_TYPE_HTTP,
-                            "subgraph.name" = original_subgraph_name
-                        );
-
-                        result
-                    };
+                    u64_counter!(
+                        "apollo.router.operations.connectors",
+                        "Total number of requests to connectors",
+                        1,
+                        "connector.type" = CONNECTOR_TYPE_HTTP,
+                        "subgraph.name" = original_subgraph_name
+                    );
 
                     Ok(process_response(
                         result,
