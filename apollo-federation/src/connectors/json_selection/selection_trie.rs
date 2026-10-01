@@ -159,20 +159,17 @@ impl SelectionTrie {
     pub(crate) fn add_name(&mut self, name: &Name) -> &mut Self {
         let mut current: &mut SelectionTrie = self;
         // Ranges specific to each name segment (not inherited from parent
-        // segments). `Name::locations()` (public) returns the parent chain's
-        // locations followed by the segment's own, deduplicated in insertion
-        // order; `Name::locs()` (the per-segment accessor) is `pub(crate)` in
-        // shape@0.7.0, so we recover the per-segment slice by tracking the
-        // previous segment's accumulated location count.
-        let mut prev_count = 0;
+        // segments): the segment's own locations, minus any an ancestor
+        // segment already contributed. Calling `Name::locations()` per segment
+        // instead rebuilds the whole parent chain's set each time, which is
+        // quadratic in the name's depth.
+        let mut seen_locs = IndexSet::default();
         for part in name.iter() {
-            let all_locs: Vec<_> = part.locations().collect();
-            let ranges: Vec<Range<usize>> = all_locs
-                .iter()
-                .skip(prev_count)
+            let ranges: Vec<Range<usize>> = part
+                .locs()
+                .filter(|loc| seen_locs.insert(*loc))
                 .map(|loc| loc.span.clone())
                 .collect();
-            prev_count = all_locs.len();
             match part.case() {
                 NameCase::Base(base) => current = current.add_str_with_ranges(base, ranges),
                 NameCase::Field(_, field) => {

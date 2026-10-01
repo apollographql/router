@@ -348,6 +348,39 @@ pub(crate) fn validate(
     }
 }
 
+/// Replace a reference to a schema type (as `shape_lookup` entries hold for
+/// their nested composite fields) with that type's shape, looking through
+/// unions such as the `One<Type, null>` of a nullable field. Walking a path one
+/// key at a time needs the referenced type's fields, and resolving references
+/// only along the path keeps the cost proportional to the path rather than to
+/// everything reachable from the type.
+fn expand_schema_refs(shape: &Shape, context: &Context, resolving: &HashSet<String>) -> Shape {
+    match shape.case() {
+        ShapeCase::Name(name, _) => match name.case() {
+            NameCase::Base(base) if !base.starts_with('$') && !resolving.contains(base) => context
+                .schema
+                .shape_lookup
+                .get(base)
+                .map(|resolved| resolved.clone().with_locations(shape.locations()))
+                .unwrap_or_else(|| shape.clone()),
+            _ => shape.clone(),
+        },
+        ShapeCase::One(shapes) => Shape::one(
+            shapes
+                .iter()
+                .map(|member| expand_schema_refs(member, context, resolving)),
+            shape.locations().cloned(),
+        ),
+        ShapeCase::All(shapes) => Shape::all(
+            shapes
+                .iter()
+                .map(|member| expand_schema_refs(member, context, resolving)),
+            shape.locations().cloned(),
+        ),
+        _ => shape.clone(),
+    }
+}
+
 /// Validate that the shape is an acceptable output shape for an Expression.
 ///
 /// `resolving` tracks schema-defined named shapes currently on the resolution
@@ -497,8 +530,18 @@ fn resolve_shape(
             // has already been resolved to shape above. All Name chains begin
             // logically with a ::Base case, and the ::Base case cannot appear
             // later in the subpath chain, so .skip(1) handles it reliably.
+            // Inside a schema type, expand the references `shape_lookup` uses for
+            // nested composite fields as the path reaches them, so errors name the
+            // full path from that type. Variables keep their references, which
+            // resolve (and report) from the referenced type instead.
+            let is_schema_name = !base_shape_name.starts_with('$');
             for key in name.iter().skip(1) {
-                let child = resolved.apply_name(key);
+                let child = if is_schema_name {
+                    expand_schema_refs(&resolved, context, resolving)
+                } else {
+                    resolved
+                }
+                .apply_name(key);
                 if child.is_none() {
                     let message = match key.case() {
                         NameCase::AnyItem(parent) | NameCase::Item(parent, _) => {
@@ -538,7 +581,6 @@ fn resolve_shape(
             // re-entry through it (directly or transitively) short-circuits.
             // Variables ($args, $this, $root, ...) aren't tracked because
             // they can't self-recurse the same way.
-            let is_schema_name = !base_shape_name.starts_with('$');
             let added = is_schema_name && resolving.insert(base_shape_name.to_string());
             let result = resolve_shape(&resolved, context, expression, resolving);
             if added {
