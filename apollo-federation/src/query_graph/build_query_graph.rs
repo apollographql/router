@@ -303,8 +303,10 @@ impl BaseQueryGraphBuilder {
                 QueryGraphEdgeTransition::RootTypeResolution { .. }
                     | QueryGraphEdgeTransition::SubgraphEnteringTransition
             ) {
-                // Root transitions reject every outgoing root-resolution edge. Cache the
-                // final result by destination, in addition to the sorted candidate list.
+                // After entering subgraph B, jumping to another root in C is redundant:
+                // we can reach C directly from the previous subgraph or the start of the query.
+                // Both transitions therefore reject every outgoing root-resolution edge.
+                // Cache the final result by destination, in addition to the sorted candidate list.
                 if let Some(followups) = root_followups.get(&tail) {
                     self.query_graph
                         .non_trivial_followup_edges
@@ -339,64 +341,38 @@ impl BaseQueryGraphBuilder {
             };
             for followup_edge in out_edges {
                 let followup_edge_weight = self.query_graph.edge_weight(*followup_edge)?;
-                match edge_weight.transition {
-                    QueryGraphEdgeTransition::KeyResolution => {
-                        // After taking a key from subgraph A to B, there is no point of following
-                        // that up with another key to subgraph C if that key has the same
-                        // conditions. This is because, due to the way key edges are created, if we
-                        // have a key (with some conditions X) from B to C, then we are guaranteed
-                        // to also have a key (with the same conditions X) from A to C, and so it's
-                        // that later key we should be using in the first place. In other words,
-                        // it's never better to do 2 hops rather than 1.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::KeyResolution
-                        ) {
-                            let Some(conditions) = &edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
-                            let Some(followup_conditions) = &followup_edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
+                if matches!(
+                    edge_weight.transition,
+                    QueryGraphEdgeTransition::KeyResolution
+                ) && matches!(
+                    followup_edge_weight.transition,
+                    QueryGraphEdgeTransition::KeyResolution
+                ) {
+                    // After taking a key from subgraph A to B, there is no point of following
+                    // that up with another key to subgraph C if that key has the same
+                    // conditions. This is because, due to the way key edges are created, if we
+                    // have a key (with some conditions X) from B to C, then we are guaranteed
+                    // to also have a key (with the same conditions X) from A to C, and so it's
+                    // that later key we should be using in the first place. In other words,
+                    // it's never better to do 2 hops rather than 1.
+                    let Some(conditions) = &edge_weight.conditions else {
+                        return Err(SingleFederationError::Internal {
+                            message: "Key resolution edge unexpectedly missing conditions"
+                                .to_owned(),
+                        }
+                        .into());
+                    };
+                    let Some(followup_conditions) = &followup_edge_weight.conditions else {
+                        return Err(SingleFederationError::Internal {
+                            message: "Key resolution edge unexpectedly missing conditions"
+                                .to_owned(),
+                        }
+                        .into());
+                    };
 
-                            if conditions == followup_conditions {
-                                continue;
-                            }
-                        }
+                    if conditions == followup_conditions {
+                        continue;
                     }
-                    QueryGraphEdgeTransition::RootTypeResolution { .. } => {
-                        // A 'RootTypeResolution' means that a query reached the query type (or
-                        // another root type) in some subgraph A and we're looking at jumping to
-                        // another subgraph B. But like for keys, there is no point in trying to
-                        // jump directly to yet another subpraph C from B, since we can always jump
-                        // directly from A to C and it's better.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::RootTypeResolution { .. }
-                        ) {
-                            continue;
-                        }
-                    }
-                    QueryGraphEdgeTransition::SubgraphEnteringTransition => {
-                        // This is somewhat similar to 'RootTypeResolution' except that we're
-                        // starting the query. Still, we shouldn't do "start of query" -> B -> C,
-                        // since we can do "start of query" -> C and that's always better.
-                        if matches!(
-                            followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::RootTypeResolution { .. }
-                        ) {
-                            continue;
-                        }
-                    }
-                    _ => {}
                 }
                 non_trivial_followups.push(*followup_edge);
             }
