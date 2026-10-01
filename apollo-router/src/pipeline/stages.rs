@@ -38,6 +38,7 @@ use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::traffic_shaping::ShapingTarget;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanCache;
@@ -223,10 +224,10 @@ pub(crate) fn build_subgraph_service(
             t.subgraph_error_response_layer(name)
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-            t.subgraph_load_shed_layer(name)
+            t.load_shed_layer(ShapingTarget::Subgraph(name))
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-            t.subgraph_rate_limit_layer(name)
+            t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
@@ -297,10 +298,10 @@ pub(crate) fn build_connector_request_services(
                     t.connector_source_error_response_layer(&source)
                 })
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-                    t.connector_source_load_shed_layer(&source)
+                    t.load_shed_layer(ShapingTarget::ConnectorSource(&source))
                 })
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-                    t.connector_source_rate_limit_layer(&source)
+                    t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
                 })
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_timeout_layer(&source)

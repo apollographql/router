@@ -462,6 +462,15 @@ impl TrafficShaping {
     }
 }
 
+/// What a layer shared by subgraphs and connector sources applies to.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ShapingTarget<'a> {
+    /// A subgraph, by name.
+    Subgraph(&'a str),
+    /// A connector source, keyed by `<subgraph name>.<source name>`.
+    ConnectorSource(&'a str),
+}
+
 /// The layers traffic shaping applies to each subgraph and connector source.
 ///
 /// A target with no traffic shaping configuration, neither its own block nor `all`, gets an
@@ -490,20 +499,47 @@ impl TrafficShaping {
         )
     }
 
-    /// Caches the rate configuration for this target for the plugin's lifetime. Each service
-    /// built from the layer has an independent counter.
-    fn cached_rate_limit_layer(
-        rate_limits: &Mutex<HashMap<String, RateLimitLayer>>,
-        key: &str,
-        conf: Option<&RateLimitConf>,
-    ) -> Option<RateLimitLayer> {
-        conf.map(|conf| {
+    /// Returns a layer that rejects a request to `target` when the rate limit beneath it is not
+    /// ready, instead of waiting.
+    pub(crate) fn load_shed_layer(&self, target: ShapingTarget<'_>) -> OptionLayer<LoadShedLayer> {
+        let shaped = match target {
+            ShapingTarget::Subgraph(name) => self.subgraph_shaping(name).is_some(),
+            ShapingTarget::ConnectorSource(source) => {
+                self.connector_source_shaping(source).is_some()
+            }
+        };
+        option_layer(shaped.then(LoadShedLayer::new))
+    }
+
+    /// Returns the rate limit for `target`, when `global_rate_limit` is configured for it.
+    ///
+    /// The rate configuration is cached per target for the plugin's lifetime. Each service built
+    /// from the layer has an independent counter.
+    pub(crate) fn rate_limit_layer(
+        &self,
+        target: ShapingTarget<'_>,
+    ) -> OptionLayer<RateLimitLayer> {
+        let (rate_limits, key, conf) = match target {
+            ShapingTarget::Subgraph(name) => (
+                &self.rate_limit_subgraphs,
+                name,
+                self.subgraph_shaping(name)
+                    .and_then(|shaping| shaping.global_rate_limit),
+            ),
+            ShapingTarget::ConnectorSource(source) => (
+                &self.rate_limit_sources,
+                source,
+                self.connector_source_shaping(source)
+                    .and_then(|shaping| shaping.global_rate_limit),
+            ),
+        };
+        option_layer(conf.map(|conf| {
             rate_limits
                 .lock()
                 .entry(key.to_string())
                 .or_insert_with(|| RateLimitLayer::new(conf.capacity.into(), conf.interval))
                 .clone()
-        })
+        }))
     }
 
     /// Returns a layer that answers a request to this subgraph that load shedding rejected with a
@@ -516,23 +552,6 @@ impl TrafficShaping {
             self.subgraph_shaping(name)
                 .map(|_| SubgraphErrorResponseLayer),
         )
-    }
-
-    /// Returns a layer that rejects a request to this subgraph when the rate limit beneath it
-    /// is not ready, instead of waiting.
-    pub(crate) fn subgraph_load_shed_layer(&self, name: &str) -> OptionLayer<LoadShedLayer> {
-        option_layer(self.subgraph_shaping(name).map(|_| LoadShedLayer::new()))
-    }
-
-    /// Returns this subgraph's rate limit, when `global_rate_limit` is configured for it.
-    pub(crate) fn subgraph_rate_limit_layer(&self, name: &str) -> OptionLayer<RateLimitLayer> {
-        option_layer(self.subgraph_shaping(name).and_then(|shaping| {
-            Self::cached_rate_limit_layer(
-                &self.rate_limit_subgraphs,
-                name,
-                shaping.global_rate_limit.as_ref(),
-            )
-        }))
     }
 
     /// Returns a layer that answers a request to this subgraph with a `504` once it runs past
@@ -603,32 +622,6 @@ impl TrafficShaping {
             self.connector_source_shaping(source)
                 .map(|_| ConnectorSourceErrorResponseLayer),
         )
-    }
-
-    /// Returns a layer that rejects a request to this connector source when the rate limit
-    /// beneath it is not ready, instead of waiting.
-    pub(crate) fn connector_source_load_shed_layer(
-        &self,
-        source: &str,
-    ) -> OptionLayer<LoadShedLayer> {
-        option_layer(
-            self.connector_source_shaping(source)
-                .map(|_| LoadShedLayer::new()),
-        )
-    }
-
-    /// Returns this connector source's rate limit, when `global_rate_limit` is configured for it.
-    pub(crate) fn connector_source_rate_limit_layer(
-        &self,
-        source: &str,
-    ) -> OptionLayer<RateLimitLayer> {
-        option_layer(self.connector_source_shaping(source).and_then(|shaping| {
-            Self::cached_rate_limit_layer(
-                &self.rate_limit_sources,
-                source,
-                shaping.global_rate_limit.as_ref(),
-            )
-        }))
     }
 
     /// Returns a layer that answers a request to this connector source with a gateway-timeout
