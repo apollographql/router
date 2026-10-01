@@ -1,13 +1,15 @@
-//! Subgraph traffic shaping as the subgraph stage places it.
+//! Subgraph and connector source traffic shaping as their stages place it.
 //!
-//! Each test builds the real subgraph stack with [`build_subgraph_services`]. A stub plugin
-//! replaces the subgraph service with a [`tower_test::mock`] from its subgraph hook, so the mock
-//! sits beneath traffic shaping and the tests see what the subgraph actually receives. Time is
-//! paused, so timeouts and rate-limit intervals elapse deterministically.
+//! Each test builds the real stack with [`build_subgraph_services`] or
+//! [`build_connector_request_services`] around a [`tower_test::mock`] that sits beneath traffic
+//! shaping, so the tests see what the target actually receives. For a subgraph, a stub plugin
+//! returns the mock from its hook. For a connector source, the mock is the source's HTTP client.
+//! Time is paused, so timeouts and rate-limit intervals elapse deterministically.
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use apollo_federation::connectors::runtime::errors::Error;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
@@ -17,6 +19,7 @@ use tower::ServiceExt;
 use tower_test::mock::Mock;
 
 use crate::Configuration;
+use crate::pipeline::build_connector_request_services;
 use crate::pipeline::build_subgraph_services;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginUnstable;
@@ -26,9 +29,35 @@ use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServices;
+use crate::services::connector::request_service;
+use crate::services::http::HttpRequest;
+use crate::services::http::HttpResponse;
+use crate::services::router;
 use crate::services::subgraph;
 
 const SUBGRAPH: &str = "test";
+/// A connector source key, `<subgraph name>.<source name>`, matching
+/// [`request_service::Request::test_new`].
+const SOURCE: &str = "test_subgraph.test_sourcename";
+
+/// The plugins both stages require, in the order the router registers them.
+async fn stage_plugins(traffic_shaping: serde_json::Value) -> Plugins {
+    let mut plugins = Plugins::default();
+    for (name, config) in [
+        ("apollo.include_subgraph_errors", serde_json::json!({})),
+        ("apollo.headers", serde_json::json!({})),
+        (APOLLO_TRAFFIC_SHAPING, traffic_shaping),
+    ] {
+        let plugin = crate::plugin::plugins()
+            .find(|factory| factory.name == name)
+            .expect("plugin is registered")
+            .create_instance_without_schema(&config)
+            .await
+            .expect("plugin builds");
+        plugins.insert(name.to_string(), plugin);
+    }
+    plugins
+}
 
 type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
 
@@ -59,22 +88,8 @@ impl PluginUnstable for StubSubgraph {
 /// The subgraph services built with `traffic_shaping` config, and the handle of the mock that
 /// stands in for the subgraph.
 async fn subgraph_services(traffic_shaping: serde_json::Value) -> (SubgraphServices, Handle) {
-    let mut plugins = Plugins::default();
-    // The plugins the subgraph stage requires, in the order the router registers them.
-    for (name, config) in [
-        ("apollo.include_subgraph_errors", serde_json::json!({})),
-        ("apollo.headers", serde_json::json!({})),
-        (APOLLO_TRAFFIC_SHAPING, traffic_shaping),
-    ] {
-        let plugin = crate::plugin::plugins()
-            .find(|factory| factory.name == name)
-            .expect("plugin is registered")
-            .create_instance_without_schema(&config)
-            .await
-            .expect("plugin builds");
-        plugins.insert(name.to_string(), plugin);
-    }
     let (mock, handle) = tower_test::mock::pair();
+    let mut plugins = stage_plugins(traffic_shaping).await;
     plugins.insert("stub".to_string(), Box::new(StubSubgraph { mock }));
 
     let http_services = [(
@@ -254,6 +269,146 @@ async fn compression_sets_content_encoding() {
     assert_eq!(response.response.status(), StatusCode::OK);
     assert_eq!(
         request.subgraph_request.headers().get(CONTENT_ENCODING),
+        Some(&HeaderValue::from_static("gzip"))
+    );
+}
+
+type SourceHandle = tower_test::mock::Handle<HttpRequest, HttpResponse>;
+
+/// A function that hands out clones of [`SOURCE`]'s request service, built with
+/// `traffic_shaping` config, and the handle of the mock that stands in for the source.
+async fn source_services(
+    traffic_shaping: serde_json::Value,
+) -> (impl Fn() -> request_service::BoxCloneService, SourceHandle) {
+    let (mock, handle) = tower_test::mock::pair();
+    let plugins = stage_plugins(traffic_shaping).await;
+
+    let http_services = [(SOURCE.to_string(), mock.boxed_clone())]
+        .into_iter()
+        .collect();
+    let services = build_connector_request_services(http_services, &Arc::new(plugins));
+    (move || services.get(SOURCE.to_string()), handle)
+}
+
+async fn answer_next_source(handle: &mut SourceHandle) -> HttpRequest {
+    let (request, response) = handle
+        .next_request()
+        .await
+        .expect("the connector source receives a request");
+    response.send_response(source_response(&request));
+    request
+}
+
+fn source_response(request: &HttpRequest) -> HttpResponse {
+    HttpResponse {
+        http_response: http::Response::new(router::body::empty()),
+        context: request.context.clone(),
+    }
+}
+
+fn source_rate_limit_of_one_per_100ms() -> serde_json::Value {
+    serde_json::json!({ "connector": { "all": {
+        "global_rate_limit": { "capacity": 1, "interval": "100ms" }
+    } } })
+}
+
+async fn send_to_source(service: &mut request_service::BoxCloneService) -> Result<(), Error> {
+    service
+        .ready()
+        .await
+        .unwrap()
+        .call(request_service::Request::test_new())
+        .await
+        .expect("traffic shaping answers with a response, not an error")
+        .transport_result
+        .map(|_| ())
+}
+
+#[tokio::test(start_paused = true)]
+async fn source_timeout_is_answered_with_gateway_timeout() {
+    let (service, mut handle) = source_services(
+        serde_json::json!({ "connector": { "sources": { SOURCE: { "timeout": "100ms" } } } }),
+    )
+    .await;
+
+    // The source never answers.
+    assert!(matches!(
+        send_to_source(&mut service()).await,
+        Err(Error::GatewayTimeout)
+    ));
+    assert!(handle.next_request().await.is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn source_without_shaping_config_is_not_shaped() {
+    let (service, mut handle) = source_services(serde_json::json!({})).await;
+    let mut service = service();
+
+    // With no `connector.all` or source block, not even the 30 second default timeout applies.
+    let (result, ()) = tokio::join!(send_to_source(&mut service), async {
+        let (request, response) = handle.next_request().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        response.send_response(source_response(&request));
+    });
+    assert!(result.is_ok());
+}
+
+#[tokio::test(start_paused = true)]
+async fn rate_limited_request_never_reaches_the_source() {
+    let (service, mut handle) = source_services(source_rate_limit_of_one_per_100ms()).await;
+    let mut service = service();
+
+    let (first, _) = tokio::join!(
+        send_to_source(&mut service),
+        answer_next_source(&mut handle)
+    );
+    assert!(first.is_ok());
+
+    assert!(matches!(
+        send_to_source(&mut service).await,
+        Err(Error::RateLimited)
+    ));
+
+    tokio::time::advance(Duration::from_millis(100)).await;
+
+    let (after_interval, _) = tokio::join!(
+        send_to_source(&mut service),
+        answer_next_source(&mut handle)
+    );
+    assert!(after_interval.is_ok());
+    // Only the first and last of the three requests reached the source.
+    assert_no_mock_calls(handle).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn clones_of_the_source_service_share_one_rate_limit() {
+    let (service, mut handle) = source_services(source_rate_limit_of_one_per_100ms()).await;
+    let (mut first, mut second) = (service(), service());
+
+    let (ok, _) = tokio::join!(send_to_source(&mut first), answer_next_source(&mut handle));
+    assert!(ok.is_ok());
+    assert!(matches!(
+        send_to_source(&mut second).await,
+        Err(Error::RateLimited)
+    ));
+    assert_no_mock_calls(handle).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn source_compression_sets_content_encoding() {
+    let (service, mut handle) = source_services(
+        serde_json::json!({ "connector": { "sources": { SOURCE: { "compression": "gzip" } } } }),
+    )
+    .await;
+    let mut service = service();
+
+    let (result, request) = tokio::join!(
+        send_to_source(&mut service),
+        answer_next_source(&mut handle)
+    );
+    assert!(result.is_ok());
+    assert_eq!(
+        request.http_request.headers().get(CONTENT_ENCODING),
         Some(&HeaderValue::from_static("gzip"))
     );
 }

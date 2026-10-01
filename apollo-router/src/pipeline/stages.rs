@@ -38,6 +38,7 @@ use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::traffic_shaping::ShapingTarget;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanCache;
@@ -223,10 +224,10 @@ pub(crate) fn build_subgraph_service(
             t.subgraph_error_response_layer(name)
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-            t.subgraph_load_shed_layer(name)
+            t.load_shed_layer(ShapingTarget::Subgraph(name))
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
-            t.subgraph_rate_limit_layer(name)
+            t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
@@ -274,21 +275,40 @@ pub(crate) fn build_subgraph_services(
 
 /// Builds the request service stack for each connector source, keyed by
 /// `source_config_key()`.
-fn build_connector_request_services(
+pub(crate) fn build_connector_request_services(
     connector_http_services: IndexMap<String, http::BoxCloneService>,
     plugins: &Arc<Plugins>,
 ) -> ConnectorRequestServices {
     let mut map = HashMap::with_capacity(connector_http_services.len());
     for (source, http_client) in connector_http_services.into_iter() {
-        // One buffer per connector source provides per-source backpressure and is
-        // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-        // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
+        // One buffer per connector source provides per-source backpressure and lets
+        // every clone from [`ConnectorRequestServices::get`] share this stack (mirrors
+        // the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
+                .buffered()
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_error_response_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.load_shed_layer(ShapingTarget::ConnectorSource(&source))
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_timeout_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_compression_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_backpressure_buffer_layer(&source)
+                })
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })

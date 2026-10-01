@@ -12,8 +12,8 @@
 //!   a GraphQL response. This can't move into the rate limit, which only waits; it is load
 //!   shedding that turns the wait into an error.
 //!
-//! Subgraphs place each part separately, and their timeout answers its own errors. Connector
-//! sources still use one layer for all four, which also answers timeouts.
+//! The subgraph and connector request stages place each part separately. Their timeouts answer
+//! their own errors.
 
 use apollo_federation::connectors::runtime::errors::Error;
 use http::StatusCode;
@@ -22,9 +22,7 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
-use tower::limit::RateLimitLayer;
 use tower::load_shed::error::Overloaded;
-use tower::timeout::error::Elapsed;
 use tower::util::BoxService;
 
 use super::rate_limit_error;
@@ -68,29 +66,20 @@ where
     }
 }
 
-/// Layer type for [`TrafficShaping::connector_source_admission_layer`](super::TrafficShaping::connector_source_admission_layer).
-pub(crate) struct ConnectorSourceAdmissionLayer {
-    rate_limit: Option<RateLimitLayer>,
-}
+/// Layer type for [`TrafficShaping::connector_source_error_response_layer`](super::TrafficShaping::connector_source_error_response_layer).
+pub(crate) struct ConnectorSourceErrorResponseLayer;
 
-impl ConnectorSourceAdmissionLayer {
-    pub(super) fn new(rate_limit: Option<RateLimitLayer>) -> Self {
-        Self { rate_limit }
-    }
-}
-
-impl<S> Layer<S> for ConnectorSourceAdmissionLayer
+impl<S> Layer<S> for ConnectorSourceErrorResponseLayer
 where
     S: Service<request_service::Request, Response = request_service::Response, Error = BoxError>
         + Send
         + 'static,
     S::Future: Send + 'static,
 {
-    type Service = request_service::BoxCloneService;
+    type Service = BoxService<request_service::Request, request_service::Response, BoxError>;
 
     fn layer(&self, inner: S) -> Self::Service {
         ServiceBuilder::new()
-            .buffered()
             .map_future_with_request_data(
                 |req: &request_service::Request| {
                     (
@@ -102,16 +91,6 @@ where
                 |(context, response_key, subgraph_name), future| async {
                     let response: Result<request_service::Response, BoxError> = future.await;
                     match response {
-                        Ok(ok) => Ok(ok),
-                        Err(err) if err.is::<Elapsed>() => {
-                            Ok(request_service::Response::error_new(
-                                context,
-                                subgraph_name,
-                                Error::GatewayTimeout,
-                                "Your request has been timed out",
-                                response_key,
-                            ))
-                        }
                         Err(err) if err.is::<Overloaded>() => {
                             Ok(request_service::Response::error_new(
                                 context,
@@ -121,19 +100,18 @@ where
                                 response_key,
                             ))
                         }
-                        Err(err) => Err(err),
+                        _ => response,
                     }
                 },
             )
-            .load_shed()
-            .option_layer(self.rate_limit.clone())
             .service(inner)
-            .boxed_clone()
+            .boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use apollo_federation::connectors::runtime::errors::Error;
     use http::StatusCode;
     use tower::BoxError;
     use tower::Layer;
@@ -141,9 +119,11 @@ mod tests {
     use tower::load_shed::error::Overloaded;
     use tower::timeout::error::Elapsed;
 
+    use super::ConnectorSourceErrorResponseLayer;
     use super::SubgraphErrorResponseLayer;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::connector::request_service;
 
     /// The response the error-response layer gives when the service beneath it fails with `error`.
     async fn respond_to(error: BoxError) -> Result<SubgraphResponse, BoxError> {
@@ -182,6 +162,37 @@ mod tests {
         assert_eq!(error.to_string(), "connection refused");
         // The subgraph timeout answers its own errors.
         let error = respond_to(Elapsed::new().into()).await.unwrap_err();
+        assert!(error.is::<Elapsed>());
+    }
+
+    /// The response the connector source error-response layer gives when the service beneath it
+    /// fails with `error`.
+    async fn source_responds_to(error: BoxError) -> Result<request_service::Response, BoxError> {
+        let mut error = Some(error);
+        let failing = tower::service_fn(move |_: request_service::Request| {
+            let error = error.take().expect("called once");
+            async move { Err::<request_service::Response, _>(error) }
+        });
+        ConnectorSourceErrorResponseLayer
+            .layer(failing)
+            .oneshot(request_service::Request::test_new())
+            .await
+    }
+
+    #[tokio::test]
+    async fn source_overload_becomes_rate_limited() {
+        let response = source_responds_to(Overloaded::new().into()).await.unwrap();
+        assert!(matches!(response.transport_result, Err(Error::RateLimited)));
+    }
+
+    #[tokio::test]
+    async fn other_source_errors_pass_through() {
+        let error = source_responds_to("connection refused".into())
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "connection refused");
+        // The connector source timeout answers its own errors.
+        let error = source_responds_to(Elapsed::new().into()).await.unwrap_err();
         assert!(error.is::<Elapsed>());
     }
 }
