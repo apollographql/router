@@ -7344,12 +7344,19 @@ async fn partial_entity_hit_stores_fetched_entity_under_its_own_ttl() {
 }
 
 /// What a toggleable mock subgraph returns for the next request. `Healthy` is a cacheable
-/// `public, max-age=600` response.
+/// `public, max-age=600` response. The failure shapes are what a subgraph framework can emit on
+/// its error path (Plug, for example, defaults to `max-age=0, private, must-revalidate`).
 #[derive(Clone, Copy, Debug)]
 enum ToggledSubgraphResponse {
     Healthy,
     PrivateStorable,
+    PrivateDataWithErrors,
+    PrivateStorableWithErrors,
+    PrivateNullDataWithErrors,
+    PrivateHttp500,
+    PrivateMaxAgeZero,
     PublicDataWithErrors,
+    NoStoreDataWithErrors,
 }
 
 /// A subgraph service that answers with `healthy_data` or with the response shape currently
@@ -7381,9 +7388,54 @@ fn toggled_subgraph_service(
                     Some(healthy_data),
                     vec![],
                 ),
+                ToggledSubgraphResponse::PrivateDataWithErrors => (
+                    http::StatusCode::OK,
+                    "max-age=0, private, must-revalidate",
+                    Some(healthy_data),
+                    vec![error],
+                ),
+                ToggledSubgraphResponse::PrivateStorableWithErrors => (
+                    http::StatusCode::OK,
+                    "private, max-age=600",
+                    Some(healthy_data),
+                    vec![error],
+                ),
+                ToggledSubgraphResponse::PrivateNullDataWithErrors => (
+                    http::StatusCode::OK,
+                    "max-age=0, private, must-revalidate",
+                    Some(serde_json_bytes::Value::Null),
+                    vec![error],
+                ),
+                // Mirrors what the HTTP subgraph service hands to plugins for a non-2xx
+                // response: the original status and headers, and a `SUBREQUEST_HTTP_ERROR`.
+                ToggledSubgraphResponse::PrivateHttp500 => (
+                    http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "max-age=0, private, must-revalidate",
+                    None,
+                    vec![
+                        crate::error::FetchError::SubrequestHttpError {
+                            service: req.subgraph_name.clone(),
+                            status_code: Some(500),
+                            reason: "500: Internal Server Error".to_string(),
+                        }
+                        .to_graphql_error(None),
+                    ],
+                ),
+                ToggledSubgraphResponse::PrivateMaxAgeZero => (
+                    http::StatusCode::OK,
+                    "private, max-age=0",
+                    Some(healthy_data),
+                    vec![],
+                ),
                 ToggledSubgraphResponse::PublicDataWithErrors => (
                     http::StatusCode::OK,
                     "public, max-age=600",
+                    Some(healthy_data),
+                    vec![error],
+                ),
+                ToggledSubgraphResponse::NoStoreDataWithErrors => (
+                    http::StatusCode::OK,
+                    "no-store",
                     Some(healthy_data),
                     vec![error],
                 ),
@@ -7589,6 +7641,76 @@ impl ToggledSubgraphHarness {
     }
 }
 
+/// A private response that the cache could not store does not mark the query as private. The
+/// next healthy public response is stored and the request after it is served from the cache.
+#[rstest]
+#[tokio::test]
+async fn unstorable_response_does_not_mark_root_field_query_private(
+    #[values(
+        ToggledSubgraphResponse::PrivateDataWithErrors,
+        ToggledSubgraphResponse::PrivateStorableWithErrors,
+        ToggledSubgraphResponse::PrivateNullDataWithErrors,
+        ToggledSubgraphResponse::PrivateHttp500,
+        ToggledSubgraphResponse::PrivateMaxAgeZero,
+        ToggledSubgraphResponse::PublicDataWithErrors,
+        ToggledSubgraphResponse::NoStoreDataWithErrors
+    )]
+    failure: ToggledSubgraphResponse,
+    #[values(false, true)] with_private_id: bool,
+) {
+    async move {
+        let private_id = with_private_id.then_some("1234");
+        let mut harness = ToggledSubgraphHarness::root_fields(with_private_id).await;
+
+        harness.respond_with(failure);
+        let entries = harness.call(private_id).await;
+        assert_eq!(harness.subgraph_calls(), 1);
+        assert!(
+            entries.iter().all(|entry| !entry.should_store),
+            "nothing was stored for a {failure:?} response, got: {entries:?}"
+        );
+        assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 0);
+
+        harness.assert_healthy_response_is_cached(private_id).await;
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Entity variant of `unstorable_response_does_not_mark_root_field_query_private`. A public
+/// response with errors is left out: an error without an entity path does not stop the entity
+/// from being stored.
+#[rstest]
+#[tokio::test]
+async fn unstorable_response_does_not_mark_entity_query_private(
+    #[values(
+        ToggledSubgraphResponse::PrivateDataWithErrors,
+        ToggledSubgraphResponse::PrivateStorableWithErrors,
+        ToggledSubgraphResponse::PrivateNullDataWithErrors,
+        ToggledSubgraphResponse::PrivateHttp500,
+        ToggledSubgraphResponse::PrivateMaxAgeZero,
+        ToggledSubgraphResponse::NoStoreDataWithErrors
+    )]
+    failure: ToggledSubgraphResponse,
+) {
+    async move {
+        let mut harness = ToggledSubgraphHarness::entities().await;
+
+        harness.respond_with(failure);
+        let entries = harness.call(None).await;
+        assert_eq!(harness.subgraph_calls(), 1);
+        assert!(
+            entries.iter().all(|entry| !entry.should_store),
+            "nothing was stored for a {failure:?} response, got: {entries:?}"
+        );
+        assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 0);
+
+        harness.assert_healthy_response_is_cached(None).await;
+    }
+    .with_metrics()
+    .await;
+}
+
 /// A storable private response marks the query as private. Without `private_id`, later
 /// requests skip the cache, and the debugger reports that nothing was stored.
 #[tokio::test]
@@ -7649,4 +7771,394 @@ async fn response_with_errors_is_not_reported_as_stored() {
     assert!(!entries[0].should_store);
 
     harness.assert_healthy_response_is_cached(None).await;
+}
+
+/// With `private_id`, a storable private response is cached for that user only.
+#[tokio::test]
+async fn storable_private_response_is_cached_per_user_with_private_id() {
+    async {
+        let mut harness = ToggledSubgraphHarness::root_fields(true).await;
+
+        harness.respond_with(ToggledSubgraphResponse::PrivateStorable);
+        let entries = harness.call(Some("1234")).await;
+        assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
+        assert!(entries[0].should_store);
+        wait_for_cache(&harness.storage, expected_cached_keys(&entries)).await;
+
+        harness.call(Some("1234")).await;
+        assert_eq!(
+            harness.subgraph_calls(),
+            1,
+            "the same user is served from the cache"
+        );
+
+        harness.call(Some("5678")).await;
+        assert_eq!(harness.subgraph_calls(), 2, "another user is not");
+    }
+    .with_metrics()
+    .await;
+}
+
+/// Connector variant of `unstorable_response_does_not_mark_root_field_query_private`. For a
+/// connector, success is its own `isSuccess` decision, not the HTTP status: a 500 that a custom
+/// `isSuccess` accepts, with a storable `private, max-age=600`, marks the query as private, so
+/// later requests skip the cache. Other private error or `max-age=0` responses leave the list
+/// unchanged, so the next healthy response is stored and the request after it is served from the
+/// cache.
+#[rstest]
+#[case::root_field_http_500("/users", 500, "max-age=0, private, must-revalidate", false)]
+#[case::root_field_private_max_age_zero("/users", 200, "private, max-age=0", false)]
+#[case::root_field_http_500_accepted_by_is_success("/users", 500, "private, max-age=600", true)]
+#[case::entity_http_500("/products/1", 500, "max-age=0, private, must-revalidate", false)]
+#[case::entity_private_max_age_zero("/products/1", 200, "private, max-age=0", false)]
+#[case::entity_http_500_accepted_by_is_success("/products/1", 500, "private, max-age=600", true)]
+#[tokio::test]
+async fn connector_private_response_marks_query_private_only_on_success(
+    #[case] endpoint: &'static str,
+    #[case] failure_status: u16,
+    #[case] failure_cache_control: &'static str,
+    #[case] accepted_by_is_success: bool,
+) {
+    async move {
+        // `/products` returns a public list of one product, so `title` comes from an entity fetch
+        // to `/products/1`.
+        let (query, connect_http, healthy_body) = match endpoint {
+            "/users" => (
+                "query { users { id name } }",
+                r#"http: {GET: "/users"}"#,
+                serde_json::json!([{"id": 1, "name": "Alice"}]),
+            ),
+            _ => (
+                "query { products { id title } }",
+                r#"http: {GET: "/products/{$args.id}"}"#,
+                serde_json::json!({"id": "1", "title": "One"}),
+            ),
+        };
+        let schema = if accepted_by_is_success {
+            CONNECTOR_SCHEMA.replace(
+                connect_http,
+                &format!(r#"{connect_http}, isSuccess: "$status->lt(600)""#),
+            )
+        } else {
+            CONNECTOR_SCHEMA.to_string()
+        };
+        let failure_body = if failure_status == 200 || accepted_by_is_success {
+            healthy_body.clone()
+        } else {
+            serde_json::json!({"error": "upstream failure"})
+        };
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", "public, max-age=600")
+                    .set_body_json(serde_json::json!([{"id": "1"}])),
+            )
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(endpoint))
+            .respond_with(
+                ResponseTemplate::new(failure_status)
+                    .insert_header("cache-control", failure_cache_control)
+                    .set_body_json(failure_body),
+            )
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(endpoint))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", "public, max-age=600")
+                    .set_body_json(healthy_body),
+            )
+            .with_priority(2)
+            .mount(&mock_server)
+            .await;
+
+        let uri = mock_server.uri();
+        let namespace = Uuid::new_v4().to_string();
+        let factory =
+            create_connector_cache_factory_with_schema(&schema, &uri, &namespace, None).await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        connector_response_body(response).await;
+        assert_eq!(mock_requests_for_path(&mock_server, endpoint).await, 1);
+        assert_gauge!(
+            "apollo.router.response_cache.private_queries.lru.size",
+            u64::from(accepted_by_is_success)
+        );
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        let context = response.context.clone();
+        connector_response_body(response).await;
+        assert_eq!(mock_requests_for_path(&mock_server, endpoint).await, 2);
+        let (_storage_guard, expected_requests) = if accepted_by_is_success {
+            (None, 3)
+        } else {
+            (
+                Some(wait_for_connector_cache_insert(&namespace, &context).await),
+                2,
+            )
+        };
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        connector_response_body(response).await;
+        assert_eq!(
+            mock_requests_for_path(&mock_server, endpoint).await,
+            expected_requests
+        );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// A connector entity whose mapping declares an error (`->withError`) is neither stored nor allowed
+/// to mark its query as private, whether or not `include_subgraph_errors` shows the error to the
+/// client. When the error is hidden it never reaches the response's `errors`, so the cache must not
+/// rely on that array alone.
+#[rstest]
+#[tokio::test]
+async fn connector_entity_with_declared_error_is_not_stored_or_marked_private(
+    #[values(false, true)] include_subgraph_errors: bool,
+    #[values("private, max-age=600", "public, max-age=600")] first_cache_control: &'static str,
+) {
+    async move {
+        let schema = CONNECTOR_SCHEMA.replace(
+            r#"http: {GET: "/products/{$args.id}"}, selection: "id title""#,
+            r#"http: {GET: "/products/{$args.id}"}, selection: "id title: title->withError($.problem)""#,
+        );
+        assert_ne!(
+            schema, CONNECTOR_SCHEMA,
+            "schema substitution did not apply"
+        );
+        let query = "query { products { id title } }";
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/products"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", "public, max-age=600")
+                    .set_body_json(serde_json::json!([{"id": "1"}])),
+            )
+            .mount(&mock_server)
+            .await;
+        // The mapping declares an error only when the body has a `problem`.
+        Mock::given(method("GET"))
+            .and(path("/products/1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", first_cache_control)
+                    .set_body_json(
+                        serde_json::json!({"id": "1", "title": "One", "problem": "Title unverified"}),
+                    ),
+            )
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/products/1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", "public, max-age=600")
+                    .set_body_json(serde_json::json!({"id": "1", "title": "One"})),
+            )
+            .with_priority(2)
+            .mount(&mock_server)
+            .await;
+
+        let uri = mock_server.uri();
+        let namespace = Uuid::new_v4().to_string();
+        let extra_config = serde_json_bytes::json!({
+            "include_subgraph_errors": { "all": include_subgraph_errors }
+        });
+        let factory =
+            create_connector_cache_factory_with_schema(&schema, &uri, &namespace, Some(extra_config))
+                .await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        connector_response_body(response).await;
+        assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 0);
+        grace_period_for_unwanted_insert().await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        let context = response.context.clone();
+        connector_response_body(response).await;
+        assert_eq!(
+            mock_requests_for_path(&mock_server, "/products/1").await,
+            2,
+            "the entity with a declared error should not have been stored"
+        );
+        let _storage_guard = wait_for_connector_cache_insert(&namespace, &context).await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        connector_response_body(response).await;
+        assert_eq!(mock_requests_for_path(&mock_server, "/products/1").await, 2);
+    }
+    .with_metrics()
+    .await;
+}
+
+/// A batch connector response that declares an error on any entity stores none of its entities,
+/// and doesn't mark the query as private. Error paths come from the order of the upstream response,
+/// which need not match the order of the requested entities, so the cache can't safely tell which
+/// entity an error belongs to.
+#[rstest]
+#[tokio::test]
+async fn connector_batch_with_declared_error_stores_no_entities(
+    #[values(false, true)] include_subgraph_errors: bool,
+    #[values("private, max-age=600", "public, max-age=600")] first_cache_control: &'static str,
+) {
+    async move {
+        let schema = include_str!("../connectors/testdata/batch.graphql").replace(
+            r#"body: "ids: $batch.id"}, selection: "id name username""#,
+            r#"body: "ids: $batch.id"}, selection: "id name: name->withError($.problem) username""#,
+        );
+        assert!(
+            schema.contains("withError"),
+            "schema substitution did not apply"
+        );
+        let query = "query { users { id name username } }";
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/users"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", "public, max-age=600")
+                    .set_body_json(serde_json::json!([{"id": 1}, {"id": 2}])),
+            )
+            .mount(&mock_server)
+            .await;
+        // The upstream returns the entities in reverse order, and only user 2 declares an error.
+        Mock::given(method("POST"))
+            .and(path("/users-batch"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", first_cache_control)
+                    .set_body_json(serde_json::json!([
+                        {"id": 2, "name": "Bea", "username": "bea", "problem": "Name unverified"},
+                        {"id": 1, "name": "Al", "username": "al"},
+                    ])),
+            )
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/users-batch"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("cache-control", "public, max-age=600")
+                    .set_body_json(serde_json::json!([
+                        {"id": 1, "name": "Al", "username": "al"},
+                        {"id": 2, "name": "Bea", "username": "bea"},
+                    ])),
+            )
+            .with_priority(2)
+            .mount(&mock_server)
+            .await;
+
+        let uri = mock_server.uri();
+        let namespace = Uuid::new_v4().to_string();
+        let extra_config = serde_json_bytes::json!({
+            "include_subgraph_errors": { "all": include_subgraph_errors }
+        });
+        let factory = create_connector_cache_factory_with_schema(
+            &schema,
+            &uri,
+            &namespace,
+            Some(extra_config),
+        )
+        .await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        let body = connector_response_body(response).await;
+        let entity_entries: Vec<_> = body
+            .pointer("/extensions/apolloCacheDebugging/data")
+            .and_then(|data| data.as_array())
+            .expect("response should contain debug entries")
+            .iter()
+            .filter(|entry| entry.pointer("/kind/entityKey").is_some())
+            .collect();
+        assert_eq!(entity_entries.len(), 2, "got: {body:?}");
+        assert!(
+            entity_entries
+                .iter()
+                .all(|entry| entry.pointer("/shouldStore") == Some(&serde_json::json!(false))),
+            "no entity of a batch with a declared error should be stored, got: {entity_entries:?}"
+        );
+        assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 0);
+        grace_period_for_unwanted_insert().await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        let context = response.context.clone();
+        connector_response_body(response).await;
+        let batch_requests: Vec<_> = mock_server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|request| request.url.path() == "/users-batch")
+            .collect();
+        assert_eq!(batch_requests.len(), 2);
+        let refetched: serde_json::Value = batch_requests[1].body_json().unwrap();
+        assert_eq!(
+            refetched["ids"].as_array().map(Vec::len),
+            Some(2),
+            "both entities should be fetched again, got: {refetched}"
+        );
+        let _storage_guard = wait_for_connector_cache_insert(&namespace, &context).await;
+
+        let response = factory
+            .create()
+            .oneshot(make_connector_cache_request(query))
+            .await
+            .unwrap();
+        connector_response_body(response).await;
+        assert_eq!(
+            mock_requests_for_path(&mock_server, "/users-batch").await,
+            2
+        );
+    }
+    .with_metrics()
+    .await;
 }

@@ -114,12 +114,31 @@ response_cache:
 The router performs the following sequence to determine whether a particular query returns private data:
 
 1. Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
-2. When the subgraph returns the response with private data, the router recognizes it and stores the data in a user-specific part of the cache.
+2. When the subgraph returns the response with private data, the router recognizes it. If the private ID is provided, the router stores the data in a user-specific part of the cache.
 3. The router stores the query in a list of known queries with private data.
 4. When the router subsequently sees a known query:
 
-- If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly.
+- If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly. The response is never cached.
 - If the private ID is provided, the router queries the part of the cache for the current user and checks the subgraph if nothing is available.
+
+#### Which responses mark a query as private
+
+A response marks its query as private only if it has `Cache-Control: private` and the router could otherwise store it:
+
+- The response succeeded:
+  - For a subgraph, the response has a 2xx status and no GraphQL errors.
+  - For a connector, the connector treats the response as a success (by default a 2xx status, or whatever its `isSuccess` setting accepts), and its mapping declares no errors.
+- The `Cache-Control` header allows storing: it doesn't include `no-store`, and its TTL is above zero.
+
+Other responses, such as errors or `private, max-age=0` responses, leave the list unchanged.
+
+A query stays on the list until the router restarts, or until the list is full and the query is the least recently used entry. The list tracks the subgraph query, not its variables, so the classification applies to every variable value of that query.
+
+<Tip>
+
+Return `Cache-Control: no-store` from your subgraphs on error responses. This tells the router and any other caches not to store the response.
+
+</Tip>
 
 ## Custom cache keys
 

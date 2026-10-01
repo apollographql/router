@@ -162,6 +162,21 @@ pub(super) struct PrivateQueryKey {
     pub(super) has_private_id: bool,
 }
 
+/// Whether a response may add its query to the known-private queries.
+///
+/// Only a private response that the cache could store counts: it must have succeeded without
+/// errors, and its `Cache-Control` must allow storing. Entries stay until they are evicted or
+/// the router restarts, so learning from anything else would let a single error response
+/// (frameworks often mark those `private`) turn off caching for the query.
+pub(super) fn marks_query_private(cache_control: &CacheControl, succeeded: bool) -> bool {
+    succeeded && cache_control.private() && cache_control.should_store()
+}
+
+/// Whether a subgraph or connector response has a 2xx status and no GraphQL errors.
+pub(super) fn succeeded_without_errors(response: &http::Response<graphql::Response>) -> bool {
+    response.status().is_success() && response.body().errors.is_empty()
+}
+
 /// Adds a query to the known-private queries and updates their size gauge.
 pub(super) async fn remember_private_query(
     private_queries: &RwLock<LruCache<PrivateQueryKey, ()>>,
@@ -1681,12 +1696,17 @@ impl CacheService {
                 if cache_control.private() {
                     // we did not know in advance that this was a query with a private scope, so we update the cache key
                     if !is_known_private {
-                        remember_private_query(
-                            &self.private_queries,
-                            private_query_key,
-                            &self.lru_size_instrument,
-                        )
-                        .await;
+                        if marks_query_private(
+                            &cache_control,
+                            succeeded_without_errors(&response.response),
+                        ) {
+                            remember_private_query(
+                                &self.private_queries,
+                                private_query_key,
+                                &self.lru_size_instrument,
+                            )
+                            .await;
+                        }
 
                         if let Some(s) = private_id.as_ref() {
                             root_cache_key = format!("{root_cache_key}:{s}");
@@ -1899,7 +1919,12 @@ impl CacheService {
                     store_cache_control.merge_no_store(&request_cache_control);
                 }
 
-                if !is_known_private && store_cache_control.private() {
+                if !is_known_private
+                    && marks_query_private(
+                        &store_cache_control,
+                        succeeded_without_errors(&response.response),
+                    )
+                {
                     remember_private_query(
                         &self.private_queries,
                         private_query_key,
