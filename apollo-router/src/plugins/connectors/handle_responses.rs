@@ -44,6 +44,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::fetch::AddSubgraphNameExt;
+use crate::services::http::IncompleteResponseBody;
 
 // --- ERRORS ------------------------------------------------------------------
 
@@ -105,9 +106,10 @@ where
         Ok(response) => {
             let (parts, body) = response.into_parts();
 
-            let result = Ok(TransportResponse::Http(HttpResponse {
-                inner: parts.clone(),
-            }));
+            let mut result: Result<TransportResponse, Error> =
+                Ok(TransportResponse::Http(HttpResponse {
+                    inner: parts.clone(),
+                }));
 
             let make_err = |message: String, code: &str| -> Box<RuntimeError> {
                 let mut err = RuntimeError::new(message, &response_key);
@@ -142,6 +144,9 @@ where
                 .extensions()
                 .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
 
+            // Whether the body failed to arrive in full for a reason of the source's own, as
+            // opposed to the router cutting it off at the response size limit.
+            let mut body_incomplete = false;
             let body_result: Result<_, Box<RuntimeError>> = match response_size_limit {
                 Some(ConnectorResponseSizeLimit(limit)) => {
                     Limited::new(body, limit)
@@ -159,15 +164,22 @@ where
                                     .record("apollo.connector.response.aborted", "response_size_limit");
                                 make_limit_err(limit)
                             } else {
+                                body_incomplete = true;
                                 make_invalid_response_err()
                             }
                         })
                 }
-                None => body
-                    .collect()
-                    .await
-                    .map_err(|_| make_invalid_response_err()),
+                None => body.collect().await.map_err(|_| {
+                    body_incomplete = true;
+                    make_invalid_response_err()
+                }),
             };
+            if body_incomplete && let Ok(TransportResponse::Http(http_response)) = &mut result {
+                http_response
+                    .inner
+                    .extensions
+                    .insert(IncompleteResponseBody);
+            }
 
             let deserialized_body = body_result.and_then(|body| {
                 let body = body.to_bytes();
@@ -397,6 +409,7 @@ mod tests {
     use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::runtime::errors::RuntimeError;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
@@ -406,6 +419,7 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
+    use crate::services::http::IncompleteResponseBody;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
@@ -1556,6 +1570,18 @@ mod tests {
         )
         .await;
 
+        // The router cut this body off itself, so it must not be counted against the source.
+        let Ok(TransportResponse::Http(http_response)) = &result.transport_result else {
+            panic!("the source answered: {:?}", result.transport_result);
+        };
+        assert!(
+            http_response
+                .inner
+                .extensions
+                .get::<IncompleteResponseBody>()
+                .is_none()
+        );
+
         let graphql_response =
             super::aggregate_responses(vec![result.mapped_response], Context::new())
                 .unwrap()
@@ -1566,6 +1592,47 @@ mod tests {
             errors[0].message.contains("exceeded limit of 5 bytes"),
             "unexpected error message: {}",
             errors[0].message
+        );
+    }
+
+    /// A connection that drops part of the way through the body keeps the status the headers
+    /// carried, so the transport result is marked for the circuit breaker to tell it apart from
+    /// an answer.
+    #[tokio::test]
+    async fn process_response_marks_a_body_that_did_not_arrive_in_full() {
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let body = router::body::from_result_stream(futures::stream::iter([
+            Ok(bytes::Bytes::from_static(br#"{"data":"#)),
+            Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)),
+        ]));
+        let response = http::Response::builder().body(body).unwrap();
+
+        let result = process_response(
+            Ok(response),
+            key,
+            make_connector(),
+            &Context::new(),
+            (None, Default::default()),
+            None,
+            make_supergraph_request(),
+            Default::default(),
+        )
+        .await;
+
+        let Ok(TransportResponse::Http(http_response)) = &result.transport_result else {
+            panic!("the headers arrived: {:?}", result.transport_result);
+        };
+        assert_eq!(http_response.inner.status, http::StatusCode::OK);
+        assert!(
+            http_response
+                .inner
+                .extensions
+                .get::<IncompleteResponseBody>()
+                .is_some()
         );
     }
 
