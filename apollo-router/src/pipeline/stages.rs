@@ -216,7 +216,8 @@ pub(crate) fn build_subgraph_service(
         // what it rejects. The `admission` module in traffic shaping explains the order of this
         // buffer and the three layers after it. The buffer is placed even without shaping
         // configuration: the rate limit can't be cloned, and the telemetry layers need a
-        // service they can clone.
+        // service they can clone. The timeout answers its own errors, so it doesn't depend on
+        // the layers above it.
         .buffered()
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)

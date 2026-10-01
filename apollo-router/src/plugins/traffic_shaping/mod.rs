@@ -8,6 +8,7 @@
 //!
 mod admission;
 mod deduplication;
+mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -35,6 +36,7 @@ use tower::util::option_layer;
 use self::admission::ConnectorSourceAdmissionLayer;
 use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
+use self::timeout::SubgraphTimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
@@ -480,7 +482,7 @@ impl TrafficShaping {
 ///
 /// 1. admission: a buffer, error responses, load shedding and rate limit (the subgraph stage
 ///    places the subgraph buffer itself)
-/// 2. timeout
+/// 2. timeout (the subgraph timeout answers its own errors)
 /// 3. deduplication (subgraphs only)
 /// 4. compression
 /// 5. backpressure buffer
@@ -517,8 +519,8 @@ impl TrafficShaping {
         })
     }
 
-    /// Returns a layer that answers a rate-limited request to this subgraph with a `503`, and a
-    /// timed-out one with a `504`.
+    /// Returns a layer that answers a request to this subgraph that load shedding rejected with a
+    /// `503`.
     pub(crate) fn subgraph_error_response_layer(
         &self,
         name: &str,
@@ -546,12 +548,13 @@ impl TrafficShaping {
         }))
     }
 
-    /// Returns a layer that fails a request to this subgraph once it runs past the subgraph's
-    /// timeout (30 seconds by default).
-    pub(crate) fn subgraph_timeout_layer(&self, name: &str) -> OptionLayer<TimeoutLayer> {
+    /// Returns a layer that answers a request to this subgraph with a `504` once it runs past
+    /// the subgraph's timeout (30 seconds by default).
+    pub(crate) fn subgraph_timeout_layer(&self, name: &str) -> OptionLayer<SubgraphTimeoutLayer> {
         option_layer(
-            self.subgraph_shaping(name)
-                .map(|shaping| TimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))),
+            self.subgraph_shaping(name).map(|shaping| {
+                SubgraphTimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))
+            }),
         )
     }
 

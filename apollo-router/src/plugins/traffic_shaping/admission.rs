@@ -8,10 +8,12 @@
 //! - The buffer above load shedding polls readiness unconstrained, so Tokio's cooperative
 //!   scheduling is not mistaken for overload. It also lets the layers above clone the service
 //!   while every clone shares one rate limit.
-//! - The error responses must sit above load shedding and the timeout: they turn
-//!   [`Overloaded`] and [`Elapsed`] errors into GraphQL responses.
+//! - The error responses must sit above load shedding: they turn its [`Overloaded`] error into
+//!   a GraphQL response. This can't move into the rate limit, which only waits; it is load
+//!   shedding that turns the wait into an error.
 //!
-//! Subgraphs place each part separately. Connector sources still use one layer for all four.
+//! Subgraphs place each part separately, and their timeout answers its own errors. Connector
+//! sources still use one layer for all four, which also answers timeouts.
 
 use apollo_federation::connectors::runtime::errors::Error;
 use http::StatusCode;
@@ -25,7 +27,6 @@ use tower::load_shed::error::Overloaded;
 use tower::timeout::error::Elapsed;
 use tower::util::BoxService;
 
-use super::gateway_timeout_error;
 use super::rate_limit_error;
 use crate::layers::ServiceBuilderExt as _;
 use crate::services::SubgraphResponse;
@@ -49,15 +50,6 @@ where
                 |(ctx, subgraph_name), future| async {
                     let response: Result<SubgraphResponse, BoxError> = future.await;
                     match response {
-                        Err(err) if err.is::<Elapsed>() => {
-                            // TODO add metrics
-                            Ok(SubgraphResponse::error_builder()
-                                .status_code(StatusCode::GATEWAY_TIMEOUT)
-                                .subgraph_name(subgraph_name)
-                                .error(gateway_timeout_error())
-                                .context(ctx)
-                                .build())
-                        }
                         Err(err) if err.is::<Overloaded>() => {
                             // TODO add metrics
                             Ok(SubgraphResponse::error_builder()
@@ -175,14 +167,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn timeout_becomes_gateway_timeout() {
-        let response = respond_to(Elapsed::new().into()).await.unwrap();
-        assert_eq!(response.response.status(), StatusCode::GATEWAY_TIMEOUT);
-        assert_eq!(error_code(&response).as_deref(), Some("GATEWAY_TIMEOUT"));
-        assert_eq!(response.subgraph_name, "products");
-    }
-
-    #[tokio::test]
     async fn overload_becomes_rate_limited() {
         let response = respond_to(Overloaded::new().into()).await.unwrap();
         assert_eq!(response.response.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -196,5 +180,8 @@ mod tests {
     async fn other_errors_pass_through() {
         let error = respond_to("connection refused".into()).await.unwrap_err();
         assert_eq!(error.to_string(), "connection refused");
+        // The subgraph timeout answers its own errors.
+        let error = respond_to(Elapsed::new().into()).await.unwrap_err();
+        assert!(error.is::<Elapsed>());
     }
 }
