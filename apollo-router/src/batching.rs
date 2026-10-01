@@ -40,6 +40,8 @@ use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
+use crate::Context;
+use crate::configuration::Batching;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
@@ -84,6 +86,19 @@ impl fmt::Display for BatchQuery {
 }
 
 impl BatchQuery {
+    /// The batch query a fetch to `subgraph_name` in this request joins, if it joins one: batching
+    /// must be enabled for that subgraph, and the request's batch query must still be waiting for
+    /// its fetches.
+    pub(crate) fn joined_by(context: &Context, subgraph_name: &str) -> Option<Self> {
+        context.extensions().with_lock(|lock| {
+            lock.get::<Batching>()
+                .filter(|batching| batching.batch_include(subgraph_name))
+                .and(lock.get::<BatchQuery>())
+                .filter(|query| !query.finished())
+                .cloned()
+        })
+    }
+
     /// Is this BatchQuery finished?
     fn finished(&self) -> bool {
         self.remaining.load(Ordering::Acquire) == 0
