@@ -177,6 +177,9 @@ pub struct QueryPlanningStatistics {
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
+    /// `non_local_selections_count` can be `None`, if 
+    /// `QueryPlanOptions::non_local_selections_limit_enabled` is `false`
+    pub non_local_selections_count: Option<u64>,
 }
 
 /// Deserialize helper for f64 that treats null as NaN.
@@ -563,6 +566,7 @@ impl QueryPlanner {
             node: root_node,
             statistics: QueryPlanningStatistics {
                 best_plan_cost: cost,
+                non_local_selections_count: non_local_selection_state.as_ref().map(|s| s.count),
                 ..statistics
             },
         };
@@ -1458,13 +1462,15 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            non_local_selections_count: Some(30),
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
         insta::assert_snapshot!(serialized, @r###"
         {
           "evaluated_plan_count": 10,
           "evaluated_plan_paths": 20,
-          "best_plan_cost": null
+          "best_plan_cost": null,
+          "non_local_selections_count": 30
         }
         "###);
 
