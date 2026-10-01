@@ -5926,12 +5926,15 @@ mod tests {
             None
         ));
 
-        // Exercise the dangerous bucket order explicitly: the complete optimizer's HashMap
-        // may visit either bucket first. Both candidate pairs were unrelated when collected.
+        // Exercise the dangerous candidate order explicitly, independently of the optimizer's
+        // bucket traversal. Both candidate pairs were unrelated when collected.
         let mut ordered = graph.clone();
         ordered.merge_in_with_all_dependencies(u, v).unwrap();
         assert!(ordered.is_descendant_of(d, p));
         ordered.merge_in_with_all_dependencies(d, p).unwrap();
+        assert!(ordered.graph.contains_node(p));
+        assert!(ordered.graph.contains_node(d));
+        assert!(ordered.is_descendant_of(d, p));
 
         graph.reduce_and_optimize().unwrap();
         for graph in [ordered, graph] {
