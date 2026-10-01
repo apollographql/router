@@ -50,8 +50,9 @@ pub(crate) struct Client {
 
 #[buildstructor::buildstructor]
 impl Client {
-    /// An omitted `pool_idle_timeout` gets the 15s default. To disable idle eviction, construct
-    /// `Client` directly with `pool_idle_timeout: None`.
+    /// An omitted or `None` `pool_idle_timeout` gets the 15s default, including through
+    /// `and_pool_idle_timeout(None)`. To disable idle eviction, construct `Client` directly with
+    /// `pool_idle_timeout: None`.
     #[builder]
     pub(crate) fn new(
         experimental_http2: Option<Http2Config>,
