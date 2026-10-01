@@ -127,6 +127,8 @@ type KeyHopCache = RefCell<HashMap<(NodeIndex, RoutingSiteKey), Arc<Vec<RoutingC
 type CanSatisfyCache = RefCell<HashMap<(ConditionsKey, Name, Arc<str>), bool>>;
 type ConditionsRoutableCache =
     RefCell<HashMap<(NodeIndex, ArcKey<crate::operation::SelectionMap>), bool>>;
+type InconsistentMembersCache =
+    RefCell<HashMap<(Name, Arc<str>), Option<Arc<std::collections::HashSet<Name>>>>>;
 type StrandedCache =
     RefCell<HashMap<(NodeIndex, ArcKey<crate::operation::SelectionMap>), Arc<Vec<Selection>>>>;
 
@@ -156,6 +158,10 @@ pub(super) struct PlannerCaches {
     /// session; `child_possible_types` runs on every dispatch, so building
     /// the sorted Vec fresh each time dominated allocation on small graphs.
     pub(super) possible_type_names: RefCell<HashMap<Name, Arc<Vec<Name>>>>,
+    /// Runtime members of an inconsistent abstract type per subgraph. The
+    /// set is part of the routing-options cache key by pointer, so it must
+    /// be built once per (type, subgraph) for that cache to hit.
+    inconsistent_members: InconsistentMembersCache,
 }
 
 impl PlannerCaches {
@@ -169,6 +175,7 @@ impl PlannerCaches {
             key_hops_in_flight: RefCell::new(HashMap::new()),
             guard_floor: std::cell::Cell::new(usize::MAX),
             possible_type_names: RefCell::new(HashMap::new()),
+            inconsistent_members: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -317,11 +324,22 @@ impl FieldRoutingSearchSpace {
         if !self.inconsistent_abstract_types.contains(type_name) {
             return None;
         }
-        let schema = self.qg().schema_by_source(subgraph).ok()?;
-        let ty = schema.get_type(type_name).ok()?;
-        let pos = CompositeTypeDefinitionPosition::try_from(ty).ok()?;
-        let types = schema.possible_runtime_types(pos).ok()?;
-        Some(Arc::new(types.into_iter().map(|t| t.type_name).collect()))
+        let key = (type_name.clone(), subgraph.clone());
+        if let Some(cached) = self.caches.inconsistent_members.borrow().get(&key) {
+            return cached.clone();
+        }
+        let members = (|| {
+            let schema = self.qg().schema_by_source(subgraph).ok()?;
+            let ty = schema.get_type(type_name).ok()?;
+            let pos = CompositeTypeDefinitionPosition::try_from(ty).ok()?;
+            let types = schema.possible_runtime_types(pos).ok()?;
+            Some(Arc::new(types.into_iter().map(|t| t.type_name).collect()))
+        })();
+        self.caches
+            .inconsistent_members
+            .borrow_mut()
+            .insert(key, members.clone());
+        members
     }
 
     /// Advance past deterministic decisions in-place: commit single-option
