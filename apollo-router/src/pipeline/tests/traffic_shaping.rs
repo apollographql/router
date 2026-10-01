@@ -1,31 +1,23 @@
 //! Subgraph and connector source traffic shaping as their stages place it.
 //!
-//! Each test builds the real stack with [`build_subgraph_services`] or
-//! [`build_connector_request_services`] around a [`tower_test::mock`] that sits beneath traffic
-//! shaping, so the tests see what the target actually receives. For a subgraph, a stub plugin
-//! returns the mock from its hook. For a connector source, the mock is the source's HTTP client.
-//! Time is paused, so timeouts and rate-limit intervals elapse deterministically.
+//! Each test builds the real stack with the stage builders, through [`stage_stack`], which puts a
+//! [`tower_test::mock`] beneath traffic shaping, so the tests see what the target actually
+//! receives. Time is paused, so timeouts and rate-limit intervals elapse deterministically.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_federation::connectors::runtime::errors::Error;
 use http::HeaderValue;
 use http::StatusCode;
 use http::header::CONTENT_ENCODING;
-use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
-use tower_test::mock::Mock;
 
-use crate::Configuration;
-use crate::pipeline::build_connector_request_services;
-use crate::pipeline::build_subgraph_services;
-use crate::plugin::PluginInit;
-use crate::plugin::PluginUnstable;
+use super::stage_stack;
+use super::stage_stack::Handle;
+use super::stage_stack::SourceHandle;
 use crate::plugin::test::assert_no_mock_calls;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::services::Plugins;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServices;
@@ -40,67 +32,10 @@ const SUBGRAPH: &str = "test";
 /// [`request_service::Request::test_new`].
 const SOURCE: &str = "test_subgraph.test_sourcename";
 
-/// The plugins both stages require, in the order the router registers them.
-async fn stage_plugins(traffic_shaping: serde_json::Value) -> Plugins {
-    let mut plugins = Plugins::default();
-    for (name, config) in [
-        ("apollo.include_subgraph_errors", serde_json::json!({})),
-        ("apollo.headers", serde_json::json!({})),
-        (APOLLO_TRAFFIC_SHAPING, traffic_shaping),
-    ] {
-        let plugin = crate::plugin::plugins()
-            .find(|factory| factory.name == name)
-            .expect("plugin is registered")
-            .create_instance_without_schema(&config)
-            .await
-            .expect("plugin builds");
-        plugins.insert(name.to_string(), plugin);
-    }
-    plugins
-}
-
-type Handle = tower_test::mock::Handle<SubgraphRequest, SubgraphResponse>;
-
-/// Replaces the subgraph service with `mock`.
-struct StubSubgraph {
-    mock: Mock<SubgraphRequest, SubgraphResponse>,
-}
-
-#[async_trait::async_trait]
-impl PluginUnstable for StubSubgraph {
-    type Config = ();
-
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        unreachable!("inserted into the plugin registry directly")
-    }
-
-    fn subgraph_service(
-        &self,
-        _subgraph_name: &str,
-        _service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        self.mock.clone().boxed_clone()
-    }
-
-    fn unstable_method(&self) {}
-}
-
 /// The subgraph services built with `traffic_shaping` config, and the handle of the mock that
 /// stands in for the subgraph.
 async fn subgraph_services(traffic_shaping: serde_json::Value) -> (SubgraphServices, Handle) {
-    let (mock, handle) = tower_test::mock::pair();
-    let mut plugins = stage_plugins(traffic_shaping).await;
-    plugins.insert("stub".to_string(), Box::new(StubSubgraph { mock }));
-
-    let http_services = [(
-        SUBGRAPH.to_string(),
-        crate::services::http::test_http_client_service(SUBGRAPH),
-    )]
-    .into_iter()
-    .collect();
-    let services =
-        build_subgraph_services(http_services, &Arc::new(plugins), &Configuration::default());
-    (services, handle)
+    stage_stack::subgraph_services(SUBGRAPH, &[(APOLLO_TRAFFIC_SHAPING, traffic_shaping)]).await
 }
 
 /// Like [`subgraph_services`], for one clone of the test subgraph's service.
@@ -300,21 +235,12 @@ async fn compression_sets_content_encoding() {
     );
 }
 
-type SourceHandle = tower_test::mock::Handle<HttpRequest, HttpResponse>;
-
 /// A function that hands out clones of [`SOURCE`]'s request service, built with
 /// `traffic_shaping` config, and the handle of the mock that stands in for the source.
 async fn source_services(
     traffic_shaping: serde_json::Value,
 ) -> (impl Fn() -> request_service::BoxCloneService, SourceHandle) {
-    let (mock, handle) = tower_test::mock::pair();
-    let plugins = stage_plugins(traffic_shaping).await;
-
-    let http_services = [(SOURCE.to_string(), mock.boxed_clone())]
-        .into_iter()
-        .collect();
-    let services = build_connector_request_services(http_services, &Arc::new(plugins));
-    (move || services.get(SOURCE.to_string()), handle)
+    stage_stack::source_services(SOURCE, &[(APOLLO_TRAFFIC_SHAPING, traffic_shaping)]).await
 }
 
 async fn answer_next_source(handle: &mut SourceHandle) -> HttpRequest {
