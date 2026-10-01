@@ -96,6 +96,65 @@ pub struct Request {
 }
 
 impl Request {
+    /// A request to a `Query.hello` connector on the `test_subgraph.test_sourcename` source.
+    #[cfg(test)]
+    pub(crate) fn test_new() -> Self {
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+        use apollo_federation::connectors::SourceName;
+        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some(SourceName::cast("test_sourcename")),
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+        let http_request = HttpRequest {
+            inner: http::Request::new("testing".to_string()),
+            debug: Default::default(),
+        };
+        Self {
+            context: Context::default(),
+            connector: Arc::new(connector),
+            transport_request: http_request.into(),
+            key: ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            },
+            mapping_problems: Default::default(),
+            supergraph_request: Default::default(),
+            operation: Default::default(),
+        }
+    }
+
     /// The original request made to the router, which produced this connector request.
     ///
     /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
