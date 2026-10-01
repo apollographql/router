@@ -8,6 +8,7 @@
 //!
 mod admission;
 mod deduplication;
+mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -25,6 +26,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::limit::ConcurrencyLimitLayer;
 use tower::limit::RateLimitLayer;
+use tower::load_shed::LoadShedLayer;
 use tower::load_shed::error::Overloaded;
 use tower::timeout::TimeoutLayer;
 use tower::timeout::error::Elapsed;
@@ -32,8 +34,9 @@ use tower::util::MapRequestLayer;
 use tower::util::option_layer;
 
 use self::admission::ConnectorSourceAdmissionLayer;
-use self::admission::SubgraphAdmissionLayer;
+use self::admission::SubgraphErrorResponseLayer;
 use self::deduplication::QueryDeduplicationLayer;
+use self::timeout::SubgraphTimeoutLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
 use crate::graphql;
@@ -408,21 +411,6 @@ impl PluginPrivate for TrafficShaping {
             .boxed_clone()
     }
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        ServiceBuilder::new()
-            .layer(self.subgraph_admission_layer(name))
-            .layer(self.subgraph_timeout_layer(name))
-            .layer(self.subgraph_deduplication_layer(name))
-            .layer(self.subgraph_compression_layer(name))
-            .layer(self.subgraph_backpressure_buffer_layer(name))
-            .service(service)
-            .boxed_clone()
-    }
-
     fn connector_request_service(
         &self,
         service: connector::request_service::BoxCloneService,
@@ -492,14 +480,14 @@ impl TrafficShaping {
 /// A target with no traffic shaping configuration, neither its own block nor `all`, gets an
 /// identity layer from every constructor. The layers go in this order, from the outside in:
 ///
-/// 1. admission: outer buffer, error mapping, load shedding and rate limit
-/// 2. timeout
+/// 1. admission: a buffer, error responses, load shedding and rate limit (the subgraph stage
+///    places the subgraph buffer itself)
+/// 2. timeout (the subgraph timeout answers its own errors)
 /// 3. deduplication (subgraphs only)
 /// 4. compression
 /// 5. backpressure buffer
 ///
-/// Admission renders the errors of the timeout beneath it, so the timeout must stay below
-/// admission. The [`admission`] module explains why admission is one layer.
+/// The [`admission`] module explains the order of the admission parts.
 impl TrafficShaping {
     /// This subgraph's shaping: its own block merged over `all`, or `all` alone.
     fn subgraph_shaping(&self, name: &str) -> Option<Shaping> {
@@ -531,28 +519,42 @@ impl TrafficShaping {
         })
     }
 
-    /// Returns a layer that admits or rejects requests to this subgraph. A request over the
-    /// subgraph's rate limit is answered with a `503`, and a timeout raised beneath this layer
-    /// with a `504`.
-    pub(crate) fn subgraph_admission_layer(
+    /// Returns a layer that answers a request to this subgraph that load shedding rejected with a
+    /// `503`.
+    pub(crate) fn subgraph_error_response_layer(
         &self,
         name: &str,
-    ) -> OptionLayer<SubgraphAdmissionLayer> {
-        option_layer(self.subgraph_shaping(name).map(|shaping| {
-            SubgraphAdmissionLayer::new(Self::cached_rate_limit_layer(
+    ) -> OptionLayer<SubgraphErrorResponseLayer> {
+        option_layer(
+            self.subgraph_shaping(name)
+                .map(|_| SubgraphErrorResponseLayer),
+        )
+    }
+
+    /// Returns a layer that rejects a request to this subgraph when the rate limit beneath it
+    /// is not ready, instead of waiting.
+    pub(crate) fn subgraph_load_shed_layer(&self, name: &str) -> OptionLayer<LoadShedLayer> {
+        option_layer(self.subgraph_shaping(name).map(|_| LoadShedLayer::new()))
+    }
+
+    /// Returns this subgraph's rate limit, when `global_rate_limit` is configured for it.
+    pub(crate) fn subgraph_rate_limit_layer(&self, name: &str) -> OptionLayer<RateLimitLayer> {
+        option_layer(self.subgraph_shaping(name).and_then(|shaping| {
+            Self::cached_rate_limit_layer(
                 &self.rate_limit_subgraphs,
                 name,
                 shaping.global_rate_limit.as_ref(),
-            ))
+            )
         }))
     }
 
-    /// Returns a layer that fails a request to this subgraph once it runs past the subgraph's
-    /// timeout (30 seconds by default).
-    pub(crate) fn subgraph_timeout_layer(&self, name: &str) -> OptionLayer<TimeoutLayer> {
+    /// Returns a layer that answers a request to this subgraph with a `504` once it runs past
+    /// the subgraph's timeout (30 seconds by default).
+    pub(crate) fn subgraph_timeout_layer(&self, name: &str) -> OptionLayer<SubgraphTimeoutLayer> {
         option_layer(
-            self.subgraph_shaping(name)
-                .map(|shaping| TimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))),
+            self.subgraph_shaping(name).map(|shaping| {
+                SubgraphTimeoutLayer::new(shaping.timeout.unwrap_or(DEFAULT_TIMEOUT))
+            }),
         )
     }
 
@@ -1003,39 +1005,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn it_add_correct_headers_for_compression() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        subgraphs:
-            test:
-                compression: gzip
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = SubgraphRequest::fake_builder().build();
-
-        let test_service = MockSubgraph::new(HashMap::new()).map_request(|req: SubgraphRequest| {
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&CONTENT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip")
-            );
-
-            req
-        });
-
-        let _response = plugin
-            .subgraph_service("test", test_service.boxed_clone())
-            .oneshot(request)
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
     async fn it_adds_correct_headers_for_compression_for_connector() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
@@ -1197,66 +1166,6 @@ mod test {
                 pool_idle_timeout: default_pool_idle_timeout(),
                 ..Default::default()
             },
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn it_rate_limit_subgraph_requests() {
-        let config = serde_yaml::from_str::<serde_json::Value>(
-            r#"
-        subgraphs:
-            test:
-                global_rate_limit:
-                    capacity: 1
-                    interval: 100ms
-                timeout: 500ms
-        "#,
-        )
-        .unwrap();
-
-        let plugin = get_traffic_shaping_plugin(&config).await;
-
-        let test_service = MockSubgraph::new(hashmap! {
-            graphql::Request::default() => graphql::Response::default()
-        });
-
-        let mut svc = plugin.subgraph_service("test", test_service.boxed_clone());
-
-        assert!(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(SubgraphRequest::fake_builder().build())
-                .await
-                .unwrap()
-                .response
-                .body()
-                .errors
-                .is_empty()
-        );
-        let response = svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(SubgraphRequest::fake_builder().build())
-            .await
-            .expect("it responded");
-
-        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
-
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        assert!(
-            svc.ready()
-                .await
-                .expect("it is ready")
-                .call(SubgraphRequest::fake_builder().build())
-                .await
-                .unwrap()
-                .response
-                .body()
-                .errors
-                .is_empty()
         );
     }
 

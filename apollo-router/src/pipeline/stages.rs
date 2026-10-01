@@ -38,6 +38,7 @@ use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanCache;
 use crate::query_planner::QueryPlannerService;
@@ -211,6 +212,32 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
         .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
         .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
+        // Traffic shaping runs outside every plugin hook and inside telemetry, which records
+        // what it rejects. The `admission` module in traffic shaping explains the order of this
+        // buffer and the three layers after it. The buffer is placed even without shaping
+        // configuration: the rate limit can't be cloned, and the telemetry layers need a
+        // service they can clone. The timeout answers its own errors, so it doesn't depend on
+        // the layers above it.
+        .buffered()
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_error_response_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_load_shed_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_rate_limit_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_deduplication_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_compression_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_backpressure_buffer_layer(name)
+        })
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
