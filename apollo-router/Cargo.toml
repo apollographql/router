@@ -62,6 +62,7 @@ anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-configuration.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.17.0" }
+apollo-qos = "0.9.0"
 apollo-redaction = { version = "0.3.2", features = ["schemars"] }
 async-compression = { version = "0.4.6", features = [
     "tokio",

@@ -209,6 +209,11 @@ The operation (specified by ID) was not executed because the ID was not found in
 The router is configured to only execute operations specified by persisted query ID, but the request contained freeform GraphQL instead.
 
 </Property>
+<Property name="REQUEST_CIRCUIT_BREAKER_OPEN">
+
+The router didn't send the request because the circuit for its target subgraph or connector source is open. Learn more about [circuit breaking](/graphos/routing/performance/circuit-breaking).
+
+</Property>
 <Property name="REQUEST_LIMIT_EXCEEDED">
 
 There was an error due to exceeding the max requests configuration for a

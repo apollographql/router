@@ -1,30 +1,255 @@
 ---
 title: Circuit Breaking
-subtitle: Improve system stability by implementing circuit breaking
+subtitle: Stop sending requests to a failing subgraph or connector until it recovers
+description: Configure circuit breaking in GraphOS Router to shed load from a failing subgraph or connector source, per subgraph, per connector source, or for all of them together.
 ---
 
-Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to subgraphs that fail or experience high latency. This gives your services time to recover without being overwhelmed by additional requests.
+Circuit breaking prevents cascading failures in your distributed system by temporarily halting requests to a subgraph or connector source that is already failing. This gives the struggling service time to recover instead of being overwhelmed by requests that are unlikely to succeed, and it returns an error to the client immediately rather than making it wait.
 
-Apollo Router monitors the health of your services. When it detects failures or timeouts, it temporarily removes the service from the request chain. You can implement circuit breakers at various levels (for example, at the router level or subgraph level).
+The router tracks the outcome of every request it makes to each subgraph and each connector source separately. Each of those targets gets its own _circuit_, which is in one of three states:
 
-Circuit breaking helps your team manage environments where services are dynamic and experience varying loads. Use it with patterns like rate limiting and load balancing to optimize resource usage.
+- **Closed**: requests flow through normally. This is the starting state.
+- **Open**: the target has been failing, so requests are rejected immediately without reaching it.
+- **Half-open**: the circuit has been open long enough to try again, so a single _probe_ request is let through. If the probe succeeds the circuit closes; if it fails the circuit opens again.
 
-Set thresholds for timeouts or errors to trigger circuit breaking. Manually override them to force a breaker closed or open.
+## Configuration
 
-## Implementing circuit breaking
+Circuit breaking is disabled unless you configure it. Add a `circuit_breaker` section to your [router YAML configuration file](/router/configuration/overview/#yaml-config-file):
 
-To implement circuit breaking, evaluate your system architecture and the specific requirements of your services.
+```yaml title="router.yaml"
+circuit_breaker:
+  all: # Rules applied to every subgraph
+    failure_rate_threshold: 0.5 # Open the circuit once half of the window has failed
+    window_size: 100 # Measure the failure rate over the last 100 requests
+    min_requests: 10 # ...but only once at least 10 requests are in the window
+    open_duration: 30s # Stay open for 30s, then let a single probe request through
+    consecutive_failures: 5 # Or open immediately after 5 failures in a row
+  subgraphs: # Rules applied to individual subgraphs, in place of `all`
+    products:
+      consecutive_failures: 2 # Open the products circuit after only 2 failures in a row
+    reviews:
+      window_size: 20 # Measure the reviews failure rate over a much shorter window
+  connector:
+    all: # Rules applied to every connector source
+      open_duration: 10s
+    sources: # Rules applied to individual connector sources, in place of `connector.all`
+      products.api:
+        window_size: 500
+```
 
-### Use service meshes and proxies (recommended)
+Every option is optional and has a default, so `circuit_breaker: {}` is enough to protect every subgraph and connector source with the values shown above. Adding the section protects every target; there is no per-target switch, so a deployment that wants no circuit breaking leaves the section out.
 
-Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide robust circuit breaking at the network or application level. Configure these tools to monitor health, error rates, and latency to halt or reroute traffic to failing subgraphs or services.
+The router checks these options when it loads its configuration, at startup, on a reload, and with `router config validate`. An invalid block, such as a `min_requests` larger than its `window_size`, stops the router from starting and points at the offending key. On a reload, the router keeps running with its last valid configuration.
 
-Apollo recommends using these tools for circuit breaking outside the Apollo Router. Many organizations already use this approach for rate limiting and load balancing.
+### Options
 
-Service mesh circuit breaking is typically not GraphQL-aware and might treat entire subgraphs atomically, lacking per-resolver or per-query granularity.
+<table class="field-table">
+  <thead>
+    <tr>
+      <th>Option</th>
+      <th>Description</th>
+      <th>Default</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
 
-### Use circuit breakers at the application level
+`failure_rate_threshold`
 
-Wrap data sources or resolvers with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach in your subgraph services to enable per-resolver or per-backend API circuit breaking.
+      </td>
+      <td>
 
-This decentralized approach can require coordination and duplication across your services.
+Fraction of requests in the window that must fail before the circuit opens. Must be greater than `0.0` and at most `1.0`. Evaluated only after the window holds at least `min_requests` requests.
+
+      </td>
+      <td>`0.5`</td>
+    </tr>
+    <tr>
+      <td>
+
+`window_size`
+
+      </td>
+      <td>
+
+Number of most recent requests the failure rate is measured over. Older outcomes drop out of the window as new ones arrive, so the rate always reflects how the target behaves now. Must be at least `min_requests` and at most `1000000`.
+
+      </td>
+      <td>`100`</td>
+    </tr>
+    <tr>
+      <td>
+
+`min_requests`
+
+      </td>
+      <td>
+
+Minimum number of requests in the window before the failure rate is evaluated. Prevents the circuit from opening on a few early failures. Must be at most `window_size`.
+
+      </td>
+      <td>`10`</td>
+    </tr>
+    <tr>
+      <td>
+
+`open_duration`
+
+      </td>
+      <td>
+
+How long the circuit stays open before letting a single probe request through. Also bounds the probe itself: a probe that doesn't report an outcome within this duration counts as failed, and the circuit opens again.
+
+      </td>
+      <td>`30s`</td>
+    </tr>
+    <tr>
+      <td>
+
+`consecutive_failures`
+
+      </td>
+      <td>
+
+Number of consecutive failures that open the circuit immediately, regardless of the overall failure rate. Catches hard failures before the rate window fills.
+
+      </td>
+      <td>`5`</td>
+    </tr>
+  </tbody>
+</table>
+
+### Configure subgraphs and connector sources
+
+`circuit_breaker` is organized like other per-subgraph router configuration:
+
+- `all` applies to every subgraph.
+- `subgraphs.<subgraph name>` applies to one subgraph.
+- `connector.all` applies to every connector source.
+- `connector.sources` applies to one connector source, keyed by the single string `<subgraph name>.<source name>` — for example `products.api`.
+
+<Note>
+
+A connector declared with `@connect` but no [`@source`](/graphos/schema-design/connectors/) has no source name to be keyed by. Each such `@connect` directive gets a circuit of its own, keyed by a name the router synthesizes from the directive's position — `<subgraph name>.<subgraph name>_<type>_<field>_<index>` for a connector on a field, and `<subgraph name>.<subgraph name>_<type>_<index>` for one on a type, where `<index>` counts the `@connect` directives at that position from zero. A `@connect` on `Query.products` in the `products` subgraph is therefore `products.products_Query_products_0`.
+
+These names aren't meant for configuration, and they change when you rearrange the directive. Two consequences are worth knowing: `connector.all` is the practical way to configure sourceless connectors, and because each directive counts separately, failures from multiple `@connect` directives calling the same API don't pool into one circuit. Give the connectors a shared `@source` if you want them to trip together.
+
+</Note>
+
+A subgraph or source listed under `subgraphs` or `connector.sources` takes its options from its own block alone. That block stands in for the corresponding `all` block rather than layering over it, so an option the block leaves out falls back to the default and not to the value `all` gives it. In this example, `products` opens after two consecutive failures and measures its failure rate over the default window of 100 requests — `all`'s `window_size` of 200 applies to every other subgraph, not to `products`:
+
+```yaml title="router.yaml"
+circuit_breaker:
+  all:
+    window_size: 200
+    consecutive_failures: 5
+  subgraphs:
+    products:
+      consecutive_failures: 2
+```
+
+To give `products` the larger window as well, set it in the `products` block too:
+
+```yaml title="router.yaml"
+circuit_breaker:
+  all:
+    window_size: 200
+    consecutive_failures: 5
+  subgraphs:
+    products:
+      window_size: 200
+      consecutive_failures: 2
+```
+
+Subgraphs and connector sources are configured independently: an `all` block under `circuit_breaker` doesn't apply to connectors, and `connector.all` doesn't apply to subgraphs.
+
+## What counts as a failure
+
+Every request to a subgraph or connector source passes through two phases, and the circuit sits between them:
+
+- **Admission** is the router deciding whether to send the request at all: a traffic shaping [rate limit](./traffic-shaping#rate-limiting) and the load shedding in front of it, and a connector's [`max_requests`](/graphos/routing/connectors/limits) limit. These run before the circuit, so a request they turn away never reaches it and isn't recorded, as either a failure or a success. The router's own throttling can't open the circuit of a healthy target, and a throttled request can't stand in for the probe that closes one.
+- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
+
+Identical requests joined by [query deduplication](./traffic-shaping#query-deduplication) are one call to the target, so they're recorded once, and each of them receives the same answer.
+
+The router records a request as a failure when:
+
+- The response carries a `5xx` or `429` HTTP status, whether the target sent it or a coprocessor, rhai script, or native plugin built it. A `429` means the target is overloaded, which is what a circuit protects it from.
+- The request fails with an error. For example, the router can't connect, the connection drops before the whole response arrives, or a coprocessor can't be reached.
+- The request runs past its traffic shaping timeout.
+
+Timeouts count because a target that has stopped responding never returns an error of its own, so the timeout is the only evidence the circuit gets. They count only for a subgraph or connector source that traffic shaping configures, in `traffic_shaping.all`, `traffic_shaping.subgraphs`, `traffic_shaping.connector.all`, or `traffic_shaping.connector.sources`; its timeout is 30 seconds unless that block sets another. Without one, nothing ends a request to a target that has stopped responding except the router-level timeout or the client giving up, and neither of those is recorded. The timeout covers the whole of execution, including time spent in coprocessors and rhai scripts before the request reaches the target.
+
+Everything else, including any other `4xx` response and GraphQL errors in an otherwise successful response, counts as a success. A `4xx` usually says something about the request rather than the health of the target. A response cache hit counts as a success too.
+
+Some requests end without the router recording anything, because the target might still have answered them: the client disconnects, the router-level request timeout fires, the operation stops waiting after another fetch fails, or the router shuts down. If a recovery probe ends this way, the circuit stays half-open and the next request becomes the probe, without another wait.
+
+A mapping-only connector (a `@connect` with no `http` argument) never makes a request, so it's invisible to the circuit and keeps being served while the circuit is open, even when the connector names a `@source`.
+
+<Note>
+
+Because timeouts count as failures, a traffic shaping timeout shorter than a target's normal response time opens its circuit even while the target is healthy. Time a slow coprocessor or rhai script spends before the request reaches the target counts toward that timeout too. Size the timeout, `consecutive_failures`, and `failure_rate_threshold` with that in mind. If the router-level request timeout isn't longer than a target's timeout, that target's timeouts never count.
+
+For the same reason, a coprocessor that is unreachable or breaks requests with a `5xx` status, a rhai script that throws, or a native plugin that returns errors counts against the circuit of every target it runs for. For connectors, any request a coprocessor or native plugin fails before it's sent, including with `into_error_response`, counts as a failure, whatever status the coprocessor gives it.
+
+</Note>
+
+## Reloads
+
+Every circuit starts closed whenever the router reloads, whether after a schema update or a configuration change, because circuits are rebuilt along with the rest of the router's request pipeline. An open circuit therefore closes on a reload, and its target receives traffic again until it trips the circuit again.
+
+## Observability
+
+Each circuit reports itself under the `apollo.qos.circuit_breaker.name` attribute, set to the subgraph name or the `<subgraph name>.<source name>` source key:
+
+| Instrument | Description |
+| --- | --- |
+| `apollo.qos.circuit_breaker.state` | Whether the circuit is in the state named by `apollo.qos.circuit_breaker.state`: `1` for the state it is in, `0` for the other two. A circuit reports all three of `closed`, `half_open`, and `open` from its first export, so summing by state always gives the complete picture. |
+| `apollo.qos.circuit_breaker.requests` | Counter of requests, with `apollo.qos.circuit_breaker.status` set to `accepted`, `rejected`, or `probe`. |
+| `apollo.qos.circuit_breaker.transitions` | Counter of state changes, with `apollo.qos.circuit_breaker.transition.from` and `apollo.qos.circuit_breaker.transition.to`. |
+
+Every request through a circuit also opens an `apollo.qos.circuit_breaker` span carrying the circuit's name and the state it was in. A state change adds an `apollo.qos.circuit_breaker.transition` event to the span, with the same `from` and `to` attributes as the counter.
+
+Requests turned away by admission never reach the circuit, so they don't appear in these instruments. The router's own traffic shaping and connector telemetry records them.
+
+## What clients see
+
+While a circuit is open, the affected fetch fails immediately without the router making a request. Coprocessors, rhai scripts, native plugins, and the response cache don't run for a rejected fetch, so a response the cache holds isn't served while the circuit is open. The traffic shaping rate limit still applies first, so a request it turns away gets its own error instead. The router adds an error to the GraphQL response with the extension code `REQUEST_CIRCUIT_BREAKER_OPEN`:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Your request was rejected because the circuit breaker for this service is open",
+      "extensions": {
+        "code": "REQUEST_CIRCUIT_BREAKER_OPEN"
+      }
+    }
+  ]
+}
+```
+
+Whether the client receives partial data alongside the error depends on the query plan, exactly as it does for any other failing fetch.
+
+<Note>
+
+The error is attached to the subgraph response, so [`include_subgraph_errors`](/router/configuration/subgraph-error-inclusion) applies to it like any other subgraph error. With the default configuration, your client sees `Subgraph errors redacted` instead of the message and code above.
+
+</Note>
+
+## Alternatives
+
+Circuit breaking in the router covers the calls the router makes. If you need circuit breaking elsewhere in your architecture, or with different granularity, consider these alternatives, which work alongside the router's own circuit breaking.
+
+### Service meshes and proxies
+
+Service meshes like [Istio](https://istio.io/) and proxies such as [Envoy](https://www.envoyproxy.io/) and [NGINX](https://www.nginx.com/) provide circuit breaking at the network level, including for traffic that doesn't pass through the router. Many organizations already use this approach for rate limiting and load balancing.
+
+The router's circuit breaking complements this network-level protection with GraphQL-aware, per-connector-source granularity that service meshes typically lack.
+
+### Application-level circuit breakers
+
+Wrap data sources or resolvers in your subgraph services with circuit breaker logic using libraries like [`opossum`](https://github.com/nodeshift/opossum) (Node.js) or [`resilience4j`](https://github.com/resilience4j/resilience4j) (Java). Use this approach for per-resolver or per-backend-API circuit breaking inside a subgraph.
+
+The router's centralized circuit breaking complements this approach, protecting every subgraph and connector source without duplicating logic across your services.
