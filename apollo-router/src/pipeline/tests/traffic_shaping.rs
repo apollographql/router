@@ -258,6 +258,33 @@ async fn deduplication_shares_one_in_flight_request() {
     identical_requests_reach_the_subgraph(false, 2).await;
 }
 
+/// The timeout sits below deduplication, so a request joined to one already in flight is answered
+/// when that one times out, and the subgraph receives one request.
+#[tokio::test(start_paused = true)]
+async fn deduplicated_requests_share_one_timeout() {
+    let (service, mut handle) = subgraph_service(serde_json::json!({ "subgraphs": { SUBGRAPH: {
+        "deduplicate_query": true,
+        "timeout": "100ms",
+    } } }))
+    .await;
+
+    // The subgraph never answers.
+    let (first, second, received) = tokio::join!(
+        service
+            .clone()
+            .oneshot(SubgraphRequest::fake_builder().build()),
+        service.oneshot(SubgraphRequest::fake_builder().build()),
+        handle.next_request(),
+    );
+    assert!(received.is_some());
+    for response in [first.unwrap(), second.unwrap()] {
+        assert_eq!(response.response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(error_code(&response).as_deref(), Some("GATEWAY_TIMEOUT"));
+    }
+    drop(received);
+    assert_no_mock_calls(handle).await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn compression_sets_content_encoding() {
     let (mut service, mut handle) = subgraph_service(

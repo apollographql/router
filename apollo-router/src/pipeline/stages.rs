@@ -229,10 +229,12 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
+        // Below deduplication, one timeout covers every request joined to the same fetch, and it
+        // bounds the plugins and the call beneath it.
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_compression_layer(name)
         })
