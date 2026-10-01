@@ -1200,7 +1200,7 @@ impl FieldRoutingSearchSpace {
     /// subgraph schema (ignoring routing reachability). @external does not
     /// count as availability: the subgraph cannot resolve the field, so it
     /// creates no fork.
-    fn field_in_multiple_subgraphs(
+    pub(super) fn field_in_multiple_subgraphs(
         &self,
         field_sel: &FieldSelection,
         source_node: NodeIndex,
@@ -1212,6 +1212,10 @@ impl FieldRoutingSearchSpace {
         };
         let parent_type_name = source_pos.type_name();
         let field_name = field_sel.field.field_position.field_name();
+        let key = (parent_type_name.clone(), field_name.clone());
+        if let Some(&cached) = self.caches.fields_in_multiple_subgraphs.borrow().get(&key) {
+            return Ok(cached);
+        }
         let mut count = 0u32;
         for (_source, schema) in self.qg().subgraph_schemas() {
             let Ok(parent_type) = schema.get_type(parent_type_name) else {
@@ -1235,10 +1239,15 @@ impl FieldRoutingSearchSpace {
             }
             count += 1;
             if count > 1 {
-                return Ok(true);
+                break;
             }
         }
-        Ok(false)
+        let in_multiple = count > 1;
+        self.caches
+            .fields_in_multiple_subgraphs
+            .borrow_mut()
+            .insert(key, in_multiple);
+        Ok(in_multiple)
     }
 
     /// Shareable-fork propagation for children: whether some field on this
