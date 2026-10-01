@@ -113,8 +113,8 @@ fn plans_intersecting_interface_from_an_interface_object(#[case] extra_type: &st
         let plan = planner
             .build_query_plan(&document, None, Default::default())
             .unwrap();
-        // Success alone could hide an incorrectly discarded fragment. Verify the response
-        // shape for every runtime type, including B, which does not implement J.
+        // Success alone could hide a discarded fragment. Check that the plan supplies all
+        // requested fields under their runtime-type and directive constraints.
         apollo_federation::correctness::check_plan(
             planner.api_schema(),
             planner.supergraph_schema(),
