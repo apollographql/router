@@ -3395,9 +3395,9 @@ fn connector_batch_resolves_fields_outside_root_selection() {
     "###);
 }
 
-/// A @defer fragment whose data the parent connector returns stays in that
-/// connector's fetch, without the @defer directive, which subgraph operations
-/// cannot carry.
+/// Under a @defer fragment, the field the parent connector returns (`id`)
+/// stays in that connector's fetch without the @defer directive, and the
+/// entity hop for the rest runs in the deferred block.
 #[test]
 fn connector_defer_strips_directive_from_connector_fetch() {
     let schema = include_str!("../fixtures/connector_defer.graphql");
@@ -3422,18 +3422,20 @@ fn connector_defer_strips_directive_from_connector_fetch() {
       Defer {
         Primary {
           { m { f } }:
-          Sequence {
-            Fetch(service: "connectors_Mutation_m_0") {
-              {
-                m {
-                  f
-                  entity {
-                    __typename
-                    id
-                  }
+          Fetch(service: "connectors_Mutation_m_0", id: 0) {
+            {
+              m {
+                f
+                entity {
+                  __typename
+                  id
                 }
               }
-            },
+            }
+          },
+        }, [
+          Deferred(depends: [0], path: "m") {
+            { entity { id f } }:
             Flatten(path: "m.entity") {
               Fetch(service: "connectors_Query_e_0") {
                 {
@@ -3449,10 +3451,6 @@ fn connector_defer_strips_directive_from_connector_fetch() {
                 }
               },
             },
-          },
-        }, [
-          Deferred(depends: [], path: "m") {
-            { entity { id f } }:
           },
         ]
       },
