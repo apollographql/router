@@ -23,7 +23,7 @@ circuit_breaker:
         window_size: 500
 ```
 
-Every option is optional and defaults to the value shown above, so `circuit_breaker: {}` is enough to protect every subgraph and connector source with sensible thresholds. Circuit breaking is off unless the `circuit_breaker` section is present, and protects every target once it is.
+Every option has a default. `circuit_breaker: {}` protects every subgraph and connector source using the defaults in the [Options table](https://www.apollographql.com/docs/graphos/routing/performance/circuit-breaking#options). Circuit breaking is off unless the `circuit_breaker` section is present, and protects every target once it is.
 
 A subgraph or source listed under `subgraphs` or `connector.sources` takes its options from its own block alone: that block stands in for `all` rather than layering over it, so options it leaves out fall back to the defaults above and not to the values `all` gave them. `products` in the example above therefore opens after 2 failures in a row, over a window of 100 requests — `all`'s own `window_size`, had it set one, would not apply.
 

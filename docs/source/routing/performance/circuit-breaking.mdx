@@ -37,7 +37,7 @@ circuit_breaker:
         window_size: 500
 ```
 
-Every option is optional and has a default, so `circuit_breaker: {}` is enough to protect every subgraph and connector source with the values shown above. Adding the section protects every target; there is no per-target switch, so a deployment that wants no circuit breaking leaves the section out.
+Every option has a default. `circuit_breaker: {}` protects every subgraph and connector source using the defaults in the [Options](#options) table. Adding the section protects every target; there is no per-target switch, so a deployment that wants no circuit breaking leaves the section out.
 
 The router checks these options when it loads its configuration, at startup, on a reload, and with `router config validate`. An invalid block, such as a `min_requests` larger than its `window_size`, stops the router from starting and points at the offending key. On a reload, the router keeps running with its last valid configuration.
 
