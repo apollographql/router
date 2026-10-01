@@ -72,9 +72,12 @@ mod uplink;
 pub(crate) mod allocator;
 mod registry;
 
+// Re-exports for plugins.
+pub use apollo_configuration;
+pub use apollo_redaction;
+
 pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
-pub use crate::configuration::ConfigurationParser;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
 pub use crate::context::extensions::Extensions;

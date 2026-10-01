@@ -9,7 +9,7 @@ use derive_more::From;
 use futures::prelude::*;
 
 use crate::Configuration;
-use crate::ConfigurationParser;
+use crate::configuration::ConfigurationParser;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::RhaiReload;
