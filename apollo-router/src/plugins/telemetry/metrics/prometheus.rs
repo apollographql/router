@@ -15,7 +15,7 @@ use tower_service::Service;
 use crate::ListenAddr;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
-use crate::plugins::telemetry::metrics::OverflowStarts;
+use crate::plugins::telemetry::metrics::OverflowTracker;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
 use crate::services::router;
@@ -86,7 +86,7 @@ impl MetricsConfigurator for Config {
         // Scrapes bypass reader wrappers, so the endpoint checks each scrape for overflow itself
         builder.with_prometheus_registry(PrometheusRegistry {
             registry,
-            overflow_starts: Some(OverflowStarts::default()),
+            overflow_tracker: Some(OverflowTracker::default()),
         });
 
         Ok(())
@@ -100,7 +100,7 @@ pub(crate) struct PrometheusRegistry {
     pub(crate) registry: Registry,
     /// Present when scrapes count cardinality overflow on the public meter provider, which is when
     /// Prometheus is its only exporter. `None` when a push exporter counts instead.
-    pub(crate) overflow_starts: Option<OverflowStarts>,
+    pub(crate) overflow_tracker: Option<OverflowTracker>,
 }
 
 pub(crate) struct PrometheusService {
@@ -124,9 +124,9 @@ impl Service<router::Request> for PrometheusService {
         // counter goes to the global meter provider whichever task records it.
         Box::pin(async move {
             // As with the push exporters, the counter shows up from the next collection.
-            let metric_families = match &registry.overflow_starts {
-                Some(overflow_starts) => {
-                    overflow_starts.gather_and_record(|| registry.registry.gather())
+            let metric_families = match &registry.overflow_tracker {
+                Some(overflow_tracker) => {
+                    overflow_tracker.gather_and_record(|| registry.registry.gather())
                 }
                 None => registry.registry.gather(),
             };

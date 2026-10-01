@@ -40,7 +40,7 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::InstrumentNameMatcher;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
-use crate::plugins::telemetry::metrics::OverflowCounting;
+use crate::plugins::telemetry::metrics::OverflowCountSwitch;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::prometheus::PrometheusRegistry;
 
@@ -64,9 +64,10 @@ pub(crate) struct MetricsBuilder<'a> {
     providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
     prometheus_registry: Option<PrometheusRegistry>,
-    /// Overflow counting switches of the public meter provider's push exporters, in configuration
-    /// order.
-    public_push_overflow_counting: Vec<OverflowCounting>,
+    /// The public meter provider's push exporters that could count cardinality overflow, in
+    /// configuration order. [`Self::build`] chooses the first; Prometheus scrapes count only when
+    /// there is none.
+    push_counting_candidates: Vec<OverflowCountSwitch>,
     metrics_common: &'a MetricsCommon,
     resource: Resource,
 }
@@ -83,10 +84,10 @@ impl<'a> MetricsBuilder<'a> {
         // with OpenTelemetry metric names. Prometheus scrapes count only when Prometheus is the
         // provider's only exporter.
         let mut prometheus_registry = self.prometheus_registry;
-        if let Some(counting) = self.public_push_overflow_counting.first() {
-            counting.enable();
+        if let Some(is_overflow_counted) = self.push_counting_candidates.first() {
+            is_overflow_counted.turn_on();
             if let Some(prometheus_registry) = &mut prometheus_registry {
-                prometheus_registry.overflow_starts = None;
+                prometheus_registry.overflow_tracker = None;
             }
         }
         (
@@ -133,7 +134,7 @@ impl<'a> MetricsBuilder<'a> {
             resource,
             apollo_metrics_sender: Sender::default(),
             prometheus_registry: None,
-            public_push_overflow_counting: Vec::new(),
+            push_counting_candidates: Vec::new(),
             metrics_common: &config.exporters.metrics.common,
         }
     }
@@ -150,9 +151,10 @@ impl<'a> MetricsBuilder<'a> {
     /// Wrap a push exporter for the public meter provider in cardinality overflow detection.
     /// Whether it counts is decided by [`Self::build`], so that each overflow is counted once.
     pub(crate) fn public_overflow_exporter<T>(&mut self, exporter: T) -> OverflowMetricExporter<T> {
-        let counting = OverflowCounting::default();
-        self.public_push_overflow_counting.push(counting.clone());
-        OverflowMetricExporter::with_counting(exporter, counting)
+        let is_overflow_counted = OverflowCountSwitch::default();
+        self.push_counting_candidates
+            .push(is_overflow_counted.clone());
+        OverflowMetricExporter::new(exporter, is_overflow_counted)
     }
     pub(crate) fn with_apollo_metrics_sender(
         &mut self,
@@ -301,8 +303,8 @@ mod overflow_counting_tests {
         let second = builder.public_overflow_exporter(InMemoryMetricExporter::default());
         builder.build();
 
-        assert!(first.counts_overflow());
-        assert!(!second.counts_overflow());
+        assert!(first.is_overflow_counted());
+        assert!(!second.is_overflow_counted());
     }
 
     #[test]
@@ -320,8 +322,8 @@ mod overflow_counting_tests {
             }
             let (prometheus_registry, _, _) = builder.build();
 
-            assert!(push.counts_overflow());
-            assert!(prometheus_registry.unwrap().overflow_starts.is_none());
+            assert!(push.is_overflow_counted());
+            assert!(prometheus_registry.unwrap().overflow_tracker.is_none());
         }
     }
 
@@ -332,7 +334,7 @@ mod overflow_counting_tests {
         builder.configure(&prometheus_config()).unwrap();
         let (prometheus_registry, _, _) = builder.build();
 
-        assert!(prometheus_registry.unwrap().overflow_starts.is_some());
+        assert!(prometheus_registry.unwrap().overflow_tracker.is_some());
     }
 }
 
