@@ -5,7 +5,7 @@ description: Learn how to enable and tune the incremental query planner in Graph
 minVersion: Router v3.0.0
 ---
 
-The incremental query planner is an alternative query planner for GraphOS Router. It quickly finds a draft of a query plan, then spends a bounded effort budget optimizing it. On large or highly connected graphs, this keeps query planning time predictable where the default planner can slow down.
+The incremental query planner is an alternative query planner for GraphOS Router. It quickly finds a draft of a query plan, then spends a bounded effort budget optimizing it. On large or highly connected graphs, this keeps query planning fast and predictable.
 
 ## How it differs from the default planner
 
@@ -17,11 +17,11 @@ The incremental planner works differently:
 2. If a choice leads to a dead end, the planner backtracks and tries other options until it reaches a complete plan. Finding this draft does not use the effort budget.
 3. It then spends the effort budget revisiting earlier choices, keeping any plan that is cheaper than the best one found so far.
 
-Because the search is bounded, planning time depends mostly on the size of the operation rather than the number of possible plans. The trade-off is that when the budget runs out, the plan returned might not be the cheapest one possible.
+Because the search is bounded, planning time depends mostly on the size of the operation rather than the number of possible plans. The trade-off is that when the budget runs out, the planner might return a plan that is not the cheapest one possible.
 
 ## Enable the incremental planner
 
-Add the following to your router's [YAML config file](/graphos/routing/configuration/yaml):
+Add the following to your [`router.yaml` configuration file](/graphos/routing/configuration/yaml):
 
 ```yaml title="router.yaml"
 supergraph:
@@ -54,9 +54,9 @@ supergraph:
 ### Tuning recommendations
 
 - Start with the defaults. They are sized to keep planning fast on large graphs.
-- Adjust `fuel` first. Lower values reduce planning time and return plans closer to the draft. Higher values give the planner more room to find cheaper plans.
+- Adjust `fuel` first. Lowering it reduces planning time and returns plans closer to the draft. Raising it gives the planner more room to find cheaper plans.
 - Leave `beam_width` at its default unless you have measured a benefit from changing it. Lowering it reduces memory use during planning at the cost of more backtracking.
-- Only set `timeout` if you need a hard upper bound on planning time. With a timeout, the plan you get for an operation can depend on how busy the router is, so the same operation might produce different plans at different times. Without a timeout, the same operation and supergraph always produce the same plan.
+- Only set `timeout` if you need a hard upper bound on planning time. With a timeout, the plan you get for an operation depends on how busy the router is, so the same operation might produce different plans at different times. Without a timeout, the same operation and supergraph always produce the same plan.
 
 ## Behavior changes when enabled
 
@@ -68,7 +68,7 @@ Disabling the incremental planner restores the cache keys used by the default pl
 
 ### Query plans and subgraph operations
 
-The incremental planner can choose a different plan than the default planner for the same operation. Both planners produce plans that return the same data, but the fetches, their order, and the generated subgraph operations might differ.
+For the same operation, the incremental planner might choose a different plan than the default planner. Both planners produce plans that return the same data, but the fetches, their order, and the generated subgraph operations might differ.
 
 ### Unused limits
 
@@ -95,15 +95,15 @@ A `fuel_remaining` value of `0` means the planner ran out of fuel before it fini
 
 Mutations are planned one top-level field at a time. For a mutation, both values come from the field whose search consumed the most fuel.
 
-The same values are recorded on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`. Use the span attributes to find which operations ran out of fuel, because the histograms do not identify operations.
+The router also records the same values on the `query_planning` span as `query_planning.fuel_consumed` and `query_planning.fuel_remaining`. Use the span attributes to find which operations ran out of fuel, because the histograms do not identify operations.
 
-How to read them:
+Interpret the metrics as follows:
 
 - If most operations finish with fuel remaining, the planner is exploring every alternative it considers worthwhile within the budget. Raising `fuel` does not change their plans.
 - If many operations finish with `0` remaining, the budget is cutting the search short. Raising `fuel` lets the search go further and might find cheaper plans, at the cost of longer planning.
 - Operations served from the query plan cache do not record these metrics, because no search runs.
 
-Both histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000`, regardless of the global [`buckets`](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#buckets) setting. The `0` bucket of `fuel_remaining` counts searches that ran out of fuel. The boundaries do not depend on your `fuel` setting, so series stay comparable when you change it. To use finer buckets around your `fuel` value, add a [view](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#customizing-metric-attributes-and-buckets):
+Both histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000`, regardless of the [global histogram buckets setting](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#buckets). The `0` bucket of `fuel_remaining` counts searches that ran out of fuel. The boundaries do not depend on your `fuel` setting, so series stay comparable when you change it. To use finer buckets around your `fuel` value, add a [metrics view with custom buckets](/graphos/routing/observability/router-telemetry-otel/telemetry-pipelines/metrics-exporters/overview#customizing-metric-attributes-and-buckets):
 
 ```yaml title="router.yaml"
 telemetry:
