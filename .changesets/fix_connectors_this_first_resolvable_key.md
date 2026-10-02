@@ -6,4 +6,4 @@ The cause was in how connectors work out which `$this` fields an entity key need
 
 When a connector's key still can't be built, the error now names the connector and includes the field set errors, instead of only saying `error creating resolvable key`.
 
-By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@benjamn](https://github.com/benjamn) in https://github.com/apollographql/router/pull/10403
