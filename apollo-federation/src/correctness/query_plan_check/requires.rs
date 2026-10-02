@@ -50,6 +50,7 @@ use super::selections::wrap_non_empty;
 use super::subgraph::Subgraph;
 use crate::query_plan::requires_selection;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 //==================================================================================================
 // Checking FetchNode.requires field -- nominal required response names
@@ -59,8 +60,12 @@ use crate::schema::ValidFederationSchema;
 /// `None` means unrestricted.
 type GroundTypes = Option<Vec<Name>>;
 
-/// One level of a field set: each response key, the object types it is reached at there, and what
-/// is selected under it.
+/// One level of a field set: each field name, the object types it is reached at there, and what is
+/// selected under it.
+///
+/// Keyed by field name, not by the alias a field is read under: a type condition is grounded here,
+/// and a name is something the schema can look up where an alias is not. The aliases are checked
+/// separately, against the fetch's input rewrites.
 ///
 /// Inline fragments contribute their type condition to the entries below without an entry of their
 /// own; a field starts a new level, so guards do not cross it.
@@ -79,7 +84,7 @@ fn level_entries<'a>(
     for selection in field_set {
         match selection {
             requires_selection::Selection::Field(field) => out.push(LevelEntry {
-                key: field.alias.clone().unwrap_or_else(|| field.name.clone()),
+                key: field.name.clone(),
                 reached_at: reached_at.clone(),
                 selected: field.selections.iter().collect(),
             }),
@@ -412,6 +417,126 @@ fn condition_matches_requirement_at(
         .map_err(|mismatch| mismatch.under(key))?;
     }
     Ok(())
+}
+
+//==================================================================================================
+// The two readings of a `requires` entry
+//==================================================================================================
+
+/// Which key each field of an entry is taken under.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reading {
+    /// The key `execute_selection_set` reads it from: its alias if it has one.
+    AsRead,
+    /// Its own name, which is what the subgraph reads it as once the rewrites have run.
+    AsSent,
+}
+
+/// A `requires` entry read as an ordinary selection, under one reading of its keys.
+///
+/// Arguments are dropped — Rust's `requires_selection::Field` has none, and the demand is where
+/// what a key must hold is read from. `Err` means the entry names a field the schema does not
+/// place where it sits, which is a malformed plan.
+pub(super) fn entry_selections(
+    schema: &ValidFederationSchema,
+    parent_type: &Name,
+    reading: Reading,
+    selections: &[requires_selection::Selection],
+) -> Result<Vec<Selection>, ComparisonError> {
+    let mut out = Vec::new();
+    for selection in selections {
+        match selection {
+            requires_selection::Selection::Field(field) => {
+                let definition = field_definition(schema, parent_type, &field.name)?;
+                let mut built = executable::Field::new(field.name.clone(), definition);
+                if reading == Reading::AsRead {
+                    built.alias = field.alias.clone();
+                }
+                if !field.selections.is_empty() {
+                    let child = built.ty().inner_named_type().clone();
+                    built = built.with_selections(entry_selections(
+                        schema,
+                        &child,
+                        reading,
+                        &field.selections,
+                    )?);
+                }
+                out.push(built.into());
+            }
+            requires_selection::Selection::InlineFragment(fragment) => {
+                let built = match &fragment.type_condition {
+                    Some(type_condition) => {
+                        executable::InlineFragment::with_type_condition(type_condition.clone())
+                    }
+                    None => executable::InlineFragment::without_type_condition(parent_type.clone()),
+                };
+                let inner = built.selection_set.ty.clone();
+                out.push(
+                    built
+                        .with_selections(entry_selections(
+                            schema,
+                            &inner,
+                            reading,
+                            &fragment.selections,
+                        )?)
+                        .into(),
+                );
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The definition a field is read against. `Err` is the entry naming a field the schema does not
+/// place here, which the caller reads as a malformed plan rather than a mismatch.
+fn field_definition(
+    schema: &ValidFederationSchema,
+    parent_type: &Name,
+    field_name: &Name,
+) -> Result<Node<ast::FieldDefinition>, ComparisonError> {
+    let missing = || {
+        ComparisonError::new(format!(
+            "`requires` entry selects `{field_name}`, which `{parent_type}` does not have"
+        ))
+    };
+    let parent: CompositeTypeDefinitionPosition = schema
+        .get_type(parent_type)
+        .map_err(|_| missing())?
+        .try_into()
+        .map_err(|_| missing())?;
+    parent
+        .field(field_name.clone())
+        .map_err(|_| missing())?
+        .get(schema.schema())
+        .map(|component| component.node.clone())
+        .map_err(|_| missing())
+}
+
+/// Two selections of the same shape with the same response keys throughout.
+///
+/// Renaming changes response keys and nothing else, so this is how a renamed reading of an entry
+/// is compared with another reading of it.
+pub(super) fn same_keys(left: &[Selection], right: &[Selection]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter().zip(right).all(|(left, right)| {
+        match (left, right) {
+            (Selection::Field(left), Selection::Field(right)) => {
+                left.response_key() == right.response_key()
+                    && same_keys(
+                        &left.selection_set.selections,
+                        &right.selection_set.selections,
+                    )
+            }
+            (Selection::InlineFragment(left), Selection::InlineFragment(right)) => same_keys(
+                &left.selection_set.selections,
+                &right.selection_set.selections,
+            ),
+            // Spreads are inlined before a fetch's selections reach here.
+            _ => false,
+        }
+    })
 }
 
 /// A selection read back as a field-set selection: its response key becomes the name, and its

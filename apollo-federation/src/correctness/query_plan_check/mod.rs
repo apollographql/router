@@ -19,6 +19,18 @@
 //!   the fetch is reached, while the state that reached it is in hand. No fetch site is ever
 //!   collected.
 //!
+//! # What a fetch must already have found
+//!
+//! A `requires` entry is not the authority on that; two other things are. The subgraph is sent the
+//! demand, so what must already be fetched is the demand's *preimage* under the fetch's input
+//! rewrites — the demand says which field each key must hold and with which arguments, which the
+//! entry cannot, `trim_requires_selection_set` having dropped its arguments; the rewrites say
+//! which key it is read from. The entry is checked against the two rather than read from: it has
+//! the demand's shape by field name, and it agrees with the rewrites, which link each alias it
+//! reads under to the field it names. A planner may fetch a `@requires` input under an alias and
+//! name it back with an input key renamer, which is what the router's `execute_selection_set` and
+//! `apply_rewrites` do between them.
+//!
 //! # Differences from the model
 //!
 //! - **The subgraph oracle.** The model has no notion of which subgraphs can resolve a field; the
@@ -36,8 +48,8 @@
 //!
 //! The model assumes the operations it compares are valid and carries that as a premise of its
 //! correctness statement, `QueryPlanWellFormed`, naming three: the plan read as an operation, what
-//! each entity fetch has already fetched, and what each `@key` demands of it. The checker does not
-//! decide it for any of them.
+//! each entity fetch has already fetched, and what each `@key` demands of it, inverted through the
+//! fetch's input rewrites. The checker does not decide it for any of them.
 //!
 //! The first two are read off the buffer of what the plan has fetched, and that buffer is a
 //! *response shape written in selection syntax*: it keys a response name by type condition and has
@@ -93,14 +105,21 @@ use apollo_compiler::validation::Valid;
 use self::context::check_context_rewrites;
 use self::context::context_variables;
 use self::context::remove_context_arguments;
+use self::requires::Reading;
 use self::requires::check_requires_conflict;
 use self::requires::condition_matches_requirement;
+use self::requires::entry_selections;
 use self::requires::key_half;
 use self::requires::requires_half;
+use self::requires::same_keys;
 use self::requires::to_requires_field_set;
-use self::selections::apply_output_rewrites;
+use self::selections::apply_key_renamers;
 use self::selections::inline_fragment_spreads;
+use self::selections::invert_key_renamers;
 use self::selections::selections_at;
+use self::selections::type_filter_admits;
+use self::selections::type_filter_covers;
+use self::selections::type_filter_meets;
 use self::selections::under_condition;
 use self::subgraph::KeyDirective;
 use self::subgraph::Subgraph;
@@ -110,6 +129,7 @@ use super::response_shape_compare::ComparisonError;
 use super::subgraph_constraint::SubgraphConstraint;
 use crate::correctness::CheckerOptions;
 use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
@@ -437,8 +457,12 @@ impl<'a> Checker<'a> {
         // is that selection set under the key renames its output rewrites apply and without the
         // synthetic arguments its context rewrites bind. `interpret_fetch_node` applies the two
         // in this order.
-        let contributed =
-            apply_output_rewrites(self.supergraph_schema, &fetch.output_rewrites, selected);
+        let contributed = apply_key_renamers(
+            self.supergraph_schema,
+            type_filter_admits,
+            &fetch.output_rewrites,
+            selected,
+        );
         let contributed =
             remove_context_arguments(&context_variables(&fetch.context_rewrites), contributed);
         Ok(selections_at(
@@ -560,6 +584,13 @@ impl Checker<'_> {
             per_case.push((subgraph.keys(entity_type)?, selections, field_set));
         }
 
+        // An entry agrees with the fetch's input rewrites, or it is matched by no case at all:
+        // the check reads the fetch and the entry, never the case or the `@key`, so it is asked
+        // once per entry rather than once per pair.
+        for (entry, require_type) in require_types.iter().enumerate() {
+            self.check_entry_agrees_with_rewrites(fetch, entry, require_type)?;
+        }
+
         // The table of outcomes, one per (`requires` entry, entity case) pair. Cells are filled
         // in on demand: the two checks below only ask whether *some* cell of a row, and of a
         // column, is a match, and a plan writes one entry per case it means to serve, so the
@@ -585,6 +616,7 @@ impl Checker<'_> {
                     &fetch.requires[entry],
                     require_types[entry],
                     cases[case].0,
+                    &fetch.input_rewrites,
                     &per_case[case],
                     reached,
                     available,
@@ -662,6 +694,65 @@ impl Checker<'_> {
         )
     }
 
+    /// A `requires` entry agrees with the fetch's input rewrites, which link each alias it reads
+    /// under to the field it names.
+    ///
+    /// The entry is read two ways — `AsRead`, each field under the key it is read from, and
+    /// `AsSent`, each under its own name — and the rewrites must carry one to the other in both
+    /// directions, compared key for key.
+    /// - Forwards, the entry as read, renamed as `apply_rewrites` renames a representation, has
+    ///   the keys it is sent under: no alias left unnamed, and no demanded field renamed away.
+    /// - Inverted, the entry as sent, taken back through every rewrite, has the keys it reads
+    ///   from. Since the demand's preimage is computed by that same inversion, this is what makes
+    ///   it the keys *this* entry reads. It also rules out two fields sent under one key, and a
+    ///   rewrite reaching a key the entry sends under its own name.
+    ///
+    /// A rewrite reaching nothing the entry has is allowed. That has a cost: a fetch sending two
+    /// entity types where only one aliases its input, under a renamer with no type condition, is
+    /// correct — the router finds nothing to rename in the other's representation — but the
+    /// renamer disagrees with that entry and the plan is rejected. Scoping the renamer with a
+    /// `typenameEquals` makes it agree.
+    fn check_entry_agrees_with_rewrites(
+        &self,
+        fetch: &FetchNode,
+        entry: usize,
+        require_type: &Name,
+    ) -> Result<(), ComparisonError> {
+        let entry_item = std::slice::from_ref(&fetch.requires[entry]);
+        let as_read = entry_selections(
+            self.supergraph_schema,
+            require_type,
+            Reading::AsRead,
+            entry_item,
+        )?;
+        let as_sent = entry_selections(
+            self.supergraph_schema,
+            require_type,
+            Reading::AsSent,
+            entry_item,
+        )?;
+        let renamed = apply_key_renamers(
+            self.supergraph_schema,
+            type_filter_meets,
+            &fetch.input_rewrites,
+            as_read.clone(),
+        );
+        let inverted = invert_key_renamers(
+            self.supergraph_schema,
+            type_filter_covers,
+            &fetch.input_rewrites,
+            as_sent.clone(),
+        );
+        if same_keys(&renamed, &as_sent) && same_keys(&inverted, &as_read) {
+            return Ok(());
+        }
+        Err(ComparisonError::new(format!(
+            "fetch to {}: `requires` entry {} does not agree with the fetch's input rewrites: \
+             the keys it reads and the keys it sends are not the ones the rewrites carry between",
+            fetch.subgraph_name, fetch.requires[entry]
+        )))
+    }
+
     /// Whether one `requires` entry is matched by one entity case: the subgraph resolves that
     /// case from a key the plan has already fetched, and the entry declares exactly that key.
     ///
@@ -680,6 +771,7 @@ impl Checker<'_> {
         require_item: &requires_selection::Selection,
         require_type: &Name,
         entity_type: &Name,
+        input_rewrites: &[Arc<FetchDataRewrite>],
         hoisted: &(
             Vec<KeyDirective>,
             Vec<Selection>,
@@ -732,10 +824,18 @@ impl Checker<'_> {
                 ));
                 continue;
             }
-            // Mounted where the fetch runs and guarded by the condition it runs under, so the
-            // comparison happens at the query root.
+            // The subgraph is sent the demand, so what must already be fetched is the demand's
+            // preimage under the fetch's input rewrites: each one inverted, where its filter
+            // covers the position. Mounted where the fetch runs and guarded by the condition it
+            // runs under, so the comparison happens at the query root.
             let mut computed = key_selections;
             computed.extend(requires_selections.iter().cloned());
+            let computed = invert_key_renamers(
+                self.supergraph_schema,
+                type_filter_covers,
+                input_rewrites,
+                computed,
+            );
             let required = under_condition(
                 reached.condition,
                 &self.root_type,

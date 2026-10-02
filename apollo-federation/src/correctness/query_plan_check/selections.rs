@@ -23,14 +23,18 @@
 //! spreads have to go at the boundary, as the legacy checker effectively does when it converts
 //! each fetch operation to a response shape.
 //!
-//! # Output rewrites
+//! # Key renamers
 //!
 //! What a fetch contributes is what it selects, under the key renames its output rewrites apply.
 //! A rename is what makes a `@requires` field reachable under the key the fetch's `requires` entry
 //! names, when the planner had to alias it — two entity types requiring the same field at
-//! different types cannot both select it unaliased. Input rewrites need no counterpart:
-//! `check_input_rewrite` accepts only a value setter and ignores it, since the one the planner
-//! emits overwrites `__typename` and so leaves the response shape alone.
+//! different types cannot both select it unaliased.
+//!
+//! Input rewrites rename the other way: the representation a fetch sends. Soundness reads them in
+//! both directions — forwards to check an entry against them, inverted to turn a subgraph's demand
+//! into what must already have been fetched — so the walk is shared and parameterized by which
+//! positions a `TypenameEquals` filter applies at: [`type_filter_admits`] on an output,
+//! [`type_filter_meets`] forwards and [`type_filter_covers`] inverted on an input.
 
 use std::sync::Arc;
 
@@ -381,12 +385,18 @@ fn selections_under_key(
 // Output rewrites
 //==================================================================================================
 
-/// What a fetch contributes, under the key renames its output rewrites apply.
+/// Which positions a `TypenameEquals` filter applies at: the filter's own object types and the
+/// fragment guards in force where a key was reached.
+type TypeFilterTest = fn(&ValidFederationSchema, &[Name], &[Name]) -> bool;
+
+/// Applies the key renamers among a fetch's rewrites, in order, as `apply_rewrites` does.
 ///
-/// Only a key renamer can appear here — `apply_output_rewrite` rejects a value setter in an
-/// output.
-pub(super) fn apply_output_rewrites(
+/// A value setter changes a value but no key, so it is passed over: `apply_output_rewrite` rejects
+/// one in an output, and on the input side one fakes the `__typename` an interface object is sent
+/// with, which nothing here compares.
+pub(super) fn apply_key_renamers(
     schema: &ValidFederationSchema,
+    applies: TypeFilterTest,
     rewrites: &[Arc<FetchDataRewrite>],
     selections: Vec<Selection>,
 ) -> Vec<Selection> {
@@ -397,6 +407,7 @@ pub(super) fn apply_output_rewrites(
         };
         selections = rename_key_at(
             schema,
+            applies,
             &[],
             &[],
             &renamer.path,
@@ -407,10 +418,44 @@ pub(super) fn apply_output_rewrites(
     selections
 }
 
+/// The inverse of [`apply_key_renamers`]: every key renamer inverted, the last first, so that each
+/// path is followed through the keys it was written against.
+///
+/// One renamer inverted names the key it renames *to* back to the key it renames, at the same
+/// position. A path that does not end at a key renames nothing, as `split_path_last_element` finds
+/// no key there.
+pub(super) fn invert_key_renamers(
+    schema: &ValidFederationSchema,
+    applies: TypeFilterTest,
+    rewrites: &[Arc<FetchDataRewrite>],
+    selections: Vec<Selection>,
+) -> Vec<Selection> {
+    let mut selections = selections;
+    for rewrite in rewrites.iter().rev() {
+        let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
+            continue;
+        };
+        let Some((FetchDataPathElement::Key(renamed_key, type_condition), leading)) =
+            renamer.path.split_last()
+        else {
+            continue;
+        };
+        let mut path = leading.to_vec();
+        path.push(FetchDataPathElement::Key(
+            renamer.rename_key_to.clone(),
+            type_condition.clone(),
+        ));
+        selections = rename_key_at(schema, applies, &[], &[], &path, renamed_key, selections);
+    }
+    selections
+}
+
 /// Applies one key renamer, following `rename_at_path`: the path is followed through the fetch's
 /// selections and the key it ends at is renamed; a key the path does not reach is left alone.
+#[allow(clippy::too_many_arguments)]
 fn rename_key_at(
     schema: &ValidFederationSchema,
+    applies: TypeFilterTest,
     type_filter: &[Name],
     guards: &[Name],
     path: &[FetchDataPathElement],
@@ -421,16 +466,30 @@ fn rename_key_at(
         return selections;
     };
     match head {
-        FetchDataPathElement::Key(name, _) if rest.is_empty() => {
-            rename_here(schema, type_filter, guards, name, new_key, selections)
-        }
+        FetchDataPathElement::Key(name, _) if rest.is_empty() => rename_here(
+            schema,
+            applies,
+            type_filter,
+            guards,
+            name,
+            new_key,
+            selections,
+        ),
         FetchDataPathElement::Key(name, _) => {
-            rename_key_under(schema, name, rest, new_key, selections)
+            rename_key_under(schema, applies, name, rest, new_key, selections)
         }
         FetchDataPathElement::TypenameEquals(type_name) => {
             let mut type_filter = type_filter.to_vec();
             type_filter.push(type_name.clone());
-            rename_key_at(schema, &type_filter, guards, rest, new_key, selections)
+            rename_key_at(
+                schema,
+                applies,
+                &type_filter,
+                guards,
+                rest,
+                new_key,
+                selections,
+            )
         }
         // An index consumes no response key, and `Parent` cannot be followed downwards.
         FetchDataPathElement::AnyIndex(_) | FetchDataPathElement::Parent => selections,
@@ -441,6 +500,7 @@ fn rename_key_at(
 /// filter and no guards, as `rename_at_path` starts with a fresh one.
 fn rename_key_under(
     schema: &ValidFederationSchema,
+    applies: TypeFilterTest,
     name: &Name,
     path: &[FetchDataPathElement],
     new_key: &Name,
@@ -453,6 +513,7 @@ fn rename_key_under(
                 let mut copy = (*field).clone();
                 copy.selection_set.selections = rename_key_at(
                     schema,
+                    applies,
                     &[],
                     &[],
                     path,
@@ -465,6 +526,7 @@ fn rename_key_under(
                 let mut copy = (*fragment).clone();
                 copy.selection_set.selections = rename_key_under(
                     schema,
+                    applies,
                     name,
                     path,
                     new_key,
@@ -478,9 +540,11 @@ fn rename_key_under(
 }
 
 /// Renames every selection at one response key, where the path ends. The rename applies only where
-/// the `TypenameEquals` filter admits the guards in force.
+/// `applies` admits the `TypenameEquals` filter against the guards in force.
+#[allow(clippy::too_many_arguments)]
 fn rename_here(
     schema: &ValidFederationSchema,
+    applies: TypeFilterTest,
     type_filter: &[Name],
     guards: &[Name],
     name: &Name,
@@ -491,8 +555,7 @@ fn rename_here(
         .into_iter()
         .map(|selection| match selection {
             Selection::Field(field)
-                if field.response_key() == name
-                    && type_filter_admits(schema, type_filter, guards) =>
+                if field.response_key() == name && applies(schema, type_filter, guards) =>
             {
                 let mut copy = (*field).clone();
                 copy.alias = Some(new_key.clone());
@@ -506,6 +569,7 @@ fn rename_here(
                 let mut copy = (*fragment).clone();
                 copy.selection_set.selections = rename_here(
                     schema,
+                    applies,
                     type_filter,
                     &guards,
                     name,
@@ -519,10 +583,49 @@ fn rename_here(
         .collect()
 }
 
-/// Does a `TypenameEquals` filter apply to data guarded by `guards` — are the filter's object
-/// types all admitted there? An unguarded position is not narrower than the filter, so the filter
-/// applies.
-fn type_filter_admits(
+/// Does an input rewrite's filter admit *some* object type the position can hold, so that the
+/// router may rename there? This is how a renamer is read forwards. A position nothing is known
+/// about is met by any filter.
+pub(super) fn type_filter_meets(
+    schema: &ValidFederationSchema,
+    type_filter: &[Name],
+    guards: &[Name],
+) -> bool {
+    let Some(filter_types) = admitted_types(schema, type_filter) else {
+        return true;
+    };
+    let Some(guard_types) = admitted_types(schema, guards) else {
+        return true;
+    };
+    guard_types
+        .iter()
+        .any(|type_name| filter_types.contains(type_name))
+}
+
+/// Does an input rewrite's filter admit *every* object type the position can hold, so that the
+/// router renames there whatever the runtime type? This is how a renamer is read inverted, where
+/// only a rename that certainly happens may be undone. A position nothing is known about is
+/// covered only by a filterless rewrite.
+pub(super) fn type_filter_covers(
+    schema: &ValidFederationSchema,
+    type_filter: &[Name],
+    guards: &[Name],
+) -> bool {
+    let Some(filter_types) = admitted_types(schema, type_filter) else {
+        return true;
+    };
+    let Some(guard_types) = admitted_types(schema, guards) else {
+        return false;
+    };
+    guard_types
+        .iter()
+        .all(|type_name| filter_types.contains(type_name))
+}
+
+/// Does an output rewrite's `TypenameEquals` filter apply to data guarded by `guards` — are the
+/// filter's object types all admitted there? An unguarded position is not narrower than the
+/// filter, so the filter applies.
+pub(super) fn type_filter_admits(
     schema: &ValidFederationSchema,
     type_filter: &[Name],
     guards: &[Name],

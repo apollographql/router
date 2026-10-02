@@ -263,63 +263,111 @@ fn written_plan(planner: &QueryPlanner, json: &str) -> QueryPlan {
     }
 }
 
-// A planner may alias a `@requires` input, for example when two fetches need the same field with
-// different subselections, and rename it back with an input rewrite. The router applies input
-// rewrites to each representation before sending it, so `reviews` still receives `isbn`.
-#[test]
-fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
-    let planner = planner();
-    let plan = written_plan(
-        &planner,
-        r#"{ "Sequence": { "nodes": [
-            { "Fetch": {
+/// A plan whose `reviews` fetch reads `isbn` under an alias and names it back with an input key
+/// renamer. `locations_selections` is what the first fetch selects on `Book`, and `aliased` is the
+/// field the entry reads under `__require_0_isbn`; varying the two is how these tests separate the
+/// key an entry reads from the field it sends.
+fn aliased_requires_plan(
+    planner: &QueryPlanner,
+    locations_selections: &str,
+    aliased: &str,
+) -> QueryPlan {
+    written_plan(
+        planner,
+        &format!(
+            r#"{{ "Sequence": {{ "nodes": [
+            {{ "Fetch": {{
                 "subgraph_name": "locations",
                 "variable_usages": [],
-                "operation_document": "{ feed { __typename ... on Book { __typename id __require_0_isbn: isbn } } }",
+                "operation_document": "{{ feed {{ __typename ... on Book {{ {locations_selections} }} }} }}",
                 "operation_kind": "query",
                 "input_rewrites": [],
                 "output_rewrites": [],
                 "context_rewrites": []
-            } },
-            { "Flatten": {
-                "path": [{ "Key": ["feed", null] }, { "AnyIndex": null }],
-                "node": { "Fetch": {
+            }} }},
+            {{ "Flatten": {{
+                "path": [{{ "Key": ["feed", null] }}, {{ "AnyIndex": null }}],
+                "node": {{ "Fetch": {{
                     "subgraph_name": "reviews",
                     "variable_usages": [],
-                    "requires": [{
+                    "requires": [{{
                         "kind": "InlineFragment",
                         "typeCondition": "Book",
                         "selections": [
-                            { "kind": "Field", "name": "__typename" },
-                            { "kind": "Field", "name": "id" },
-                            { "kind": "Field", "alias": "__require_0_isbn", "name": "isbn" }
+                            {{ "kind": "Field", "name": "__typename" }},
+                            {{ "kind": "Field", "name": "id" }},
+                            {{ "kind": "Field", "alias": "__require_0_isbn", "name": "{aliased}" }}
                         ]
-                    }],
-                    "operation_document": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Book { blurb } } }",
+                    }}],
+                    "operation_document": "query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ ... on Book {{ blurb }} }} }}",
                     "operation_kind": "query",
-                    "input_rewrites": [{ "KeyRenamer": {
-                        "path": [{ "Key": ["__require_0_isbn", null] }],
+                    "input_rewrites": [{{ "KeyRenamer": {{
+                        "path": [{{ "Key": ["__require_0_isbn", null] }}],
                         "rename_key_to": "isbn"
-                    } }],
+                    }} }}],
                     "output_rewrites": [],
                     "context_rewrites": []
-                } }
-            } }
-        ] } }"#,
-    );
+                }} }}
+            }} }}
+        ] }} }}"#
+        ),
+    )
+}
+
+fn check_blurb_plan(planner: &QueryPlanner, plan: &QueryPlan) -> Result<(), CorrectnessError> {
     let operation = ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
         "{ feed { ... on Book { blurb } } }",
         "operation.graphql",
     )
     .expect("valid operation");
-
     crate::correctness::check_plan(
         planner.api_schema(),
         planner.supergraph_schema(),
         planner.subgraph_schemas(),
         &operation,
-        &plan,
+        plan,
     )
-    .unwrap();
+}
+
+// A planner may alias a `@requires` input, for example when two fetches need the same field with
+// different subselections, and rename it back with an input rewrite. The router applies input
+// rewrites to each representation before sending it, so `reviews` still receives `isbn`.
+#[test]
+fn an_aliased_requires_input_renamed_by_an_input_rewrite_is_accepted() {
+    let planner = planner();
+    let plan = aliased_requires_plan(&planner, "__typename id __require_0_isbn: isbn", "isbn");
+    check_blurb_plan(&planner, &plan).unwrap();
+}
+
+// The subgraph is sent `isbn`, and the renamer says it is read from `__require_0_isbn`, so that is
+// the key the plan has to have fetched. Fetching `isbn` under its own name leaves the rename with
+// nothing to carry.
+#[test]
+fn an_entry_reading_a_key_the_plan_never_fetched_is_rejected() {
+    let planner = planner();
+    let plan = aliased_requires_plan(&planner, "__typename id isbn", "isbn");
+    let error = check_blurb_plan(&planner, &plan).expect_err("`__require_0_isbn` is never fetched");
+    assert!(
+        error
+            .to_string()
+            .contains("has not fetched what the subgraph demands"),
+        "{error}"
+    );
+}
+
+// The entry reads `id` under the alias the renamer names `isbn`, so `reviews` would be sent `id`'s
+// value as `isbn`. Forwards, the entry as read renames to `isbn` where the entry as sent says
+// `id`, and the rewrites and the entry disagree.
+#[test]
+fn a_renamed_key_naming_a_different_field_is_rejected() {
+    let planner = planner();
+    let plan = aliased_requires_plan(&planner, "__typename id __require_0_isbn: id", "id");
+    let error = check_blurb_plan(&planner, &plan).expect_err("`isbn` would carry `id`'s value");
+    assert!(
+        error
+            .to_string()
+            .contains("does not agree with the fetch's input rewrites"),
+        "{error}"
+    );
 }
