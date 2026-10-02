@@ -561,7 +561,9 @@ supergraph:
 
 ### Graph Artifacts
 
-GraphOS Router 3.0 can load the supergraph schema from an OCI registry, instead of Apollo's proprietary Uplink service.
+[Graph Artifacts] combine the supergraph schema and persisted queries into a single versioned OCI artifact. These can be served from any standard OCI registry. Among other benefits, using Graph Artifacts simplifies rollbacks and using self-hosted artifacts.
+
+GraphOS Router 3.0 fetches the supergraph schema and persisted queries from Apollo's Graph Artifacts OCI registry by default, replacing the legacy Apollo Uplink.
 
 ### Early enforcement of GraphQL Validation
 
@@ -571,4 +573,5 @@ GraphQL Validation is now enforced _before_ access to `@authenticated` fields is
 
 Make sure that you are referencing the correct router release: **v{products.router.latest().version}**
 
+[Graph Artifacts]: /graphos/platform/schema-management/delivery/graph-artifacts
 [incremental query planner]: /graphos/routing/query-planning/incremental-query-planner
