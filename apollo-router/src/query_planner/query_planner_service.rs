@@ -1286,9 +1286,12 @@ mod tests {
     #[test(tokio::test)]
     async fn test_fuel_histograms_with_incremental_planner() {
         async {
-            let config = Configuration::from_str(
-                "supergraph:\n  query_planning:\n    incremental_planner:\n      enabled: true\n",
-            )
+            let config = Configuration::from_str(indoc::indoc! {"
+                supergraph:
+                  query_planning:
+                    incremental_planner:
+                      enabled: true
+            "})
             .expect("valid configuration");
             plan_example_query(config).await;
 
@@ -1348,9 +1351,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_fuel_recorded_on_query_planning_span_with_incremental_planner() {
-        let config = Configuration::from_str(
-            "supergraph:\n  query_planning:\n    incremental_planner:\n      enabled: true\n      fuel: 5000\n",
-        )
+        let config = Configuration::from_str(indoc::indoc! {"
+            supergraph:
+              query_planning:
+                incremental_planner:
+                  enabled: true
+                  fuel: 5000
+        "})
         .expect("valid configuration");
         let recorded = recorded_on_query_planning_span(config).await;
 
