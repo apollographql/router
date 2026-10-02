@@ -99,7 +99,7 @@ Minimum number of requests in the window before the failure rate is evaluated. P
       </td>
       <td>
 
-How long the circuit stays open before letting a single probe request through. Also bounds the probe itself: a probe that doesn't report an outcome within this duration counts as failed, and the circuit opens again.
+How long the circuit stays open before letting a single probe request through. If the probe is still running after this duration, the next request reopens the circuit and the probe's result is ignored. A traffic shaping `timeout` shorter than this duration ends a slow probe as a failure.
 
       </td>
       <td>`30s`</td>
