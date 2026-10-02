@@ -330,6 +330,8 @@ With `redacted_error`, users only see "Authentication failed". The details are s
 authentication:
   router:
     jwt:
+      jwks:
+        - url: https://auth.example.com/.well-known/jwks.json
       on_error: error
 ```
 
