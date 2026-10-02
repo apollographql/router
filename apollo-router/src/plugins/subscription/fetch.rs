@@ -220,7 +220,7 @@ fn subscription_with_subgraph_service(
                     .map_to_graphql_error(service_name.to_string(), &current_dir)
                 {
                     Err(e) => {
-                        failfast_error!("subgraph call fetch error: {}", e);
+                        tracing::error!("subgraph call fetch error: {}", e);
                         vec![e]
                     }
                     Ok(response) => response.response.into_parts().1.errors,

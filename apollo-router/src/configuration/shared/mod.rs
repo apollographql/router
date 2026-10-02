@@ -22,7 +22,7 @@ pub(crate) const DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_sec
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Client {
     /// Use HTTP/2 to communicate with the coprocessor.
-    pub(crate) experimental_http2: Option<Http2Config>,
+    pub(crate) http2: Option<Http2Config>,
 
     /// Specify a DNS resolution strategy to use when resolving the coprocessor URL.
     pub(crate) dns_resolution_strategy: Option<DnsResolutionStrategy>,

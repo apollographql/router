@@ -1609,35 +1609,28 @@ where
                             }
                         },
                     };
-                    match static_instruments
+                    let counter = static_instruments
                         .get(instrument_name)
                         .expect(
                             "cannot get static instrument for supergraph; this should not happen",
                         )
                         .as_counter_f64()
                         .cloned()
-                    {
-                        Some(counter) => {
-                            let counter = CustomCounterInner {
-                                increment,
-                                condition: instrument.condition.clone(),
-                                counter: Some(counter),
-                                attributes: Vec::new(),
-                                selector,
-                                selectors: Some(instrument.attributes.clone()),
-                                incremented: false,
-                                _phantom: PhantomData,
-                            };
-                            counters.push(CustomCounter {
-                                inner: Mutex::new(counter),
-                            })
-                        }
-                        None => {
-                            failfast_debug!(
-                                "cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub"
-                            );
-                        }
-                    }
+                        .expect("cannot convert static instrument into a counter, this is a bug");
+
+                    let counter = CustomCounterInner {
+                        increment,
+                        condition: instrument.condition.clone(),
+                        counter: Some(counter),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: Some(instrument.attributes.clone()),
+                        incremented: false,
+                        _phantom: PhantomData,
+                    };
+                    counters.push(CustomCounter {
+                        inner: Mutex::new(counter),
+                    })
                 }
                 InstrumentType::Histogram => {
                     let (selector, increment) = match (&instrument.value).into() {
@@ -1671,36 +1664,29 @@ where
                         },
                     };
 
-                    match static_instruments
+                    let histogram = static_instruments
                         .get(instrument_name)
                         .expect(
                             "cannot get static instrument for supergraph; this should not happen",
                         )
                         .as_histogram()
                         .cloned()
-                    {
-                        Some(histogram) => {
-                            let histogram = CustomHistogramInner {
-                                increment,
-                                condition: instrument.condition.clone(),
-                                histogram: Some(histogram),
-                                attributes: Vec::new(),
-                                selector,
-                                selectors: Some(instrument.attributes.clone()),
-                                updated: false,
-                                _phantom: PhantomData,
-                            };
+                        .expect("cannot convert static instrument into a histogram, this is a bug");
 
-                            histograms.push(CustomHistogram {
-                                inner: Mutex::new(histogram),
-                            });
-                        }
-                        None => {
-                            failfast_debug!(
-                                "cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub"
-                            );
-                        }
-                    }
+                    let histogram = CustomHistogramInner {
+                        increment,
+                        condition: instrument.condition.clone(),
+                        histogram: Some(histogram),
+                        attributes: Vec::new(),
+                        selector,
+                        selectors: Some(instrument.attributes.clone()),
+                        updated: false,
+                        _phantom: PhantomData,
+                    };
+
+                    histograms.push(CustomHistogram {
+                        inner: Mutex::new(histogram),
+                    });
                 }
             }
         }
@@ -1930,8 +1916,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -1972,8 +1958,8 @@ where
                 Increment::EventCustom(None) => Increment::Custom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2023,8 +2009,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2111,8 +2097,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom: {other:?}"
                     );
                     return;
                 }
@@ -2357,8 +2343,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2398,8 +2384,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::Custom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2450,8 +2436,8 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom: {other:?}"
                     );
                     return;
                 }
@@ -2535,8 +2521,8 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(Some(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(Some(selected_value)),
                 other => {
-                    failfast_error!(
-                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    tracing::error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom: {other:?}"
                     );
                     return;
                 }
@@ -3119,10 +3105,13 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_builtin_subgraph_instruments()),
                                     ));
-                                    apollo_subgraph_instruments = Some(config.new_apollo_subgraph_instruments(
-                                        Arc::new(config.new_builtin_apollo_subgraph_instruments()),
-                                        apollo_config.clone()
-                                    ));
+                                    apollo_subgraph_instruments =
+                                        Some(config.new_apollo_subgraph_instruments(
+                                            Arc::new(
+                                                config.new_builtin_apollo_subgraph_instruments(),
+                                            ),
+                                            apollo_config.clone(),
+                                        ));
                                     cache_instruments = Some(config.new_cache_instruments(
                                         Arc::new(config.new_builtin_cache_instruments()),
                                     ));
@@ -3135,22 +3124,27 @@ mod tests {
                                     let mut http_request = http::Request::new(graphql_request);
                                     *http_request.headers_mut() = convert_http_headers(headers);
 
-                                    let request = crate::plugins::telemetry::subgraph::Request::fake_builder()
-                                        .context(context.clone())
-                                        .subgraph_name(subgraph_name)
-                                        .and_operation_kind(operation_kind)
-                                        .subgraph_request(http_request)
-                                        .build();
+                                    let request =
+                                        crate::services::subgraph::Request::fake_builder()
+                                            .context(context.clone())
+                                            .subgraph_name(subgraph_name)
+                                            .and_operation_kind(operation_kind)
+                                            .subgraph_request(http_request)
+                                            .build();
 
-                                    let body = serde_json::to_string(request.subgraph_request.body()).expect("failed to serialize subgraph request body");
+                                    let body =
+                                        serde_json::to_string(request.subgraph_request.body())
+                                            .expect("failed to serialize subgraph request body");
                                     let body_size = body.len();
-                                    request.context.extensions()
-                                        .with_lock(|lock| {
-                                            lock.insert(SubgraphRequestBodySize(body_size as u64));
-                                        });
+                                    request.context.extensions().with_lock(|lock| {
+                                        lock.insert(SubgraphRequestBodySize(body_size as u64));
+                                    });
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
-                                    apollo_subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    apollo_subgraph_instruments
+                                        .as_mut()
+                                        .unwrap()
+                                        .on_request(&request);
                                     cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
@@ -3161,23 +3155,26 @@ mod tests {
                                     errors,
                                     headers,
                                 } => {
-                                    let response = crate::plugins::telemetry::subgraph::Response::fake2_builder()
-                                        .context(context.clone())
-                                        .and_subgraph_name(subgraph_name)
-                                        .status_code(StatusCode::from_u16(status).expect("status"))
-                                        .and_data(data)
-                                        .errors(errors)
-                                        .extensions(extensions)
-                                        .headers(convert_headers(headers))
-                                        .build()
-                                        .unwrap();
+                                    let response =
+                                        crate::services::subgraph::Response::fake2_builder()
+                                            .context(context.clone())
+                                            .and_subgraph_name(subgraph_name)
+                                            .status_code(
+                                                StatusCode::from_u16(status).expect("status"),
+                                            )
+                                            .and_data(data)
+                                            .errors(errors)
+                                            .extensions(extensions)
+                                            .headers(convert_headers(headers))
+                                            .build()
+                                            .unwrap();
 
-                                    let body = serde_json::to_string(response.response.body()).expect("failed to serialize subgraph response body");
+                                    let body = serde_json::to_string(response.response.body())
+                                        .expect("failed to serialize subgraph response body");
                                     let body_size = body.len();
-                                    response.context.extensions()
-                                        .with_lock(|lock| {
-                                            lock.insert(SubgraphResponseBodySize(body_size as u64));
-                                        });
+                                    response.context.extensions().with_lock(|lock| {
+                                        lock.insert(SubgraphResponseBodySize(body_size as u64));
+                                    });
 
                                     subgraph_instruments
                                         .take()
@@ -3325,7 +3322,11 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
+                                            JSONSelection::parse_with_spec(
+                                                "$.data",
+                                                DEFAULT_CONNECT_SPEC,
+                                            )
+                                            .unwrap(),
                                         ),
                                     };
                                     let request = Request {
@@ -3348,7 +3349,10 @@ mod tests {
                                     apollo_connector_instruments = Some({
                                         let apollo_connector_instruments = config
                                             .new_apollo_connector_instruments(
-                                                Arc::new(config.new_builtin_apollo_connector_instruments()),
+                                                Arc::new(
+                                                    config
+                                                        .new_builtin_apollo_connector_instruments(),
+                                                ),
                                                 apollo_config.clone(),
                                             );
                                         apollo_connector_instruments.on_request(&request);
@@ -3366,7 +3370,11 @@ mod tests {
                                         name: "hello".to_string(),
                                         inputs: Default::default(),
                                         selection: Arc::new(
-                                            JSONSelection::parse_with_spec("$.data", DEFAULT_CONNECT_SPEC).unwrap(),
+                                            JSONSelection::parse_with_spec(
+                                                "$.data",
+                                                DEFAULT_CONNECT_SPEC,
+                                            )
+                                            .unwrap(),
                                         ),
                                     };
                                     let mut http_response = http::Response::builder()
@@ -3389,6 +3397,7 @@ mod tests {
                                             key: response_key,
                                             problems: mapping_problems,
                                         },
+                                        break_status: None,
                                     };
                                     connector_instruments
                                         .take()

@@ -14,13 +14,13 @@ use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
-use shape::graphql::shape_for_arguments;
 use shape::location::Location;
-use shape::location::SourceId;
 use shape::name::NameCase;
 
 use crate::connectors::JSONSelection;
 use crate::connectors::Namespace;
+use crate::connectors::graphql_shapes::shape_for_arguments;
+use crate::connectors::graphql_shapes::source_file;
 use crate::connectors::id::ConnectedElement;
 use crate::connectors::id::ObjectCategory;
 use crate::connectors::json_selection::VarPaths;
@@ -33,7 +33,7 @@ use crate::connectors::validation::graphql::subslice_location;
 use crate::connectors::variable::VariableReference;
 
 static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::record(
+    Shape::closed_record(
         [(
             "headers".to_string(),
             Shape::dict(Shape::list(Shape::string([]), []), []),
@@ -44,7 +44,7 @@ static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
 });
 
 static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::record(
+    Shape::closed_record(
         [(
             "headers".to_string(),
             Shape::dict(Shape::list(Shape::string([]), []), []),
@@ -86,7 +86,7 @@ impl<'schema> Context<'schema> {
                 parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Args, shape_for_arguments(schema, field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Request, REQUEST_SHAPE.clone()),
@@ -145,7 +145,7 @@ impl<'schema> Context<'schema> {
                 parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
-                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Args, shape_for_arguments(schema, field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
                     (Namespace::Status, Shape::int([])),
@@ -359,6 +359,17 @@ fn resolve_shape(
     expression: &Expression,
     resolving: &mut HashSet<String>,
 ) -> Result<Shape, Message> {
+    // Shape errors are stored as metadata on the shape itself rather than as a
+    // dedicated `ShapeCase::Error` variant. If any are present, surface the
+    // first message as a validation failure before attempting structural
+    // dispatch on the (possibly partial) case.
+    if let Some(error) = shape.own_errors().next() {
+        return Err(Message {
+            code: context.code,
+            message: error.message.clone(),
+            locations: transform_locations(shape.locations(), context, expression),
+        });
+    }
     match shape.case() {
         ShapeCase::One(shapes) => {
             let mut inners = Vec::new();
@@ -546,11 +557,6 @@ fn resolve_shape(
             }
             result
         }
-        ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
-            code: context.code,
-            message: message.clone(),
-            locations: transform_locations(shape.locations(), context, expression),
-        }),
         ShapeCase::Array { prefix, tail } => {
             let prefix = prefix
                 .iter()
@@ -591,14 +597,15 @@ fn transform_locations<'a>(
 ) -> Vec<Range<LineColumn>> {
     let mut locations: Vec<_> = locations
         .into_iter()
-        .filter_map(|location| match &location.source_id {
-            SourceId::GraphQL(file_id) => context
-                .schema
-                .sources
-                .get(file_id)
-                .and_then(|source| source.get_line_column_range(location.span.clone())),
-            SourceId::Other(_) => {
-                // Right now, this always refers to the JSONSelection location
+        .filter_map(|location| {
+            // Since shape 0.9.0, a GraphQL location is a `SourceId::Other` of
+            // the form `graphql:<path>` rather than its own variant, so it is
+            // `source_file` that tells one apart from the `JSONSelection` ids
+            // we mint ourselves: it returns `None` for any id that
+            // `graphql_shapes` did not produce.
+            if let Some(source) = source_file(context.schema, &location.source_id) {
+                source.get_line_column_range(location.span.clone())
+            } else {
                 subslice_location(
                     context.node,
                     location.span.start + expression.location.start
@@ -621,6 +628,9 @@ fn transform_locations<'a>(
 
 /// A simplified shape name for error messages
 fn short_shape_name(shape: &Shape) -> &'static str {
+    if shape.has_own_errors() {
+        return "error";
+    }
     match shape.case() {
         ShapeCase::Bool(_) => "boolean",
         ShapeCase::String(_) => "string",
@@ -634,7 +644,6 @@ fn short_shape_name(shape: &Shape) -> &'static str {
         ShapeCase::Name(_, _) => "named type",
         ShapeCase::Unknown => "unknown",
         ShapeCase::None => "none",
-        ShapeCase::Error(_) => "error",
     }
 }
 
@@ -702,7 +711,6 @@ pub(crate) fn parse_mapping_argument(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
@@ -710,10 +718,11 @@ mod tests {
     use crate::connectors::JSONSelection;
     use crate::connectors::schema_type_ref::SchemaTypeRef;
     use crate::connectors::validation::ConnectLink;
+    use crate::subgraph::typestate::expand_schema;
 
     fn expression(selection: &str, spec: ConnectSpec) -> Expression {
         Expression {
-            expression: JSONSelection::parse_with_spec(selection, spec).unwrap(),
+            expression: JSONSelection::parse_with_spec(selection, spec).expect("selection parses"),
             location: 0..0,
         }
     }
@@ -787,25 +796,41 @@ mod tests {
         spec: ConnectSpec,
     ) -> Result<(), Message> {
         let schema_str = schema_for(selection, spec);
-        let schema = Schema::parse(&schema_str, "schema").unwrap();
-        let object = schema.get_object("Query").unwrap();
+        let parsed = Schema::parse(&schema_str, "schema").expect("test schema parses");
+        // Expanded, like the production path, so `SchemaInfo` gets the federation metadata.
+        let federation_schema = expand_schema(parsed).expect("test schema expands");
+        let schema = federation_schema.schema();
+        let object = schema.get_object("Query").expect("`Query` is defined");
         let field = &object.fields["aField"];
-        let directive = field.directives.get("connect").unwrap();
-        let schema_info =
-            SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
-        debug_assert_eq!(schema_info.connect_link.spec, spec);
+        let directive = field
+            .directives
+            .get("connect")
+            .expect("`Query.aField` has a `@connect`");
+        let schema_info = SchemaInfo::new(
+            &federation_schema,
+            ConnectLink::new(schema).expect("schema links the connect spec")?,
+        );
+        // Expansion auto-upgrades `v0.1` to `v0.2`, so validation never observes `v0.1` — an
+        // author writing it gets validated under `v0.2` rules, which is also how it will execute.
+        let effective_spec = if spec == ConnectSpec::V0_1 {
+            ConnectSpec::V0_2
+        } else {
+            spec
+        };
+        debug_assert_eq!(schema_info.connect_link.spec, effective_spec);
         let expr_string = directive
-            .argument_by_name("http", &schema)
-            .unwrap()
+            .argument_by_name("http", schema)
+            .expect("`@connect(http:)` is set")
             .as_object()
-            .unwrap()
+            .expect("`http` is an object")
             .first()
-            .unwrap()
+            .expect("`http` has a method entry")
             .1
             .clone();
         let coordinate = ConnectDirectiveCoordinate {
             element: ConnectedElement::Field {
-                parent_type: SchemaTypeRef::from_node(&schema, object).unwrap(),
+                parent_type: SchemaTypeRef::from_node(schema, object)
+                    .expect("`Query` is a composite type"),
                 field_def: field,
                 parent_category: ObjectCategory::Query,
             },
@@ -822,19 +847,26 @@ mod tests {
         full_expression: &str,
         spec: ConnectSpec,
     ) -> Range<LineColumn> {
-        let schema = schema_for(full_expression, spec);
-        let line_col_lookup = LineColLookup::new(&schema);
-        let expression_offset = schema.find(full_expression).unwrap() - 1;
-        let start_offset = expression_offset + full_expression.find(part).unwrap();
-        let (start_line, start_col) = line_col_lookup.get(start_offset);
-        let (end_line, end_col) = line_col_lookup.get(start_offset + part.len());
-        LineColumn {
-            line: start_line,
-            column: start_col,
-        }..LineColumn {
-            line: end_line,
-            column: end_col,
-        }
+        let schema_str = schema_for(full_expression, spec);
+        let expression_offset = schema_str
+            .find(full_expression)
+            .expect("expression was substituted into the schema")
+            - 1;
+        let start_offset = expression_offset
+            + full_expression
+                .find(part)
+                .expect("`part` is a substring of the expression");
+
+        // Look the location up through the schema's own source file, the same way the code under
+        // test does, so the expectation can't drift from the implementation.
+        let schema = Schema::parse(&schema_str, "schema").expect("test schema parses");
+        let file = schema
+            .sources
+            .values()
+            .find(|file| file.path() == std::path::Path::new("schema"))
+            .expect("the parsed schema is among its own sources");
+        file.get_line_column_range(start_offset..start_offset + part.len())
+            .expect("offsets are within the schema")
     }
 
     #[rstest]
@@ -889,7 +921,8 @@ mod tests {
             ConnectSpec::V0_4,
             ConnectSpec::V0_5,
         ] {
-            validate_with_context(selection, scalars(), spec).unwrap();
+            validate_with_context(selection, scalars(), spec)
+                .expect("expression is valid for this spec version");
         }
     }
 
@@ -918,10 +951,10 @@ mod tests {
             ConnectSpec::V0_4,
             ConnectSpec::V0_5,
         ] {
-            let err = validate_with_context(selection, scalars(), spec);
-            assert!(err.is_err());
+            let message = validate_with_context(selection, scalars(), spec)
+                .expect_err("expression is invalid for this spec version");
             assert!(
-                !err.err().unwrap().locations.is_empty(),
+                !message.locations.is_empty(),
                 "Every error should have at least one location"
             );
         }
@@ -946,10 +979,10 @@ mod tests {
         assert_eq!(ConnectSpec::next(), ConnectSpec::V0_5);
 
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
-            let err = validate_with_context(selection, scalars(), spec);
-            assert!(err.is_err());
+            let message = validate_with_context(selection, scalars(), spec)
+                .expect_err("expression is invalid for this spec version");
             assert!(
-                !err.err().unwrap().locations.is_empty(),
+                !message.locations.is_empty(),
                 "Every error should have at least one location"
             );
         }
@@ -970,7 +1003,8 @@ mod tests {
     )]
     fn valid_as_var_bindings(#[case] selection: &str) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
-            validate_with_context(selection, scalars(), spec).unwrap();
+            validate_with_context(selection, scalars(), spec)
+                .expect("expression is valid for this spec version");
         }
     }
 
@@ -985,10 +1019,10 @@ mod tests {
     #[case::as_with_reused_var("$([1, 2, 3])->as($o, $o)->echo($o)")]
     fn invalid_expressions_with_as_var_binding(#[case] selection: &str) {
         for spec in [ConnectSpec::V0_3, ConnectSpec::V0_4, ConnectSpec::V0_5] {
-            let err = validate_with_context(selection, scalars(), spec);
-            assert!(err.is_err());
+            let message = validate_with_context(selection, scalars(), spec)
+                .expect_err("expression is invalid for this spec version");
             assert!(
-                !err.err().unwrap().locations.is_empty(),
+                !message.locations.is_empty(),
                 "Every error should have at least one location"
             );
         }

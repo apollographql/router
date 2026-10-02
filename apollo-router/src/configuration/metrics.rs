@@ -181,6 +181,16 @@ impl InstrumentData {
             "$.supergraph[?(@.defer_support == true)]"
         );
         populate_config_instrument!(
+            apollo.router.config.incremental_planner,
+            "$.supergraph.query_planning.incremental_planner[?(@.enabled == true)]",
+            opt.beam_width,
+            "$[?(@.beam_width)]",
+            opt.fuel,
+            "$[?(@.fuel)]",
+            opt.timeout,
+            "$[?(@.timeout)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.authentication.jwt,
             "$.authentication[?(@..jwt)]",
             opt.on_error,
@@ -303,11 +313,26 @@ impl InstrumentData {
             opt.subgraph.rate_limit,
             "$[?(@.all.global_rate_limit || @.subgraphs..global_rate_limit)]",
             opt.subgraph.http2,
-            "$[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]",
+            "$[?(@.all.http2 == 'enable' || @.all.http2 == 'http2only' || @.subgraphs..http2 == 'enable' || @.subgraphs..http2 == 'http2only')]",
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
             "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
+        );
+        // Presence of the block is the whole of the feature switch: every subgraph and connector
+        // source is protected as soon as `circuit_breaker` is configured at all, with the
+        // apollo-qos defaults where nothing overrides them. So `circuit_breaker: {}` counts.
+        populate_config_instrument!(
+            apollo.router.config.circuit_breaker,
+            "$.circuit_breaker",
+            opt.subgraph.all,
+            "$[?(@.all)]",
+            opt.subgraph.subgraphs,
+            "$[?(@.subgraphs)]",
+            opt.connector.all,
+            "$[?(@.connector.all)]",
+            opt.connector.sources,
+            "$[?(@.connector.sources)]"
         );
 
         populate_config_instrument!(
@@ -409,8 +434,8 @@ impl InstrumentData {
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
             "$.metrics_reference_mode",
-            opt.errors.preview_extended_error_metrics,
-            "$.errors.preview_extended_error_metrics",
+            opt.errors.extended_error_metrics,
+            "$.errors.extended_error_metrics",
             opt.field_level_instrumentation_sampler,
             "$.field_level_instrumentation_sampler",
             opt.tracing.batch_processor.scheduled_delay,
@@ -423,6 +448,8 @@ impl InstrumentData {
             "$.tracing.batch_processor.max_export_timeout",
             opt.tracing.batch_processor.max_queue_size,
             "$.tracing.batch_processor.max_queue_size",
+            opt.tracing.throttle,
+            "$.tracing.throttle",
             opt.metrics.otlp.batch_processor.scheduled_delay,
             "$.metrics.otlp.batch_processor.scheduled_delay",
             opt.metrics.otlp.batch_processor.max_export_timeout,
@@ -447,17 +474,12 @@ impl InstrumentData {
             "$[?(@.expose_sources_in_context == true)]",
             opt.max_requests_per_operation_per_source,
             "$[?(@.max_requests_per_operation_per_source)]",
-            opt.subgraph.config,
-            "$[?(@.subgraphs..['$config'])]",
+            opt.source.config,
+            "$[?(@.sources..['$config'])]",
             opt.source.override_url,
-            "$[?(@.subgraphs..sources..override_url)]",
+            "$[?(@.sources..override_url)]",
             opt.source.max_requests_per_operation,
-            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
-        );
-
-        populate_config_instrument!(
-            apollo.router.config.experimental_chaos,
-            "$.experimental_chaos[?(@.force_schema_reload || @.force_config_reload)]"
+            "$[?(@.sources..max_requests_per_operation)]"
         );
 
         populate_config_instrument!(
@@ -471,8 +493,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_log_on_broken_pipe,
-            "$.supergraph.experimental_log_on_broken_pipe[?(@==true)]"
+            apollo.router.config.log_on_broken_pipe,
+            "$.supergraph.log_on_broken_pipe[?(@==true)]"
         );
 
         populate_config_instrument!(
@@ -501,8 +523,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_response_trace_id,
-            "$.telemetry.exporters.tracing.experimental_response_trace_id[?(@.enabled==true)]"
+            apollo.router.config.response_trace_id,
+            "$.telemetry.exporters.tracing.response_trace_id[?(@.enabled==true)]"
         );
 
         populate_config_instrument!(
@@ -511,8 +533,8 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_http2,
-            "$.traffic_shaping[?(@.all.experimental_http2 == 'enable' || @.all.experimental_http2 == 'http2only' || @.subgraphs..experimental_http2 == 'enable' || @.subgraphs..experimental_http2 == 'http2only')]"
+            apollo.router.config.http2,
+            "$.traffic_shaping[?(@.all.http2 == 'enable' || @.all.http2 == 'http2only' || @.subgraphs..http2 == 'enable' || @.subgraphs..http2 == 'http2only')]"
         );
 
         populate_config_instrument!(
@@ -541,8 +563,13 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_expose_query_plan,
-            "$.plugins[?(@['experimental.expose_query_plan']==true)]"
+            apollo.router.config.expose_query_plan,
+            "$[?(@.expose_query_plan==true)]"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.supergraph.validate_default_values,
+            "$.supergraph[?(@.validate_default_values == false)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.
@@ -574,6 +601,13 @@ impl InstrumentData {
                 atomic.load(Ordering::Relaxed).into()
             }
         }
+        fn mutex_string(mutex: &Mutex<Option<String>>) -> opentelemetry::Value {
+            if cfg!(test) {
+                "test".into()
+            } else {
+                mutex.lock().clone().unwrap_or_default().into()
+            }
+        }
         let mut attributes = HashMap::new();
         attributes.insert(
             "opt.apollo.key".to_string(),
@@ -590,6 +624,14 @@ impl InstrumentData {
         attributes.insert(
             "opt.apollo.license.path".to_string(),
             atomic_is_true(&crate::executable::APOLLO_ROUTER_LICENCE_PATH_IS_SET),
+        );
+        attributes.insert(
+            "opt.apollo.graph_artifact_reference".to_string(),
+            mutex_is_some(&crate::executable::APOLLO_ROUTER_GRAPH_ARTIFACT_REFERENCE),
+        );
+        attributes.insert(
+            "opt.apollo.license.source".to_string(),
+            mutex_string(&crate::executable::APOLLO_ROUTER_LICENSE_SOURCE),
         );
         attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),
@@ -636,11 +678,10 @@ impl InstrumentData {
             "apollo.router.config.custom_plugins".to_string(),
             (
                 configuration
-                    .plugins
-                    .plugins
-                    .as_ref()
-                    .map(|configuration| {
-                        configuration
+                    .document_section("plugins")
+                    .and_then(|plugins| plugins.as_object())
+                    .map(|plugins| {
+                        plugins
                             .keys()
                             .filter(|k| !k.starts_with("cloud_router."))
                             .count()
@@ -714,6 +755,40 @@ mod test {
         }
     }
 
+    /// Production reads usage gauges from the document that parsing retains. For every fixture,
+    /// that document must drive the same gauges as the document startup migrates the file to.
+    /// Parsing uses no environment overrides, such as `APOLLO_USAGE_REPORTING_INGRESS_URL`, so the
+    /// shell running the test cannot change either side.
+    #[test]
+    fn parsed_configuration_keeps_usage_telemetry_meaning() {
+        for file_name in Asset::iter() {
+            let source = Asset::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data).expect("expected utf8");
+            let migrated = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(input).expect("config must be valid yaml"),
+                false,
+                crate::configuration::upgrade::UpgradeMode::current_minor(),
+            )
+            .expect("the fixture migrates");
+            let parsed = crate::configuration::parse_without_inputs(
+                input,
+                crate::configuration::Migration::WithinMajor,
+            )
+            .unwrap_or_else(|error| panic!("{file_name}: {error}"));
+
+            let mut from_document = InstrumentData::default();
+            from_document.populate_config_instruments(&migrated);
+            let mut from_parsed = InstrumentData::default();
+            from_parsed.populate_config_instruments(
+                parsed
+                    .validated_yaml
+                    .as_ref()
+                    .expect("parsing retains the document"),
+            );
+            assert_eq!(from_parsed.data, from_document.data, "{file_name}");
+        }
+    }
+
     #[test]
     fn test_env_metrics() {
         let mut data = InstrumentData::default();
@@ -744,10 +819,10 @@ mod test {
 
     #[test]
     fn test_custom_plugin() {
-        let mut configuration = crate::Configuration::default();
-        let mut custom_plugins = serde_json::Map::new();
-        custom_plugins.insert("name".to_string(), json!("test"));
-        configuration.plugins.plugins = Some(custom_plugins);
+        let configuration = crate::Configuration {
+            validated_yaml: Some(json!({ "plugins": { "name": "test" } })),
+            ..Default::default()
+        };
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();
@@ -756,11 +831,12 @@ mod test {
 
     #[test]
     fn test_ignore_cloud_router_plugins() {
-        let mut configuration = crate::Configuration::default();
-        let mut custom_plugins = serde_json::Map::new();
-        custom_plugins.insert("name".to_string(), json!("test"));
-        custom_plugins.insert("cloud_router.".to_string(), json!("test"));
-        configuration.plugins.plugins = Some(custom_plugins);
+        let configuration = crate::Configuration {
+            validated_yaml: Some(json!({
+                "plugins": { "name": "test", "cloud_router.": "test" }
+            })),
+            ..Default::default()
+        };
         let mut data = InstrumentData::default();
         data.populate_user_plugins_instrument(&configuration);
         let _metrics: Metrics = data.into();

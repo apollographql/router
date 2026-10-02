@@ -1,0 +1,3 @@
+plugins:
+  this_plugin_is_not_registered:
+    enabled: true

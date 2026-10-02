@@ -262,6 +262,7 @@ pub(crate) fn operation(
         variables: def.variables.clone(),
         directives: def.directives.clone(),
         selection_set,
+        description: def.description.clone(),
     }))
 }
 
@@ -288,6 +289,7 @@ pub(crate) fn fragment_definition(
         type_condition: def.type_condition.clone(),
         directives: def.directives.clone(),
         selection_set,
+        description: def.description.clone(),
     }))
 }
 
@@ -388,7 +390,7 @@ pub(crate) fn selection_set(
                     .map_err(|e| match e {
                         FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
                         FieldLookupError::NoSuchField(_, _) => {
-                            format!("no field `{}` in type `{parent_type}`", &def.name)
+                            format!("no field `{}` in type `{parent_type}`", def.name)
                         }
                     })?
                     .clone();

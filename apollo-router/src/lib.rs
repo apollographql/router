@@ -16,7 +16,6 @@
 //! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
 
-#![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
@@ -29,28 +28,6 @@
 #[ctor::ctor(unsafe)]
 fn install_default_crypto_provider_for_tests() {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
-
-macro_rules! failfast_debug {
-    ($($tokens:tt)+) => {{
-        tracing::debug!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
-}
-
-macro_rules! failfast_error {
-    ($($tokens:tt)+) => {{
-        tracing::error!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
 }
 
 #[macro_use]
@@ -95,6 +72,10 @@ mod uplink;
 pub(crate) mod allocator;
 mod registry;
 
+// Re-exports for plugins.
+pub use apollo_configuration;
+pub use apollo_redaction;
+
 pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
@@ -103,7 +84,6 @@ pub use crate::context::extensions::Extensions;
 pub use crate::context::extensions::sync::ExtensionsMutex;
 pub use crate::executable::Executable;
 pub use crate::executable::main;
-pub use crate::plugins::subscription::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
 pub use crate::router::LicenseSource;
@@ -131,6 +111,7 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     pub use crate::plugin::PluginFactory;
     // For tests
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
     pub use crate::plugins::mock_subgraphs::testing_subgraph_call as mock_subgraphs_subgraph_call;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
     pub use crate::services::APOLLO_GRAPH_REF;

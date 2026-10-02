@@ -21,9 +21,7 @@ pub(super) struct TrafficShapingIncompatPlugin {
 impl TrafficShapingIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
         config
-            .apollo_plugins
-            .plugins
-            .get("traffic_shaping")
+            .document_section("traffic_shaping")
             .and_then(|raw| serde_json::from_value(raw.clone()).ok())
             .map(|config| Self { config })
     }

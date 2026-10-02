@@ -2,13 +2,13 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Range;
 
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::DiagnosticList;
@@ -46,7 +46,19 @@ pub struct Subgraph {
 
 impl Subgraph {
     pub fn new(name: &str, url: &str, schema_str: &str) -> Result<Self, FederationError> {
-        let schema = Schema::parse(schema_str, name)?;
+        Self::new_with_options(name, url, schema_str, true)
+    }
+
+    pub fn new_with_options(
+        name: &str,
+        url: &str,
+        schema_str: &str,
+        validate_default_values: bool,
+    ) -> Result<Self, FederationError> {
+        let schema = Schema::builder()
+            .validate_default_values(validate_default_values)
+            .parse(schema_str, name)
+            .build()?;
         // TODO: federation-specific validation
         Ok(Self {
             name: name.to_string(),
@@ -258,13 +270,13 @@ impl Subgraph {
             .schema_definition
             .make_mut()
             .query
-            .get_or_insert(ComponentName::from(name!("Query")));
+            .get_or_insert(name!("Query").to_node(None));
         if let ExtendedType::Object(query_type) = schema
             .types
-            .entry(query_type_name.name.clone())
+            .entry(Name::clone(query_type_name))
             .or_insert(ExtendedType::Object(Node::new(ObjectType {
                 description: None,
-                name: query_type_name.name.clone(),
+                name: Name::clone(query_type_name),
                 directives: Default::default(),
                 fields: IndexMap::default(),
                 implements_interfaces: IndexSet::default(),
@@ -289,7 +301,7 @@ impl Subgraph {
     fn locate_entities(
         schema: &mut Schema,
         fed_definitions: &FederationSpecDefinitions,
-    ) -> IndexSet<ComponentName> {
+    ) -> IndexSet<Node<Name>> {
         let mut entities = Vec::new();
         let immutable_type_map = schema.types.to_owned();
         for (named_type, extended_type) in immutable_type_map.iter() {
@@ -308,8 +320,10 @@ impl Subgraph {
                 entities.push(named_type);
             }
         }
-        let entity_set: IndexSet<ComponentName> =
-            entities.iter().map(|e| ComponentName::from(*e)).collect();
+        let entity_set: IndexSet<Node<Name>> = entities
+            .iter()
+            .map(|e| (*e).clone().to_node(None))
+            .collect();
         entity_set
     }
 }
@@ -462,11 +476,11 @@ impl Display for SubgraphError {
 }
 
 pub mod test_utils {
-
     use super::SubgraphError;
     use super::typestate::Expanded;
     use super::typestate::Subgraph;
     use super::typestate::Validated;
+    use crate::composition::CompositionFailure;
 
     pub enum BuildOption {
         AsIs,
@@ -476,7 +490,7 @@ pub mod test_utils {
     pub fn build_inner(
         schema_str: &str,
         build_option: BuildOption,
-    ) -> Result<Subgraph<Validated>, SubgraphError> {
+    ) -> Result<Subgraph<Validated>, CompositionFailure> {
         let name = "S";
         let subgraph =
             Subgraph::parse(name, &format!("http://{name}"), schema_str).expect("valid schema");
@@ -485,10 +499,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        Ok(subgraph
-            .expand_links()?
-            .normalize_root_types()?
-            .assume_validated())
+        subgraph.expand_links()?.normalize_root_types()?.validate()
     }
 
     pub fn build_inner_expanded(
@@ -503,7 +514,7 @@ pub mod test_utils {
         } else {
             subgraph
         };
-        subgraph.expand_links_without_validation()
+        subgraph.expand_links()
     }
 
     pub fn build_and_validate(schema_str: &str) -> Subgraph<Validated> {
@@ -520,7 +531,17 @@ pub mod test_utils {
     ) -> Vec<(String, String)> {
         build_inner(schema, build_option)
             .expect_err("subgraph error was expected")
-            .format_errors()
+            .errors
+            .iter()
+            // `CompositionError`'s `Display` is already `[{subgraph}] {error}`, matching what
+            // `SubgraphError::format_errors` produced.
+            .map(|error| {
+                (
+                    error.code().definition().code().to_string(),
+                    error.to_string(),
+                )
+            })
+            .collect()
     }
 
     /// Build subgraph expecting errors, assuming fed 2.
@@ -630,7 +651,7 @@ pub fn schema_diff_expanded_from_initial(schema_str: String) -> Result<String, F
         typestate::Subgraph::new("S", "http://S", initial_schema.clone(), Default::default());
     let expanded_subgraph = initial_subgraph
         .map_err(|e| e.into_federation_error())?
-        .expand_links_without_validation()
+        .expand_links()
         .map_err(|e| e.into_federation_error())?;
 
     // Build string of missing directives and types from initial to expanded

@@ -46,6 +46,8 @@ use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::apollo_trace_throttle::ApolloTraceThrottle;
+use crate::plugins::telemetry::tracing::apollo_trace_throttle::TraceSummary;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
 use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
@@ -79,7 +81,7 @@ const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
-const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
+pub(crate) const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 pub(crate) const GRAPHQL_ERROR_EXT_CODE: &str = "graphql.error.extensions.code";
@@ -260,6 +262,8 @@ pub(crate) struct Exporter {
     otlp_exporter: ApolloOtlpExporter,
     include_attr_names: HashSet<Key>,
     include_attr_event_names: HashSet<Key>,
+    /// Back-stop that throttles the volume of traces exported to Apollo
+    trace_throttle: ApolloTraceThrottle,
 }
 
 #[buildstructor::buildstructor]
@@ -274,6 +278,7 @@ impl Exporter {
         buffer_size: NonZeroUsize,
         errors_configuration: &'a ErrorsConfiguration,
         batch_processor_config: &'a BatchProcessorConfig,
+        trace_throttle: ApolloTraceThrottle,
     ) -> Result<Self, BoxError> {
         tracing::info!("configuring Apollo tracing: {}", batch_processor_config);
 
@@ -300,9 +305,16 @@ impl Exporter {
                 [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
             ),
             include_attr_event_names: HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS),
+            trace_throttle,
         })
     }
 }
+
+/// Hard upper bound on the (approximate) size of a single trace exported to Apollo. Traces larger
+/// than this are dropped unconditionally: GraphOS ingestion rejects oversized traces, so exporting
+/// them just wastes CPU and bandwidth. Oversized traces are most often caused by pathologically
+/// large FTv1 blobs in subgraph spans.
+const MAX_TRACE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
@@ -312,6 +324,13 @@ impl SpanExporter for Exporter {
         // Traces that aren't complete yet are kept for the next export event. Spans whose root
         // never arrives are eventually evicted by the LRU.
         let mut grouped_traces: Vec<Vec<LightSpanData>> = Vec::new();
+        // Number of complete traces seen this export, and how many the sampler kept
+        let mut total_traces: u64 = 0;
+        let mut kept_traces: u64 = 0;
+        // Traces dropped for exceeding the hard 10MB size limit.
+        let mut oversized_traces: u64 = 0;
+        // Traces dropped because the apollo_telemetry exporter would not have sent them anyway.
+        let mut unexportable_traces: u64 = 0;
 
         {
             let mut span_cache = self.span_cache.lock();
@@ -327,7 +346,33 @@ impl SpanExporter for Exporter {
                         &self.include_attr_names,
                         &self.include_attr_event_names,
                     );
-                    grouped_traces.push(span_cache.pop_spans_for_tree(root_span));
+                    let trace = span_cache.pop_spans_for_tree(root_span);
+                    // To avoid scanning the trace multiple times, we do a single pass over the
+                    // trace's spans to get the approximate size, the dimensions identifying a
+                    // representative trace, and an "exportable" flag which indicates whether or
+                    // not a trace has a signature-bearing supergraph span (these were
+                    // previously dropped in the `prepare_for_export` function).
+                    let summary = TraceSummary::from_trace(&trace);
+                    if !summary.is_exportable() {
+                        unexportable_traces += 1;
+                        continue;
+                    }
+                    // Unconditionally drop traces over the hard size limit — GraphOS ignores
+                    // oversized traces anyway, so exporting them just wastes CPU and bandwidth.
+                    // This is independent of the configured throttle. Checked before the throttle
+                    // (so an oversized trace doesn't consume a representative slot) and before
+                    // `prepare_for_export` (so we skip the CPU-heavy FTV1 re-encode for it).
+                    if summary.approx_size_bytes > MAX_TRACE_SIZE_BYTES {
+                        oversized_traces += 1;
+                        continue;
+                    }
+                    // Apply the Apollo-pipeline throttle on the complete trace. Dropped traces
+                    // never reach `prepare_for_export`, so their CPU-heavy FTV1 re-encode is skipped.
+                    total_traces += 1;
+                    if self.trace_throttle.should_keep(&summary) {
+                        kept_traces += 1;
+                        grouped_traces.push(trace);
+                    }
                 } else if span.parent_span_id != SpanId::INVALID {
                     // Not a root span, we may need it later so stash it.
                     span_cache.insert(LightSpanData::from_span_data(
@@ -344,10 +389,42 @@ impl SpanExporter for Exporter {
                 .update(span_cache.len() as u64);
         }
 
+        if total_traces > 0 {
+            let throttle = self.trace_throttle.mode_name();
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_throttle.total",
+                "Complete traces considered for export to Apollo Studio",
+                total_traces,
+                throttle = throttle
+            );
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_throttle.kept",
+                "Traces kept for export to Apollo Studio after throttling",
+                kept_traces,
+                throttle = throttle
+            );
+        }
+
+        if oversized_traces > 0 {
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_throttle.oversized",
+                "Complete traces dropped because their approximate size exceeded the 10MB limit",
+                oversized_traces
+            );
+        }
+
+        if unexportable_traces > 0 {
+            u64_counter!(
+                "apollo.router.telemetry.apollo.trace_throttle.unexportable",
+                "Complete traces dropped because Apollo's exporter would not have sent them",
+                unexportable_traces
+            );
+        }
+
         // ftv1 decode/re-encode is CPU-heavy, so run it after releasing the span_cache lock.
         let otlp_traces: Vec<Vec<SpanData>> = grouped_traces
             .into_iter()
-            .filter_map(|grouped| self.otlp_exporter.prepare_for_export(grouped))
+            .map(|grouped| self.otlp_exporter.prepare_for_export(grouped))
             .collect();
 
         if !otlp_traces.is_empty() {
@@ -877,5 +954,64 @@ mod span_cache_test {
             "only the popped root is returned"
         );
         assert_eq!(cache.len(), 1, "orphan child must be retained");
+    }
+}
+
+#[cfg(test)]
+mod trace_size_test {
+    use std::collections::HashMap;
+    use std::time::SystemTime;
+
+    use opentelemetry::Key;
+    use opentelemetry::Value;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::Status;
+    use opentelemetry::trace::TraceId;
+
+    use super::APOLLO_PRIVATE_FTV1;
+    use super::LightSpanData;
+    use super::MAX_TRACE_SIZE_BYTES;
+    use super::TraceSummary;
+
+    fn span_with_ftv1(byte_len: usize) -> LightSpanData {
+        let mut attributes: HashMap<Key, Value> = HashMap::new();
+        attributes.insert(
+            APOLLO_PRIVATE_FTV1,
+            Value::String("x".repeat(byte_len).into()),
+        );
+        LightSpanData {
+            trace_id: TraceId::from(1u128),
+            span_id: SpanId::from(1u64),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Internal,
+            name: "subgraph".into(),
+            start_time: SystemTime::UNIX_EPOCH,
+            end_time: SystemTime::UNIX_EPOCH,
+            attributes,
+            status: Status::Unset,
+            droppped_attribute_count: 0,
+            events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn small_trace_is_under_the_limit() {
+        let trace = vec![span_with_ftv1(1024)];
+        assert!(TraceSummary::from_trace(&trace).approx_size_bytes <= MAX_TRACE_SIZE_BYTES);
+    }
+
+    #[test]
+    fn large_ftv1_attribute_exceeds_the_limit() {
+        // A single subgraph span carrying an 11MB FTV1 blob must trip the 10MB guard.
+        let trace = vec![span_with_ftv1(11 * 1024 * 1024)];
+        assert!(TraceSummary::from_trace(&trace).approx_size_bytes > MAX_TRACE_SIZE_BYTES);
+    }
+
+    #[test]
+    fn size_accumulates_across_spans() {
+        // No single span exceeds the limit, but together they do.
+        let trace: Vec<LightSpanData> = (0..3).map(|_| span_with_ftv1(4 * 1024 * 1024)).collect();
+        assert!(TraceSummary::from_trace(&trace).approx_size_bytes > MAX_TRACE_SIZE_BYTES);
     }
 }

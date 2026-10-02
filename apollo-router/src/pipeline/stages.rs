@@ -21,10 +21,15 @@ use crate::introspection;
 use crate::introspection::IntrospectionService;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::InternalServiceBuilderExt as _;
+use crate::layers::ServiceBuilderExt as _;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::extract_authorization_checks_layer::ExtractAuthorizationChecksLayer;
+use crate::plugins::circuit_breaker::CircuitBreaker;
+use crate::plugins::connectors::request_limit::RequestLimitLayer;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
+use crate::plugins::headers::Headers;
+use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
 use crate::plugins::limits::operation_limits_layer::EnforceOperationLimitsLayer;
 use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimitLayer;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -35,6 +40,8 @@ use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::traffic_shaping::ShapingTarget;
+use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanCache;
 use crate::query_planner::QueryPlannerService;
@@ -145,6 +152,9 @@ pub(crate) fn build_http_client_service(
     ServiceBuilder::new()
         .layer(JoinBatchRequestsLayer::new(name))
         .layer(SubgraphResponseSizeLimitLayer::new(name))
+        .apply_plugin_layer(&plugins, Telemetry::overhead_subgraph_request_timing_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_http_client_layer)
+        .apply_plugin_layer(&plugins, Telemetry::custom_instrument_http_client_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.http_client_service(name, service)
         })
@@ -192,13 +202,52 @@ pub(crate) fn build_subgraph_service(
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
 ) -> BufferedSubgraphService {
-    use crate::layers::ServiceBuilderExt as _;
-
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    ServiceBuilder::new()
+    // Box *inside* the buffer, as [`build_connector_request_services`] does: it erases the
+    // stack's type without a second box on the way out of [`SubgraphServices::get`], which
+    // runs once per fetch node per request.
+    let service = ServiceBuilder::new()
+        .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
+            p.tag_errors_with_subgraph_name_layer(Arc::from(name))
+        })
+        .apply_required_plugin_layer(plugins, |h: &Headers| h.subgraph_headers_layer(name))
+        .apply_plugin_layer(plugins, Telemetry::instrument_subgraph_layer)
+        .apply_plugin_layer(plugins, Telemetry::subgraph_ftv1_layer)
+        // Traffic shaping runs outside every plugin hook and inside telemetry, which records
+        // what it rejects. The `admission` module in traffic shaping explains the order of this
+        // buffer and the three layers after it. The buffer is placed even without shaping
+        // configuration: the rate limit can't be cloned, and the telemetry layers need a
+        // service they can clone. The timeout answers its own errors, so it doesn't depend on
+        // the layers above it.
         .buffered()
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_error_response_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.load_shed_layer(ShapingTarget::Subgraph(name))
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.rate_limit_layer(ShapingTarget::Subgraph(name))
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_deduplication_layer(name)
+        })
+        // The circuit judges execution, never admission: what admission turns away never
+        // reaches it, and the timeout and every plugin hook are beneath it, so an expired
+        // timeout or a failing coprocessor counts against the subgraph. Below deduplication,
+        // one call to the subgraph is one sample, and every joined request shares its answer.
+        .apply_plugin_layer(plugins, |c: &CircuitBreaker| c.subgraph_circuit_layer(name))
+        // Below deduplication, one timeout covers every request joined to the same fetch, and it
+        // bounds the plugins and the call beneath it.
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_compression_layer(name)
+        })
+        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_backpressure_buffer_layer(name)
+        })
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.subgraph_service(name, service)
         })
@@ -210,6 +259,11 @@ pub(crate) fn build_subgraph_service(
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
         .service(SubgraphService::new(name, http_service))
+        .boxed_clone();
+
+    // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
+    // the type easier to name
+    ServiceBuilder::new().buffered().service(service)
 }
 
 /// Builds the full service stack for every subgraph, keyed by subgraph name.
@@ -230,20 +284,51 @@ pub(crate) fn build_subgraph_services(
 
 /// Builds the request service stack for each connector source, keyed by
 /// `source_config_key()`.
-fn build_connector_request_services(
+pub(crate) fn build_connector_request_services(
     connector_http_services: IndexMap<String, http::BoxCloneService>,
     plugins: &Arc<Plugins>,
 ) -> ConnectorRequestServices {
     let mut map = HashMap::with_capacity(connector_http_services.len());
     for (source, http_client) in connector_http_services.into_iter() {
-        // One buffer per connector source provides per-source backpressure and is
-        // required for correct LoadShed / RateLimit behaviour from traffic-shaping
-        // plugins (mirrors the per-subgraph buffer in [`build_subgraph_service`]).
+        // One buffer per connector source provides per-source backpressure and lets
+        // every clone from [`ConnectorRequestServices::get`] share this stack (mirrors
+        // the per-subgraph buffer in [`build_subgraph_service`]).
         let service = UnconstrainedBuffer::new(
-            plugins.iter().rev().fold(
-                ConnectorRequestService { http_client }.boxed_clone(),
-                |acc, (_, e)| e.connector_request_service(acc, source.clone()),
-            ),
+            ServiceBuilder::new()
+                .apply_required_plugin_layer(plugins, |h: &Headers| {
+                    h.connector_headers_layer(&source)
+                })
+                .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
+                .buffered()
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_error_response_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.load_shed_layer(ShapingTarget::ConnectorSource(&source))
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
+                })
+                // The operation's `max_requests` is admission too: a request over it is never sent,
+                // so no plugin hook sees it.
+                .layer(RequestLimitLayer)
+                .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
+                    c.connector_source_circuit_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_timeout_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_compression_layer(&source)
+                })
+                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                    t.connector_source_backpressure_buffer_layer(&source)
+                })
+                .rust_plugins(plugins.clone(), |plugin, service| {
+                    plugin.connector_request_service(service, source.clone())
+                })
+                .service(ConnectorRequestService { http_client }.boxed_clone())
+                .boxed_clone(),
             DEFAULT_BUFFER_SIZE,
         );
         map.insert(source, service);
@@ -400,6 +485,7 @@ fn build_execution_service(
         .layer(SubscriptionExecutionLayer::new(
             configuration.notify.clone(),
         ))
+        .apply_plugin_layer(&plugins, Telemetry::instrument_execution_layer)
         .rust_plugins(plugins.clone(), |plugin, service| {
             plugin.execution_service(service)
         })
@@ -438,6 +524,11 @@ fn build_supergraph_service(
     ServiceBuilder::new()
         .layer(content_negotiation::SupergraphContentNegotiationLayer::default())
         .layer(crate::compute_job::ComputeJobMetricsLayer::new())
+        .apply_required_plugin_layer(
+            &plugins,
+            IncludeSubgraphErrors::redact_subgraph_errors_layer,
+        )
+        .apply_plugin_layer(&plugins, Telemetry::instrument_supergraph_layer)
         .rust_plugins(plugins, |plugin, service| {
             plugin.supergraph_service(service)
         })
@@ -469,6 +560,9 @@ pub(crate) fn build_router_service(
 
     ServiceBuilder::new()
         .layer(StaticPageLayer::new(configuration))
+        .apply_required_plugin_layer(&plugins, Headers::router_masking_layer)
+        .apply_plugin_layer(&plugins, Telemetry::allocation_metrics_layer)
+        .apply_plugin_layer(&plugins, Telemetry::instrument_router_layer)
         .rust_plugins(plugins, |plugin, service| plugin.router_service(service))
         .layer(content_negotiation::RouterContentNegotiationLayer::default())
         .layer(DisplayRouterRequestLayer)

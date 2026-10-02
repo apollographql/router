@@ -5,6 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+use apollo_redaction::Redacted;
 use futures::future::BoxFuture;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -37,20 +38,19 @@ use tower_service::Service;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
-use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugin::serde::deserialize_option_header_name;
-use crate::plugin::serde::deserialize_option_header_value;
+use crate::plugin::serde::deserialize_option_redacted_header_value;
+use crate::plugin::serde::deserialize_redacted_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::services::SubgraphRequest;
 use crate::services::connector;
 use crate::services::router;
-use crate::services::subgraph;
 
 register_private_plugin!("apollo", "headers", Headers);
 
 /// Request-side header configuration: propagation operations + optional masking.
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct HeadersLocation {
     /// Propagate/Insert/Remove operations
@@ -64,7 +64,7 @@ struct HeadersLocation {
 
 /// Response-side header configuration. Response propagation isn't a router
 /// feature, so only masking is configurable here.
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ResponseHeadersLocation {
     /// Header masking configuration applied to response headers in logs/telemetry.
@@ -74,7 +74,7 @@ struct ResponseHeadersLocation {
 
 /// Configuration for connector headers at a specific location
 /// Connectors only have request operations - masking is inherited from parent subgraph
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorHeadersLocation {
     /// Request-side propagate/insert/remove operations
@@ -85,7 +85,7 @@ struct ConnectorHeadersLocation {
 /// Request-side connector header configuration. Mirrors the wrapped
 /// `operations:` shape used by `HeadersLocation`, so connector config doesn't
 /// drift from regular subgraph config.
-#[derive(Clone, JsonSchema, Deserialize, Default)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorRequestHeadersLocation {
     /// Propagate/Insert/Remove operations
@@ -93,7 +93,7 @@ struct ConnectorRequestHeadersLocation {
     operations: Vec<Operation>,
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
     Insert(Insert),
@@ -108,7 +108,7 @@ schemar_fn!(
     "Remove a header given a regex matching against the header name"
 );
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case")]
 /// Remove header
 enum Remove {
@@ -123,7 +123,7 @@ enum Remove {
     Matching(Regex),
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Insert header
@@ -136,7 +136,7 @@ enum Insert {
     FromBody(InsertFromBody),
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert static header
 struct InsertStatic {
@@ -147,11 +147,11 @@ struct InsertStatic {
 
     /// The value for the header
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_header_value")]
-    value: HeaderValue,
+    #[serde(deserialize_with = "deserialize_redacted_header_value")]
+    value: Redacted<HeaderValue>,
 }
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert header with a value coming from context key
 struct InsertFromContext {
@@ -179,8 +179,18 @@ struct InsertFromBody {
 
     /// The default if the path in the body did not resolve to an element
     #[schemars(with = "Option<String>", default)]
-    #[serde(deserialize_with = "deserialize_option_header_value", default)]
-    default: Option<HeaderValue>,
+    #[serde(deserialize_with = "deserialize_option_redacted_header_value", default)]
+    default: Option<Redacted<HeaderValue>>,
+}
+
+// `JsonPathInst` does not implement `Debug`, so the path is left out.
+impl std::fmt::Debug for InsertFromBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InsertFromBody")
+            .field("name", &self.name)
+            .field("default", &self.default)
+            .finish_non_exhaustive()
+    }
 }
 
 schemar_fn!(
@@ -189,7 +199,7 @@ schemar_fn!(
     "Remove a header given a regex matching header name"
 );
 
-#[derive(Clone, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Propagate header
@@ -208,8 +218,8 @@ enum Propagate {
 
         /// Default value for the header.
         #[schemars(with = "Option<String>", default)]
-        #[serde(deserialize_with = "deserialize_option_header_value", default)]
-        default: Option<HeaderValue>,
+        #[serde(deserialize_with = "deserialize_option_redacted_header_value", default)]
+        default: Option<Redacted<HeaderValue>>,
     },
     /// Propagate header given a regex to match header name
     Matching {
@@ -221,7 +231,7 @@ enum Propagate {
 }
 
 /// Configuration for connectors (no masking - inherits from parent subgraph)
-#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct ConnectorHeadersConfiguration {
     /// Options applying to all sources across all subgraphs
@@ -235,7 +245,7 @@ struct ConnectorHeadersConfiguration {
 
 /// Per-subgraph (or global) header configuration. Request configuration covers
 /// propagation + masking; response configuration covers masking only.
-#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct GlobalHeadersConfiguration {
     /// Request configuration (operations and masking)
@@ -248,24 +258,24 @@ struct GlobalHeadersConfiguration {
 }
 
 /// Configuration for header propagation and masking
-#[derive(Clone, JsonSchema, Default, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[serde(rename_all = "snake_case")]
 #[schemars(rename = "HeadersConfig")]
-struct Config {
+pub(crate) struct Config {
     /// Rules to apply to all subgraphs (global defaults)
-    #[serde(default)]
+    #[config(skip_validate)]
     all: Option<GlobalHeadersConfiguration>,
 
     /// Rules for specific subgraphs
-    #[serde(default)]
+    #[config(skip_validate)]
     subgraphs: HashMap<String, GlobalHeadersConfiguration>,
 
     /// Rules for connectors
-    #[serde(default)]
+    #[config(skip_validate)]
     connector: ConnectorHeadersConfiguration,
 }
 
-struct Headers {
+pub(crate) struct Headers {
     all_operations: Arc<Vec<Operation>>,
     subgraph_operations: HashMap<String, Arc<Vec<Operation>>>,
     all_connector_operations: Arc<Vec<Operation>>,
@@ -450,47 +460,64 @@ impl PluginPrivate for Headers {
             masking_rules_map,
         })
     }
+}
 
-    fn subgraph_service(
-        &self,
-        name: &str,
-        service: subgraph::BoxCloneService,
-    ) -> subgraph::BoxCloneService {
-        // Get operations for this subgraph (fallback to global)
+impl Headers {
+    /// Returns a layer that applies this subgraph's header operations.
+    ///
+    /// Note: masking rules aren't installed here — they're inserted into request context
+    /// once by [`Headers::router_masking_layer`], and consumers resolve per-subgraph rules
+    /// at read time via `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
+    pub(crate) fn subgraph_headers_layer(&self, name: &str) -> HeadersLayer {
         let operations = self
             .subgraph_operations
             .get(name)
             .cloned()
             .unwrap_or_else(|| self.all_operations.clone());
 
-        // Note: masking rules aren't installed here — they're inserted into
-        // request context once in `router_service` below, and consumers
-        // resolve per-subgraph rules at read time via
-        // `MaskingRulesMap::get_request(Some(name))` / `get_response(...)`.
-        ServiceBuilder::new()
-            .layer(HeadersLayer::new(operations))
-            .service(service)
-            .boxed_clone()
+        HeadersLayer::new(operations)
     }
 
-    fn connector_request_service(
-        &self,
-        service: crate::services::connector::request_service::BoxCloneService,
-        source_name: String,
-    ) -> crate::services::connector::request_service::BoxCloneService {
+    /// Returns a layer that applies this connector source's header operations (falling back
+    /// to the global connector operations if the source has none of its own).
+    pub(crate) fn connector_headers_layer(&self, source_name: &str) -> HeadersLayer {
         let operations = self
             .connector_source_operations
-            .get(&source_name)
+            .get(source_name)
             .cloned()
             .unwrap_or_else(|| self.all_connector_operations.clone());
 
-        ServiceBuilder::new()
-            .layer(HeadersLayer::new(operations))
-            .service(service)
-            .boxed_clone()
+        HeadersLayer::new(operations)
     }
 
-    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
+    /// Returns a layer that inserts a [`MaskingRulesMap`] into the request context.
+    pub(crate) fn router_masking_layer(&self) -> MaskingContextLayer {
+        MaskingContextLayer::new(self.masking_rules_map.clone())
+    }
+}
+
+/// Layer type for [`Headers::router_masking_layer`].
+pub(crate) struct MaskingContextLayer {
+    masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>,
+}
+
+impl MaskingContextLayer {
+    fn new(masking_rules_map: Arc<crate::services::header_masking::MaskingRulesMap>) -> Self {
+        Self { masking_rules_map }
+    }
+}
+
+impl<S> Layer<S> for MaskingContextLayer
+where
+    S: Service<router::Request, Response = router::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Service = router::BoxCloneService;
+
+    fn layer(&self, inner: S) -> Self::Service {
         let masking_rules_map = self.masking_rules_map.clone();
 
         ServiceBuilder::new()
@@ -500,12 +527,12 @@ impl PluginPrivate for Headers {
                 });
                 req
             })
-            .service(service)
+            .service(inner)
             .boxed_clone()
     }
 }
 
-struct HeadersLayer {
+pub(crate) struct HeadersLayer {
     operations: Arc<Vec<Operation>>,
 }
 
@@ -527,7 +554,7 @@ impl<S> Layer<S> for HeadersLayer {
 }
 
 #[derive(Clone)]
-struct HeadersService<S> {
+pub(crate) struct HeadersService<S> {
     inner: S,
     operations: Arc<Vec<Operation>>,
 }
@@ -688,7 +715,7 @@ impl Insert {
     ) {
         match self {
             Insert::Static(insert_static) => {
-                headers_mut.insert(&insert_static.name, insert_static.value.clone());
+                headers_mut.insert(&insert_static.name, insert_static.value.unredact().clone());
             }
             Insert::FromContext(insert_from_context) => {
                 if let Some(val) = context
@@ -715,7 +742,7 @@ impl Insert {
                     let output = from_body.path.find(body_to_value);
                     if let serde_json_bytes::Value::Null = output {
                         if let Some(default_val) = &from_body.default {
-                            headers_mut.insert(&from_body.name, default_val.clone());
+                            headers_mut.insert(&from_body.name, default_val.unredact().clone());
                         }
                     } else {
                         let header_value = if let serde_json_bytes::Value::String(val_str) = output
@@ -735,7 +762,7 @@ impl Insert {
                         }
                     }
                 } else if let Some(default_val) = &from_body.default {
-                    headers_mut.insert(&from_body.name, default_val.clone());
+                    headers_mut.insert(&from_body.name, default_val.unredact().clone());
                 }
             }
         }
@@ -797,7 +824,7 @@ impl Propagate {
                     let values = supergraph_headers.get_all(named);
                     if values.iter().count() == 0 {
                         if let Some(default) = default {
-                            headers_mut.append(target_header, default.clone());
+                            headers_mut.append(target_header, default.unredact().clone());
                             already_propagated.insert(target_header.to_string());
                         }
                     } else {
@@ -857,7 +884,6 @@ mod test {
     use serde_json_bytes::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
-    use tower::ServiceExt as _;
 
     use super::*;
     use crate::Context;
@@ -867,6 +893,7 @@ mod test {
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::subgraph;
 
     #[test]
     fn test_subgraph_config() {
@@ -897,6 +924,38 @@ mod test {
         "#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn test_config_debug_redacts_header_values() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+            request:
+                operations:
+                    - insert:
+                        name: "authorization"
+                        value: "Bearer static-secret"
+                    - insert:
+                        name: "x-from-body"
+                        path: ".secret"
+                        default: "body-default-secret"
+                    - propagate:
+                        named: "x-token"
+                        default: "propagate-default-secret"
+        "#,
+        )
+        .unwrap();
+
+        let debug = format!("{config:?}");
+        assert!(debug.contains("authorization"), "{debug}");
+        for secret in [
+            "static-secret",
+            "body-default-secret",
+            "propagate-default-secret",
+        ] {
+            assert!(!debug.contains(secret), "{secret} leaked in {debug}");
+        }
     }
 
     #[test]
@@ -1212,7 +1271,7 @@ mod test {
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
                 name: "c".try_into()?,
-                value: "d".try_into()?,
+                value: Redacted::new("d".try_into()?),
             },
         ))]))
         .layer(mock);
@@ -1242,7 +1301,7 @@ mod test {
         let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
             InsertStatic {
                 name: "c".try_into()?,
-                value: "d".try_into()?,
+                value: Redacted::new("d".try_into()?),
             },
         ))]))
         .layer(mock);
@@ -1804,7 +1863,7 @@ mod test {
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
-                default: Some("defaulted".try_into()?),
+                default: Some(Redacted::new("defaulted".try_into()?)),
             })]))
             .layer(mock);
         let call = tokio::spawn(service.ready().await?.call(example_request()));
@@ -1831,7 +1890,7 @@ mod test {
             HeadersLayer::new(Arc::new(vec![Operation::Propagate(Propagate::Named {
                 named: "ea".try_into()?,
                 rename: None,
-                default: Some("defaulted".try_into()?),
+                default: Some(Redacted::new("defaulted".try_into()?)),
             })]))
             .layer(mock);
 
@@ -2186,25 +2245,29 @@ mod test {
         input: Vec<(&'static str, &'static str)>,
         output: Vec<(&'static str, &'static str)>,
     ) {
-        let test_harness = PluginTestHarness::<Headers>::builder()
+        let harness = PluginTestHarness::<Headers>::builder()
             .config(config)
             .build()
             .await
             .expect("test harness");
-        let service = test_harness.subgraph_service("test", move |r| {
-            let output = output.clone();
-            async move {
-                // Assert the headers here
-                let headers = r.subgraph_request.headers();
-                for (name, value) in output.iter() {
-                    if let Some(header) = headers.get(*name) {
-                        assert_eq!(header.to_str().unwrap(), *value);
-                    } else {
-                        panic!("missing header {name}");
-                    }
+
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+
+        let mut service = ServiceBuilder::new()
+            .layer(harness.subgraph_headers_layer("test"))
+            .service(mock);
+
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let headers = request.subgraph_request.headers();
+            for (name, value) in output.iter() {
+                if let Some(header) = headers.get(*name) {
+                    assert_eq!(header.to_str().unwrap(), *value);
+                } else {
+                    panic!("missing header {name}");
                 }
-                Ok(subgraph::Response::fake_builder().build())
             }
+            responder.send_response(subgraph::Response::fake_builder().build());
         });
 
         let mut req = http::Request::builder();
@@ -2213,6 +2276,9 @@ mod test {
         }
 
         service
+            .ready()
+            .await
+            .unwrap()
             .call(
                 subgraph::Request::fake_builder()
                     .supergraph_request(Arc::new(
@@ -2223,6 +2289,8 @@ mod test {
             )
             .await
             .unwrap();
+
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]

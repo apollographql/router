@@ -226,6 +226,7 @@ impl PersistedQueryExpander {
     /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
     /// (using an `Err()` return value).
     /// The user of this function is responsible for propagating short-circuiting.
+    #[expect(clippy::result_large_err, reason = "err is smaller than ok")]
     pub(crate) async fn supergraph_request_with_analyzed_query(
         &self,
         request: SupergraphRequest,
@@ -559,7 +560,7 @@ mod tests {
     #[tokio::test]
     async fn poller_waits_to_start() {
         let (_id, _body, manifest) = fake_manifest();
-        let delay = Duration::from_secs(2);
+        let delay = Duration::from_millis(200);
         let (_mock_guard, uplink_config) = mock_pq_uplink_with_delay(&manifest, delay).await;
         let now = tokio::time::Instant::now();
 

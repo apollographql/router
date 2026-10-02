@@ -23,13 +23,12 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Configuration;
-use crate::Notify;
 use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::subscription::notification::Notify;
 use crate::query_planner::QueryPlannerService;
-use crate::services::connector;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -101,8 +100,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");
 
-        let config = Configuration::from_str(config.unwrap_or_default())
-            .expect("valid config required for test");
+        let config = Configuration::from_str(config.unwrap_or_default())?;
 
         let name = &factory.name.replace("apollo.", "");
         let config_for_plugin = config
@@ -242,32 +240,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         );
 
         ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn call_connector_request_service(
-        &self,
-        request: connector::request_service::Request,
-        response_fn: impl Fn(
-            connector::request_service::Request,
-        ) -> connector::request_service::Response
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ) -> Result<connector::request_service::Response, BoxError> {
-        let service: connector::request_service::BoxCloneService =
-            connector::request_service::BoxCloneService::new(ServiceBuilder::new().service_fn(
-                move |req: connector::request_service::Request| {
-                    let response_fn = response_fn.clone();
-                    async move { Ok((response_fn)(req)) }
-                },
-            ));
-
-        self.plugin
-            .connector_request_service(service, "my_connector".to_string())
-            .call(request)
-            .await
     }
 }
 
@@ -446,8 +418,6 @@ mod test_for_harness {
     use ::http::HeaderMap;
     use ::http::HeaderValue;
     use async_trait::async_trait;
-    use schemars::JsonSchema;
-    use serde::Deserialize;
     use tokio::join;
 
     use super::*;
@@ -460,7 +430,7 @@ mod test_for_harness {
     use crate::services::router::body;
 
     /// Config for the test plugin
-    #[derive(JsonSchema, Deserialize)]
+    #[apollo_configuration::configuration]
     struct MyTestPluginConfig {}
 
     struct MyTestPlugin {}

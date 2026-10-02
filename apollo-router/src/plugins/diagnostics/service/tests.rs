@@ -8,21 +8,25 @@ use http::Request;
 use http::StatusCode;
 use http_body_util::BodyExt;
 use serde_json::Value;
+use tempfile::TempDir;
 use tempfile::tempdir;
 use tower::Service;
 
 use super::*;
 
 /// Helper function to create a test router with the diagnostics service
-fn create_test_router() -> Router {
+///
+/// The returned `TempDir` is the router's output directory: keep it alive for the test's
+/// duration so that it (and any heap dumps written to it) is removed afterwards.
+fn create_test_router() -> (Router, TempDir) {
     let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_directory = temp_dir.path();
 
-    create_router(
-        output_directory,
+    let router = create_router(
+        temp_dir.path(),
         Arc::from("test: config"),
         Arc::new("type Query { test: String }".to_string()),
-    )
+    );
+    (router, temp_dir)
 }
 
 /// Helper to make a request and get the response
@@ -60,7 +64,7 @@ async fn make_request(
 
 #[tokio::test]
 async fn test_dashboard_endpoint_returns_html() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) = make_request(&mut router, Method::GET, "/").await;
 
     assert_eq!(status, StatusCode::OK);
@@ -81,7 +85,7 @@ async fn test_dashboard_endpoint_returns_html() {
 
 #[tokio::test]
 async fn test_system_info_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) = make_request(&mut router, Method::GET, "/system_info.txt").await;
 
     assert_eq!(status, StatusCode::OK);
@@ -98,7 +102,7 @@ async fn test_system_info_endpoint() {
 
 #[tokio::test]
 async fn test_router_config_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) =
         make_request(&mut router, Method::GET, "/router_config.yaml").await;
 
@@ -116,7 +120,7 @@ async fn test_router_config_endpoint() {
 
 #[tokio::test]
 async fn test_supergraph_schema_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) =
         make_request(&mut router, Method::GET, "/supergraph.graphql").await;
 
@@ -134,7 +138,7 @@ async fn test_supergraph_schema_endpoint() {
 
 #[tokio::test]
 async fn test_memory_status_endpoint_returns_json() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) = make_request(&mut router, Method::GET, "/memory/status").await;
 
     // Should be OK on supported platforms, or NOT_IMPLEMENTED on unsupported
@@ -161,7 +165,7 @@ async fn test_memory_status_endpoint_returns_json() {
 
 #[tokio::test]
 async fn test_memory_start_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::POST, "/memory/start").await;
 
     // Should accept POST and return valid JSON
@@ -177,7 +181,7 @@ async fn test_memory_start_endpoint() {
 
 #[tokio::test]
 async fn test_memory_stop_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::POST, "/memory/stop").await;
 
     // Should accept POST and return valid JSON
@@ -193,7 +197,7 @@ async fn test_memory_stop_endpoint() {
 
 #[tokio::test]
 async fn test_memory_dump_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::POST, "/memory/dump").await;
 
     // Should accept POST and return valid JSON
@@ -213,7 +217,7 @@ async fn test_memory_dump_endpoint() {
 
 #[tokio::test]
 async fn test_memory_list_dumps_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::GET, "/memory/dumps").await;
 
     assert!(status == StatusCode::OK || status == StatusCode::NOT_IMPLEMENTED);
@@ -224,7 +228,7 @@ async fn test_memory_list_dumps_endpoint() {
 
 #[tokio::test]
 async fn test_memory_clear_dumps_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, _) = make_request(&mut router, Method::DELETE, "/memory/dumps").await;
 
     assert!(status == StatusCode::OK || status == StatusCode::NOT_IMPLEMENTED);
@@ -239,7 +243,7 @@ async fn test_memory_clear_dumps_endpoint() {
 
 #[tokio::test]
 async fn test_memory_download_dump_not_found() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, _, _) =
         make_request(&mut router, Method::GET, "/memory/dumps/nonexistent.prof").await;
 
@@ -249,7 +253,7 @@ async fn test_memory_download_dump_not_found() {
 
 #[tokio::test]
 async fn test_memory_download_dump_invalid_filename() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     // Try path traversal attack
     let (status, _, _) = make_request(
         &mut router,
@@ -264,7 +268,7 @@ async fn test_memory_download_dump_invalid_filename() {
 
 #[tokio::test]
 async fn test_memory_delete_dump_invalid_filename() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     // Try path traversal attack
     let (status, _, _) =
         make_request(&mut router, Method::DELETE, "/memory/dumps/../secret.txt").await;
@@ -279,7 +283,7 @@ async fn test_memory_delete_dump_invalid_filename() {
 
 #[tokio::test]
 async fn test_export_endpoint_returns_archive() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) = make_request(&mut router, Method::GET, "/export").await;
 
     assert_eq!(status, StatusCode::OK);
@@ -304,7 +308,7 @@ async fn test_export_endpoint_returns_archive() {
 
 #[tokio::test]
 async fn test_fallback_serves_javascript_resources() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) =
         make_request(&mut router, Method::GET, "/backtrace-processor.js").await;
 
@@ -318,7 +322,7 @@ async fn test_fallback_serves_javascript_resources() {
 
 #[tokio::test]
 async fn test_fallback_serves_css_resources() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, body, headers) = make_request(&mut router, Method::GET, "/styles.css").await;
 
     assert_eq!(status, StatusCode::OK);
@@ -331,7 +335,7 @@ async fn test_fallback_serves_css_resources() {
 
 #[tokio::test]
 async fn test_fallback_returns_404_for_unknown_resources() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, _, _) = make_request(&mut router, Method::GET, "/unknown-file.js").await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -343,7 +347,7 @@ async fn test_fallback_returns_404_for_unknown_resources() {
 
 #[tokio::test]
 async fn test_invalid_route_returns_404() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let (status, _, _) = make_request(&mut router, Method::GET, "/invalid/route").await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -351,7 +355,7 @@ async fn test_invalid_route_returns_404() {
 
 #[tokio::test]
 async fn test_wrong_http_method_on_post_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     // Try GET on a POST-only endpoint
     let (status, _, _) = make_request(&mut router, Method::GET, "/memory/start").await;
 
@@ -360,7 +364,7 @@ async fn test_wrong_http_method_on_post_endpoint() {
 
 #[tokio::test]
 async fn test_wrong_http_method_on_get_endpoint() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     // Try POST on a GET-only endpoint
     let (status, _, _) = make_request(&mut router, Method::POST, "/system_info.txt").await;
 
@@ -417,7 +421,7 @@ async fn test_router_with_empty_config() {
 
 #[tokio::test]
 async fn test_json_responses_are_valid_json() {
-    let mut router = create_test_router();
+    let (mut router, _output_directory) = create_test_router();
     let json_endpoints = vec![
         (Method::GET, "/memory/status"),
         (Method::GET, "/memory/dumps"),

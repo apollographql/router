@@ -327,9 +327,10 @@ where
     }
 
     fn record_cache_hit_duration(&self, duration: Duration, storage: CacheStorageName) {
-        f64_histogram!(
+        f64_histogram_with_unit!(
             "apollo.router.cache.hit.time",
             "Time to get a value from the cache in seconds",
+            "s",
             duration.as_secs_f64(),
             kind = self.caller,
             storage = storage.to_string()
@@ -337,9 +338,10 @@ where
     }
 
     fn record_cache_miss_duration(&self, duration: Duration, storage: CacheStorageName) {
-        f64_histogram!(
+        f64_histogram_with_unit!(
             "apollo.router.cache.miss.time",
             "Time to check the cache for an uncached value in seconds",
+            "s",
             duration.as_secs_f64(),
             kind = self.caller,
             storage = storage.to_string()

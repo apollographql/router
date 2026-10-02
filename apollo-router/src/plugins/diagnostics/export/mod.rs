@@ -198,10 +198,19 @@ impl Exporter {
         Self::add_manifest_to_archive(&mut tar, config).await?;
         Self::add_router_config_to_archive(&mut tar, router_config).await?;
         Self::add_supergraph_schema_to_archive(&mut tar, supergraph_schema).await?;
-        Self::add_system_info_to_archive(&mut tar).await?;
+        // Collected once and shared with the HTML report: each collection samples CPU usage
+        // over a fixed interval.
+        let system_info = crate::plugins::diagnostics::system_info::collect().await?;
+        Self::add_system_info_to_archive(&mut tar, &system_info).await?;
         Self::add_memory_data_to_archive(&mut tar, config).await?;
-        Self::add_html_report_to_archive(&mut tar, config, router_config, supergraph_schema)
-            .await?;
+        Self::add_html_report_to_archive(
+            &mut tar,
+            config,
+            router_config,
+            supergraph_schema,
+            &system_info,
+        )
+        .await?;
 
         // Finalize the archive and ensure all buffered data is flushed
         // The async tar builder and gzip encoder stream data incrementally
@@ -244,9 +253,9 @@ impl Exporter {
     /// Add system information to the archive with async I/O
     async fn add_system_info_to_archive<W: tokio::io::AsyncWrite + Unpin + Send + Sync>(
         tar: &mut tokio_tar::Builder<W>,
+        system_info: &str,
     ) -> DiagnosticsResult<()> {
-        let system_info = crate::plugins::diagnostics::system_info::collect().await?;
-        ArchiveUtils::add_text_file(tar, "system_info.txt", &system_info).await
+        ArchiveUtils::add_text_file(tar, "system_info.txt", system_info).await
     }
 
     /// Add memory profiling data to the archive with async I/O
@@ -264,6 +273,7 @@ impl Exporter {
         config: &Config,
         router_config: &str,
         supergraph_schema: &str,
+        system_info: &str,
     ) -> DiagnosticsResult<()> {
         use std::path::Path;
 
@@ -273,16 +283,13 @@ impl Exporter {
         // Create HTML generator
         let generator = HtmlGenerator::new()?;
 
-        // Get system info content
-        let system_info_content = crate::plugins::diagnostics::system_info::collect().await?;
-
         // Read memory dumps from the directory using the memory module
         let memory_directory = Path::new(&config.output_directory).join("memory");
         let memory_dumps = memory::load_memory_dumps(&memory_directory).await?;
 
         // Generate the HTML report with all embedded data
         let report_data = ReportData::new(
-            Some(&system_info_content),
+            Some(system_info),
             Some(router_config),
             Some(supergraph_schema),
             &memory_dumps,

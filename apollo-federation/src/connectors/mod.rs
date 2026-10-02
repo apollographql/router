@@ -25,9 +25,12 @@ use std::hash::Hasher;
 
 use apollo_compiler::Name;
 
+pub(crate) mod blueprint;
 pub mod expand;
+mod graphql_shapes;
 pub mod header;
 mod id;
+pub mod index;
 mod json_selection;
 pub mod migration;
 mod models;
@@ -92,7 +95,7 @@ impl ConnectId {
     /// Until we have a source-aware query planner, we'll need to split up connectors into
     /// their own subgraphs when doing planning. Each subgraph will need a name, so we
     /// synthesize one using metadata present on the directive.
-    pub(crate) fn synthetic_name(&self) -> String {
+    pub fn synthetic_name(&self) -> String {
         format!("{}_{}", self.subgraph_name, self.directive.synthetic_name())
     }
 

@@ -1058,7 +1058,7 @@ mod tests {
     use tracing_subscriber::prelude::*;
 
     use super::*;
-    use crate::plugins::telemetry::OTEL_NAME;
+    use crate::plugins::telemetry::consts::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
     /// Span data captured by [`TestTracer`] for inspection in tests.

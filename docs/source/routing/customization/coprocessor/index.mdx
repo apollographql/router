@@ -235,7 +235,7 @@ UDS also supports HTTP/2:
 coprocessor:
   url: unix:///tmp/coprocessor.sock
   client:
-    experimental_http2: http2only
+    http2: http2only
 ```
 
 <HttpConnection type="coprocessor" />
@@ -245,9 +245,9 @@ For example, to enable h2c (http2 cleartext) communication with a coprocessor yo
 ```yaml title="router.yaml"
 coprocessor:
   url: http://127.0.0.1:8081
-  # Using an HTTP (not HTTPS) URL and experimental_http2: http2only results in connections that use h2c
+  # Using an HTTP (not HTTPS) URL and http2: http2only results in connections that use h2c
   client:
-    experimental_http2: http2only
+    http2: http2only
 ```
 
 #### Connection pool

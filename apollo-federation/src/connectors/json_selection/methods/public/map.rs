@@ -189,7 +189,7 @@ mod tests {
         //         &IndexMap::default(),
         //         &SourceId::new("test"),
         //     );
-        //     assert_eq!(output_shape.pretty_print(), "List<String>");
+        //     assert_eq!(output_shape.pretty_print(), "[...String]");
         // }
     }*/
 

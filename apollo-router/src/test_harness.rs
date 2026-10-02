@@ -30,6 +30,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
+#[cfg(any(test, feature = "mock_subgraphs_testing"))]
 use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
 use crate::services::Plugins;
@@ -59,6 +60,12 @@ pub(crate) mod http_snapshot;
 ///
 /// On the subgraph side, this test harness never makes network requests to subgraphs
 /// unless [`with_subgraph_network_requests`][Self::with_subgraph_network_requests] is called.
+///
+/// Subgraph mocking is implemented by an internal plugin gated behind the `mock_subgraphs_testing`
+/// Cargo feature (always enabled for `cfg(test)` builds of this crate). Consumers outside this
+/// crate that build in release mode, or without that feature, must either enable it or call
+/// [`with_subgraph_network_requests`][Self::with_subgraph_network_requests] — otherwise building
+/// the harness returns an error rather than silently making real network requests.
 ///
 /// Compared to running a full [`RouterHttpServer`][crate::RouterHttpServer],
 /// this test harness is lacking:
@@ -116,18 +123,14 @@ impl<'a> TestHarness<'a> {
     /// Specifies the logging level. Note that this function may not be called more than once.
     /// log_level is in RUST_LOG format.
     pub fn log_level(self, log_level: &'a str) -> Self {
-        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
-        let log_level = format!("{log_level},salsa=error");
-        init_telemetry(&log_level).expect("failed to setup logging");
+        init_telemetry(log_level).expect("failed to setup logging");
         self
     }
 
     /// Specifies the logging level. Note that this function will silently fail if called more than once.
     /// log_level is in RUST_LOG format.
     pub fn try_log_level(self, log_level: &'a str) -> Self {
-        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
-        let log_level = format!("{log_level},salsa=error");
-        let _ = init_telemetry(&log_level);
+        let _ = init_telemetry(log_level);
         self
     }
 
@@ -298,6 +301,10 @@ impl<'a> TestHarness<'a> {
     /// (unless [`schema`][Self::schema] is also not called).
     /// This behavior can be changed by implementing [`Plugin::subgraph_service`]
     /// on a plugin given to [`extra_plugin`][Self::extra_plugin].
+    ///
+    /// Not calling this requires the `mock_subgraphs_testing` Cargo feature (or a `cfg(test)`
+    /// build of this crate) to provide the mocking; without it, building the harness fails with
+    /// an error instead of silently making real network requests.
     pub fn with_subgraph_network_requests(mut self) -> Self {
         self.subgraph_network_requests = true;
         self
@@ -314,23 +321,35 @@ impl<'a> TestHarness<'a> {
         ),
         BoxError,
     > {
+        #[cfg_attr(not(any(test, feature = "mock_subgraphs_testing")), allow(unused_mut))]
         let mut config = self.configuration.unwrap_or_default();
-        let has_legacy_mock_subgraphs_plugin = self.extra_plugins.iter().any(|(_, dyn_plugin)| {
-            dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
-        });
-        if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
-            Arc::make_mut(&mut config)
-                .apollo_plugins
-                .plugins
-                .entry("experimental_mock_subgraphs")
-                .or_insert_with(canned::mock_subgraphs);
+        #[cfg(any(test, feature = "mock_subgraphs_testing"))]
+        {
+            let has_legacy_mock_subgraphs_plugin =
+                self.extra_plugins.iter().any(|(_, dyn_plugin)| {
+                    dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
+                });
+            if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
+                Arc::make_mut(&mut config).add_apollo_plugin_if_absent(
+                    "experimental_mock_subgraphs",
+                    canned::mock_subgraphs,
+                )?;
+            }
+            if !self.subgraph_network_requests {
+                Arc::make_mut(&mut config)
+                    .add_apollo_plugin_if_absent("experimental_mock_subgraphs", || {
+                        serde_json::json!({})
+                    })?;
+            }
         }
+        #[cfg(not(any(test, feature = "mock_subgraphs_testing")))]
         if !self.subgraph_network_requests {
-            Arc::make_mut(&mut config)
-                .apollo_plugins
-                .plugins
-                .entry("experimental_mock_subgraphs")
-                .or_insert(serde_json::json!({}));
+            return Err(
+                "TestHarness subgraph mocking requires the `mock_subgraphs_testing` \
+                 Cargo feature on `apollo-router`; either enable it or call \
+                 `.with_subgraph_network_requests()` to opt into making real network requests"
+                    .into(),
+            );
         }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);

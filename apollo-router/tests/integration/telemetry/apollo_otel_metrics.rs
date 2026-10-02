@@ -47,7 +47,7 @@ async fn test_validation_error_emits_metric() {
                     batch_processor:
                       scheduled_delay: 100ms
                 errors:
-                  preview_extended_error_metrics: enabled
+                  extended_error_metrics: enabled
         "#,
         )
         .responder(ResponseTemplate::new(500).append_header("Content-Type", "application/json"))
@@ -103,7 +103,7 @@ async fn test_subgraph_http_error_emits_metric() {
                     batch_processor:
                       scheduled_delay: 100ms
                 errors:
-                  preview_extended_error_metrics: enabled
+                  extended_error_metrics: enabled
             include_subgraph_errors:
               all: true
         "#,
@@ -172,7 +172,7 @@ async fn test_subgraph_layer_error_emits_metric() {
                     batch_processor:
                       scheduled_delay: 100ms
                 errors:
-                  preview_extended_error_metrics: enabled
+                  extended_error_metrics: enabled
         "#,
         )
         .responder(
@@ -251,7 +251,7 @@ async fn test_subgraph_layer_entities_error_emits_metric() {
                     batch_processor:
                       scheduled_delay: 100ms
                 errors:
-                  preview_extended_error_metrics: enabled
+                  extended_error_metrics: enabled
         "#,
         )
         .responder(
@@ -331,7 +331,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
                     batch_processor:
                       scheduled_delay: 100ms
                 errors:
-                  preview_extended_error_metrics: enabled
+                  extended_error_metrics: enabled
             include_subgraph_errors:
               all: false
         "#,
@@ -413,7 +413,7 @@ async fn test_supergraph_layer_error_emits_metric() {
                   batch_processor:
                     scheduled_delay: 100ms
               errors:
-                preview_extended_error_metrics: enabled
+                extended_error_metrics: enabled
           supergraph:
             introspection: false
         "#,
@@ -478,7 +478,7 @@ async fn test_execution_layer_error_emits_metric() {
                   batch_processor:
                     scheduled_delay: 100ms
               errors:
-                preview_extended_error_metrics: enabled
+                extended_error_metrics: enabled
           forbid_mutations: true
         "#,
         )
@@ -545,7 +545,7 @@ async fn test_router_layer_error_emits_metric() {
                   batch_processor:
                     scheduled_delay: 100ms
               errors:
-                preview_extended_error_metrics: enabled
+                extended_error_metrics: enabled
           csrf:
             required_headers:
               - x-not-matched-header
@@ -618,7 +618,7 @@ async fn test_apollo_studio_metrics_not_affected_by_rename() {
                   batch_processor:
                     scheduled_delay: 100ms
               errors:
-                preview_extended_error_metrics: enabled
+                extended_error_metrics: enabled
             exporters:
               metrics:
                 common:

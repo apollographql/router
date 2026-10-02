@@ -22,6 +22,7 @@ use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod access_control;
 pub(crate) mod cache_tag;
+pub(crate) mod connectors;
 pub(crate) mod context;
 pub(crate) mod cost;
 pub(crate) mod external;
@@ -30,6 +31,7 @@ pub(crate) mod interface_object;
 pub(crate) mod key;
 pub(crate) mod list_size;
 pub(crate) mod merged;
+pub(crate) mod one_of;
 pub(crate) mod provides;
 pub(crate) mod requires;
 pub(crate) mod root_fields;

@@ -5,7 +5,6 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use either::Either;
@@ -24,11 +23,14 @@ use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
+use crate::composition::CompositionFailure;
 use crate::error::CompositionError;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::internal_error;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
 use crate::schema::field_set::FieldSetValidation;
@@ -37,6 +39,7 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::subgraph::typestate::Upgraded;
 use crate::subgraph::typestate::Validated;
+use crate::supergraph::CompositionHint;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
@@ -343,7 +346,6 @@ impl SchemaUpgrader {
             for (field_name, field) in &itf.fields {
                 let pos = interface_pos.field(field_name.clone());
                 let external_directive = field
-                    .node
                     .directives
                     .iter()
                     .find(|d| d.name == external_directive.name);
@@ -372,7 +374,7 @@ impl SchemaUpgrader {
         else {
             return;
         };
-        let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Component<Directive>)> = vec![];
+        let mut to_delete: Vec<(ObjectTypeDefinitionPosition, Node<Directive>)> = vec![];
         let mut fields_on_external_type: Vec<ObjectFieldDefinitionPosition> = vec![];
         for (obj_name, ty) in &schema.schema().types {
             let ExtendedType::Object(_) = ty else {
@@ -761,7 +763,7 @@ impl SchemaUpgrader {
                         continue;
                     };
                     let mut type_in_other_subgraphs = false;
-                    for (subgraph_name, _) in entries.iter() {
+                    for subgraph_name in entries.keys() {
                         let other_subgraph =
                             self.get_subgraph_by_name(subgraph_name).ok_or_else(|| {
                                 internal_error!(
@@ -819,7 +821,7 @@ impl SchemaUpgrader {
         for pos in &types_to_add_shareable {
             pos.insert_directive(
                 schema,
-                Component::new(Directive {
+                Node::new(Directive {
                     name: shareable_directive_name.clone(),
                     arguments: vec![],
                 }),
@@ -901,6 +903,14 @@ impl SchemaUpgrader {
     }
 }
 
+/// The federation version fed 1 and fed 2 subgraphs are upgraded to when any subgraph links
+/// federation v3.
+const FEDERATION_V3: Version = Version { major: 3, minor: 0 };
+
+fn is_fed_3(metadata: &SubgraphMetadata) -> bool {
+    metadata.federation_spec_definition().version().major >= 3
+}
+
 /// Upgrade subgraphs if necessary without validation.
 // PORT_NOTE: This corresponds to `upgradeSubgraphsIfNecessary` function in JS.
 #[instrument(skip(subgraphs))]
@@ -908,10 +918,21 @@ impl SchemaUpgrader {
 fn inner_upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
 ) -> Result<Vec<Either<Subgraph<Expanded>, Subgraph<Upgraded>>>, Vec<CompositionError>> {
-    if subgraphs
+    // If any subgraph links federation v3, every other subgraph is upgraded to federation v3 as
+    // well, the same way fed 1 subgraphs are upgraded to fed 2.
+    let upgrade_to_fed_3 = subgraphs
         .iter()
-        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
-    {
+        .any(|subgraph| is_fed_3(subgraph.metadata()));
+    let already_upgraded = if upgrade_to_fed_3 {
+        subgraphs
+            .iter()
+            .all(|subgraph| is_fed_3(subgraph.metadata()))
+    } else {
+        subgraphs
+            .iter()
+            .all(|subgraph| subgraph.metadata().is_fed_2_schema())
+    };
+    if already_upgraded {
         return Ok(subgraphs.into_iter().map(Either::Left).collect());
     }
     // Maps type name → set of subgraph names with @interfaceObject on that type (fed2 subgraphs).
@@ -926,12 +947,20 @@ fn inner_upgrade_subgraphs_if_necessary(
         .into_iter()
         .map(|subgraph| {
             if !subgraph.metadata().is_fed_2_schema() {
-                let result = schema_upgrader.upgrade(subgraph)?;
+                let mut result = schema_upgrader.upgrade(subgraph)?;
                 for type_name in result.interfaces_with_key_removed {
                     fed1_interface_key_types_to_subgraphs
                         .entry(type_name)
                         .or_default()
                         .insert(result.subgraph.name.clone());
+                }
+                if upgrade_to_fed_3 {
+                    result
+                        .subgraph
+                        .upgrade_federation_version(&FEDERATION_V3)
+                        .map_err(|e| {
+                            SubgraphError::new_without_locations(result.subgraph.name.clone(), e)
+                        })?;
                 }
                 Ok(Either::Right(result.subgraph))
             } else {
@@ -945,7 +974,15 @@ fn inner_upgrade_subgraphs_if_necessary(
                             .or_default()
                             .insert(subgraph.name.clone());
                     });
-                Ok(Either::Left(subgraph))
+                if upgrade_to_fed_3 && !is_fed_3(subgraph.metadata()) {
+                    let subgraph_name = subgraph.name.clone();
+                    let upgraded = subgraph
+                        .into_federation_version(&FEDERATION_V3)
+                        .map_err(|e| SubgraphError::new_without_locations(subgraph_name, e))?;
+                    Ok(Either::Right(upgraded))
+                } else {
+                    Ok(Either::Left(subgraph))
+                }
             }
         })
         .filter_map(|r| {
@@ -982,7 +1019,9 @@ fn inner_upgrade_subgraphs_if_necessary(
 }
 
 /// Upgrade subgraphs if necessary and validate the result.
-/// - Fed 2 input subgraphs are not upgraded.
+/// - Every subgraph is upgraded for federation 3 compatibility.
+/// - Fed 2 input subgraphs are not upgraded to fed 2 (they already are).
+/// - If any subgraph links federation v3, every other subgraph is upgraded to federation v3.
 /// - Also, normalizes root types if necessary.
 /// - Unchanged subgraphs are returned as-is.
 // PORT_NOTE: In JS, this returns upgraded subgraphs along with a set of messages about what changed.
@@ -990,48 +1029,104 @@ fn inner_upgrade_subgraphs_if_necessary(
 #[instrument(skip(subgraphs))]
 pub fn upgrade_subgraphs_if_necessary(
     subgraphs: Vec<Subgraph<Expanded>>,
-) -> Result<Vec<Subgraph<Validated>>, Vec<CompositionError>> {
+) -> Result<Vec<Subgraph<Validated>>, CompositionFailure> {
     let mut errors: Vec<CompositionError> = vec![];
+    let mut hints: Vec<CompositionHint> = vec![];
+
+    // The federation 3 compatibility upgrade runs first, ahead of the fed1 -> fed2 upgrade and of
+    // every validation, because the constructs it rewrites are invalid under the GraphQL 2025 spec.
+    //
+    // Its hints are held here, keyed by subgraph, instead of travelling in the subgraph state:
+    // every transition below is fallible, and their `?`s would discard hints carried along. Each
+    // subgraph gets its own back once it reaches `Validated`; whatever is left over belongs to a
+    // subgraph that failed on the way there, and is reported with the errors.
+    let mut fed3_hints: IndexMap<String, Vec<CompositionHint>> = IndexMap::default();
     let subgraphs = subgraphs
         .into_iter()
-        .filter_map(|sg| match sg.normalize_root_types() {
-            Ok(s) => Some(s),
-            Err(e) => {
-                errors.extend(e.to_composition_errors());
-                None
+        .filter_map(|mut sg| {
+            let upgrade_hints = sg.apply_fed3_upgrade();
+            if !upgrade_hints.is_empty() {
+                fed3_hints.insert(sg.name.clone(), upgrade_hints);
             }
-        })
-        .collect_vec();
-
-    // Upgrade subgraphs (if necessary)
-    let upgraded = inner_upgrade_subgraphs_if_necessary(subgraphs)?;
-
-    // Validate subgraphs (if either upgraded or normalized)
-    let validated: Vec<Subgraph<Validated>> = upgraded
-        .into_iter()
-        .filter_map(|subgraph| match subgraph {
-            Either::Left(s) => {
-                // This subgraph was not upgraded nor normalized in this function, which implies
-                // this subgraph is originally Fed v2. Since Fed v2 schemas are already fully
-                // validated in the `expand_links` method, it's safe to transition to the
-                // `Validated` state.
-                Some(s.assume_validated())
-            }
-            Either::Right(s) => match s.validate() {
+            match sg.normalize_root_types() {
                 Ok(s) => Some(s),
                 Err(e) => {
                     errors.extend(e.to_composition_errors());
                     None
                 }
-            },
+            }
+        })
+        .collect_vec();
+
+    // Upgrade subgraphs (if necessary)
+    let upgraded = match inner_upgrade_subgraphs_if_necessary(subgraphs) {
+        Ok(upgraded) => upgraded,
+        Err(upgrade_errors) => {
+            errors.extend(upgrade_errors);
+            return Err(CompositionFailure {
+                errors,
+                hints: into_hints(fed3_hints, vec![], hints),
+            });
+        }
+    };
+
+    // Validate subgraphs. Expansion is a pure transformation, so every subgraph is validated here
+    // regardless of whether it was upgraded or normalized — the two arms differ only in which state
+    // they arrive in.
+    let validated: Vec<Subgraph<Validated>> = upgraded
+        .into_iter()
+        .filter_map(|subgraph| {
+            let result = match subgraph {
+                Either::Left(s) => s.validate(),
+                Either::Right(s) => s.validate(),
+            };
+            match result {
+                Ok(mut s) => {
+                    if let Some(upgrade_hints) = fed3_hints.shift_remove(&s.name) {
+                        s.prepend_hints(upgrade_hints);
+                    }
+                    Some(s)
+                }
+                Err(failure) => {
+                    errors.extend(failure.errors);
+                    // Warnings raised beside the errors are still worth reporting.
+                    hints.extend(failure.hints);
+                    None
+                }
+            }
         })
         .collect();
 
     if errors.is_empty() {
         Ok(validated)
     } else {
-        Err(errors)
+        // The validated subgraphs are dropped along with the hints they carry, so those are
+        // collected here too rather than lost to the failure.
+        Err(CompositionFailure {
+            errors,
+            hints: into_hints(fed3_hints, validated, hints),
+        })
     }
+}
+
+/// Flattens everything holding pre-merge hints into one list, in the order the hints were raised:
+/// the upgrade hints of subgraphs that never reached `Validated`, then the hints of those that did,
+/// then the ones raised beside validation errors.
+fn into_hints(
+    fed3_hints: IndexMap<String, Vec<CompositionHint>>,
+    validated: Vec<Subgraph<Validated>>,
+    validation_hints: Vec<CompositionHint>,
+) -> Vec<CompositionHint> {
+    fed3_hints
+        .into_values()
+        .flatten()
+        .chain(
+            validated
+                .into_iter()
+                .flat_map(|mut sg| sg.take_hints().into_iter()),
+        )
+        .chain(validation_hints)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1404,10 +1499,10 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let errors = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
-        assert_eq!(errors.len(), 1);
+        let failure = upgrade_subgraphs_if_necessary(vec![s1, s2]).expect_err("should fail");
+        assert_eq!(failure.errors.len(), 1);
         assert_eq!(
-            errors[0].to_string(),
+            failure.errors[0].to_string(),
             r#"The @interfaceObject directive is used on type "A" in subgraph "s1", which requires other subgraphs to resolve its type name via an interface @key. However, @key on an interface in a federation 1 subgraph does not mean it can fulfill the __typename-resolution requirement that @interfaceObject depends on. For subgraph "s2", either upgrade them to federation 2 subgraphs or remove @key from the type."#
         );
     }
@@ -2871,6 +2966,220 @@ scalar _FieldSet
                 .schema()
                 .type_field("T", "x")
                 .is_ok_and(|f| !f.directives.has("shareable"))
+        );
+    }
+
+    fn parse_and_expand(name: &str, schema: &str) -> Subgraph<Expanded> {
+        Subgraph::parse(name, "", schema)
+            .expect("parses schema")
+            .expand_links()
+            .expect("expands schema")
+    }
+
+    fn federation_version(subgraph: &Subgraph<Validated>) -> Version {
+        subgraph
+            .metadata()
+            .federation_spec_definition()
+            .version()
+            .clone()
+    }
+
+    const FED3_SUBGRAPH: &str = r#"
+        extend schema
+            @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key"])
+
+        type Query {
+            t: T
+        }
+
+        type T @key(fields: "id") {
+            id: ID!
+        }
+    "#;
+
+    #[test]
+    fn upgrades_fed2_subgraphs_to_fed3_when_any_subgraph_is_fed3() {
+        let fed3 = parse_and_expand("fed3", FED3_SUBGRAPH);
+        let fed2 = parse_and_expand(
+            "fed2",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key", "@shareable"])
+
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int @shareable
+            }
+            "#,
+        );
+
+        let [fed2, fed3]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![fed2, fed3])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
+
+        assert_eq!(federation_version(&fed3), FEDERATION_V3);
+        assert_eq!(federation_version(&fed2), FEDERATION_V3);
+        // The imports are kept, so imported directives keep their unprefixed names.
+        insta::assert_snapshot!(
+            fed2.schema().schema().schema_definition.directives,
+            @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@shareable"])"#
+        );
+        assert!(
+            fed2.schema()
+                .schema()
+                .type_field("T", "x")
+                .is_ok_and(|f| f.directives.has("shareable"))
+        );
+        // Definitions introduced after v2.5 are added under the federation prefix.
+        assert!(
+            fed2.schema()
+                .schema()
+                .directive_definitions
+                .contains_key("federation__cacheTag")
+        );
+    }
+
+    #[test]
+    fn upgrades_fed1_subgraphs_to_fed3_when_any_subgraph_is_fed3() {
+        let fed3 = parse_and_expand("fed3", FED3_SUBGRAPH);
+        let fed1 = parse_and_expand(
+            "fed1",
+            r#"
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int
+            }
+            "#,
+        );
+
+        let [fed1, fed3]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![fed1, fed3])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
+
+        assert_eq!(federation_version(&fed3), FEDERATION_V3);
+        assert_eq!(federation_version(&fed1), FEDERATION_V3);
+        // Fed 1 subgraphs keep the imports of the regular fed 1 upgrade.
+        insta::assert_snapshot!(
+            fed1.schema().schema().schema_definition.directives,
+            @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#
+        );
+    }
+
+    #[test]
+    fn returns_upgraded_state_only_for_upgraded_subgraphs() {
+        let fed1 = || {
+            parse_and_expand(
+                "fed1",
+                r#"
+                type T @key(fields: "id") {
+                    id: ID!
+                    a: Int
+                }
+                "#,
+            )
+        };
+        let fed2 = || {
+            parse_and_expand(
+                "fed2",
+                r#"
+                extend schema
+                    @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
+
+                type T @key(fields: "id") {
+                    id: ID!
+                    b: Int
+                }
+                "#,
+            )
+        };
+        let fed3 = parse_and_expand("fed3", FED3_SUBGRAPH);
+
+        // With a fed 3 subgraph, fed 1 and fed 2 subgraphs are upgraded to fed 3; the fed 3 one is
+        // already at the right version.
+        let [fed1_result, fed2_result, fed3_result]: [Either<_, _>; 3] =
+            inner_upgrade_subgraphs_if_necessary(vec![fed1(), fed2(), fed3])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 3 elements");
+        assert!(fed1_result.is_right());
+        assert!(fed2_result.is_right());
+        assert!(fed3_result.is_left());
+
+        // Without one, only the fed 1 subgraph is upgraded (to fed 2).
+        let [fed1_result, fed2_result]: [Either<_, _>; 2] =
+            inner_upgrade_subgraphs_if_necessary(vec![fed1(), fed2()])
+                .expect("upgrades schema")
+                .try_into()
+                .expect("Expected 2 elements");
+        assert!(fed1_result.is_right());
+        assert!(fed2_result.is_left());
+    }
+
+    #[test]
+    fn does_not_upgrade_subgraphs_that_are_all_fed3() {
+        let s1 = parse_and_expand("s1", FED3_SUBGRAPH);
+        let s2 = parse_and_expand(
+            "s2",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key"])
+
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int
+            }
+            "#,
+        );
+
+        let upgraded = inner_upgrade_subgraphs_if_necessary(vec![s1, s2]).expect("upgrades schema");
+
+        assert!(upgraded.iter().all(Either::is_left));
+    }
+
+    #[test]
+    fn does_not_upgrade_fed2_subgraphs_to_fed3_without_a_fed3_subgraph() {
+        let s1 = parse_and_expand(
+            "s1",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.5", import: ["@key"])
+
+            type Query {
+                t: T
+            }
+
+            type T @key(fields: "id") {
+                id: ID!
+            }
+            "#,
+        );
+        let s2 = parse_and_expand(
+            "s2",
+            r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key"])
+
+            type T @key(fields: "id") {
+                id: ID!
+                x: Int
+            }
+            "#,
+        );
+
+        let [s1, s2]: [Subgraph<_>; 2] = upgrade_subgraphs_if_necessary(vec![s1, s2])
+            .expect("upgrades schema")
+            .try_into()
+            .expect("Expected 2 elements");
+
+        assert_eq!(federation_version(&s1), Version { major: 2, minor: 5 });
+        assert_eq!(
+            federation_version(&s2),
+            Version {
+                major: 2,
+                minor: 12
+            }
         );
     }
 }

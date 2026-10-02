@@ -487,11 +487,15 @@ pub struct Handle<K, V>
 where
     K: Clone,
 {
-    handle_guard: HandleGuard<K, V>,
     #[pin]
     msg_sender: broadcast::Sender<Option<V>>,
+    // Must be dropped before `handle_guard`: dropping `handle_guard` sends an
+    // async Unsubscribe notification, and the pubsub task only honors it once
+    // `receiver_count()` has already hit zero. Field drop order is declaration
+    // order, so this receiver has to be declared (and thus dropped) first.
     #[pin]
     msg_receiver: BroadcastStream<Option<V>>,
+    handle_guard: HandleGuard<K, V>,
 }
 }
 
@@ -563,9 +567,13 @@ pub struct HandleStream<K, V>
 where
     K: Clone,
 {
-    handle_guard: HandleGuard<K, V>,
+    // Must be dropped before `handle_guard`: dropping `handle_guard` sends an
+    // async Unsubscribe notification, and the pubsub task only honors it once
+    // `receiver_count()` has already hit zero. Field drop order is declaration
+    // order, so this receiver has to be declared (and thus dropped) first.
     #[pin]
     msg_receiver: BroadcastStream<Option<V>>,
+    handle_guard: HandleGuard<K, V>,
 }
 }
 

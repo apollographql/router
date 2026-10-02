@@ -48,6 +48,7 @@ use super::Header;
 use super::JWT_CONTEXT_KEY;
 use super::JWTConf;
 use super::JwtStatus;
+use super::OnError;
 use super::Source;
 use super::authenticate;
 use super::has_authenticated_jwt;
@@ -265,7 +266,10 @@ async fn it_rejects_when_there_is_no_auth_header() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_is_missing() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `redacted_error` is the default.
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "invalid")
@@ -294,7 +298,10 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `redacted_error` is the default.
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer")
@@ -323,7 +330,10 @@ async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `redacted_error` is the default.
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Bearer header.payload")
@@ -351,7 +361,10 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `redacted_error` is the default.
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
@@ -380,7 +393,10 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
 
 #[tokio::test]
 async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
-    let (test_harness, handle) = build_a_default_test_harness().await;
+    // Explicit `Error`: this test asserts the detailed message, which is only returned in
+    // that mode now that `redacted_error` is the default.
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
             .header(
@@ -599,7 +615,10 @@ async fn it_inserts_success_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-    let (test_harness, handle) = build_a_test_harness(None, None, false, false, None).await;
+    // Explicit `Error`: this test asserts the detailed message on the response, which is
+    // only returned in that mode now that `redacted_error` is the default.
+    let (test_harness, handle) =
+        build_a_test_harness(None, None, false, false, Some("error")).await;
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(
@@ -658,7 +677,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
 #[tokio::test]
 async fn it_moves_on_after_jwt_errors_when_configured() {
     let (test_harness, handle) =
-        build_a_test_harness(None, None, false, false, Some("Continue")).await;
+        build_a_test_harness(None, None, false, false, Some("continue")).await;
     let driver = spawn_mock_driver(handle);
 
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -1040,7 +1059,12 @@ async fn issuer_check() {
         .build()
         .unwrap();
 
-    let mut config = JWTConf::default();
+    // Explicit `Error`: this test asserts the detailed issuer-mismatch message, which is
+    // only returned in that mode now that `redacted_error` is the default.
+    let mut config = JWTConf {
+        on_error: OnError::Error,
+        ..JWTConf::default()
+    };
     config.sources.push(Source::Header {
         name: super::default_header_name(),
         value_prefix: super::default_header_value_prefix(),
@@ -1225,7 +1249,12 @@ async fn audience_check() {
         .build()
         .unwrap();
 
-    let mut config = JWTConf::default();
+    // Explicit `Error`: this test asserts the detailed audience-mismatch message, which is
+    // only returned in that mode now that `redacted_error` is the default.
+    let mut config = JWTConf {
+        on_error: OnError::Error,
+        ..JWTConf::default()
+    };
     config.sources.push(Source::Header {
         name: super::default_header_name(),
         value_prefix: super::default_header_value_prefix(),
@@ -2493,11 +2522,11 @@ mod duplicate_key_retry {
     }
 }
 
-/// Redaction of client-visible JWT validation errors (`on_error: RedactedError`).
+/// Redaction of client-visible JWT validation errors (`on_error: redacted_error`).
 ///
 /// The detailed messages the router returns by default echo `jsonwebtoken`'s own error text
 /// (base64 byte offsets, the list of supported signing algorithms) and the router's configured
-/// issuers/audiences back to an unauthenticated caller. `RedactedError` rejects the request with
+/// issuers/audiences back to an unauthenticated caller. `redacted_error` rejects the request with
 /// a single generic message instead, while keeping the full detail in the
 /// `apollo::authentication::jwt_status` context object and in telemetry.
 mod redacted_errors {
@@ -2634,7 +2663,7 @@ mod redacted_errors {
     #[tokio::test]
     async fn it_redacts_jwt_decoding_errors() {
         let (service_response, response) =
-            send_with_authorization(Some("RedactedError"), UNDECODABLE_JWT).await;
+            send_with_authorization(Some("redacted_error"), UNDECODABLE_JWT).await;
 
         assert_redacted(&response, &["Base64", "offset", "Cannot decode JWT"]);
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
@@ -2643,7 +2672,7 @@ mod redacted_errors {
     #[tokio::test]
     async fn it_redacts_jwt_header_errors_including_supported_algorithms() {
         let (service_response, response) =
-            send_with_authorization(Some("RedactedError"), &jwt_with_alg_none()).await;
+            send_with_authorization(Some("redacted_error"), &jwt_with_alg_none()).await;
 
         assert_redacted(
             &response,
@@ -2662,7 +2691,7 @@ mod redacted_errors {
         // Prefix problems are redacted too: redaction is all-or-nothing, so there is no
         // per-message judgement about which strings are safe to disclose.
         let (service_response, response) =
-            send_with_authorization(Some("RedactedError"), "invalid").await;
+            send_with_authorization(Some("redacted_error"), "invalid").await;
 
         assert_redacted(&response, &["Bearer", "prefixed"]);
         assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
@@ -2686,7 +2715,7 @@ mod redacted_errors {
             }),
         );
 
-        match authenticate(&jwt_conf(Some("RedactedError")), &manager, request) {
+        match authenticate(&jwt_conf(Some("redacted_error")), &manager, request) {
             ControlFlow::Break(res) => {
                 assert_eq!(res.response.status(), StatusCode::UNAUTHORIZED);
                 let body = res.response.into_body().collect().await.unwrap();
@@ -2700,7 +2729,7 @@ mod redacted_errors {
     #[tokio::test]
     async fn it_keeps_full_error_detail_in_the_context_when_redacting() {
         let (test_harness, handle) =
-            build_a_test_harness(None, None, false, false, Some("RedactedError")).await;
+            build_a_test_harness(None, None, false, false, Some("redacted_error")).await;
 
         let request = supergraph::Request::canned_builder()
             .header(http::header::AUTHORIZATION, UNDECODABLE_JWT)
@@ -2741,9 +2770,10 @@ mod redacted_errors {
     }
 
     #[tokio::test]
-    async fn it_does_not_redact_by_default() {
-        // Redaction is opt-in: omitting `on_error` must keep today's detailed messages.
-        let (service_response, response) = send_with_authorization(None, UNDECODABLE_JWT).await;
+    async fn it_does_not_redact_when_on_error_is_error() {
+        // Explicitly setting `on_error: error` must keep the detailed messages.
+        let (service_response, response) =
+            send_with_authorization(Some("error"), UNDECODABLE_JWT).await;
 
         let expected_error = graphql::Error::builder()
             .message("Cannot decode JWT: Base64 error: Invalid last symbol 66, offset 42.")
@@ -2751,6 +2781,15 @@ mod redacted_errors {
             .build();
 
         crate::assert_errors_eq_ignoring_id!(response.errors, [expected_error]);
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_redacts_by_default() {
+        // Redaction is the default: omitting `on_error` must redact the message.
+        let (service_response, response) = send_with_authorization(None, UNDECODABLE_JWT).await;
+
+        assert_redacted(&response, &["Base64", "offset", "Cannot decode JWT"]);
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
     }
 
@@ -2765,7 +2804,7 @@ mod redacted_errors {
             let manager = make_manager(&jwk(&signing_key), None, None);
             let request = request_with_authorization(&tampered_token(&signing_key));
 
-            match authenticate(&jwt_conf(Some("RedactedError")), &manager, request) {
+            match authenticate(&jwt_conf(Some("redacted_error")), &manager, request) {
                 ControlFlow::Break(_) => {}
                 ControlFlow::Continue(_) => panic!("a tampered signature should be rejected"),
             }

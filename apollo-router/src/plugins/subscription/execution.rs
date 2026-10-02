@@ -22,12 +22,12 @@ use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
-use crate::Notify;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::graphql::Response;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::subscription::Notify;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
@@ -338,7 +338,7 @@ async fn dispatch_subscription_event(
     context: Context,
     mut val: graphql::Response,
     sender: mpsc::Sender<Response>,
-) -> Result<(), SendError<Response>> {
+) -> Result<(), SendError<Box<Response>>> {
     let start = Instant::now();
     let span = Span::current();
     let res = match query_plan {
@@ -373,12 +373,18 @@ async fn dispatch_subscription_event(
                 val.errors.append(&mut next_response.errors);
                 next_response.errors = val.errors;
 
-                sender.send(next_response).await
+                sender
+                    .send(next_response)
+                    .await
+                    .map_err(|SendError(unboxed)| SendError(Box::new(unboxed)))
             } else {
                 Ok(())
             }
         }
-        None => sender.send(val).await,
+        None => sender
+            .send(val)
+            .await
+            .map_err(|SendError(unboxed)| SendError(Box::new(unboxed))),
     };
     span.record(
         APOLLO_PRIVATE_DURATION_NS,

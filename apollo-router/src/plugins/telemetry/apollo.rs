@@ -150,6 +150,9 @@ pub(crate) struct Config {
     /// When `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`
     /// header already marked as sampled by the calling service will be passed through to this
     /// exporter regardless of this sampler's value — including when set to `always_off`.
+    ///
+    /// Whatever this sampler lets through is then subject to `tracing.throttle`, which acts as a
+    /// back-stop that further reduces trace volume sent to Apollo Studio.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) sampler: Option<SamplerOption>,
 }
@@ -159,6 +162,28 @@ pub(crate) struct Config {
 pub(crate) struct TracingConfiguration {
     /// Configuration for tracing batch processor.
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the
+    /// `telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers.
+    pub(crate) throttle: ApolloTraceThrottleConfig,
+}
+
+/// The back-stop strategy used to throttle the volume of traces exported to Apollo Studio, after
+/// head sampling.
+#[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum ApolloTraceThrottleConfig {
+    /// Send at most one representative trace per minute for each distinct combination of dimensions
+    /// (operation, client, latency bucket, error status, operation type). Duplicate traces sharing
+    /// a combination already seen within the current minute are dropped. These traces would end up
+    /// being dropped by Apollo at ingestion time anyway.
+    #[default]
+    RepresentativeTraces,
+
+    /// Send every trace, but cap the export rate at a fixed maximum of 100 traces per second (per
+    /// router instance). Cheaper than `representative_traces` in CPU and memory, at the cost of a
+    /// less even sample. The rate is not configurable.
+    RateLimited,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
@@ -277,7 +302,7 @@ pub(crate) struct ErrorsConfiguration {
     pub(crate) subgraph: SubgraphErrorConfig,
 
     /// Send error metrics via OTLP with additional dimensions [`extensions.service`, `extensions.code`]
-    pub(crate) preview_extended_error_metrics: ExtendedErrorMetricsMode,
+    pub(crate) extended_error_metrics: ExtendedErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default, PartialEq)]
@@ -326,10 +351,10 @@ impl SubgraphErrorConfig {
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum ExtendedErrorMetricsMode {
     /// Do not send extended OTLP error metrics
-    #[default]
     Disabled,
     /// Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`].
     /// If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.
+    #[default]
     Enabled,
 }
 
@@ -416,7 +441,7 @@ impl Default for Config {
             signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm::default(),
             experimental_local_field_metrics: false,
             metrics_reference_mode: ApolloMetricsReferenceMode::default(),
-            subgraph_metrics: false,
+            subgraph_metrics: true,
             sampler: None,
         }
     }

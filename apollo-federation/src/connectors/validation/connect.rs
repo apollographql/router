@@ -52,7 +52,7 @@ pub(super) fn fields_seen_by_all_connects(
                 ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_)
             )
         })
-        .filter_map(|(type_name, _)| SchemaTypeRef::new(schema.schema, type_name))
+        .filter_map(|(type_name, _)| SchemaTypeRef::new(schema, type_name))
         .map(|type_ref| Connect::find_on_type(type_ref, schema, all_source_names))
         .unzip();
     let connects: Vec<_> = connects.into_iter().flatten().collect();
@@ -150,14 +150,14 @@ impl<'schema> Connect<'schema> {
             .schema_definition
             .query
             .as_ref()
-            .is_some_and(|query| query.name == *type_ref.name())
+            .is_some_and(|query| **query == *type_ref.name())
         {
             ObjectCategory::Query
         } else if schema
             .schema_definition
             .mutation
             .as_ref()
-            .is_some_and(|mutation| mutation.name == *type_ref.name())
+            .is_some_and(|mutation| **mutation == *type_ref.name())
         {
             ObjectCategory::Mutation
         } else {

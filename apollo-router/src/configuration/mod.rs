@@ -13,6 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use apollo_redaction::Redacted;
 use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -33,36 +34,47 @@ use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+#[cfg(test)]
 use serde_json::Map;
 use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
+pub(crate) use self::apollo_configuration_parse::ConfigurationParser;
+pub(crate) use self::apollo_configuration_parse::Migration;
+#[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::parse_configuration;
+#[cfg(test)]
+pub(crate) use self::apollo_configuration_parse::parse_without_inputs;
 use self::cors::Cors;
+#[cfg(test)]
 use self::expansion::Expansion;
+pub(crate) use self::plugin_configs::ApolloPlugins;
+pub(crate) use self::plugin_configs::ParsedPlugin;
+pub(crate) use self::plugin_configs::UserPlugins;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
-pub(crate) use self::schema::validate_yaml_configuration;
 use self::server::Server;
 use self::subgraph::SubgraphConfiguration;
+pub(crate) use self::upgrade::uses_migrated_settings;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::cooperative_cancellation::CooperativeCancellation;
 use crate::configuration::mode::Mode;
 use crate::graphql;
-use crate::plugin::plugins;
-use crate::plugins::chaos;
-use crate::plugins::chaos::Config;
+use crate::plugin::PluginConfig;
 use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
 use crate::plugins::limits;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::notification::Notify;
 use crate::uplink::UplinkConfig;
 
+mod apollo_configuration_parse;
+#[cfg(test)]
+mod compatibility;
 pub(crate) mod connector;
 pub(crate) mod cooperative_cancellation;
 pub(crate) mod cors;
@@ -71,10 +83,13 @@ pub(crate) mod header_masking_config;
 pub(crate) mod metrics;
 pub(crate) mod mode;
 mod persisted_queries;
+pub(crate) mod plugin_configs;
 pub(crate) mod schema;
 pub(crate) mod server;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
+#[cfg(test)]
+mod test_discovery;
 #[cfg(test)]
 mod tests;
 mod upgrade;
@@ -122,6 +137,16 @@ pub enum ConfigurationError {
 
     /// could not load certificate authorities: {error}
     CertificateAuthorities { error: String },
+
+    /// {0}
+    ApolloConfiguration(String),
+}
+
+impl From<apollo_configuration::ConfigError> for ConfigurationError {
+    fn from(error: apollo_configuration::ConfigError) -> Self {
+        // Render source labels as well as the error summary.
+        Self::ApolloConfiguration(format!("{:?}", miette::Report::new(error)))
+    }
 }
 
 impl From<proteus::Error> for ConfigurationError {
@@ -144,9 +169,11 @@ impl From<proteus::parser::Error> for ConfigurationError {
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-#[derive(Clone, Derivative, Serialize, JsonSchema)]
+// Every way in goes through `ConfigurationParser`, so the configuration is checked against
+// Router's schema and every plugin's validation rules.
+#[derive(Clone, Derivative, JsonSchema)]
 #[derivative(Debug)]
-// We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
+// We can't put a global #[serde(default)] here because the Default implementation deserializes an empty document
 pub struct Configuration {
     /// The raw configuration value.
     #[serde(skip)]
@@ -199,13 +226,9 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) limits: limits::Config,
 
-    /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
-    /// You probably don’t want this in production!
-    #[serde(default)]
-    pub(crate) experimental_chaos: Config,
-
     /// Plugin configuration
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) plugins: UserPlugins,
 
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
@@ -244,79 +267,16 @@ impl PartialEq for Configuration {
     }
 }
 
+/// Deserialize a configuration with serde. Verified against the schema and validation rules.
+/// The document is taken as written, without migrations, overrides or `--dev`.
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        // This intermediate structure will allow us to deserialize a Configuration
-        // yet still exercise the Configuration validation function
-        #[derive(Deserialize, Default)]
-        #[serde(default)]
-        struct AdHocConfiguration {
-            reload: Reload,
-            health_check: HealthCheck,
-            sandbox: Sandbox,
-            homepage: Homepage,
-            server: Server,
-            supergraph: Supergraph,
-            cors: Cors,
-            plugins: UserPlugins,
-            #[serde(flatten)]
-            apollo_plugins: ApolloPlugins,
-            tls: Tls,
-            apq: Apq,
-            persisted_queries: PersistedQueries,
-            limits: limits::Config,
-            experimental_chaos: chaos::Config,
-            batching: Batching,
-            experimental_type_conditioned_fetching: bool,
-            experimental_hoist_orphan_errors: SubgraphConfiguration<HoistOrphanErrors>,
-        }
-        let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
-
-        let notify = Configuration::notify(&ad_hoc.apollo_plugins.plugins)
-            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
-
-        // Allow the limits plugin to use the configuration from the configuration struct.
-        // This means that the limits plugin will get the regular configuration via plugin init.
-        ad_hoc.apollo_plugins.plugins.insert(
-            "limits".to_string(),
-            serde_json::to_value(&ad_hoc.limits).unwrap(),
-        );
-        ad_hoc.apollo_plugins.plugins.insert(
-            "health_check".to_string(),
-            serde_json::to_value(&ad_hoc.health_check).unwrap(),
-        );
-
-        // Use a struct literal instead of a builder to ensure this is exhaustive
-        Configuration {
-            reload: ad_hoc.reload,
-            health_check: ad_hoc.health_check,
-            sandbox: ad_hoc.sandbox,
-            homepage: ad_hoc.homepage,
-            server: ad_hoc.server,
-            supergraph: ad_hoc.supergraph,
-            cors: ad_hoc.cors,
-            tls: ad_hoc.tls,
-            apq: ad_hoc.apq,
-            persisted_queries: ad_hoc.persisted_queries,
-            limits: ad_hoc.limits,
-            experimental_chaos: ad_hoc.experimental_chaos,
-            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            experimental_hoist_orphan_errors: ad_hoc.experimental_hoist_orphan_errors,
-            plugins: ad_hoc.plugins,
-            apollo_plugins: ad_hoc.apollo_plugins,
-            batching: ad_hoc.batching,
-
-            // serde(skip)
-            notify,
-            uplink: None,
-            validated_yaml: None,
-            raw_yaml: None,
-        }
-        .validate()
-        .map_err(|e| serde::de::Error::custom(e.to_string()))
+        let document = Value::deserialize(deserializer)?;
+        let text = serde_json::to_string(&document).map_err(serde::de::Error::custom)?;
+        apollo_configuration_parse::parse_as_written(&text).map_err(serde::de::Error::custom)
     }
 }
 
@@ -342,13 +302,13 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_hoist_orphan_errors: Option<SubgraphConfiguration<HoistOrphanErrors>>,
         batching: Option<Batching>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
         let notify = Self::notify(&apollo_plugins)?;
 
         let conf = Self {
@@ -364,13 +324,8 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            experimental_chaos: chaos.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
+            plugins,
+            apollo_plugins,
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
@@ -380,7 +335,8 @@ impl Configuration {
             notify,
         };
 
-        conf.validate()
+        conf.validate_sandbox_settings()?;
+        conf.validate()?.with_plugin_rules_checked()
     }
 }
 
@@ -397,19 +353,133 @@ impl Configuration {
         hash
     }
 
+    /// The config of the built-in plugin named `full_name`, such as `apollo.telemetry`, when
+    /// the configuration has a section for it.
+    pub(crate) fn plugin_config(&self, full_name: &str) -> Option<&PluginConfig> {
+        self.apollo_plugins
+            .get(full_name)
+            .map(|parsed| &parsed.config)
+    }
+
+    /// Configuration with every setting at its default and no plugin sections, before any
+    /// document is read.
+    pub(crate) fn with_defaults() -> Self {
+        Self {
+            validated_yaml: None,
+            raw_yaml: None,
+            reload: Default::default(),
+            health_check: Default::default(),
+            sandbox: Default::default(),
+            homepage: Default::default(),
+            server: Default::default(),
+            supergraph: Default::default(),
+            cors: Default::default(),
+            tls: Default::default(),
+            apq: Default::default(),
+            persisted_queries: Default::default(),
+            limits: Default::default(),
+            plugins: Default::default(),
+            apollo_plugins: Default::default(),
+            uplink: None,
+            // Replaced once the document's subscription section, if any, has been read.
+            notify: Self::notify(&ApolloPlugins::default())
+                .expect("without a subscription section there is no config to read"),
+            batching: Default::default(),
+            experimental_type_conditioned_fetching: Default::default(),
+            experimental_hoist_orphan_errors: Default::default(),
+        }
+    }
+
+    /// Sets the `limits` and `health_check` plugin sections from the typed top-level settings
+    /// they share, so those plugins run with the values the rest of the router reads.
+    pub(crate) fn insert_typed_plugin_sections(&mut self) {
+        let sections = [
+            ("limits", PluginConfig::new(self.limits.clone())),
+            ("health_check", PluginConfig::new(self.health_check.clone())),
+        ];
+        for (name, config) in sections {
+            let factory = plugin_configs::find_factory(&format!("{APOLLO_PLUGIN_PREFIX}{name}"))
+                .expect("the limits and health_check plugins are registered");
+            self.apollo_plugins
+                .insert(name, ParsedPlugin { factory, config });
+        }
+    }
+
+    /// The section `name` of the document the configuration was parsed from, after expansion and
+    /// overrides, for code that inspects its shape rather than a plugin's typed config.
+    pub(crate) fn document_section(&self, name: &str) -> Option<&Value> {
+        self.validated_yaml.as_ref()?.get(name)
+    }
+
+    /// The config of the built-in plugin named `full_name` as its plugin's `Config` type, when
+    /// the configuration has a section for it.
+    pub(crate) fn typed_plugin_config<C: 'static>(&self, full_name: &str) -> Option<&C> {
+        self.plugin_config(full_name)?.downcast_ref()
+    }
+
+    /// Adds a section for the built-in plugin `name`, such as `experimental_mock_subgraphs`,
+    /// when the configuration has none. The section is deserialized and its plugin's rules
+    /// checked as parsing would have; no other section is touched.
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
+    pub(crate) fn add_apollo_plugin_if_absent(
+        &mut self,
+        name: &str,
+        config: impl FnOnce() -> Value,
+    ) -> Result<(), ConfigurationError> {
+        if self.apollo_plugins.contains(name) {
+            return Ok(());
+        }
+        let section =
+            ApolloPlugins::deserialize(serde_json::json!({ name: config() })).map_err(|error| {
+                ConfigurationError::InvalidConfiguration {
+                    message: "invalid plugin configuration",
+                    error: error.to_string(),
+                }
+            })?;
+        let (_, parsed) = section
+            .iter()
+            .next()
+            .expect("the section was just deserialized");
+        let parsed = parsed.clone();
+        apollo_configuration_parse::check_plugin_rules(&parsed.config)?;
+        self.apollo_plugins.insert(name, parsed);
+        Ok(())
+    }
+
+    /// Checks the sandbox, homepage and introspection settings together. `--dev` sets all three,
+    /// so parsing runs this once `--dev` is applied, not while deserializing.
+    pub(crate) fn validate_sandbox_settings(&self) -> Result<(), ConfigurationError> {
+        // Sandbox and Homepage cannot be both enabled
+        if self.sandbox.enabled && self.homepage.enabled {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox and homepage cannot be enabled at the same time",
+                error: "disable the homepage if you want to enable sandbox".to_string(),
+            });
+        }
+        // Sandbox needs Introspection to be enabled
+        if self.sandbox.enabled && !self.supergraph.introspection {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "sandbox requires introspection",
+                error: "sandbox needs introspection to be enabled".to_string(),
+            });
+        }
+        Ok(())
+    }
+
     fn notify(
-        apollo_plugins: &Map<String, Value>,
+        apollo_plugins: &ApolloPlugins,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
         if cfg!(test) {
             return Ok(Notify::for_tests());
         }
-        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN_NAME) {
-            Some(plugin_conf) => {
-                let conf = serde_json::from_value::<SubscriptionConfig>(plugin_conf.clone())
-                    .map_err(|err| ConfigurationError::PluginConfiguration {
+        let notify_queue_cap = match apollo_plugins.get(APOLLO_SUBSCRIPTION_PLUGIN) {
+            Some(parsed) => {
+                let conf = parsed.config.typed::<SubscriptionConfig>().map_err(|err| {
+                    ConfigurationError::PluginConfiguration {
                         plugin: APOLLO_SUBSCRIPTION_PLUGIN.to_string(),
-                        error: format!("{err:?}"),
-                    })?;
+                        error: err.to_string(),
+                    }
+                })?;
                 conf.queue_capacity
             }
             None => None,
@@ -455,14 +525,26 @@ impl Configuration {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
             },
+            incremental_planner:
+                apollo_federation::query_plan::query_planner::IncrementalPlannerConfig {
+                    enabled: self.supergraph.query_planning.incremental_planner.enabled,
+                    beam_width: self
+                        .supergraph
+                        .query_planning
+                        .incremental_planner
+                        .beam_width,
+                    fuel: self.supergraph.query_planning.incremental_planner.fuel,
+                    timeout: self.supergraph.query_planning.incremental_planner.timeout,
+                },
         }
     }
 }
 
 impl Default for Configuration {
     fn default() -> Self {
-        // We want to trigger all defaulting logic so don't use the raw builder.
-        Configuration::from_str("").expect("default configuration must be valid")
+        // Parsing an empty document applies every default. Only startup parsing applies `--dev`.
+        apollo_configuration_parse::parse_as_written("")
+            .expect("default configuration must be valid")
     }
 }
 
@@ -483,12 +565,12 @@ impl Configuration {
         apq: Option<Apq>,
         persisted_query: Option<PersistedQueries>,
         operation_limits: Option<limits::Config>,
-        chaos: Option<chaos::Config>,
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
         server: Option<Server>,
     ) -> Result<Self, ConfigurationError> {
+        let (apollo_plugins, plugins) = Self::plugin_sections(apollo_plugins, plugins)?;
         let configuration = Self {
             validated_yaml: Default::default(),
             reload: Default::default(),
@@ -499,13 +581,8 @@ impl Configuration {
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
-            experimental_chaos: chaos.unwrap_or_default(),
-            plugins: UserPlugins {
-                plugins: Some(plugins),
-            },
-            apollo_plugins: ApolloPlugins {
-                plugins: apollo_plugins,
-            },
+            plugins,
+            apollo_plugins,
             tls: tls.unwrap_or_default(),
             notify: notify.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
@@ -518,26 +595,40 @@ impl Configuration {
             raw_yaml: None,
         };
 
-        configuration.validate()
+        configuration.validate_sandbox_settings()?;
+        configuration.validate()?.with_plugin_rules_checked()
+    }
+}
+
+#[cfg(test)]
+impl Configuration {
+    /// Deserializes the test builders' plugin sections as parsing does.
+    fn plugin_sections(
+        apollo_plugins: Map<String, Value>,
+        plugins: Map<String, Value>,
+    ) -> Result<(ApolloPlugins, UserPlugins), ConfigurationError> {
+        let invalid = |error: serde_json::Error| ConfigurationError::InvalidConfiguration {
+            message: "invalid plugin configuration",
+            error: error.to_string(),
+        };
+        Ok((
+            ApolloPlugins::deserialize(Value::Object(apollo_plugins)).map_err(invalid)?,
+            UserPlugins::deserialize(Value::Object(plugins)).map_err(invalid)?,
+        ))
+    }
+
+    /// Runs every plugin's validation rules, for configurations the test builders assemble from
+    /// typed values rather than a document. Errors have no location.
+    fn with_plugin_rules_checked(mut self) -> Result<Self, ConfigurationError> {
+        // Built-in sections the builders do not take as a section read the typed field.
+        self.insert_typed_plugin_sections();
+        apollo_configuration_parse::check_plugin_rules(&self)?;
+        Ok(self)
     }
 }
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
-        // Sandbox and Homepage cannot be both enabled
-        if self.sandbox.enabled && self.homepage.enabled {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "sandbox and homepage cannot be enabled at the same time",
-                error: "disable the homepage if you want to enable sandbox".to_string(),
-            });
-        }
-        // Sandbox needs Introspection to be enabled
-        if self.sandbox.enabled && !self.supergraph.introspection {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "sandbox requires introspection",
-                error: "sandbox needs introspection to be enabled".to_string(),
-            });
-        }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "invalid 'server.graphql_path' configuration",
@@ -603,13 +694,17 @@ impl Configuration {
     }
 }
 
-/// Parse configuration from a string in YAML syntax
+/// Parse router configuration from YAML.
+///
+/// Settings from the command line and environment are read once on the first call and reused when
+/// parsing multiple configurations.
+/// Substitutions (including environment substitutions like `${env.NAME}`) are still read on every
+/// call.
 impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, schema::Mode::Upgrade)?
-            .validate()
+        apollo_configuration_parse::parse_with_process_inputs(s)
     }
 }
 
@@ -635,12 +730,6 @@ fn gen_schema(
 /// These plugins are processed prior to user plugins. Also, their configuration
 /// is "hoisted" to the top level of the config rather than being processed
 /// under "plugins" as for user plugins.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(transparent)]
-pub(crate) struct ApolloPlugins {
-    pub(crate) plugins: Map<String, Value>,
-}
-
 impl JsonSchema for ApolloPlugins {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         stringify!(Plugins).into()
@@ -674,12 +763,6 @@ impl JsonSchema for ApolloPlugins {
 ///
 /// These plugins are compiled into a router by and their configuration is performed
 /// under the "plugins" section.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-#[serde(transparent)]
-pub(crate) struct UserPlugins {
-    pub(crate) plugins: Option<Map<String, Value>>,
-}
-
 impl JsonSchema for UserPlugins {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         stringify!(Plugins).into()
@@ -694,7 +777,10 @@ impl JsonSchema for UserPlugins {
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
             .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect();
-        gen_schema(plugins, None)
+        let mut schema = gen_schema(plugins, None);
+        // `plugins: null` means no user plugins, as in earlier releases.
+        schema.insert("type".to_string(), serde_json::json!(["object", "null"]));
+        schema
     }
 }
 
@@ -751,12 +837,16 @@ pub(crate) struct Supergraph {
 
     /// Log a message if the client closes the connection before the response is sent.
     /// Default: false.
-    pub(crate) experimental_log_on_broken_pipe: bool,
+    pub(crate) log_on_broken_pipe: bool,
 
     /// Determines how to handle queries which include additional fields of an input object.
     /// - `enforce` (default): rejects query
     /// - `measure`: permits query and the logs unknown fields
     pub(crate) strict_variable_validation: Mode,
+
+    /// Whether to validate default values in the supergraph schema.
+    /// Default: true
+    pub(crate) validate_default_values: bool,
 }
 
 const fn default_generate_query_fragments() -> bool {
@@ -783,10 +873,11 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
-        experimental_log_on_broken_pipe: Option<bool>,
+        log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
+        validate_default_values: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -799,11 +890,12 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
-            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            log_on_broken_pipe: log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
             redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
+            validate_default_values: validate_default_values.unwrap_or(true),
         }
     }
 }
@@ -821,10 +913,11 @@ impl Supergraph {
         query_planning: Option<QueryPlanning>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
-        experimental_log_on_broken_pipe: Option<bool>,
+        log_on_broken_pipe: Option<bool>,
         insert_result_coercion_errors: Option<bool>,
         strict_variable_validation: Option<Mode>,
         redact_query_validation_errors: Option<bool>,
+        validate_default_values: Option<bool>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -837,11 +930,12 @@ impl Supergraph {
             generate_query_fragments: generate_query_fragments
                 .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_else(default_early_cancel),
-            experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
+            log_on_broken_pipe: log_on_broken_pipe.unwrap_or_default(),
             enable_result_coercion_errors: insert_result_coercion_errors.unwrap_or_default(),
             strict_variable_validation: strict_variable_validation
                 .unwrap_or_else(default_strict_variable_validation),
             redact_query_validation_errors: redact_query_validation_errors.unwrap_or_default(),
+            validate_default_values: validate_default_values.unwrap_or(true),
         }
     }
 }
@@ -969,6 +1063,11 @@ pub(crate) struct QueryPlanning {
     ///
     /// See [`CooperativeCancellation`] for more details.
     pub(crate) experimental_cooperative_cancellation: CooperativeCancellation,
+
+    /// Configuration for the incremental (BULB) query planner, which
+    /// builds plans field-by-field with bounded backtracking instead of
+    /// exhaustively enumerating plan candidates.
+    pub(crate) incremental_planner: IncrementalPlanner,
 }
 
 #[buildstructor::buildstructor]
@@ -981,6 +1080,7 @@ impl QueryPlanning {
         experimental_plans_limit: Option<u32>,
         experimental_paths_limit: Option<u32>,
         experimental_cooperative_cancellation: Option<CooperativeCancellation>,
+        incremental_planner: Option<IncrementalPlanner>,
     ) -> Self {
         Self {
             cache: cache.unwrap_or_default(),
@@ -989,6 +1089,40 @@ impl QueryPlanning {
             experimental_paths_limit,
             experimental_cooperative_cancellation: experimental_cooperative_cancellation
                 .unwrap_or_default(),
+            incremental_planner: incremental_planner.unwrap_or_default(),
+        }
+    }
+}
+
+/// Configuration for the incremental (BULB) query planner.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct IncrementalPlanner {
+    /// Whether the incremental planner is enabled.
+    pub(crate) enabled: bool,
+
+    /// Beam width: how many states advance together per depth in the beam.
+    /// Wider beams capture more diversity, reducing expensive backtracking.
+    pub(crate) beam_width: usize,
+
+    /// Cap on optimization effort beyond the first draft of the plan, measured in
+    /// pending-selection visits. `fuel: 0` returns the first complete plan found.
+    pub(crate) fuel: u64,
+
+    /// Optional wall-clock time limit for the search. When set, the search
+    /// returns the best complete plan found so far once the limit is reached.
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "Option<String>", default)]
+    pub(crate) timeout: Option<Duration>,
+}
+
+impl Default for IncrementalPlanner {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+            timeout: None,
         }
     }
 }
@@ -1011,9 +1145,21 @@ pub(crate) struct QueryPlanRedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1103,9 +1249,21 @@ pub(crate) struct RedisCache {
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
-    pub(crate) username: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) username: Option<Redacted<String>>,
     /// Redis password if not provided in the URLs. This field takes precedence over the password in the URL
-    pub(crate) password: Option<String>,
+    #[serde(
+        serialize_with = "crate::plugin::serde::serialize_redacted_option",
+        deserialize_with = "crate::plugin::serde::deserialize_redacted_string_option",
+        default
+    )]
+    #[schemars(transform = crate::plugin::serde::without_schema_default)]
+    pub(crate) password: Option<Redacted<String>>,
 
     #[serde(
         deserialize_with = "humantime_serde::deserialize",
@@ -1209,9 +1367,9 @@ pub(crate) struct TlsSupergraph {
     #[schemars(with = "String")]
     pub(crate) certificate: CertificateDer<'static>,
     /// server key in PEM format
-    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
-    #[schemars(with = "String")]
-    pub(crate) key: PrivateKeyDer<'static>,
+    #[serde(deserialize_with = "deserialize_redacted_key", skip_serializing)]
+    #[schemars(with = "Redacted<String>")]
+    pub(crate) key: Redacted<PrivateKeyDer<'static>>,
     /// list of certificate authorities in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
@@ -1225,7 +1383,7 @@ impl TlsSupergraph {
 
         let mut config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_single_cert(certificates, self.key.clone_key())
+            .with_single_cert(certificates, self.key.unredact().clone_key())
             .map_err(ApolloRouterError::Rustls)?;
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
@@ -1263,13 +1421,16 @@ where
     load_certs(&data).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>
+fn deserialize_redacted_key<'de, D>(
+    deserializer: D,
+) -> Result<Redacted<PrivateKeyDer<'static>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let data = String::deserialize(deserializer)?;
-
-    load_key(&data).map_err(serde::de::Error::custom)
+    let data = crate::plugin::serde::deserialize_redacted_string(deserializer)?;
+    load_key(data.unredact())
+        .map(Redacted::new)
+        .map_err(serde::de::Error::custom)
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1282,39 +1443,41 @@ pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>>
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, LoadCertError(error)))
 }
 
-pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(data.as_bytes());
-    let mut key_iterator = iter::from_fn(|| rustls_pemfile::read_one(&mut reader).transpose());
+/// Why PEM data could not be loaded as a TLS private key.
+///
+/// Each message is fixed so that it never repeats any of the key material.
+#[derive(thiserror::Error, Debug, PartialEq)]
+pub(crate) enum LoadKeyError {
+    #[error("could not parse TLS private key: the PEM data is malformed")]
+    Malformed,
+    #[error(
+        "could not parse TLS private key: the PEM data contains another item, such as a certificate, instead of a private key"
+    )]
+    NotAPrivateKey,
+    #[error("could not parse TLS private key: the data contains no PEM private key")]
+    Missing,
+    #[error(
+        "could not parse TLS private key: the PEM data contains more than one item; expected exactly one private key"
+    )]
+    MultipleItems,
+}
 
-    let private_key = match key_iterator.next() {
+pub(crate) fn load_key(data: &str) -> Result<PrivateKeyDer<'static>, LoadKeyError> {
+    let mut reader = BufReader::new(data.as_bytes());
+    let mut items = iter::from_fn(|| rustls_pemfile::read_one(&mut reader).transpose());
+
+    let private_key = match items.next() {
         Some(Ok(rustls_pemfile::Item::Pkcs1Key(key))) => PrivateKeyDer::from(key),
         Some(Ok(rustls_pemfile::Item::Pkcs8Key(key))) => PrivateKeyDer::from(key),
         Some(Ok(rustls_pemfile::Item::Sec1Key(key))) => PrivateKeyDer::from(key),
-        Some(Err(e)) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("could not parse the key: {e}"),
-            ));
-        }
-        Some(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "expected a private key",
-            ));
-        }
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find a private key",
-            ));
-        }
+        // The parser's own error can describe the input, so it is deliberately discarded.
+        Some(Err(_)) => return Err(LoadKeyError::Malformed),
+        Some(Ok(_)) => return Err(LoadKeyError::NotAPrivateKey),
+        None => return Err(LoadKeyError::Missing),
     };
 
-    if key_iterator.next().is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "expected exactly one private key",
-        ));
+    if items.next().is_some() {
+        return Err(LoadKeyError::MultipleItems);
     }
     Ok(private_key)
 }
@@ -1359,9 +1522,9 @@ pub(crate) struct TlsClientAuth {
     #[schemars(with = "String")]
     pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
     /// key in PEM format
-    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
-    #[schemars(with = "String")]
-    pub(crate) key: PrivateKeyDer<'static>,
+    #[serde(deserialize_with = "deserialize_redacted_key", skip_serializing)]
+    #[schemars(with = "Redacted<String>")]
+    pub(crate) key: Redacted<PrivateKeyDer<'static>>,
 }
 
 /// Configuration for router reload behavior.

@@ -211,7 +211,6 @@ mod tests {
 
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use tower::Service as _;
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
 

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde_json::json;
 use tower::BoxError;
@@ -155,5 +156,53 @@ async fn test_supergraph_allow_to_change_http1_max_buf_size() -> Result<(), BoxE
         response.json::<serde_json::Value>().await?,
         json!({ "data": { "__typename": "Query" } })
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_validate_default_values_false_allows_startup() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              validate_default_values: false
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "supergraph_with_invalid_default.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_validate_default_values_false_allows_startup_with_connectors() -> Result<(), BoxError>
+{
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            supergraph:
+              validate_default_values: false
+            "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "supergraph_with_invalid_default.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
     Ok(())
 }

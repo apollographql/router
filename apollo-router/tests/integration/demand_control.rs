@@ -79,25 +79,25 @@ fn federated_ships_required() -> TestSetupParameters {
             "vehicles": {
                 "query": {
                     "ships": [
-                        {"__typename": "Ship", "id": 1, "name": "Ship1", "owner": {"__typename": "User", "licenseNumber": 10}},
-                        {"__typename": "Ship", "id": 2, "name": "Ship2", "owner": {"__typename": "User", "licenseNumber": 11}},
-                        {"__typename": "Ship", "id": 3, "name": "Ship3", "owner": {"__typename": "User", "licenseNumber": 12}},
+                        {"__typename": "Ship", "id": "1", "name": "Ship1", "owner": {"__typename": "User", "licenseNumber": "10"}},
+                        {"__typename": "Ship", "id": "2", "name": "Ship2", "owner": {"__typename": "User", "licenseNumber": "11"}},
+                        {"__typename": "Ship", "id": "3", "name": "Ship3", "owner": {"__typename": "User", "licenseNumber": "12"}},
                     ],
                 },
                 "entities": [
-                    {"__typename": "Ship", "id": 1, "owner": {"addresses": [{"zipCode": 18263}]}, "registrationFee": 129.2},
-                    {"__typename": "Ship", "id": 2, "owner": {"addresses": [{"zipCode": 61027}]}, "registrationFee": 14.0},
-                    {"__typename": "Ship", "id": 3, "owner": {"addresses": [{"zipCode": 86204}]}, "registrationFee": 97.15},
-                    {"__typename": "Ship", "id": 1, "owner": null, "registrationFee": null},
-                    {"__typename": "Ship", "id": 2, "owner": null, "registrationFee": null},
-                    {"__typename": "Ship", "id": 3, "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": "1", "owner": {"addresses": [{"zipCode": 18263}]}, "registrationFee": 129.2},
+                    {"__typename": "Ship", "id": "2", "owner": {"addresses": [{"zipCode": 61027}]}, "registrationFee": 14.0},
+                    {"__typename": "Ship", "id": "3", "owner": {"addresses": [{"zipCode": 86204}]}, "registrationFee": 97.15},
+                    {"__typename": "Ship", "id": "1", "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": "2", "owner": null, "registrationFee": null},
+                    {"__typename": "Ship", "id": "3", "owner": null, "registrationFee": null},
                 ]
             },
             "users": {
                 "entities": [
-                    {"__typename": "User", "licenseNumber": 10, "addresses": [{"zipCode": 18263}]},
-                    {"__typename": "User", "licenseNumber": 11, "addresses": [{"zipCode": 61027}]},
-                    {"__typename": "User", "licenseNumber": 12, "addresses": [{"zipCode": 86204}]},
+                    {"__typename": "User", "licenseNumber": "10", "addresses": [{"zipCode": 18263}]},
+                    {"__typename": "User", "licenseNumber": "11", "addresses": [{"zipCode": 61027}]},
+                    {"__typename": "User", "licenseNumber": "12", "addresses": [{"zipCode": 86204}]},
                 ],
             }
         }),
@@ -118,25 +118,25 @@ fn federated_ships_fragment() -> TestSetupParameters {
             "vehicles": {
                 "query": {
                     "ships": [
-                        {"__typename": "Ship", "id": 1, "name": "Ship1", "owner": {"__typename": "User", "licenseNumber": 100}},
-                        {"__typename": "Ship", "id": 2, "name": "Ship2", "owner": {"__typename": "User", "licenseNumber": 110}},
-                        {"__typename": "Ship", "id": 3, "name": "Ship3", "owner": {"__typename": "User", "licenseNumber": 120}},
-                        {"__typename": "Ship", "id": 4, "name": "Ship4", "owner": {"__typename": "User", "licenseNumber": 120}},
-                        {"__typename": "Ship", "id": 5, "name": "Ship5", "owner": {"__typename": "User", "licenseNumber": 120}},
+                        {"__typename": "Ship", "id": "1", "name": "Ship1", "owner": {"__typename": "User", "licenseNumber": "100"}},
+                        {"__typename": "Ship", "id": "2", "name": "Ship2", "owner": {"__typename": "User", "licenseNumber": "110"}},
+                        {"__typename": "Ship", "id": "3", "name": "Ship3", "owner": {"__typename": "User", "licenseNumber": "120"}},
+                        {"__typename": "Ship", "id": "4", "name": "Ship4", "owner": {"__typename": "User", "licenseNumber": "120"}},
+                        {"__typename": "Ship", "id": "5", "name": "Ship5", "owner": {"__typename": "User", "licenseNumber": "120"}},
                     ],
                 },
             },
             "users": {
                 "query": {
                     "users": [
-                        {"__typename": "User", "name": "User10", "licenseNumber": 10},
-                        {"__typename": "User", "name": "User11", "licenseNumber": 11},
+                        {"__typename": "User", "name": "User10", "licenseNumber": "10"},
+                        {"__typename": "User", "name": "User11", "licenseNumber": "11"},
                     ]
                 },
                 "entities": [
-                    {"__typename": "User", "name": "User100", "licenseNumber": 100},
-                    {"__typename": "User", "name": "User110", "licenseNumber": 110},
-                    {"__typename": "User", "name": "User120", "licenseNumber": 120},
+                    {"__typename": "User", "name": "User100", "licenseNumber": "100"},
+                    {"__typename": "User", "name": "User110", "licenseNumber": "110"},
+                    {"__typename": "User", "name": "User120", "licenseNumber": "120"},
                 ],
             }
         }),
@@ -161,13 +161,13 @@ fn custom_costs() -> TestSetupParameters {
                     "enumWithCost": "A",
                     "inputWithCost": 5,
                     "scalarWithCost": 6172364,
-                    "objectWithCost": {"id": 9},
+                    "objectWithCost": {"id": "9"},
                 },
             },
             "subgraphWithListSize": {
                 "query": {
                     "fieldWithListSize": ["hello", "world", "and", "nearby", "planets"],
-                    "fieldWithDynamicListSize": {"items": [{"id": 7}, {"id": 9}]},
+                    "fieldWithDynamicListSize": {"items": [{"id": "7"}, {"id": "9"}]},
                 },
             }
         }),

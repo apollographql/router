@@ -3,5 +3,4 @@ override_subgraph_url:
 include_subgraph_errors:
   all: true
 
-plugins:
-  experimental.expose_query_plan: true
+expose_query_plan: true

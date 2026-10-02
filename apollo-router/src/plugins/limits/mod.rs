@@ -35,17 +35,20 @@ use crate::services::router;
 use crate::services::subgraph;
 
 /// Configuration for operation limits, parser limits, HTTP limits, etc.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "LimitsConfig")]
 pub(crate) struct Config {
     /// Limits that apply to inbound requests to the router.
+    #[config(skip_validate)]
     pub(crate) router: RouterLimitsConfig,
 
     /// Limits that apply to outbound subgraph responses.
+    #[config(skip_validate)]
     pub(crate) subgraph: SubgraphConfiguration<SubgraphLimits>,
 
     /// Limits that apply to outbound connector responses.
+    #[config(skip_validate)]
     pub(crate) connector: ConnectorConfiguration<ConnectorLimits>,
 }
 
@@ -58,7 +61,7 @@ pub(crate) struct RouterLimitsConfig {
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
     ///
-    /// Counts depth of an operation, looking at its selection sets,˛
+    /// Counts depth of an operation, looking at its selection sets,
     /// including fields in fragments and inline fragments. The following
     /// example has a depth of 3.
     ///
@@ -93,11 +96,6 @@ pub(crate) struct RouterLimitsConfig {
     ///     name { last }
     /// }
     /// ```
-    ///
-    /// This may change in a future version of Apollo Router to do
-    /// [full field merging across fragments][merging] instead.
-    ///
-    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]
     pub(crate) max_height: Option<u32>,
 
     /// If set, requests with operations with more root fields than this maximum
@@ -410,12 +408,16 @@ impl From<ConnectorConfiguration<ConnectorLimits>> for Config {
 mod test {
     use http::StatusCode;
     use tower::BoxError;
+    use tower::Service as _;
+    use tower::ServiceExt as _;
 
     use crate::Context;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::limits::LimitsPlugin;
     use crate::plugins::limits::layer::BodyLimitControl;
     use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
+    use crate::services::connector;
     use crate::services::router;
 
     async fn body_to_string(resp: router::Response) -> String {
@@ -958,6 +960,7 @@ mod test {
                 key: req.key.clone(),
                 problems: vec![],
             },
+            break_status: None,
         }
     }
 
@@ -971,25 +974,36 @@ mod test {
             .await
             .expect("test harness");
 
-        let result = plugin
-            .call_connector_request_service(
-                make_connector_request(Context::new()),
-                |req: crate::services::connector::request_service::Request| {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
-                    assert_eq!(
-                        limit.map(|l| l.0),
-                        Some(2048),
-                        "limit should be set on context"
-                    );
-                    make_stub_connector_response(&req)
-                },
-            )
+        let (mock_service, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let limit = req
+                .context
+                .extensions()
+                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
+            assert_eq!(
+                limit.map(|l| l.0),
+                Some(2048),
+                "limit should be set on context"
+            );
+            responder.send_response(make_stub_connector_response(&req));
+        });
+
+        let mut service = plugin
+            .connector_request_service(mock_service.boxed_clone(), "my_connector".to_string());
+
+        let result = service
+            .ready()
+            .await
+            .unwrap()
+            .call(make_connector_request(Context::new()))
             .await;
 
         assert!(result.is_ok());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
@@ -1002,21 +1016,32 @@ mod test {
             .await
             .expect("test harness");
 
-        let result = plugin
-            .call_connector_request_service(
-                make_connector_request(Context::new()),
-                |req: crate::services::connector::request_service::Request| {
-                    let limit = req
-                        .context
-                        .extensions()
-                        .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
-                    assert!(limit.is_none(), "no limit should be set on context");
-                    make_stub_connector_response(&req)
-                },
-            )
+        let (mock_service, mut handle) = tower_test::mock::pair::<
+            connector::request_service::Request,
+            connector::request_service::Response,
+        >();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let limit = req
+                .context
+                .extensions()
+                .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
+            assert!(limit.is_none(), "no limit should be set on context");
+            responder.send_response(make_stub_connector_response(&req));
+        });
+
+        let mut service = plugin
+            .connector_request_service(mock_service.boxed_clone(), "my_connector".to_string());
+
+        let result = service
+            .ready()
+            .await
+            .unwrap()
+            .call(make_connector_request(Context::new()))
             .await;
 
         assert!(result.is_ok());
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     // --- LimitsPlugin::subgraph_service ---

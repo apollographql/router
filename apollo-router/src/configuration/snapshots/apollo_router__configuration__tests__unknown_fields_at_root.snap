@@ -1,0 +1,19 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: error
+---
+apollo::configuration::schema
+
+  × schema validation error
+  ╰─▶ schema validation error
+
+Error: apollo::configuration::validation
+
+  × Additional properties are not allowed ('unknown' was unexpected)
+   ╭─[2:1]
+ 1 │ 
+ 2 │ unknown:
+   · ───┬───
+   ·    ╰── Additional properties are not allowed ('unknown' was unexpected)
+ 3 │   foo: true
+   ╰────

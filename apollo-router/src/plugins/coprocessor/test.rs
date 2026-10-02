@@ -6048,7 +6048,7 @@ mod tests {
             "coprocessor": {
                 "url": "unix:///tmp/coprocessor.sock",
                 "client": {
-                    "experimental_http2": "http2only"
+                    "http2": "http2only"
                 }
             }
         });
@@ -6071,7 +6071,7 @@ mod tests {
             "coprocessor": {
                 "url": "unix:///tmp/coprocessor.sock",
                 "client": {
-                    "experimental_http2": "enable"
+                    "http2": "enable"
                 }
             }
         });
@@ -6094,7 +6094,7 @@ mod tests {
             "coprocessor": {
                 "url": "unix:///tmp/coprocessor.sock",
                 "client": {
-                    "experimental_http2": "disable"
+                    "http2": "disable"
                 }
             }
         });
@@ -7539,6 +7539,7 @@ mod tests {
                         key: create_test_response_key(),
                         problems: Vec::new(),
                     },
+                    break_status: None,
                 })
             })
             .boxed_clone()

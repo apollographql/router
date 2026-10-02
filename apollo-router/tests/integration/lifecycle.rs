@@ -13,8 +13,6 @@ use async_trait::async_trait;
 use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;
 use regex::Regex;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::json;
 use tower::BoxError;
 use tower::Service;
@@ -23,6 +21,7 @@ use tower::ServiceExt;
 use wiremock::ResponseTemplate;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const HAPPY_CONFIG: &str = include_str!("fixtures/happy.router.yaml");
@@ -66,6 +65,61 @@ async fn test_reload_config_valid() -> Result<(), BoxError> {
     router.touch_config().await;
     router.assert_reloaded().await;
     router.execute_default_query().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_migrated_reload_and_invalid_replacement_preserves_introspection()
+-> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder().config("{}").build().await;
+    router.start().await;
+    router.assert_started().await;
+
+    router
+        .update_config(
+            r#"
+supergraph:
+  introspection: true
+cors:
+  origins:
+    - https://example.com
+"#,
+        )
+        .await;
+    router.assert_reloaded().await;
+    router.assert_log_contained("CORS configuration has been migrated");
+
+    router
+        .update_config(
+            r#"
+supergraph:
+  introspection: false
+cors:
+  origins:
+    - https://example.org
+this_key_does_not_exist_anywhere: true
+"#,
+        )
+        .await;
+    let validation_error =
+        "Additional properties are not allowed ('this_key_does_not_exist_anywhere' was unexpected)";
+    router.wait_for_log_message(validation_error).await;
+    // The file watcher logs this only after parsing returns Err and drops the update.
+    // `assert_not_reloaded` instead waits for a pipeline build failure, which is not reached.
+    assert!(router.logs().iter().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|log| {
+            log["target"] == "apollo_router::router::event::configuration"
+                && log["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(validation_error))
+        })
+    }));
+    let (_, response) = router.execute_query(Query::introspection()).await;
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await?;
+    assert!(body.get("errors").is_none(), "{body}");
+    assert!(body["data"].is_object(), "{body}");
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -134,38 +188,6 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
     let data = client_handle.await.unwrap();
     insta::assert_json_snapshot!(data);
 
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_force_config_reload_via_chaos() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "experimental_chaos:
-                force_config_reload: 2s",
-        )
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    router.assert_reloaded().await;
-    router.graceful_shutdown().await;
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_force_schema_reload_via_chaos() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            "experimental_chaos:
-                force_schema_reload: 2s",
-        )
-        .build()
-        .await;
-    router.start().await;
-    router.assert_started().await;
-    router.assert_reloaded().await;
-    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -320,7 +342,7 @@ macro_rules! make_plugin {
 
             use super::*;
 
-            #[derive(Deserialize, JsonSchema)]
+            #[apollo_configuration::configuration]
             pub(super) struct Config {}
 
             /// Dummy plugin (for testing purposes only)

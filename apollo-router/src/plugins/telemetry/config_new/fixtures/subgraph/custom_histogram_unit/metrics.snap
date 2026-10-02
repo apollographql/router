@@ -14,6 +14,16 @@ info:
             unit: unit
             value: unit
 ---
+- name: apollo.router.operations.fetch.duration
+  description: Duration of a subgraph fetch.
+  unit: s
+  data:
+    datapoints:
+      - sum: 0.1
+        count: 1
+        attributes:
+          has_errors: false
+          subgraph.name: products
 - name: custom.histogram
   description: histogram of requests
   unit: unit

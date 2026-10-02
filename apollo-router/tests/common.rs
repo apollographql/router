@@ -87,6 +87,12 @@ pub(crate) fn redact_cache_debug_query_hash(key: &str) -> String {
         .into_owned()
 }
 
+/// Isolate tests from each other by adding a random redis key prefix
+#[allow(dead_code)] // used by integration/response_cache and integration/redis test binaries
+pub(crate) fn namespace() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
 /// Default test license JWT served by `mock_license_uplink()` and
 /// validated by the spawned router against `TEST_JWKS_ENDPOINT` (via
 /// `APOLLO_TEST_INTERNAL_UPLINK_JWKS`, set in `IntegrationTest::start()`).
@@ -176,6 +182,34 @@ pub fn mint_license_jwt(
     if let Some(features) = allowed_features {
         claims["allowedFeatures"] = serde_json::json!(features);
     }
+    jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
+}
+
+/// Mint a test license JWT, signed with the same bundled HS256 test secret as
+/// [`mint_license_jwt`], that omits the required `haltAt` claim.
+/// `License::from_str`'s `set_required_spec_claims` rejects this with
+/// `jsonwebtoken::errors::ErrorKind::MissingRequiredClaim`, which
+/// `Error::is_version_incompatible()` classifies as a version-incompatible
+/// license (the router doesn't understand this license's shape) rather than a
+/// generically invalid/corrupt one.
+#[allow(dead_code)]
+pub fn mint_version_incompatible_license_jwt() -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let secret_bytes = URL_SAFE_NO_PAD
+        .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
+        .expect("test JWKS secret is valid base64url");
+    let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
+    let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
+    let claims = serde_json::json!({
+        "exp": 10000000000_u64,
+        "iss": "https://www.apollographql.com/",
+        "sub": "apollo",
+        "aud": "SELF_HOSTED",
+        "warnAt": 10000000000_u64,
+        // haltAt is deliberately omitted.
+    });
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
 }
 
@@ -1691,17 +1725,23 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub fn assert_log_contained(&self, msg: &str) {
+    pub fn log_contains(&self, msg: &str) -> bool {
         for line in &self.logs {
             if line.contains(msg) {
-                return;
+                return true;
             }
         }
+        false
+    }
 
-        panic!(
-            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
-            logs = self.logs.join("\n")
-        );
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
+        if !self.log_contains(msg) {
+            panic!(
+                "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+                logs = self.logs.join("\n")
+            );
+        }
     }
 
     #[allow(dead_code)]

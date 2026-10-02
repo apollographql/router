@@ -181,6 +181,11 @@ impl Query {
                     match self.subselections.get(&SubSelectionKey {
                         defer_label: response.label.clone(),
                         defer_conditions,
+                        defer_path: response
+                            .path
+                            .as_ref()
+                            .map(subselections::defer_path_from_response_path)
+                            .unwrap_or_default(),
                     }) {
                         Some(subselection) => {
                             let mut output =
@@ -292,7 +297,8 @@ impl Query {
                 return vec![];
             }
             _ => {
-                failfast_debug!("invalid type for data in response. data: {:#?}", data);
+                // XXX(@goto-bus-stop): this should raise an execution error?
+                tracing::debug!("invalid type for data in response. data: {data:#?}");
             }
         }
 
@@ -1049,7 +1055,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1241,7 +1253,13 @@ impl Query {
                         }
                     } else {
                         // the fragment should have been already checked with the schema
-                        failfast_debug!("missing fragment named: {}", name);
+                        // XXX(@goto-bus-stop): can we store a reference to the fragment instead of
+                        // just a name?
+                        tracing::error!(
+                            name = name,
+                            "missing fragment in response formatting, this is a bug"
+                        );
+                        return Err(InvalidValue);
                     }
                 }
             }
@@ -1276,9 +1294,9 @@ impl Query {
                 .difference(&known_variables)
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
-                failfast_debug!(
-                    "Received variable unknown to the query: {:?}",
-                    unknown_variables,
+                tracing::debug!(
+                    unknown_variables = ?unknown_variables,
+                    "Received variable unknown to the query",
                 );
             }
         }
@@ -1342,12 +1360,16 @@ impl Query {
     pub(crate) fn contains_error_path(
         &self,
         label: &Option<String>,
+        response_path: Option<&Path>,
         path: &Path,
         defer_conditions: BooleanValues,
     ) -> bool {
         let selection_set = match self.subselections.get(&SubSelectionKey {
             defer_label: label.clone(),
             defer_conditions,
+            defer_path: response_path
+                .map(subselections::defer_path_from_response_path)
+                .unwrap_or_default(),
         }) {
             Some(subselection) => &subselection.selection_set,
             None => &self.operation.selection_set,

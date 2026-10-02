@@ -428,7 +428,7 @@ impl HttpClientService {
             .experimental_http2_keep_alive_timeout
             .unwrap_or(DEFAULT_HTTP2_KEEP_ALIVE_TIMEOUT);
 
-        let http2 = client_config.experimental_http2.unwrap_or_default();
+        let http2 = client_config.http2.unwrap_or_default();
         let connector = match http2 {
             Http2Config::Enable => builder
                 .enable_http1()
@@ -546,6 +546,22 @@ impl HttpClientService {
     ///
     /// WARN: if no CA certificates are found, this function will panic
     pub(crate) fn native_roots_store() -> RootCertStore {
+        // Reading the OS trust store is slow on some platforms (over 100ms on macOS), and a single
+        // test can read it many times: every pipeline build reads it, and some plugins (such as the
+        // coprocessor) read it again. Test builds cache it for the process. Under nextest (one
+        // process per test) that removes repeat reads within a test; under `cargo test` the copy is
+        // also shared across tests. The router itself re-reads it on every call so that a reload
+        // picks up newly installed certificates.
+        if cfg!(test) {
+            static NATIVE_ROOTS: std::sync::OnceLock<RootCertStore> = std::sync::OnceLock::new();
+            return NATIVE_ROOTS
+                .get_or_init(Self::load_native_roots_store)
+                .clone();
+        }
+        Self::load_native_roots_store()
+    }
+
+    fn load_native_roots_store() -> RootCertStore {
         let mut roots = rustls::RootCertStore::empty();
 
         roots.add_parsable_certificates(
@@ -568,7 +584,7 @@ pub(crate) fn generate_tls_client_config(
             .with_root_certificates(tls_cert_store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone_key(),
+                client_auth_config.key.unredact().clone_key(),
             )?,
         None => tls_builder
             .with_root_certificates(tls_cert_store)
@@ -773,7 +789,9 @@ mod tests {
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use tokio::net::TcpListener;
-    use tower::ServiceExt;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing::Subscriber;
     use tracing::subscriber::DefaultGuard;
     use tracing_subscriber::Layer;
@@ -784,9 +802,11 @@ mod tests {
     use super::DnsResolverCache;
     use super::HttpClientInputs;
     use crate::Context;
+    use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::otel;
     use crate::plugins::telemetry::otel::OtelData;
+    use crate::plugins::test::PluginTestHarness;
     use crate::services::http::BoxCloneService;
     use crate::services::http::HttpClientService;
     use crate::services::http::HttpRequest;
@@ -868,26 +888,10 @@ mod tests {
     }
 
     async fn make_telemetry_http_client(service_name: &str) -> BoxCloneService {
-        let full_config = serde_json::json!({
-            "telemetry": {}
-        });
-        let telemetry_config = full_config
-            .as_object()
-            .expect("must be an object")
-            .get("telemetry")
-            .expect("telemetry must be a root key");
-        let init = crate::plugin::PluginInit::fake_builder()
-            .config(telemetry_config.clone())
-            .full_config(full_config)
+        let telemetry: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .build()
-            .with_deserialized_config()
-            .expect("unable to deserialize telemetry config");
-        let plugin = crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(init)
             .await
-            .expect("unable to create telemetry plugin");
+            .expect("test harness");
 
         let service_target = ServiceTarget::Subgraph {
             name: Arc::from(service_name),
@@ -905,7 +909,12 @@ mod tests {
             .expect("can create http client inputs"),
         );
 
-        plugin.http_client_service(service_name, BoxCloneService::new(http_client_service))
+        ServiceBuilder::new()
+            .layer(telemetry.overhead_subgraph_request_timing_layer())
+            .layer(telemetry.instrument_http_client_layer())
+            .layer(telemetry.custom_instrument_http_client_layer())
+            .service(http_client_service)
+            .boxed_clone()
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1005,43 +1014,23 @@ mod tests {
             "response-value",
         ));
 
-        let full_config = serde_json::json!({
-            "telemetry": {
-                "instrumentation": {
-                    "spans": {
-                        "http_client": {
-                            "attributes": {
-                                "custom_request_header": {
-                                    "request_header": "x-request-header"
-                                },
-                                "custom_response_header": {
-                                    "response_header": "x-response-header"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        let telemetry_config = full_config
-            .as_object()
-            .expect("must be an object")
-            .get("telemetry")
-            .expect("telemetry must be a root key");
-        let init = crate::plugin::PluginInit::fake_builder()
-            .config(telemetry_config.clone())
-            .full_config(full_config)
+        let telemetry: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(
+                r#"
+telemetry:
+  instrumentation:
+    spans:
+      http_client:
+        attributes:
+          custom_request_header:
+            request_header: x-request-header
+          custom_response_header:
+            response_header: x-response-header
+"#,
+            )
             .build()
-            .with_deserialized_config()
-            .expect("unable to deserialize telemetry config");
-
-        let plugin = crate::plugin::plugins()
-            .find(|factory| factory.name == "apollo.telemetry")
-            .expect("Plugin not found")
-            .create_instance(init)
             .await
-            .expect("unable to create telemetry plugin");
+            .expect("test harness");
 
         // Create HTTP client service
         let service_target = ServiceTarget::Subgraph {
@@ -1060,9 +1049,13 @@ mod tests {
             .expect("can create http client inputs"),
         );
 
-        // Wrap with telemetry plugin
-        let mut telemetry_wrapped_service =
-            plugin.http_client_service("test", BoxCloneService::new(http_client_service));
+        // Wrap with telemetry plugin's layers
+        let mut telemetry_wrapped_service = ServiceBuilder::new()
+            .layer(telemetry.overhead_subgraph_request_timing_layer())
+            .layer(telemetry.instrument_http_client_layer())
+            .layer(telemetry.custom_instrument_http_client_layer())
+            .service(http_client_service)
+            .boxed_clone();
 
         let (_guard, recording_layer) = setup_tracing();
 
@@ -1071,7 +1064,7 @@ mod tests {
             .ready()
             .await
             .unwrap()
-            .oneshot(HttpRequest {
+            .call(HttpRequest {
                 http_request: http::Request::builder()
                     .uri(url)
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())

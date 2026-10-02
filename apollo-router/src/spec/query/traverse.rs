@@ -147,7 +147,7 @@ pub(crate) fn selection_set(
                 .map_err(|e| match e {
                     FieldLookupError::NoSuchType => format!("type `{parent_type}` not defined"),
                     FieldLookupError::NoSuchField(_, _) => {
-                        format!("no field `{}` in type `{parent_type}`", &def.name)
+                        format!("no field `{}` in type `{parent_type}`", def.name)
                     }
                 })?
                 .clone();

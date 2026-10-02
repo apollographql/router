@@ -2910,6 +2910,7 @@ impl FetchDependencyGraphNode {
                     ty: ty.clone(),
                     default_value: None,
                     directives: Default::default(),
+                    description: None,
                 })
             })
         });
@@ -2973,7 +2974,7 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation_document = operation_compression.compress(operation)?;
+        let operation_document = operation_compression.compress(operation, false)?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
@@ -3007,6 +3008,7 @@ impl FetchDependencyGraphNode {
         }
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
             subgraph_name: self.subgraph_name.clone(),
+            protocol: Default::default(),
             id: self.id.get().copied(),
             variable_usages,
             requires: input_nodes
@@ -3350,7 +3352,7 @@ fn to_toposorted_adjacency_list<N, E>(
     Some((adj, tred_index_of))
 }
 
-fn operation_for_entities_fetch(
+pub(crate) fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     mut variable_definitions: Vec<Node<VariableDefinition>>,
@@ -3420,11 +3422,12 @@ fn operation_for_entities_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
 
-fn operation_for_query_fetch(
+pub(crate) fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
@@ -3438,6 +3441,7 @@ fn operation_for_query_fetch(
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
+        description: None,
         selection_set,
     })
 }
@@ -3456,6 +3460,7 @@ fn representations_variable_definition(
         ty: Type::Named(any_name).non_null().list().non_null().into(),
         default_value: None,
         directives: Default::default(),
+        description: None,
     }
     .into())
 }
@@ -4633,7 +4638,7 @@ fn wrap_selection_with_type_and_conditions<T>(
     })
 }
 
-fn wrap_input_selections(
+pub(crate) fn wrap_input_selections(
     supergraph_schema: &ValidFederationSchema,
     wrapping_type: &CompositeTypeDefinitionPosition,
     selections: SelectionSet,
@@ -4686,7 +4691,7 @@ fn create_fetch_initial_path(
     )))
 }
 
-fn compute_input_rewrites_on_key_fetch(
+pub(crate) fn compute_input_rewrites_on_key_fetch(
     input_type_name: &Name,
     dest_type: &CompositeTypeDefinitionPosition,
     dest_schema: &ValidFederationSchema,
@@ -5348,7 +5353,7 @@ fn inputs_for_require(
             |_| {
                 Err(FederationError::internal(format!(
                     "Type {} should exist in the supergraph and be a composite type",
-                    &input_type_name
+                    input_type_name
                 )))
             },
             Ok,

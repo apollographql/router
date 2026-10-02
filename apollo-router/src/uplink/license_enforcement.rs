@@ -45,12 +45,39 @@ pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
 
 pub(crate) const APOLLO_ROUTER_LICENSE_EXPIRED: &str = "APOLLO_ROUTER_LICENSE_EXPIRED";
 
+pub(crate) const APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE: &str =
+    "APOLLO_ROUTER_LICENSE_VERSION_INCOMPATIBLE";
+pub(crate) const LICENSE_VERSION_INCOMPATIBLE_SHORT_MESSAGE: &str = "This license uses a format that this version of the Apollo Router does not understand. \
+    Upgrade the Router to the latest version, or contact Apollo support if the problem persists.";
+
+pub(crate) const LICENSE_INVALID_SHORT_MESSAGE: &str = "This license file is invalid or corrupted. Re-download the license from Apollo \
+    Studio, or contact Apollo support if the problem persists.";
+
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
 #[derive(Error, Display, Debug)]
 pub enum Error {
     /// invalid license: {0}
     InvalidLicense(jsonwebtoken::errors::Error),
+}
+
+impl Error {
+    /// Returns true when this decode failure means the router doesn't understand the
+    /// *shape* of the license it was given (a required claim is missing, or the claims
+    /// don't deserialize into the expected structure) as opposed to the token being
+    /// corrupt, unsigned, or signed with an unrecognized key. The former indicates a
+    /// version mismatch between the license format and this router version; the latter
+    /// is a genuinely invalid/corrupt license.
+    pub(crate) fn is_version_incompatible(&self) -> bool {
+        match self {
+            Error::InvalidLicense(err) => matches!(
+                err.kind(),
+                jsonwebtoken::errors::ErrorKind::MissingRequiredClaim(_)
+                    | jsonwebtoken::errors::ErrorKind::InvalidClaimFormat(_)
+                    | jsonwebtoken::errors::ErrorKind::Json(_)
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Hash)]
@@ -258,10 +285,8 @@ impl LicenseEnforcementReport {
                             .flat_map(|def| match def {
                                 // To traverse additional directive locations, add match arms for the respective definition types required.
                                 ExtendedType::Object(object_type_def) => {
-                                    let directives_on_object = object_type_def
-                                        .directives
-                                        .get_all(&directive_name)
-                                        .map(|component| &component.node);
+                                    let directives_on_object =
+                                        object_type_def.directives.get_all(&directive_name);
                                     let directives_on_fields =
                                         object_type_def.fields.values().flat_map(|field| {
                                             field.directives.get_all(&directive_name)
@@ -793,15 +818,6 @@ impl LicenseState {
         !self.is_unlicensed()
     }
 
-    pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
-        match self {
-            LicenseState::Licensed { limits }
-            | LicenseState::LicensedWarn { limits }
-            | LicenseState::LicensedHalt { limits } => limits.as_ref(),
-            _ => None,
-        }
-    }
-
     pub(crate) fn get_allowed_features(&self) -> HashSet<AllowedFeature> {
         match self {
             LicenseState::Licensed { limits }
@@ -874,7 +890,13 @@ impl FromStr for License {
                     &DecodingKey::from_jwk(jwk).expect("router.jwks.json must be valid"),
                     &validation,
                 )
-                .map_err(Error::InvalidLicense)
+                .map_err(|err| {
+                    tracing::debug!(
+                        jwk_key_id = ?jwk.common.key_id,
+                        "failed to decode license against key: {err}"
+                    );
+                    Error::InvalidLicense(err)
+                })
                 .map(|r| License {
                     claims: Some(r.claims),
                 })
@@ -1013,6 +1035,20 @@ mod test {
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
 
+    #[test]
+    fn from_str_logs_debug_on_decode_failure() {
+        use crate::test_harness::tracing_test;
+
+        let _guard = tracing_test::dispatcher_guard();
+
+        let result = License::from_str("not-a-valid-jwt");
+
+        assert!(result.is_err());
+        assert!(tracing_test::logs_contain(
+            "failed to decode license against key"
+        ));
+    }
+
     #[track_caller]
     fn check(
         router_yaml: &str,
@@ -1132,6 +1168,35 @@ mod test {
             .expect("a halted license does not fail enforcement");
 
         assert_eq!(*effective, LicenseState::LicensedHalt { limits });
+    }
+
+    // `Error::is_version_incompatible` distinguishes "the router doesn't understand the
+    // shape of this license" (missing/malformed claims — a version mismatch) from
+    // "this token is corrupt or improperly signed" (an unrelated failure mode that
+    // should stay classified as a plain invalid license).
+    #[rstest::rstest]
+    #[case::missing_required_claim(
+        jsonwebtoken::errors::ErrorKind::MissingRequiredClaim("warnAt".to_string()),
+        true
+    )]
+    #[case::invalid_claim_format(
+        jsonwebtoken::errors::ErrorKind::InvalidClaimFormat("haltAt".to_string()),
+        true
+    )]
+    #[case::json_shape_mismatch(
+        jsonwebtoken::errors::ErrorKind::Json(Arc::new(
+            serde_json::from_str::<serde_json::Value>("not json").unwrap_err()
+        )),
+        true
+    )]
+    #[case::invalid_signature(jsonwebtoken::errors::ErrorKind::InvalidSignature, false)]
+    #[case::invalid_token(jsonwebtoken::errors::ErrorKind::InvalidToken, false)]
+    fn test_is_version_incompatible(
+        #[case] kind: jsonwebtoken::errors::ErrorKind,
+        #[case] expected: bool,
+    ) {
+        let error = super::Error::InvalidLicense(jsonwebtoken::errors::new_error(kind));
+        assert_eq!(error.is_version_incompatible(), expected);
     }
 
     #[test]

@@ -22,6 +22,8 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -31,7 +33,6 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
-use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -42,26 +43,40 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::services::router;
 
-pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
-pub(crate) type ServiceResult = Result<Response, BoxError>;
+/// A boxed service for making connector requests.
+pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
+/// The result of a single connector request.
+pub type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
 assert_impl_all!(Response: Send);
 
 /// Request type for a single connector request
 #[derive(Debug)]
-pub(crate) struct Request {
-    /// The request context
-    pub(crate) context: Context,
+pub struct Request {
+    /// The request context, shared with the rest of the router pipeline for this
+    /// operation. Readable and writable: a plugin may store values here for later
+    /// stages, matching what the coprocessor `ConnectorRequest` stage can do.
+    pub context: Context,
 
-    /// The connector associated with this request
-    // If this service moves into the public API, consider whether this exposes too much
-    // internal information about the connector. A new type may be needed which exposes only
-    // what is necessary for customizations.
+    /// The connector associated with this request.
+    //
+    // Deliberately kept `pub(crate)` now that this service is public: `Connector`
+    // carries the full expanded connector definition, far more internal detail than a
+    // customization needs. If plugins turn out to need something from it, expose that
+    // through a narrow accessor or a purpose-built type rather than the whole struct.
     pub(crate) connector: Arc<Connector>,
 
-    /// The request to the underlying transport
-    pub(crate) transport_request: TransportRequest,
+    /// The request to the underlying transport.
+    ///
+    /// [`TransportRequest::Http`] holds the outgoing [`http::Request`], so a plugin can
+    /// read and rewrite its URI, headers, body and method.
+    ///
+    /// Note that the method is writable here but *not* through the coprocessor
+    /// `ConnectorRequest` stage, which sends the method to the coprocessor but ignores
+    /// any method it sends back. A plugin that rewrites the method therefore has no
+    /// coprocessor equivalent.
+    pub transport_request: TransportRequest,
 
     /// Information about how to map the response to GraphQL
     pub(crate) key: ResponseKey,
@@ -69,7 +84,8 @@ pub(crate) struct Request {
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
 
-    /// Original request to the Router.
+    /// Original request to the Router. Read it through
+    /// [`Request::supergraph_request`].
     pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
 
     /// The operation being executed. Together with
@@ -78,25 +94,216 @@ pub(crate) struct Request {
     pub(crate) operation: Option<Arc<Valid<ExecutableDocument>>>,
 }
 
+impl Request {
+    /// A request to a `Query.hello` connector on the `test_subgraph.test_sourcename` source.
+    #[cfg(test)]
+    pub(crate) fn test_new() -> Self {
+        use apollo_compiler::name;
+        use apollo_federation::connectors::ConnectId;
+        use apollo_federation::connectors::ConnectSpec;
+        use apollo_federation::connectors::HttpJsonTransport;
+        use apollo_federation::connectors::JSONSelection;
+        use apollo_federation::connectors::SourceName;
+        use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            schema_subtypes_map: Default::default(),
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some(SourceName::cast("test_sourcename")),
+                name!(Query),
+                name!(hello),
+                None,
+                0,
+            ),
+            transport: Some(HttpJsonTransport {
+                source_template: "http://localhost/api".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
+                ..Default::default()
+            }),
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+            request_variable_keys: Default::default(),
+            response_variable_keys: Default::default(),
+            error_settings: Default::default(),
+            output_type: None,
+            label: "test label".into(),
+        };
+        let http_request = HttpRequest {
+            inner: http::Request::new("testing".to_string()),
+            debug: Default::default(),
+        };
+        Self {
+            context: Context::default(),
+            connector: Arc::new(connector),
+            transport_request: http_request.into(),
+            key: ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            },
+            mapping_problems: Default::default(),
+            supergraph_request: Default::default(),
+            operation: Default::default(),
+        }
+    }
+
+    /// The original request made to the router, which produced this connector request.
+    ///
+    /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
+    /// request while handling the connector call, and every other plugin on the chain
+    /// sees the same value, so letting one plugin swap it out would change behaviour
+    /// well outside that plugin. Rewrite [`Request::transport_request`] instead to
+    /// change what goes over the wire.
+    pub fn supergraph_request(&self) -> &Arc<http::Request<graphql::Request>> {
+        &self.supergraph_request
+    }
+
+    /// Consume this request and produce a failed [`Response`] for it, without making
+    /// the outbound call.
+    ///
+    /// This is the in-process equivalent of a coprocessor returning `Control::Break`
+    /// from the `ConnectorRequest` stage: the connector call is not made, and `message`,
+    /// `code`, and `extensions` are reported to the client as a GraphQL error at this
+    /// connector's path (an entry for `code` in `extensions` is ignored). Use it to fail
+    /// a connector request deliberately, for example to circuit break on an upstream a
+    /// plugin knows to be unhealthy.
+    ///
+    /// The response carries no status, so the router's own circuit breaker counts the
+    /// failure against the connector source, like any other error from a request it has
+    /// admitted.
+    ///
+    /// The error's remaining fields are derived from the request and are not settable,
+    /// for the same reason the coprocessor does not let a coprocessor set them: the
+    /// path and response key are what merge the failure back into the right place in
+    /// the GraphQL response.
+    pub fn into_error_response(
+        self,
+        message: impl Into<String>,
+        code: impl Into<String>,
+        extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
+    ) -> Response {
+        Response::error_from_request(
+            self.context,
+            self.connector,
+            self.key,
+            None,
+            message,
+            code,
+            extensions,
+        )
+    }
+}
+
 /// Response type for a connector
 #[derive(Debug)]
-pub(crate) struct Response {
-    /// The request context
-    pub(crate) context: Context,
+pub struct Response {
+    /// The request context, shared with the rest of the router pipeline for this
+    /// operation. Readable and writable, matching what the coprocessor
+    /// `ConnectorResponse` stage can do.
+    pub context: Context,
 
     /// Originating federation subgraph name for this connector call. Carried
     /// on the response (rather than passed through shared context) so parallel
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// The result of the transport request
-    pub(crate) transport_result: Result<TransportResponse, Error>,
+    /// The result of the transport request.
+    ///
+    /// This is the raw transport outcome: HTTP status, headers and transport-level
+    /// errors. Telemetry and downstream plugins read it, but the data returned to the
+    /// client comes from the mapped response, which is *not* recomputed when this
+    /// changes. Rewriting the status or headers here therefore makes telemetry
+    /// disagree with what the client actually receives unless you make the
+    /// corresponding change through the mapped-response accessors.
+    pub transport_result: Result<TransportResponse, Error>,
 
-    /// The mapped response, including any mapping problems encountered when processing the response
+    /// The mapped response, including any mapping problems encountered when processing
+    /// the response. This is what is merged into the GraphQL response returned to the
+    /// client. Kept private so that only the parts a customization may safely change
+    /// are reachable; see the accessors on [`Response`].
     pub(crate) mapped_response: MappedResponse,
+
+    /// The status a coprocessor gave when it broke this request before it was sent, so the
+    /// circuit breaker can judge the break the way it judges a subgraph response's status.
+    /// `None` for every request that was not broken with a status.
+    pub(crate) break_status: Option<http::StatusCode>,
 }
 
 impl Response {
+    /// The mapped response data returned to the client, or `None` if this connector
+    /// call produced an error instead. See [`Response::error`] for that case.
+    pub fn data(&self) -> Option<&serde_json_bytes::Value> {
+        match &self.mapped_response {
+            MappedResponse::Data { data, .. } => Some(data),
+            MappedResponse::Error { .. } => None,
+        }
+    }
+
+    /// Replace the mapped response data returned to the client.
+    ///
+    /// Returns `false` and changes nothing if this is an error response: a
+    /// customization cannot turn a failed connector call into a successful one, which
+    /// is also true of the coprocessor `ConnectorResponse` stage.
+    ///
+    /// This does not touch [`Response::transport_result`], so telemetry continues to
+    /// report the status and headers actually received from the upstream.
+    pub fn set_data(&mut self, data: serde_json_bytes::Value) -> bool {
+        match &mut self.mapped_response {
+            MappedResponse::Data { data: current, .. } => {
+                *current = data;
+                true
+            }
+            MappedResponse::Error { .. } => false,
+        }
+    }
+
+    /// The error returned to the client, or `None` if this connector call produced
+    /// data instead. See [`Response::data`] for that case.
+    pub fn error(&self) -> Option<&RuntimeError> {
+        match &self.mapped_response {
+            MappedResponse::Error { error, .. } => Some(error),
+            MappedResponse::Data { .. } => None,
+        }
+    }
+
+    /// Replace the message of the error returned to the client.
+    ///
+    /// Returns `false` and changes nothing if this is a successful response: a
+    /// customization cannot turn a successful connector call into a failed one here,
+    /// which is also true of the coprocessor `ConnectorResponse` stage. To fail a
+    /// connector call, break it before it is made with
+    /// [`Request::into_error_response`].
+    pub fn set_error_message(&mut self, message: impl Into<String>) -> bool {
+        match &mut self.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                error.message = message.into();
+                true
+            }
+            MappedResponse::Data { .. } => false,
+        }
+    }
+
+    /// Replace the `code` extension of the error returned to the client.
+    ///
+    /// Returns `false` and changes nothing if this is a successful response, as for
+    /// [`Response::set_error_message`].
+    pub fn set_error_code(&mut self, code: impl Into<String>) -> bool {
+        match &mut self.mapped_response {
+            MappedResponse::Error { error, .. } => {
+                error.set_code(code);
+                true
+            }
+            MappedResponse::Data { .. } => false,
+        }
+    }
+
     pub(crate) fn error_new(
         context: Context,
         subgraph_name: String,
@@ -117,6 +324,40 @@ impl Response {
             subgraph_name,
             transport_result: Err(error),
             mapped_response,
+            break_status: None,
+        }
+    }
+
+    pub(crate) fn error_from_request(
+        request_context: Context,
+        request_connector: Arc<Connector>,
+        request_key: ResponseKey,
+        break_status: Option<http::StatusCode>,
+        message: impl Into<String>,
+        code: impl Into<String>,
+        extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
+    ) -> Self {
+        let message = message.into();
+        let subgraph_name = request_connector.id.subgraph_name.to_string();
+        let mut error = RuntimeError::new(message.clone(), &request_key).with_code(code);
+        error.subgraph_name = Some(subgraph_name.clone());
+        for (k, v) in extensions {
+            let k = k.into();
+            if k.as_str() != "code" {
+                error = error.extension(k, v);
+            }
+        }
+
+        Response {
+            context: request_context,
+            subgraph_name,
+            transport_result: Err(Error::TransportFailure(message)),
+            mapped_response: MappedResponse::Error {
+                error,
+                key: request_key,
+                problems: Vec::new(),
+            },
+            break_status,
         }
     }
 
@@ -148,6 +389,7 @@ impl Response {
             subgraph_name: String::new(),
             transport_result: Ok(http_response.into()),
             mapped_response,
+            break_status: None,
         }
     }
 }
@@ -200,21 +442,12 @@ impl tower::Service<Request> for ConnectorRequestService {
         let mut http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         // Load the information needed from the context
-        let (debug, connector_request_event, request_limit) =
-            request.context.extensions().with_lock(|lock| {
-                (
-                    lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
-                    lock.get::<ConnectorEventRequest>().cloned(),
-                    lock.get::<Arc<RequestLimits>>()
-                        .map(|limits| {
-                            limits.get(
-                                request.connector.as_ref().into(),
-                                request.connector.max_requests,
-                            )
-                        })
-                        .unwrap_or(None),
-                )
-            });
+        let (debug, connector_request_event) = request.context.extensions().with_lock(|lock| {
+            (
+                lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
+                lock.get::<ConnectorEventRequest>().cloned(),
+            )
+        });
 
         let log_request_level = connector_request_event.and_then(|s| {
             if s.condition.lock().evaluate_request(&request) == Some(true) {
@@ -252,53 +485,45 @@ impl tower::Service<Request> for ConnectorRequestService {
                         subgraph_name: original_subgraph_name,
                         transport_result: Ok(TransportResponse::MappingOnly),
                         mapped_response: mapped,
+                        break_status: None,
                     })
                 }
 
                 TransportRequest::Http(http_request) => {
-                    let mut debug_request = (None, Default::default());
-                    let result = if request_limit
-                        .is_some_and(|request_limit| !request_limit.allow())
-                    {
-                        Err(Error::RequestLimitExceeded)
-                    } else {
-                        debug_request = http_request.debug;
+                    let debug_request = http_request.debug;
 
-                        log_request(
-                            &http_request.inner,
-                            log_request_level,
-                            request.connector.label.as_ref(),
-                            &request.context,
-                            &original_subgraph_name,
+                    log_request(
+                        &http_request.inner,
+                        log_request_level,
+                        request.connector.label.as_ref(),
+                        &request.context,
+                        &original_subgraph_name,
+                    );
+
+                    let (parts, body) = http_request.inner.into_parts();
+                    let http_request =
+                        http::Request::from_parts(parts, router::body::from_bytes(body));
+
+                    let result = http_client
+                        .call(crate::services::http::HttpRequest {
+                            http_request,
+                            context: request.context.clone(),
+                        })
+                        .await
+                        .map(|result| result.http_response)
+                        .map_err(|e|
+                            // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                            // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                            Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
                         );
 
-                        let (parts, body) = http_request.inner.into_parts();
-                        let http_request =
-                            http::Request::from_parts(parts, router::body::from_bytes(body));
-
-                        let result = http_client
-                            .call(crate::services::http::HttpRequest {
-                                http_request,
-                                context: request.context.clone(),
-                            })
-                            .await
-                            .map(|result| result.http_response)
-                            .map_err(|e|
-                                // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                            );
-
-                        u64_counter!(
-                            "apollo.router.operations.connectors",
-                            "Total number of requests to connectors",
-                            1,
-                            "connector.type" = CONNECTOR_TYPE_HTTP,
-                            "subgraph.name" = original_subgraph_name
-                        );
-
-                        result
-                    };
+                    u64_counter!(
+                        "apollo.router.operations.connectors",
+                        "Total number of requests to connectors",
+                        1,
+                        "connector.type" = CONNECTOR_TYPE_HTTP,
+                        "subgraph.name" = original_subgraph_name
+                    );
 
                     Ok(process_response(
                         result,

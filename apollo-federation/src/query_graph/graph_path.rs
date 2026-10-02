@@ -495,6 +495,23 @@ where
         &self.runtime_types_of_tail
     }
 
+    /// Returns the head node (previous subgraph) of the last subgraph-entering edge, if any.
+    /// This determines which subgraph the path was in before its most recent cross-subgraph hop,
+    /// which affects indirect-path pruning during advancement.
+    pub(crate) fn last_subgraph_entering_edge_head(
+        &self,
+    ) -> Result<Option<NodeIndex>, FederationError> {
+        let Some(info) = &self.last_subgraph_entering_edge_info else {
+            return Ok(None);
+        };
+        let Some(edge) = self.edges[info.index].into() else {
+            return Err(FederationError::internal(
+                "Subgraph-entering edge is unexpectedly absent",
+            ));
+        };
+        Ok(Some(self.graph.edge_endpoints(edge)?.0))
+    }
+
     /// Creates a new (empty) path starting at the provided `head` node.
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
         let mut path = Self {
@@ -1050,17 +1067,17 @@ where
             let tail_schema = self.graph.schema_by_source(&tail_weight.source)?;
             let tail_schema_definition = &tail_schema.schema().schema_definition;
             if let Some(query_type_name) = &tail_schema_definition.query
-                && tail_type_pos.type_name() == &query_type_name.name
+                && tail_type_pos.type_name() == &**query_type_name
             {
                 continue;
             }
             if let Some(mutation_type_name) = &tail_schema_definition.mutation
-                && tail_type_pos.type_name() == &mutation_type_name.name
+                && tail_type_pos.type_name() == &**mutation_type_name
             {
                 continue;
             }
             if let Some(subscription_type_name) = &tail_schema_definition.subscription
-                && tail_type_pos.type_name() == &subscription_type_name.name
+                && tail_type_pos.type_name() == &**subscription_type_name
             {
                 continue;
             }
@@ -1186,7 +1203,7 @@ where
                                     .get(supergraph_schema.schema())?
                                     .implements_interfaces
                                     .iter()
-                                    .any(|item| &item.name == pos.type_name()) =>
+                                    .any(|item| &**item == pos.type_name()) =>
                             {
                                 return Ok(true);
                             }
@@ -1196,7 +1213,7 @@ where
                                 .get(supergraph_schema.schema())?
                                 .implements_interfaces
                                 .iter()
-                                .any(|item| &item.name == pos.type_name()) =>
+                                .any(|item| &**item == pos.type_name()) =>
                             {
                                 return Ok(true);
                             }
@@ -1210,7 +1227,7 @@ where
                                 .get(supergraph_schema.schema())?
                                 .members
                                 .iter()
-                                .any(|item| &item.name == parent_type_in_supergraph.type_name())
+                                .any(|item| &**item == parent_type_in_supergraph.type_name())
                         {
                             return Ok(true);
                         }

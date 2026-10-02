@@ -16,6 +16,7 @@ use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use tower::BoxError;
 
 use super::*;
 use crate::Configuration;
@@ -57,17 +58,19 @@ where
 impl<T> GenericWith<T> for T where Self: Sized {}
 
 /// Telemetry configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
+    #[config(skip_validate)]
     pub(crate) apollo: apollo::Config,
 
     /// Instrumentation configuration
+    #[config(skip_validate)]
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
+    #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }
 
@@ -253,14 +256,59 @@ impl MetricView {
     #[cfg(test)]
     pub(crate) fn into_view_fn(
         self,
-    ) -> impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static {
-        let name = self.name.clone();
+    ) -> Result<impl Fn(&Instrument) -> Option<Stream> + Send + Sync + 'static, BoxError> {
+        let matcher = self.name_matcher()?;
         let view = self;
-        move |instrument: &Instrument| {
-            if instrument.name() != name {
+        Ok(move |instrument: &Instrument| {
+            if !matcher.matches(instrument.name()) {
                 return None;
             }
             Some(view.clone().into_stream())
+        })
+    }
+
+    /// Compiles this view's `name` into a matcher used to select instruments.
+    pub(crate) fn name_matcher(&self) -> Result<InstrumentNameMatcher, BoxError> {
+        InstrumentNameMatcher::new(&self.name)
+    }
+}
+
+/// Matches an instrument name against a metric view's configured `name`.
+///
+/// This restores the wildcard selection the OpenTelemetry SDK performed natively
+/// before the 0.31 View API migration, which replaced pattern-aware selection with a
+/// plain closure. `name` is a glob (`*`, `?`, `[...]`); a bare `*` or an empty name
+/// matches every instrument, and a name with no glob metacharacters matches exactly.
+#[derive(Clone, Debug)]
+pub(crate) enum InstrumentNameMatcher {
+    /// Matches every instrument (empty name or a bare `*`).
+    All,
+    /// Matches a single instrument name exactly.
+    Exact(String),
+    /// Matches instrument names against a glob pattern (`*`, `?`, `[...]`).
+    Pattern(globset::GlobMatcher),
+}
+
+impl InstrumentNameMatcher {
+    fn new(name: &str) -> Result<Self, BoxError> {
+        if name.is_empty() || name == "*" {
+            return Ok(Self::All);
+        }
+        // Only glob metacharacters opt a name into pattern matching, mirroring the pre-0.31 SDK.
+        if name.contains(['*', '?', '[', ']']) {
+            let glob = globset::Glob::new(name).map_err(|error| -> BoxError {
+                format!("invalid metric view name `{name}`: {error}").into()
+            })?;
+            return Ok(Self::Pattern(glob.compile_matcher()));
+        }
+        Ok(Self::Exact(name.to_string()))
+    }
+
+    pub(crate) fn matches(&self, name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Exact(expected) => expected == name,
+            Self::Pattern(pattern) => pattern.is_match(name),
         }
     }
 }
@@ -279,10 +327,8 @@ pub(crate) enum MetricAggregation {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Tracing {
-    // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
-    // When deleting, put a #[serde(alias = "experimental_response_trace_id")] if we don't want to break things
     /// A way to expose trace id in response headers
-    #[serde(default, rename = "experimental_response_trace_id")]
+    #[serde(default, alias = "experimental_response_trace_id")]
     pub(crate) response_trace_id: ExposeTraceId,
     /// Propagation configuration
     pub(crate) propagation: Propagation,
@@ -907,44 +953,31 @@ impl Conf {
         Ok(())
     }
 
+    /// The telemetry config, when the configuration has a `telemetry` section.
+    fn configured(configuration: &Configuration) -> Option<&Conf> {
+        configuration.typed_plugin_config("apollo.telemetry")
+    }
+
     pub(crate) fn metrics_reference_mode(
         configuration: &Configuration,
     ) -> ApolloMetricsReferenceMode {
-        match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.metrics_reference_mode,
-                    _ => ApolloMetricsReferenceMode::default(),
-                }
-            }
-            _ => ApolloMetricsReferenceMode::default(),
-        }
+        Self::configured(configuration)
+            .map(|conf| conf.apollo.metrics_reference_mode)
+            .unwrap_or_default()
     }
 
     pub(crate) fn signature_normalization_algorithm(
         configuration: &Configuration,
     ) -> ApolloSignatureNormalizationAlgorithm {
-        match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.signature_normalization_algorithm,
-                    _ => ApolloSignatureNormalizationAlgorithm::default(),
-                }
-            }
-            _ => ApolloSignatureNormalizationAlgorithm::default(),
-        }
+        Self::configured(configuration)
+            .map(|conf| conf.apollo.signature_normalization_algorithm.clone())
+            .unwrap_or_default()
     }
 
     pub(crate) fn apollo(configuration: &Configuration) -> ApolloTelemetryConfig {
-        match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo,
-                    _ => ApolloTelemetryConfig::default(),
-                }
-            }
-            _ => ApolloTelemetryConfig::default(),
-        }
+        Self::configured(configuration)
+            .map(|conf| conf.apollo.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -1006,6 +1039,53 @@ mod tests {
         AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
         AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
+    }
+
+    #[test]
+    fn instrument_name_matcher_exact_and_wildcards() {
+        let matcher = |name: &str| {
+            MetricView::default_view(name, None, None)
+                .name_matcher()
+                .expect("valid glob")
+        };
+
+        // Exact (no wildcard chars)
+        assert!(matcher("request.duration").matches("request.duration"));
+        assert!(!matcher("request.duration").matches("request.size"));
+
+        // `*` = zero or more characters; `.` in the pattern is a literal
+        assert!(matcher("request.*").matches("request.duration"));
+        assert!(matcher("request.*").matches("request.size"));
+        assert!(matcher("request.*").matches("request."));
+        assert!(!matcher("request.*").matches("response.duration"));
+        assert!(!matcher("request.*").matches("requests")); // requires the literal '.'
+
+        // `?` = exactly one character
+        assert!(matcher("request.coun?").matches("request.count"));
+        assert!(!matcher("request.coun?").matches("request.coun"));
+        assert!(!matcher("request.coun?").matches("request.counts"));
+
+        // `[...]` = one character from a set
+        assert!(matcher("request.[cs]ount").matches("request.count"));
+        assert!(matcher("request.[cs]ount").matches("request.sount"));
+        assert!(!matcher("request.[cs]ount").matches("request.bount"));
+
+        // Catch-alls: bare `*` and empty string match everything
+        assert!(matcher("*").matches("anything.at.all"));
+        assert!(matcher("").matches("anything.at.all"));
+
+        // Metacharacters other than the glob syntax stay literal: the `.` must
+        // match a literal dot.
+        assert!(matcher("a.b*").matches("a.bcd"));
+        assert!(!matcher("a.b*").matches("axbcd"));
+    }
+
+    #[test]
+    fn instrument_name_matcher_rejects_invalid_pattern() {
+        let error = MetricView::default_view("request.[cs", None, None)
+            .name_matcher()
+            .expect_err("unbalanced bracket must be rejected");
+        assert!(error.to_string().contains("request.[cs"));
     }
 
     #[test]
@@ -1240,7 +1320,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(view.into_view_fn())
+            .with_view(view.into_view_fn().unwrap())
             .build();
 
         // Record a histogram value
@@ -1283,7 +1363,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(merged.into_view_fn())
+            .with_view(merged.into_view_fn().unwrap())
             .build();
 
         let meter = meter_provider.meter("test");
@@ -1317,7 +1397,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(view.into_view_fn())
+            .with_view(view.into_view_fn().unwrap())
             .build();
 
         let meter = meter_provider.meter("test");
@@ -1359,7 +1439,7 @@ mod tests {
 
         let meter_provider = MeterProviderBuilder::default()
             .with_reader(PeriodicReader::builder(exporter.clone(), runtime::Tokio).build())
-            .with_view(merged.into_view_fn())
+            .with_view(merged.into_view_fn().unwrap())
             .build();
 
         let meter = meter_provider.meter("test");

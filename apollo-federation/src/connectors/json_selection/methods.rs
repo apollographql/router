@@ -67,6 +67,7 @@ pub(super) enum ArrowMethod {
     Trim,
     TrimStart,
     TrimEnd,
+    WithError,
 
     // Future methods:
     TypeOf,
@@ -188,6 +189,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Trim => &public::TrimMethod,
             Self::TrimStart => &public::TrimStartMethod,
             Self::TrimEnd => &public::TrimEndMethod,
+            Self::WithError => &public::WithErrorMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -252,6 +254,7 @@ impl ArrowMethod {
             "trim" => Some(Self::Trim),
             "trimStart" => Some(Self::TrimStart),
             "trimEnd" => Some(Self::TrimEnd),
+            "withError" => Some(Self::WithError),
             _ => None,
         };
 
@@ -306,6 +309,7 @@ impl ArrowMethod {
                 | Self::Trim
                 | Self::TrimStart
                 | Self::TrimEnd
+                | Self::WithError
         )
     }
 }

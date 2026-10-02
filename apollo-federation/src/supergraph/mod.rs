@@ -16,9 +16,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
-use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::DirectiveLocation;
@@ -128,29 +125,6 @@ impl Supergraph<Merged> {
 
     pub fn hints_mut(&mut self) -> &mut Vec<CompositionHint> {
         &mut self.state.hints
-    }
-
-    #[allow(unused)]
-    pub(crate) fn subgraph_name_to_graph_enum_value(
-        &self,
-    ) -> Result<IndexMap<String, Name>, FederationError> {
-        let supergraph_schema = self.schema();
-        // PORT_NOTE: The JS version calls the `extractSubgraphsFromSupergraph` function, which
-        //            returns the subgraph name to graph enum value mapping, but the corresponding
-        //            `extract_subgraphs_from_supergraph` function in Rust does not need it and
-        //            does not return it. Therefore, a small part of
-        //            `extract_subgraphs_from_supergraph` function is reused here to compute the
-        //            mapping, instead of modifying the function itself.
-        let (_link_spec_definition, join_spec_definition, _context_spec_definition) =
-            crate::validate_supergraph_for_query_planning(supergraph_schema)?;
-        let (_subgraphs, _federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-            collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
-        Ok(graph_enum_value_name_to_subgraph_name
-            .into_iter()
-            .map(|(enum_value_name, subgraph_name)| {
-                (subgraph_name.to_string(), enum_value_name.clone())
-            })
-            .collect())
     }
 }
 
@@ -307,11 +281,16 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     validate_extracted_subgraphs: Option<bool>,
 ) -> Result<ValidFederationSubgraphs, FederationError> {
     let validate_extracted_subgraphs = validate_extracted_subgraphs.unwrap_or(true);
+    let validate_default_values = supergraph_schema.schema().validate_default_values;
     let (link_spec_definition, join_spec_definition, context_spec_definition) =
         crate::validate_supergraph_for_query_planning(supergraph_schema)?;
     let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
-        collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
+        collect_empty_subgraphs(
+            supergraph_schema,
+            join_spec_definition,
+            validate_default_values,
+        )?;
 
     let filtered_types: Vec<_> = supergraph_schema
         .get_types()
@@ -343,20 +322,6 @@ pub(crate) fn extract_subgraphs_from_supergraph(
             context_spec_definition,
             &filtered_types,
         )?;
-    }
-
-    for graph_enum_value in graph_enum_value_name_to_subgraph_name.keys() {
-        let subgraph = get_subgraph(
-            &mut subgraphs,
-            &graph_enum_value_name_to_subgraph_name,
-            graph_enum_value,
-        )?;
-        let federation_spec_definition = federation_spec_definitions
-            .get(graph_enum_value)
-            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
-                message: "Subgraph unexpectedly does not use federation spec".to_owned(),
-            })?;
-        add_federation_operations(subgraph, federation_spec_definition)?;
     }
 
     let mut valid_subgraphs = ValidFederationSubgraphs::new();
@@ -411,6 +376,7 @@ type CollectEmptySubgraphsOk = (
 fn collect_empty_subgraphs(
     supergraph_schema: &FederationSchema,
     join_spec_definition: &JoinSpecDefinition,
+    validate_default_values: bool,
 ) -> Result<CollectEmptySubgraphsOk, FederationError> {
     let mut subgraphs = FederationSubgraphs::new();
     let graph_directive_definition =
@@ -431,7 +397,7 @@ fn collect_empty_subgraphs(
         let subgraph = FederationSubgraph {
             name: graph_arguments.name.to_owned(),
             url: graph_arguments.url.to_owned(),
-            schema: new_empty_federation_2_subgraph_schema()?,
+            schema: new_empty_federation_2_subgraph_schema(validate_default_values)?,
             graph_enum_value: enum_value_name.clone(),
         };
         let federation_link = &subgraph
@@ -561,7 +527,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
                 .iter()
                 .filter(|location| EXECUTABLE_DIRECTIVE_LOCATIONS.contains(*location))
                 .copied()
-                .collect::<Vec<_>>();
+                .collect::<IndexSet<_>>();
             if executable_locations.is_empty() {
                 return None;
             }
@@ -586,12 +552,23 @@ fn extract_subgraphs_from_fed_2_supergraph(
             }))
         })
         .collect::<Vec<_>>();
-    for subgraph in subgraphs.subgraphs.values_mut() {
+    for (graph_enum_value, subgraph_name) in graph_enum_value_name_to_subgraph_name {
+        let subgraph = subgraphs.get_mut(subgraph_name).ok_or_else(|| {
+            FederationError::internal(
+                "All subgraphs should have been created by \"collect_empty_subgraphs()\"",
+            )
+        })?;
+        let federation_spec_definition = federation_spec_definitions
+            .get(graph_enum_value)
+            .ok_or_else(|| SingleFederationError::InvalidFederationSupergraph {
+                message: "Subgraph unexpectedly does not use federation spec".to_owned(),
+            })?;
         remove_inactive_requires_and_provides_from_subgraph(
             supergraph_schema,
             &mut subgraph.schema,
             FieldSetValidation::Validate,
         )?;
+        add_federation_operations(subgraph, federation_spec_definition)?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
             let pos = DirectiveDefinitionPosition {
@@ -757,30 +734,21 @@ fn add_empty_type(
                             root_kind: SchemaRootDefinitionKind::Query,
                         };
                         if root_pos.try_get(subgraph.schema.schema()).is_none() {
-                            root_pos.insert(
-                                &mut subgraph.schema,
-                                ComponentName::from(&pos.type_name),
-                            )?;
+                            root_pos.insert(&mut subgraph.schema, pos.type_name.to_node(None))?;
                         }
                     } else if pos.type_name == "Mutation" {
                         let root_pos = SchemaRootDefinitionPosition {
                             root_kind: SchemaRootDefinitionKind::Mutation,
                         };
                         if root_pos.try_get(subgraph.schema.schema()).is_none() {
-                            root_pos.insert(
-                                &mut subgraph.schema,
-                                ComponentName::from(&pos.type_name),
-                            )?;
+                            root_pos.insert(&mut subgraph.schema, pos.type_name.to_node(None))?;
                         }
                     } else if pos.type_name == "Subscription" {
                         let root_pos = SchemaRootDefinitionPosition {
                             root_kind: SchemaRootDefinitionKind::Subscription,
                         };
                         if root_pos.try_get(subgraph.schema.schema()).is_none() {
-                            root_pos.insert(
-                                &mut subgraph.schema,
-                                ComponentName::from(&pos.type_name),
-                            )?;
+                            root_pos.insert(&mut subgraph.schema, pos.type_name.to_node(None))?;
                         }
                     }
                 }
@@ -799,7 +767,7 @@ fn add_empty_type(
                                 description: None,
                                 name: pos.type_name.clone(),
                                 implements_interfaces: Default::default(),
-                                directives: DirectiveList(vec![Component::new(
+                                directives: DirectiveList(vec![Node::new(
                                     interface_object_directive,
                                 )]),
                                 fields: Default::default(),
@@ -844,13 +812,17 @@ fn add_empty_type(
                     )?;
                 }
                 TypeDefinitionPosition::InputObject(pos) => {
+                    // The supergraph doesn't record which subgraphs applied `@oneOf`, so every
+                    // subgraph gets it. Composition already checked that its fields and defaults
+                    // satisfy `@oneOf` in each of them.
+                    let one_of = directives.get("oneOf").cloned();
                     pos.pre_insert(&mut subgraph.schema)?;
                     pos.insert(
                         &mut subgraph.schema,
                         Node::new(InputObjectType {
                             description: None,
                             name: pos.type_name.clone(),
-                            directives: Default::default(),
+                            directives: one_of.into_iter().collect(),
                             fields: Default::default(),
                         }),
                     )?;
@@ -863,14 +835,14 @@ fn add_empty_type(
         }
 
         if let Some(key) = &type_directive_application.key {
-            let mut key_directive = Component::new(federation_spec_definition.key_directive(
+            let mut key_directive = Node::new(federation_spec_definition.key_directive(
                 &subgraph.schema,
                 key,
                 type_directive_application.resolvable,
             )?);
             if type_directive_application.extension {
-                key_directive.origin =
-                    ComponentOrigin::Extension(ExtensionId::new(&key_directive.node))
+                let ext_id = ExtensionId::new(&key_directive);
+                key_directive.set_extension_id(ext_id);
             }
             let subgraph_type_definition_position = subgraph
                 .schema
@@ -924,7 +896,7 @@ fn add_empty_type(
                 .get_type(type_definition_position.type_name())?
                 .try_into()?;
             subgraph_type_definition_position
-                .insert_directive(&mut subgraph.schema, Component::new(context_directive))?;
+                .insert_directive(&mut subgraph.schema, Node::new(context_directive))?;
         }
     }
 
@@ -983,7 +955,7 @@ fn extract_object_type_content(
             )?;
             pos.insert_implements_interface(
                 &mut subgraph.schema,
-                ComponentName::from(Name::new(implements_directive_application.interface)?),
+                Name::new(implements_directive_application.interface)?.to_node(None),
             )?;
         }
 
@@ -1180,13 +1152,13 @@ fn extract_interface_type_content(
                 ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        ComponentName::from(Name::new(implements_directive_application.interface)?),
+                        Name::new(implements_directive_application.interface)?.to_node(None),
                     )?;
                 }
                 ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
                     pos.insert_implements_interface(
                         &mut subgraph.schema,
-                        ComponentName::from(Name::new(implements_directive_application.interface)?),
+                        Name::new(implements_directive_application.interface)?.to_node(None),
                     )?;
                 }
             }
@@ -1329,7 +1301,7 @@ fn extract_union_type_content(
                     })
                     .collect::<Vec<_>>();
                 for member in subgraph_members {
-                    pos.insert_member(&mut subgraph.schema, ComponentName::from(&member.name))?;
+                    pos.insert_member(&mut subgraph.schema, Name::clone(member).to_node(None))?;
                 }
             }
         } else {
@@ -1355,7 +1327,7 @@ fn extract_union_type_content(
                 // broken @join__unionMember).
                 pos.insert_member(
                     &mut subgraph.schema,
-                    ComponentName::from(Name::new(union_member_directive_application.member)?),
+                    Name::new(union_member_directive_application.member)?.to_node(None),
                 )?;
             }
         }
@@ -1420,7 +1392,7 @@ fn extract_enum_type_content(
                     )?;
                     value_pos.insert(
                         &mut subgraph.schema,
-                        Component::new(EnumValueDefinition {
+                        Node::new(EnumValueDefinition {
                             description: None,
                             value: value_name.clone(),
                             directives: Default::default(),
@@ -1448,7 +1420,7 @@ fn extract_enum_type_content(
                     }
                     value_pos.insert(
                         &mut subgraph.schema,
-                        Component::new(EnumValueDefinition {
+                        Node::new(EnumValueDefinition {
                             description: None,
                             value: value_name.clone(),
                             directives: Default::default(),
@@ -1679,10 +1651,10 @@ fn add_subgraph_field(
 
     match object_or_interface_field_definition_position {
         ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
-            pos.insert(&mut subgraph.schema, Component::from(subgraph_field))?;
+            pos.insert(&mut subgraph.schema, Node::from(subgraph_field))?;
         }
         ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
-            pos.insert(&mut subgraph.schema, Component::from(subgraph_field))?;
+            pos.insert(&mut subgraph.schema, Node::from(subgraph_field))?;
         }
     };
 
@@ -1728,7 +1700,7 @@ fn add_subgraph_input_field(
     )?;
 
     input_object_field_definition_position
-        .insert(&mut subgraph.schema, Component::from(subgraph_input_field))?;
+        .insert(&mut subgraph.schema, Node::from(subgraph_input_field))?;
 
     Ok(())
 }
@@ -1894,7 +1866,7 @@ pub(crate) const EMPTY_QUERY_TYPE_SPEC: ObjectTypeSpecification = ObjectTypeSpec
 fn collect_entity_members(
     schema: &FederationSchema,
     key_directive_definition: &Node<DirectiveDefinition>,
-) -> IndexSet<ComponentName> {
+) -> IndexSet<Node<Name>> {
     schema
         .schema()
         .types
@@ -1906,7 +1878,7 @@ fn collect_entity_members(
             if !type_.directives.has(&key_directive_definition.name) {
                 return None;
             }
-            Some(ComponentName::from(type_name))
+            Some(type_name.to_node(None))
         })
         .collect::<IndexSet<_>>()
 }
@@ -1940,12 +1912,12 @@ fn add_federation_operations(
         EMPTY_QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
         query_root_pos.insert(
             &mut subgraph.schema,
-            ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name),
+            EMPTY_QUERY_TYPE_SPEC.name.to_node(None),
         )?;
     }
 
     // `Query._entities` (optional)
-    let query_root_type_name = query_root_pos.get(subgraph.schema.schema())?.name.clone();
+    let query_root_type_name = Name::clone(query_root_pos.get(subgraph.schema.schema())?);
     let entity_field_pos = ObjectFieldDefinitionPosition {
         type_name: query_root_type_name.clone(),
         field_name: FEDERATION_ENTITIES_FIELD_NAME,
@@ -1953,7 +1925,7 @@ fn add_federation_operations(
     if has_entity_type {
         entity_field_pos.insert(
             &mut subgraph.schema,
-            Component::new(FieldDefinition {
+            Node::new(FieldDefinition {
                 description: None,
                 name: FEDERATION_ENTITIES_FIELD_NAME,
                 arguments: vec![Node::new(InputValueDefinition {
@@ -1980,7 +1952,7 @@ fn add_federation_operations(
     }
     .insert(
         &mut subgraph.schema,
-        Component::new(FieldDefinition {
+        Node::new(FieldDefinition {
             description: None,
             name: FEDERATION_SERVICE_FIELD_NAME,
             arguments: Vec::new(),
@@ -3055,7 +3027,7 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.16", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v3.0", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"]) @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
         assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
         assert_snapshot!(subgraph.schema.schema().get_object("I").unwrap().directives, @r#" @interfaceObject @connect(http: {GET: "http://localhost/{$this.id}"}, selection: "f")"#);

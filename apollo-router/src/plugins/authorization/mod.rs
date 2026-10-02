@@ -59,14 +59,13 @@ pub(crate) struct CacheKeyMetadata {
 }
 
 /// Authorization plugin
-#[derive(Clone, Debug, serde_derive_default::Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "AuthorizationConfig")]
 pub(crate) struct Conf {
     /// Reject unauthenticated requests
-    #[serde(default)]
     require_authentication: bool,
     /// `@authenticated`, `@requiresScopes` and `@policy` directives
-    #[serde(default)]
+    #[config(skip_validate)]
     directives: Directives,
 }
 
@@ -225,10 +224,8 @@ impl AuthorizationPlugin {
 
     pub(crate) fn configuration(configuration: &Configuration) -> Conf {
         configuration
-            .apollo_plugins
-            .plugins
-            .get("authorization")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .typed_plugin_config::<Conf>("apollo.authorization")
+            .cloned()
             .unwrap_or_default()
     }
 

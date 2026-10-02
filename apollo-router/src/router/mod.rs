@@ -29,7 +29,6 @@ use tracing_futures::WithSubscriber;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterPipelineFactory;
-use crate::plugins::chaos::ChaosEventStream;
 use crate::router::event::reload::ReloadableEventStream;
 use crate::router_factory::PipelineFactory;
 use crate::state_machine::ListenAddresses;
@@ -133,7 +132,7 @@ impl RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
         let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
-            configuration.unwrap_or_default(),
+            configuration,
             schema,
             uplink,
             license.unwrap_or_default(),
@@ -226,24 +225,27 @@ impl Future for RouterHttpServer {
 /// When a shutdown message is received no more events are emitted.
 fn generate_event_stream(
     shutdown: ShutdownSource,
-    configuration: ConfigurationSource,
+    configuration: Option<ConfigurationSource>,
     schema: SchemaSource,
     uplink_config: Option<UplinkConfig>,
     license: LicenseSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
+    let configuration = match configuration {
+        Some(source) => source.into_stream(uplink_config).boxed(),
+        None => ConfigurationSource::empty_document_stream(uplink_config).boxed(),
+    };
     stream::select_all(vec![
         shutdown.into_stream().boxed(),
         schema.into_stream().boxed(),
         license.into_stream().boxed(),
-        configuration.into_stream(uplink_config).boxed(),
+        configuration,
         shutdown_receiver
             .into_stream()
             .map(|_| Event::Shutdown)
             .boxed(),
     ])
     .with_sighup_reload()
-    .with_chaos_reload()
     .take_while(|msg| future::ready(!matches!(msg, Event::Shutdown)))
     .chain(stream::iter(vec![Event::Shutdown]))
     .boxed()
