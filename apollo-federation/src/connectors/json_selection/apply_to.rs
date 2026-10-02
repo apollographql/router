@@ -12,6 +12,8 @@ use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::name::Name;
+use shape::name::NameCase;
 
 use super::Ref;
 use super::helpers::json_merge;
@@ -1025,12 +1027,45 @@ impl ApplyToInternal for WithRange<PathList> {
                 // children. Subsequent recursion into `selection` records
                 // additional consumption (e.g. the subselection's own
                 // fields) on top.
-                context.record_consumption(&input_shape, true);
+                //
+                // The one exception is a subselection applied directly to a
+                // bare variable, with no key navigation in between, as in
+                // `price: { amount: $args.amount }`, whose input is the
+                // enclosing `@` (`$root`, or `$root.*`). Marking that input
+                // as a leaf would claim the whole variable was consumed, so
+                // it is marked only if the subselection read something under
+                // it. To tell, the subselection records into a fresh trie,
+                // which is then merged back into the shared one.
+                let bare_variable = match input_shape.case() {
+                    ShapeCase::Name(name, _) if !name_navigates(name) => Some(name.clone()),
+                    _ => None,
+                };
 
-                (
-                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                    None,
-                )
+                if let Some(name) = bare_variable {
+                    let outer = context.consumption().replace(SelectionTrie::new());
+                    let output_shape = selection.compute_output_shape(
+                        context,
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                    );
+                    let inner = context.consumption().replace(outer);
+                    let read_under_input = inner.contains_name(&name);
+                    context.consumption().borrow_mut().extend(&inner);
+                    // Release `inner` before recording more, so the subtrees
+                    // it shares with the merged trie are uniquely owned again
+                    // and `Ref::make_mut` can update them in place.
+                    drop(inner);
+                    if read_under_input {
+                        context.record_consumption(&input_shape, true);
+                    }
+                    (output_shape, None)
+                } else {
+                    context.record_consumption(&input_shape, true);
+                    (
+                        selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
+                        None,
+                    )
+                }
             }
 
             PathList::Empty => {
@@ -1528,6 +1563,18 @@ impl WithRange<PathList> {
             .cloned()
             .unwrap_or_else(SelectionTrie::new)
     }
+}
+
+/// Whether a shape name navigates into its base variable through a field or
+/// item step, as opposed to naming the variable itself (`$root`, or
+/// `$root.*` when only array iteration markers follow the base).
+fn name_navigates(name: &Name) -> bool {
+    name.iter().any(|part| {
+        matches!(
+            part.case(),
+            NameCase::Field(..) | NameCase::Item(..) | NameCase::AnyField(_)
+        )
+    })
 }
 
 /// Helper to get the field from a shape or error if the object doesn't have that field.

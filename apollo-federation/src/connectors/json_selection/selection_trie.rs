@@ -200,6 +200,26 @@ impl SelectionTrie {
         current
     }
 
+    /// Read-only counterpart of [`Self::add_name`]: whether the path that
+    /// `add_name(name)` would walk already exists in this trie.
+    pub(crate) fn contains_name(&self, name: &Name) -> bool {
+        let mut current = self;
+        for part in name.iter() {
+            let key = match part.case() {
+                NameCase::Base(base) => base.to_string(),
+                NameCase::Field(_, field) => field.to_string(),
+                NameCase::Item(_, idx) => idx.to_string(),
+                NameCase::AnyField(_) => "**".to_string(),
+                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => continue,
+            };
+            match current.get(key) {
+                Some(sub) => current = sub,
+                None => return false,
+            }
+        }
+        true
+    }
+
     pub(crate) fn extend(&mut self, other: &SelectionTrie) -> &mut Self {
         for (key, sub) in other.selections.iter() {
             if let Some(existing) = self.selections.get_mut(key) {
