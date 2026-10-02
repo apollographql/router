@@ -359,12 +359,12 @@ mod tests {
     use tower::util::BoxCloneService;
 
     use super::*;
-    use crate::Notify;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::plugin::DynPlugin;
     use crate::plugins::subscription::callback::create_verifier;
+    use crate::plugins::subscription::notification::Notify;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::router;

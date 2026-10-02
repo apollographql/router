@@ -379,7 +379,6 @@ mod tests {
 
     use super::*;
     use crate::Context;
-    use crate::Notify;
     use crate::configuration::subgraph::SubgraphConfiguration;
     use crate::graphql::Error;
     use crate::graphql::Request;
@@ -393,6 +392,7 @@ mod tests {
     use crate::plugins::subscription::SubscriptionConfig;
     use crate::plugins::subscription::SubscriptionModeConfig;
     use crate::plugins::subscription::WebSocketConfiguration;
+    use crate::plugins::subscription::notification::Notify;
     use crate::plugins::subscription::subgraph::SubscriptionSubgraphLayer;
     use crate::plugins::subscription::subgraph::SubscriptionSubgraphService;
     use crate::protocols::websocket::ClientMessage;
