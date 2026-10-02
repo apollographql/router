@@ -38,6 +38,15 @@ By [@tninesling](https://github.com/tninesling) in <https://github.com/apollogra
 
 ## 🐛 Fixes
 
+### Process renamed root operation types in deterministic order ([PR #10396](https://github.com/apollographql/router/pull/10396))
+
+Renamed root operation types were processed using `HashMap` which lead to
+non-deterministic order. Re-generating same supergraph schemas could result in
+semantically equivalent schemas but with different type ordering. Logic was 
+updated to process those renamed root operation types in order using `IndexMap`.
+
+By [@dariuszkuc](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10396>
+
 ### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
 
 During satisfiability validation, advancing subgraph paths across a transition
