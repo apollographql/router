@@ -804,7 +804,7 @@ fn required_selections(
     Ok(out)
 }
 
-fn inline_fragment(type_condition: Name, selections: Vec<Selection>) -> Selection {
+pub(super) fn inline_fragment(type_condition: Name, selections: Vec<Selection>) -> Selection {
     let mut selection_set = executable::SelectionSet::new(type_condition.clone());
     selection_set.selections = selections;
     Selection::InlineFragment(Node::new(executable::InlineFragment {

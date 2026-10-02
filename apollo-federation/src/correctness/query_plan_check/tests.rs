@@ -371,3 +371,42 @@ fn a_renamed_key_naming_a_different_field_is_rejected() {
         "{error}"
     );
 }
+
+//==================================================================================================
+// An interface object's demand
+
+const INTERFACE_OBJECT: &str = include_str!("testdata/interface_object_requires.graphql");
+
+fn interface_object_planner() -> QueryPlanner {
+    let supergraph = Supergraph::new_with_router_specs(INTERFACE_OBJECT).expect("valid supergraph");
+    QueryPlanner::new(&supergraph, Default::default()).expect("planner")
+}
+
+// `C` declares `I` as an interface object, so its `@requires` on `I.data` is written at `I` and
+// the demand derived from it reaches `P` and `Q` both, where a `requires` entry is written at one
+// of them. Coverage for that shape, which nothing else here has.
+//
+// This does not discriminate the fix that asks an entry's inputs only at its own type: on this
+// plan the subgraph oracle, which the model has no counterpart for, already drops the obligation
+// under `start`. See the note on `check_entry_agrees_with_rewrites`'s caller.
+#[test]
+fn an_interface_object_plan_is_accepted() {
+    let planner = interface_object_planner();
+    let operation = ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ start { ... on P { data } } }",
+        "operation.graphql",
+    )
+    .expect("valid operation");
+    let plan = planner
+        .build_query_plan(&operation, None, Default::default())
+        .expect("query plan");
+    crate::correctness::check_plan(
+        planner.api_schema(),
+        planner.supergraph_schema(),
+        planner.subgraph_schemas(),
+        &operation,
+        &plan,
+    )
+    .unwrap();
+}

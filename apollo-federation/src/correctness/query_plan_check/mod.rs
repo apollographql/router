@@ -109,6 +109,7 @@ use self::requires::Reading;
 use self::requires::check_requires_conflict;
 use self::requires::condition_matches_requirement;
 use self::requires::entry_selections;
+use self::requires::inline_fragment;
 use self::requires::key_half;
 use self::requires::requires_half;
 use self::requires::same_keys;
@@ -121,6 +122,7 @@ use self::selections::type_filter_admits;
 use self::selections::type_filter_covers;
 use self::selections::type_filter_meets;
 use self::selections::under_condition;
+use self::selections::wrap_non_empty;
 use self::subgraph::KeyDirective;
 use self::subgraph::Subgraph;
 use super::query_compare;
@@ -826,15 +828,28 @@ impl Checker<'_> {
             }
             // The subgraph is sent the demand, so what must already be fetched is the demand's
             // preimage under the fetch's input rewrites: each one inverted, where its filter
-            // covers the position. Mounted where the fetch runs and guarded by the condition it
-            // runs under, so the comparison happens at the query root.
+            // covers the position.
+            //
+            // Asked only at the entry's own type. The router builds this entry's representation
+            // only for entities of that type, and the demand's `@requires` half sits at the
+            // subgraph's entity type, which for an interface object reaches every implementation;
+            // another implementation's inputs are its own entry's business. Restricting first is
+            // also what lets a renamer be inverted at all: `type_filter_covers` asks whether a
+            // filter admits every type a position can hold, which a position nothing is known
+            // about never satisfies.
+            //
+            // Mounted where the fetch runs and guarded by the condition it runs under, so the
+            // comparison happens at the query root.
             let mut computed = key_selections;
             computed.extend(requires_selections.iter().cloned());
             let computed = invert_key_renamers(
                 self.supergraph_schema,
                 type_filter_covers,
                 input_rewrites,
-                computed,
+                wrap_non_empty(
+                    |selections| inline_fragment(require_type.clone(), selections),
+                    computed,
+                ),
             );
             let required = under_condition(
                 reached.condition,
