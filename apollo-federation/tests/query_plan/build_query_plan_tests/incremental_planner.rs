@@ -1512,6 +1512,119 @@ fn inc_mutation_statistics_accumulate_across_fields() {
     );
 }
 
+/// One supergraph backs all three cases, since planner config doesn't affect
+/// composition and each composed test needs its own fixture file.
+#[test]
+fn statistics_report_fuel() {
+    let supergraph = crate::query_plan::build_query_plan_support::compose(
+        insta::_function_name!(),
+        &[
+            (
+                "a",
+                r#"
+                  type Query {
+                    user: User
+                  }
+
+                  type User @key(fields: "id") {
+                    id: ID!
+                  }
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                  type User @key(fields: "id") {
+                    id: ID!
+                    profile: Profile @shareable
+                  }
+
+                  type Profile @key(fields: "id") {
+                    id: ID!
+                  }
+                "#,
+            ),
+            (
+                "c",
+                r#"
+                  type User @key(fields: "id") {
+                    id: ID!
+                    profile: Profile @shareable
+                  }
+
+                  type Profile @key(fields: "id") {
+                    id: ID!
+                    detail: String
+                  }
+                "#,
+            ),
+        ],
+    );
+    let supergraph = apollo_federation::Supergraph::new_with_router_specs(&supergraph)
+        .expect("valid supergraph");
+    let plan_statistics = |config: QueryPlannerConfig| {
+        let planner =
+            apollo_federation::query_plan::query_planner::QueryPlanner::new(&supergraph, config)
+                .expect("can create query planner");
+        let document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            "{ user { profile { detail } } }",
+            "test.graphql",
+        )
+        .expect("valid graphql document");
+        planner
+            .build_query_plan(&document, None, Default::default())
+            .expect("query plans")
+            .statistics
+    };
+
+    let stats = plan_statistics(incremental_config_with_fuel(100_000));
+    let consumed = stats
+        .fuel_consumed
+        .get()
+        .expect("fuel consumed is reported");
+    let remaining = stats
+        .fuel_remaining
+        .get()
+        .expect("fuel remaining is reported");
+    assert!(
+        consumed > 0,
+        "with ample fuel, the profile choice is revisited after the first plan"
+    );
+    assert_eq!(
+        consumed + remaining,
+        100_000,
+        "with ample fuel, consumed and remaining add up to the budget"
+    );
+
+    let stats = plan_statistics(incremental_config_with_fuel(1));
+    assert!(
+        stats
+            .fuel_consumed
+            .get()
+            .expect("fuel consumed is reported")
+            >= 1,
+        "with a budget of 1, the search consumes all of it"
+    );
+    assert_eq!(
+        stats.fuel_remaining.get(),
+        Some(0),
+        "with a budget of 1, no fuel remains"
+    );
+
+    let stats = plan_statistics(QueryPlannerConfig::default());
+    assert_eq!(
+        stats.fuel_consumed.get(),
+        None,
+        "the default planner reports no fuel consumed"
+    );
+    assert_eq!(
+        stats.fuel_remaining.get(),
+        None,
+        "the default planner reports no fuel remaining"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Root hops
 // ---------------------------------------------------------------------------

@@ -179,6 +179,7 @@ fn run_bulb_and_finalize(
         "starting BULB search",
     );
 
+    let fuel = config.fuel;
     let (result, stats) = bulb_search(
         search_space,
         initial,
@@ -196,6 +197,17 @@ fn run_bulb_and_finalize(
     evaluated.set(evaluated.get() + stats.evaluated_plans);
     let evaluated_paths = &parameters.statistics.evaluated_plan_paths;
     evaluated_paths.set(evaluated_paths.get() + stats.expansions);
+    // Every search shares one budget, so the search that consumed the most
+    // is also the one closest to running out.
+    if let Some(consumed) = stats.fuel_consumed() {
+        let fuel_consumed = &parameters.statistics.fuel_consumed;
+        let consumed = fuel_consumed.get().map_or(consumed, |c| c.max(consumed));
+        fuel_consumed.set(Some(consumed));
+        parameters
+            .statistics
+            .fuel_remaining
+            .set(Some(fuel.saturating_sub(consumed)));
+    }
 
     if matches!(stats.termination, BulbTermination::Cancelled) {
         return Err(crate::error::SingleFederationError::PlanningCancelled.into());
