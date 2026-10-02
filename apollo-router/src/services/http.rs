@@ -28,6 +28,18 @@ pub(crate) struct HttpResponse {
     pub(crate) context: Context,
 }
 
+/// Marks a response whose headers arrived but whose body did not: the connection failed while
+/// the body was being read.
+///
+/// The subgraph and connector services keep the status the headers carried, so without this a
+/// `200` whose body was cut off is indistinguishable from one that was answered in full. They
+/// insert it into the response's `http` extensions, where the circuit breaker reads it to count
+/// the transport failure against the target. A body the router cut short itself, at a
+/// configured response size limit, is not marked: that is the router's decision, not a failure
+/// of the target.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct IncompleteResponseBody;
+
 /// Test-only wrapper around the `build_http_client_service` pipeline function: a
 /// subgraph client for `name` built from default configuration with no plugins.
 #[cfg(test)]

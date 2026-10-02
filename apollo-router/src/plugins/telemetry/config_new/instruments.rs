@@ -3397,6 +3397,7 @@ mod tests {
                                             key: response_key,
                                             problems: mapping_problems,
                                         },
+                                        break_status: None,
                                     };
                                     connector_instruments
                                         .take()

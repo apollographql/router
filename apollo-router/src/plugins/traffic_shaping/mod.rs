@@ -478,12 +478,14 @@ pub(crate) enum ShapingTarget<'a> {
 ///
 /// 1. admission: a buffer, error responses, load shedding and rate limit (the stage places the
 ///    buffer itself)
-/// 2. timeout, which answers its own errors
-/// 3. deduplication (subgraphs only)
+/// 2. deduplication (subgraphs only)
+/// 3. timeout, which answers its own errors
 /// 4. compression
 /// 5. backpressure buffer
 ///
-/// The [`admission`] module explains the order of the admission parts.
+/// The timeout sits below deduplication, so a request joined to an identical one in flight is
+/// bounded by that one's timeout. The [`admission`] module explains the order of the admission
+/// parts.
 impl TrafficShaping {
     /// This subgraph's shaping: its own block merged over `all`, or `all` alone.
     fn subgraph_shaping(&self, name: &str) -> Option<Shaping> {

@@ -16,6 +16,7 @@ use walkdir::WalkDir;
 use super::apollo_configuration_parse::ExternalValues;
 use super::apollo_configuration_parse::Migration;
 use super::apollo_configuration_parse::parse_configuration;
+use super::apollo_configuration_parse::parse_without_inputs;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::configuration::cors::Policy;
@@ -806,8 +807,7 @@ fn upgrade_old_configuration() {
             let new_config =
                 serde_yaml::to_string(&new_config).expect("must be able to serialize config");
 
-            let result =
-                parse_configuration(&new_config, Expansion::builder().build(), Migration::None);
+            let result = parse_without_inputs(&new_config, Migration::None);
 
             match result {
                 Ok(_) => {
@@ -838,12 +838,8 @@ headers:
       - propagate:
           named: authorization
 "#;
-    parse_configuration(
-        old_config,
-        Expansion::builder().build(),
-        Migration::WithinMajor,
-    )
-    .expect("old headers config should be accepted at startup via automatic migration");
+    parse_without_inputs(old_config, Migration::WithinMajor)
+        .expect("old headers config should be accepted at startup via automatic migration");
 }
 
 #[test]
@@ -857,7 +853,7 @@ headers:
       - propagate:
           named: authorization
 "#;
-    parse_configuration(old_config, Expansion::builder().build(), Migration::None)
+    parse_without_inputs(old_config, Migration::None)
         .expect_err("old headers config should be rejected when migration is not applied");
 }
 
@@ -883,8 +879,7 @@ fn upgrade_old_minor_configuration() {
             let new_config =
                 serde_yaml::to_string(&new_config).expect("must be able to serialize config");
 
-            let result =
-                parse_configuration(&new_config, Expansion::builder().build(), Migration::None);
+            let result = parse_without_inputs(&new_config, Migration::None);
 
             if let Err(err) = result {
                 panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
@@ -963,8 +958,7 @@ fn from_str_reads_environment_variables_on_every_parse() {
 #[case("")]
 #[case("plugins:")]
 fn unusual_configs_validate(#[case] input: &str) {
-    parse_configuration(input, Expansion::builder().build(), Migration::None)
-        .expect("should be valid configuration");
+    parse_without_inputs(input, Migration::None).expect("should be valid configuration");
 }
 
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
