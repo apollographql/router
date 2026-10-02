@@ -491,8 +491,19 @@ fn rename_key_at(
                 selections,
             )
         }
-        // An index consumes no response key, and `Parent` cannot be followed downwards.
-        FetchDataPathElement::AnyIndex(_) | FetchDataPathElement::Parent => selections,
+        // An index is passed over: a selection set does not tell a list from its elements, and
+        // `apply_rewrites` renames in every element of an array. `rename_at_path` rejects one.
+        FetchDataPathElement::AnyIndex(_) => rename_key_at(
+            schema,
+            applies,
+            type_filter,
+            guards,
+            rest,
+            new_key,
+            selections,
+        ),
+        // `Parent` moves up, so it cannot be followed downwards.
+        FetchDataPathElement::Parent => selections,
     }
 }
 

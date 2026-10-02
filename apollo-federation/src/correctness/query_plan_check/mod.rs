@@ -447,13 +447,26 @@ impl<'a> Checker<'a> {
     ) -> Result<Vec<Selection>, ComparisonError> {
         let body = self.fetch_body(fetch)?;
         // A root fetch selects its whole operation and requires nothing; an entity fetch selects
-        // what its operation asks of the entities it was given.
+        // what its operation asks of the entities it was given, which are those of a type some
+        // `requires` entry is written at: `execute_selection_set` keeps an entry's fragment only
+        // for an entity of a matching type, and an entity no entry matches gets an empty
+        // representation, which is never sent. So the selections are kept once per entry type,
+        // under that type. For an interface object, one subgraph type standing for every
+        // implementation, a fetch whose entries cover only some of them resolves nothing for the
+        // rest; `interpret_fetch_node` merges every `_entities` fragment regardless.
         let selected = if fetch.requires.is_empty() {
             body
         } else {
             let entity_body = entity_body(fetch, &body)?;
             self.check_fetch(fetch, &entity_body, reached, available)?;
-            entity_body
+            if entity_body.is_empty() {
+                entity_body
+            } else {
+                require_types(fetch)?
+                    .into_iter()
+                    .map(|require_type| inline_fragment(require_type.clone(), entity_body.clone()))
+                    .collect()
+            }
         };
         // The entity cases were read off the fetch's own operation above; what it *contributes*
         // is that selection set under the key renames its output rewrites apply and without the
