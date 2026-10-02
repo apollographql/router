@@ -833,13 +833,20 @@ mod tests {
         expected: Shape,
         spec: ConnectSpec,
     ) -> Result<(), Message> {
-        let schema_str = schema_for(selection, spec);
-        let schema = Schema::parse(&schema_str, "schema").unwrap();
+        validate_with_schema(&schema_for(selection, spec), selection, expected, spec)
+    }
+
+    fn validate_with_schema(
+        schema_str: &str,
+        selection: &str,
+        expected: Shape,
+        spec: ConnectSpec,
+    ) -> Result<(), Message> {
+        let schema = Schema::parse(schema_str, "schema").unwrap();
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
-        let schema_info =
-            SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
+        let schema_info = SchemaInfo::new(&schema, schema_str, ConnectLink::new(&schema).unwrap()?);
         debug_assert_eq!(schema_info.connect_link.spec, spec);
         let expr_string = directive
             .argument_by_name("http", &schema)
@@ -1155,6 +1162,68 @@ mod tests {
             )),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
+        );
+    }
+
+    #[test]
+    fn mismatch_details_are_bounded() {
+        // `Dag0` reaches `Dag16` through two fields per level, so the
+        // argument's shape shares subtrees and printing it in full takes
+        // 2^16 copies of the leaf type.
+        const DEPTH: usize = 16;
+        let spec = ConnectSpec::latest();
+        let selection = "$args.dag";
+        let mut schema = schema_for(selection, spec).replace(
+            "mutualA: MutualA",
+            "mutualA: MutualA\n            dag: Dag0",
+        );
+        for level in 0..DEPTH {
+            let next = level + 1;
+            schema.push_str(&format!(
+                "\ninput Dag{level} {{ left: Dag{next} right: Dag{next} }}\n"
+            ));
+        }
+        schema.push_str(&format!("\ninput Dag{DEPTH} {{ leaf: String }}\n"));
+
+        let err = validate_with_schema(&schema, selection, scalars(), spec)
+            .expect_err("objects are not allowed");
+        assert!(
+            err.message.contains("does not accept"),
+            "{} didn't include the mismatch details",
+            err.message
+        );
+        assert!(
+            err.message.contains('…'),
+            "{} didn't elide the nested shape",
+            err.message
+        );
+        assert!(
+            err.message.len() < 1_000,
+            "message is {} bytes long",
+            err.message.len()
+        );
+    }
+
+    #[test]
+    fn mismatch_details_elide_fields_past_the_width_limit() {
+        let fields = (0..20).map(|i| format!("\"f{i:02}\": {i}")).join(", ");
+        let selection = format!("$({{{fields}}})");
+        let err = validate_with_context(&selection, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        // Fields print in key order, and only the first eight are kept.
+        assert!(err.message.contains("f07: 7"), "{}", err.message);
+        assert!(!err.message.contains("f08"), "{}", err.message);
+        assert!(err.message.contains('…'), "{}", err.message);
+    }
+
+    #[test]
+    fn mismatch_details_print_small_shapes_in_full() {
+        let err = validate_with_context(r#"$({"a": 1})"#, scalars(), ConnectSpec::latest())
+            .expect_err("objects are not allowed");
+        assert!(
+            err.message.ends_with("does not accept `{ a: 1 }`"),
+            "{}",
+            err.message
         );
     }
 
