@@ -1,0 +1,33 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+)
+
+@source(name: "api", http: { baseURL: "http://127.0.0.1" })
+
+# A key applied to an array is mapped over its elements, so `$([]).name`
+# evaluates to `[]` without errors. Validation must not report the field as
+# missing just because the array has no elements to map over.
+type Query {
+    inSelection: Result
+      @connect(
+        source: "api"
+        http: { GET: "/a" }
+        selection: """
+        names: $([]).name
+        """
+      )
+    inUrl: Result
+      @connect(
+        source: "api"
+        http: { GET: "/b?names={$([]).name->joinNotNull(',')}" }
+        selection: """
+        names: $([])
+        """
+      )
+}
+
+type Result {
+    names: [String]
+}
