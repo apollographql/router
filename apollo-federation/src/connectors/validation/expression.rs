@@ -12,6 +12,7 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
+use shape::PrintLimits;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::graphql::shape_for_arguments;
@@ -338,8 +339,8 @@ pub(crate) fn validate(
                 "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
                 short_shape_name(&mismatch.expected),
                 short_shape_name(&mismatch.received),
-                mismatch.expected.pretty_print(),
-                mismatch.received.pretty_print(),
+                mismatch.expected.pretty_print_bounded(PrintLimits::default()),
+                mismatch.received.pretty_print_bounded(PrintLimits::default()),
             ),
             locations: transform_locations(mismatch.received.locations(), context, expression),
         })
