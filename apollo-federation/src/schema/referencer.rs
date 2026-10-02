@@ -482,6 +482,11 @@ impl Referencers {
         }
 
         for (_interface_name, interface_refs) in self.interface_types.iter_mut() {
+            Self::update_interface_type_positions(
+                &mut interface_refs.interface_types,
+                old_name,
+                new_name,
+            );
             Self::update_interface_field_positions(
                 &mut interface_refs.interface_fields,
                 old_name,
@@ -530,6 +535,23 @@ impl Referencers {
                 new_name,
             );
         }
+    }
+
+    fn update_interface_type_positions(
+        types: &mut IndexSet<InterfaceTypeDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_types: Vec<_> = types
+            .iter()
+            .filter(|t| &t.type_name == old_type_name)
+            .map(|_| InterfaceTypeDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        types.retain(|t| &t.type_name != old_type_name);
+        types.extend(updated_types);
     }
 
     fn update_interface_field_positions(
