@@ -532,6 +532,21 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      # Native plugin builds may set `--cfg tracing_unstable`, which compiles code paths (such as
+      # structured `valuable` log fields) that the default build excludes. Exercise them nightly on
+      # one platform, since changing RUSTFLAGS forces a full rebuild.
+      - when:
+          condition:
+            and:
+              - equal: [true, << parameters.nightly >>]
+              - equal: [*amd_linux_test_executor, << parameters.platform >>]
+          steps:
+            - run:
+                name: Run tracing_unstable telemetry tests
+                environment:
+                  RUSTFLAGS: "--cfg tracing_unstable"
+                command: |
+                  cargo test --locked -p apollo-router --lib plugins::telemetry::fmt_layer
       # Temporarily disable cargo-fuzz https://github.com/apollographql/router/pull/7488
       # - when:
       #     condition:
