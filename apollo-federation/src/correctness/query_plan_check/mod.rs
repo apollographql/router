@@ -102,6 +102,7 @@ use self::selections::apply_output_rewrites;
 use self::selections::inline_fragment_spreads;
 use self::selections::selections_at;
 use self::selections::under_condition;
+use self::selections::undo_input_renames;
 use self::subgraph::KeyDirective;
 use self::subgraph::Subgraph;
 use super::query_compare;
@@ -110,6 +111,7 @@ use super::response_shape_compare::ComparisonError;
 use super::subgraph_constraint::SubgraphConstraint;
 use crate::correctness::CheckerOptions;
 use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
@@ -589,6 +591,7 @@ impl Checker<'_> {
                     reached,
                     available,
                     &available_doc,
+                    &fetch.input_rewrites,
                 )?);
             }
             Ok(is_match(&table[entry][case]))
@@ -688,6 +691,7 @@ impl Checker<'_> {
         reached: Reached<'_>,
         available: &[Selection],
         available_doc: &Valid<ExecutableDocument>,
+        input_rewrites: &[Arc<FetchDataRewrite>],
     ) -> Result<Option<String>, ComparisonError> {
         let (keys, requires_selections, requires_field_set) = hoisted;
         if keys.is_empty() {
@@ -720,6 +724,12 @@ impl Checker<'_> {
             };
             let mut demanded = to_requires_field_set(&key_selections);
             demanded.extend(requires_field_set.iter().cloned());
+            let mut computed = key_selections;
+            computed.extend(requires_selections.iter().cloned());
+            if !input_rewrites.is_empty() {
+                computed = undo_input_renames(self.supergraph_schema, input_rewrites, computed);
+                demanded = to_requires_field_set(&computed);
+            }
             if let Err(mismatch) = condition_matches_requirement(
                 self.supergraph_schema,
                 std::slice::from_ref(&require_item),
@@ -734,8 +744,6 @@ impl Checker<'_> {
             }
             // Mounted where the fetch runs and guarded by the condition it runs under, so the
             // comparison happens at the query root.
-            let mut computed = key_selections;
-            computed.extend(requires_selections.iter().cloned());
             let required = under_condition(
                 reached.condition,
                 &self.root_type,

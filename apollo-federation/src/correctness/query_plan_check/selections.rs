@@ -407,6 +407,37 @@ pub(super) fn apply_output_rewrites(
     selections
 }
 
+/// The subgraph's demand as the plan must declare and fetch it, under the keys the input rewrites
+/// rename from.
+///
+/// The router applies a fetch's input key renamers to each representation before sending it, so a
+/// demanded field arrives under its own name only if the plan read it from the key the renamer
+/// starts at. Undoing each renamer on the demand, last first, gives that key.
+pub(super) fn undo_input_renames(
+    schema: &ValidFederationSchema,
+    rewrites: &[Arc<FetchDataRewrite>],
+    selections: Vec<Selection>,
+) -> Vec<Selection> {
+    let mut selections = selections;
+    for rewrite in rewrites.iter().rev() {
+        let FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
+            continue;
+        };
+        let Some((FetchDataPathElement::Key(old_key, conditions), prefix)) =
+            renamer.path.split_last()
+        else {
+            continue;
+        };
+        let mut path = prefix.to_vec();
+        path.push(FetchDataPathElement::Key(
+            renamer.rename_key_to.clone(),
+            conditions.clone(),
+        ));
+        selections = rename_key_at(schema, &[], &[], &path, old_key, selections);
+    }
+    selections
+}
+
 /// Applies one key renamer, following `rename_at_path`: the path is followed through the fetch's
 /// selections and the key it ends at is renamed; a key the path does not reach is left alone.
 fn rename_key_at(
