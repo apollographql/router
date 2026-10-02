@@ -211,6 +211,145 @@ mod tests {
         }
     }
 
+    #[test]
+    fn literal_subselection_has_no_root_consumption() {
+        // An object literal nested under an alias is a subselection over
+        // `@`, but when all of its values are literals it reads nothing from
+        // the input, so it must not mark `$root` itself as consumed.
+        for input in [
+            r#"id: "sku-4417" price: { amount: 1395 currencyCode: "USD" }"#,
+            r#"{ "id": "sku-4417", "price": { "amount": 1395, "currencyCode": "USD" } }"#,
+            r#"$({ "id": "sku-4417", "price": { "amount": 1395 } })"#,
+        ] {
+            let analysis = analyze(input);
+            match analysis.consumption().get("$root") {
+                None => {}
+                Some(root) => assert!(
+                    root.is_empty() && !root.is_leaf(),
+                    "expected no $root consumption for {input:?}, got {root} (leaf: {})",
+                    root.is_leaf(),
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn subselection_reading_other_variables_has_no_root_consumption() {
+        // Reading `$args` or `$config` inside a nested object literal reads
+        // nothing from `$root`, so `$root` must still not be marked consumed.
+        let cases = [
+            (
+                r#"id: "sku-4417" price: { amount: $args.amount currencyCode: "USD" }"#,
+                "$args { amount }",
+            ),
+            (
+                r#"{ "id": "sku-4417", "price": { "amount": $args.amount } }"#,
+                "$args { amount }",
+            ),
+            (
+                r#"id: "sku-4417" price: { amount: 1395 currencyCode: $config.currency }"#,
+                "$config { currency }",
+            ),
+        ];
+        for (input, expected) in cases {
+            let analysis = analyze(input);
+            assert_eq!(
+                analysis.consumption().to_string(),
+                expected,
+                "consumption trie mismatch for {input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn root_is_consumed_only_by_reading_root() {
+        // The general rule: a selection consumes `$root` if and only if
+        // something in it reads from `$root`. Literals, other variables,
+        // methods, nesting and spreads that don't read `$root` must leave no
+        // `$root` consumption, however deeply they are nested.
+        let no_root = [
+            r#"a: { b: { c: { d: 1 } } }"#,
+            r#"a: { b: [1, { c: 2 }] }"#,
+            r#"a: { b: $args.x->add(1) }"#,
+            r#"a: { b: $args.list->map({ id: @.id }) }"#,
+            r#"a: { b: $args.code->match(["A", "ACTIVE"], [@, "UNKNOWN"]) }"#,
+            r#"a: { b: $([1, 2])->first }"#,
+            r#"a: { b: $this.x c: $config.y d: $context.z }"#,
+            r#"a: { b: { c: $args.x } d: "e" }"#,
+            r#"a: { ...$args.extra b: 1 }"#,
+            r#"{ "a": { "b": { "c": $args.x } } }"#,
+            r#"$({ a: { b: $args.x } })"#,
+        ];
+        for input in no_root {
+            let analysis = analyze(input);
+            assert!(
+                analysis
+                    .consumption()
+                    .get("$root")
+                    .is_none_or(|root| root.is_empty() && !root.is_leaf()),
+                "expected no $root consumption for {input:?}, got {}",
+                analysis.consumption(),
+            );
+        }
+
+        let reads_root = [
+            r#"a: { b: { c: @.x } }"#,
+            r#"a: { b: { c: $.x } }"#,
+            r#"a: { b: { c } }"#,
+            r#"a: { b: { c: @->size } }"#,
+            r#"a: { b: { c: $->jsonStringify } }"#,
+            r#"a: { b: { ...$.extra } }"#,
+            r#"a: { b: $args.list->map({ id: $.id }) }"#,
+        ];
+        for input in reads_root {
+            let analysis = analyze(input);
+            assert!(
+                analysis
+                    .consumption()
+                    .get("$root")
+                    .is_some_and(|root| !root.is_empty() || root.is_leaf()),
+                "expected $root consumption for {input:?}, got {}",
+                analysis.consumption(),
+            );
+        }
+    }
+
+    #[test]
+    fn key_navigated_subselection_keeps_its_leaf() {
+        // A subselection reached through a key always marks that key as a
+        // leaf, even when the subselection's values are all literals, so the
+        // trie still records that the path must exist on the input.
+        let cases = [
+            (r#"$this.items { id: "x" }"#, "$this { items }"),
+            (r#"$this.a { b { id: "x" } }"#, "$this { a { b } }"),
+            (r#"a { b { id: "x" } }"#, "$root { a { b } }"),
+        ];
+        for (input, expected) in cases {
+            let analysis = analyze(input);
+            assert_eq!(
+                analysis.consumption().to_string(),
+                expected,
+                "consumption trie mismatch for {input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn subselection_reading_input_still_marks_it_consumed() {
+        // When the subselection does read from its input, the input path
+        // is still marked as a leaf, alongside whatever the children read.
+        let analysis = analyze(r#"id: "sku-4417" price: { amount }"#);
+        let root = analysis.consumption().get("$root").expect("$root entry");
+        assert!(root.is_leaf());
+        assert_eq!(root.to_string(), "amount");
+
+        for input in ["$", "@"] {
+            let analysis = analyze(input);
+            let root = analysis.consumption().get("$root").expect("$root entry");
+            assert!(root.is_leaf(), "expected bare {input} to consume $root");
+        }
+    }
+
     // ---- RH-1345 / CNN-1093 regression coverage at the SelectionAnalysis
     // level. These tests assert directly on the consumption trie produced
     // by `SelectionAnalysis::new` rather than going through the validator,
