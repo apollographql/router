@@ -18,6 +18,7 @@ use apollo_compiler::validation::Valid;
 use hashbrown::HashSet;
 use indexmap::IndexMap;
 use itertools::Itertools;
+use shape::PrintLimits;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::ShapeVisitor;
@@ -473,7 +474,7 @@ impl<'walker> ShapeVisitor for SelectionSetWalker<'walker> {
 
     fn default(&mut self, shape: &Shape) -> Result<Self::Output, Self::Error> {
         Err(ShapeVisitorError::UnexpectedKeyOnShape {
-            shape_str: shape.pretty_print(),
+            shape_str: shape.pretty_print_bounded(PrintLimits::default()),
             locations: self
                 .name
                 .line_column_range(&self.schema.sources)
