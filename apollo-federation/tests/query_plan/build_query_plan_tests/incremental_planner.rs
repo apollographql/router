@@ -5655,3 +5655,50 @@ fn inc_defer_sibling_entity_fetches_stay_in_their_scope() {
     }
     "###);
 }
+
+// Hub.i is shareable, so its possible types are the implementers every subgraph agrees on.
+// B's I has no Y, which leaves only X, so a Y fragment under Hub.i can never match and is
+// dropped.
+#[test]
+fn inc_fragment_outside_shareable_interface_members_is_dropped() {
+    let planner = planner!(
+        config = incremental_config(),
+        A: r#"
+          type T @key(fields: "id") { id: ID! hub: Hub @shareable }
+          type Hub @shareable { i: I }
+          interface I { name: String }
+          type X implements I @shareable { name: String }
+          type Y implements I { name: String }
+        "#,
+        B: r#"
+          type Query { t: T }
+          type T @key(fields: "id") { id: ID! hub: Hub @shareable }
+          type Hub @shareable { i: I }
+          interface I { name: String }
+          type X implements I @shareable { name: String }
+        "#,
+    );
+    // validate_correctness = false: the correctness checker takes I's implementers from the
+    // supergraph, so it expects the dropped Y fragment in the response shape. It rejects the
+    // legacy planner's identical plan the same way.
+    assert_plan!(
+        validate_correctness = false,
+        &planner,
+        "{ t { hub { i { ... on Y { name } } } } }",
+        @r###"
+    QueryPlan {
+      Fetch(service: "B") {
+        {
+          t {
+            hub {
+              i {
+                __typename
+              }
+            }
+          }
+        }
+      },
+    }
+    "###
+    );
+}
