@@ -652,20 +652,6 @@ jobs:
       - checkout
       - setup_environment:
           platform: << parameters.platform >>
-      # Link the release binary against a shared jemalloc so ddprof can hook allocations
-      # (apollo-router/Cargo.toml).  The runtime image installs libjemalloc2.
-      - when:
-          condition:
-            or:
-              - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Install shared jemalloc
-                command: |
-                  microdnf install -y epel-release
-                  microdnf install -y jemalloc-devel
-                  echo 'export JEMALLOC_OVERRIDE=/usr/lib64/libjemalloc.so' >> "$BASH_ENV"
       - when:
           condition:
             or:
@@ -806,15 +792,12 @@ jobs:
                   # Note: GH Token owned by apollo-bot2, no expire
                   echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
                   # TODO: Can't figure out how to build multi-arch image from ARTIFACT_URL right now. Figure out later...
-                  # Build and push debug image
-                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
-                  docker push ${ROUTER_TAG}:${VERSION}-debug
+                  # The -debug image is built by build_release_debug, from its own binary.
                   # Build and push release image
                   docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
                   docker push ${ROUTER_TAG}:${VERSION}
                   # save containers for analysis
                   mkdir built-containers
-                  docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
                   docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}
 
             - persist_to_workspace:
@@ -893,6 +876,112 @@ jobs:
                     ]
                   }
 
+  # Builds the router for the -debug images: linked against a shared, unprefixed jemalloc so a
+  # profiler such as ddprof can hook allocations.  Runs alongside build_release, which keeps the
+  # release binaries statically linked.  Its tarballs only go into the -debug images; they are never
+  # attached to a GitHub release.
+  build_release_debug:
+    parameters:
+      platform:
+        type: executor
+      nightly:
+        type: boolean
+        default: false
+    executor: << parameters.platform >>
+    environment:
+      <<: *common_job_environment
+      RELEASE_BIN: router
+      REPO_URL: << pipeline.project.git_url >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      - run:
+          name: Install shared jemalloc
+          command: |
+            microdnf install -y epel-release
+            microdnf install -y jemalloc-devel
+      - when:
+          condition:
+            equal: [true, << parameters.nightly >>]
+          steps:
+            - run: cargo xtask release prepare nightly
+      - run:
+          name: Build router against the shared jemalloc
+          command: >
+            JEMALLOC_OVERRIDE=/usr/lib64/libjemalloc.so
+            cargo xtask dist --features apollo-router/unprefixed-jemalloc
+      - run:
+          command: >
+            mkdir -p debug-artifacts
+      - run:
+          command: >
+            cargo xtask package --output debug-artifacts/
+      - persist_to_workspace:
+          root: .
+          paths:
+            - "debug-artifacts/*"
+      - store_artifacts:
+          path: debug-artifacts/
+      - when:
+          condition:
+            and:
+              - equal: [*amd_linux_build_executor, << parameters.platform >>]
+              - equal: [true, << parameters.nightly >>]
+              - matches:
+                  pattern: "^https:\\/\\/github\\.com\\/apollographql\\/router.*$"
+                  value: << pipeline.project.git_url >>
+          steps:
+            - setup_remote_docker:
+                # CircleCI Image Policy
+                #   https://circleci.com/docs/remote-docker-images-support-policy/
+                version: docker23
+                docker_layer_caching: true
+            - run:
+                name: Docker build
+                command: |
+                  BASE_VERSION=$(cargo metadata --format-version=1 --no-deps | jq --raw-output '.packages[0].version')
+                  ARTIFACT_FILENAME="router-v${BASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                  ARTIFACT_URL="https://output.circle-artifacts.com/output/job/${CIRCLE_WORKFLOW_JOB_ID}/artifacts/0/debug-artifacts/${ARTIFACT_FILENAME}"
+                  VERSION="v$(echo "${BASE_VERSION}" | tr "+" "-")"
+                  ROUTER_TAG=ghcr.io/apollographql/nightly/router
+
+                  if [ ! -f "debug-artifacts/${ARTIFACT_FILENAME}" ]; then
+                    echo "Error: Local artifact not found: debug-artifacts/${ARTIFACT_FILENAME}"
+                    exit 1
+                  fi
+                  LOCAL_ARTIFACT_SHA256SUM=$(sha256sum "debug-artifacts/${ARTIFACT_FILENAME}" | cut -d' ' -f1)
+
+                  # Same safety net as build_release: the stored artifact must match what we built.
+                  curl -sSL -H "Circle-Token: ${CIRCLE_TOKEN}" -o "router-artifact.tar.gz" "${ARTIFACT_URL}"
+                  ARTIFACT_URL_SHA256SUM=$(sha256sum "router-artifact.tar.gz" | cut -d' ' -f1)
+                  rm -f router-artifact.tar.gz
+                  if [ "${LOCAL_ARTIFACT_SHA256SUM}" != "${ARTIFACT_URL_SHA256SUM}" ]; then
+                    echo "Error: Local and remote artifact checksums don't match!"
+                    echo "Local:  ${LOCAL_ARTIFACT_SHA256SUM}"
+                    echo "Remote: ${ARTIFACT_URL_SHA256SUM}"
+                    exit 1
+                  fi
+                  echo "ARTIFACT_URL: ${ARTIFACT_URL}"
+                  echo "VERSION: ${VERSION}"
+
+                  docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+                  docker context create buildx-build
+                  docker buildx create --driver docker-container --use buildx-build
+                  docker buildx inspect --bootstrap
+                  # Note: GH Token owned by apollo-bot2, no expire
+                  echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
+                  # Build and push debug image
+                  docker buildx build --load --platform linux/amd64 --build-arg CIRCLE_TOKEN="${CIRCLE_TOKEN}" --build-arg REPO_URL="${REPO_URL}" --build-arg ARTIFACT_URL="${ARTIFACT_URL}" --build-arg ARTIFACT_URL_SHA256SUM="${ARTIFACT_URL_SHA256SUM}" --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} --build-arg BASE_VERSION=${BASE_VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
+                  docker push ${ROUTER_TAG}:${VERSION}-debug
+                  # save container for analysis
+                  mkdir built-containers
+                  docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
+            - persist_to_workspace:
+                root: .
+                paths:
+                  - "built-containers/*.tar"
+
   publish_github_release:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
@@ -931,6 +1020,13 @@ jobs:
                 docker_layer_caching: true
             - attach_workspace:
                 at: artifacts
+            - run:
+                name: Move the -debug image's tarballs out of the release assets
+                command: |
+                  mkdir -p dockerfiles/debug-artifacts
+                  mv artifacts/debug-artifacts/*.tar.gz dockerfiles/debug-artifacts/
+                  rmdir artifacts/debug-artifacts
+                  cd dockerfiles/debug-artifacts && sha256sum *.tar.gz > sha256sums.txt
             - run:
                 command: >
                   cd artifacts && sha256sum *.tar.gz > sha256sums.txt
@@ -996,7 +1092,7 @@ jobs:
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}  > /dev/null && exit 1
                   docker manifest inspect ${ROUTER_TAG}:${VERSION}-debug  > /dev/null && exit 1
                   # Build and push debug image
-                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
+                  docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg DEBUG_IMAGE="true" --build-arg LOCAL_ARTIFACTS_DIR=debug-artifacts --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug dockerfiles/.
                   # Build and push release image
                   docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} dockerfiles/.
             - run:
@@ -1160,6 +1256,15 @@ workflows:
             parameters:
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
+      - build_release_debug:
+          nightly: true
+          context:
+            - router
+            - orb-publishing
+          matrix:
+            parameters:
+              platform:
+                [amd_linux_build, arm_linux_build]
   nightly:
     when: << pipeline.parameters.nightly >>
     jobs:
@@ -1199,6 +1304,19 @@ workflows:
             parameters:
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
+      - build_release_debug:
+          requires:
+            - test
+            - check_helm
+            - check_compliance
+          nightly: true
+          context:
+            - router
+            - orb-publishing
+          matrix:
+            parameters:
+              platform:
+                [amd_linux_build, arm_linux_build]
       - secops/wiz-docker:
           context:
             - platform-docker-ro
@@ -1206,6 +1324,7 @@ workflows:
             - github-orb
           requires:
             - build_release
+            - build_release_debug
           container-dir: /tmp/workspace/built-containers
           # Disables all PR comments from this job
           do-pr-comments: false
@@ -1282,9 +1401,20 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
+      - build_release_debug:
+          matrix:
+            parameters:
+              platform:
+                [amd_linux_build, arm_linux_build]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - publish_github_release:
           requires:
             - build_release
+            - build_release_debug
             - lint
             - check_helm
             - check_compliance

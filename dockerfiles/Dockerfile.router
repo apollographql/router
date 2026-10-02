@@ -6,6 +6,10 @@ ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
 ARG ARTIFACT_URL_SHA256SUM=
+# When set, take the tarball from this directory of the build context (with its sha256sums.txt)
+# instead of downloading it.  Releases use this for the -debug image's unprefixed-jemalloc build,
+# which isn't published as a release asset.
+ARG LOCAL_ARTIFACTS_DIR=
 # We will use TARGETPLATFORM inside the download_and_validate_router.sh script
 # It is set automatically by Docker when doing a buildx build, see:
 #  https://docs.docker.com/build/building/multi-platform/
@@ -21,7 +25,8 @@ WORKDIR /
 
 # Copy and run the router download script
 COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
-RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
+RUN --mount=type=bind,target=/context \
+  chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
 # Use a multi-stage build to install the debug tools if DEBUG_IMAGE is true
 FROM rust:slim-bookworm AS install-debug-tools-true
@@ -64,17 +69,17 @@ WORKDIR /dist
 
 COPY --from=downloader /dist/router /dist
 
-# Update apt and install ca-certificates, and the shared jemalloc the router is linked against
+# Update apt and install ca-certificates
 RUN \
   apt-get update -y \
   && apt-get install -y \
-    ca-certificates \
-    libjemalloc2
+    ca-certificates
 
-# If debug image, install perf and heaptrack and make a data directory
+# If debug image, install perf and heaptrack, plus the shared jemalloc its router is linked against,
+# and make a data directory
 RUN \
   if [ "${DEBUG_IMAGE}" = "true" ]; then \
-    apt-get install -y linux-perf heaptrack && \
+    apt-get install -y linux-perf heaptrack libjemalloc2 && \
     mkdir data && \
     chown router data; \
   fi

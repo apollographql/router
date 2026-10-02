@@ -7,7 +7,7 @@ set -e
 # this.
 
 # Validate required environment variables early
-if [ -z "${ARTIFACT_URL}" ]; then
+if [ -n "${LOCAL_ARTIFACTS_DIR}" ] || [ -z "${ARTIFACT_URL}" ]; then
     # Release build path - requires ROUTER_RELEASE
     if [ -z "${ROUTER_RELEASE}" ]; then
         echo "Error: ROUTER_RELEASE environment variable is required for release builds"
@@ -55,7 +55,28 @@ fi
 # are building a release and will download the Router binary from the official
 # release URL.
 
-if [ -z "${ARTIFACT_URL}" ]; then
+if [ -n "${LOCAL_ARTIFACTS_DIR}" ]; then
+    # Local artifact path: the tarball was placed in the build context (mounted at /context) by CI.
+    TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}.tar.gz"
+    LOCAL_DIR="/context/${LOCAL_ARTIFACTS_DIR}"
+    echo "Using local Router artifact: ${LOCAL_ARTIFACTS_DIR}/${TARBALL_NAME}"
+
+    EXPECTED_SHA256SUM=$(grep " ${TARBALL_NAME}\$" "${LOCAL_DIR}/sha256sums.txt" | cut -d' ' -f1)
+    if [ -z "${EXPECTED_SHA256SUM}" ]; then
+        echo "ERROR: Could not find checksum for ${TARBALL_NAME} in ${LOCAL_ARTIFACTS_DIR}/sha256sums.txt"
+        exit 1
+    fi
+    ACTUAL_SHA256SUM=$(sha256sum "${LOCAL_DIR}/${TARBALL_NAME}" | cut -d' ' -f1)
+    if [ "${EXPECTED_SHA256SUM}" != "${ACTUAL_SHA256SUM}" ]; then
+        echo "Error: Tarball checksum validation failed!"
+        echo "Expected: ${EXPECTED_SHA256SUM}"
+        echo "Actual: ${ACTUAL_SHA256SUM}"
+        exit 1
+    fi
+    echo "Tarball checksum validation passed: ${ACTUAL_SHA256SUM}"
+
+    tar -xzf "${LOCAL_DIR}/${TARBALL_NAME}"
+elif [ -z "${ARTIFACT_URL}" ]; then
     echo "Downloading Router release: ${ROUTER_RELEASE}"
     # Download router tarball directly instead of using installer
     TARBALL_NAME="router-${ROUTER_RELEASE}-${ARCH}.tar.gz"
