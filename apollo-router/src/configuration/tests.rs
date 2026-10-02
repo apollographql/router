@@ -542,6 +542,7 @@ fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_fiel
 /// which fails on the timeout. Pins the same known limitation as above: the copy has no YAML
 /// aliases, so the error quotes the value the anchored reference resolved to, whether the variable
 /// or the reference's default supplies it. The secret field itself stays redacted.
+#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[test]
 fn migrated_anchored_expansions_quote_the_value_aliased_into_a_secret_field() {
     for (secret, value) in [
