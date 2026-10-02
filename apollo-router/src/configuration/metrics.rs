@@ -319,6 +319,21 @@ impl InstrumentData {
             opt.subgraph.deduplicate_query,
             "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
+        // Presence of the block is the whole of the feature switch: every subgraph and connector
+        // source is protected as soon as `circuit_breaker` is configured at all, with the
+        // apollo-qos defaults where nothing overrides them. So `circuit_breaker: {}` counts.
+        populate_config_instrument!(
+            apollo.router.config.circuit_breaker,
+            "$.circuit_breaker",
+            opt.subgraph.all,
+            "$[?(@.all)]",
+            opt.subgraph.subgraphs,
+            "$[?(@.subgraphs)]",
+            opt.connector.all,
+            "$[?(@.connector.all)]",
+            opt.connector.sources,
+            "$[?(@.connector.sources)]"
+        );
 
         populate_config_instrument!(
             apollo.router.config.response_cache,

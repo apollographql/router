@@ -112,7 +112,7 @@ mod acquire;
 mod plugins;
 mod stages;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Builds a serving pipeline from configuration, schema, and license.
 ///
