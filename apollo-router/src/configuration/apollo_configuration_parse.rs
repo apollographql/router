@@ -469,20 +469,64 @@ fn apply_dev_mode(config: &mut Configuration) {
     section["all"] = Value::Bool(true);
 }
 
+/// Parses `text` with `parser`, building it with `build` on first use. Building a parser compiles
+/// Router's schema, which is slow, so parses with the same inputs share one parser.
+fn parse_shared(
+    parser: &'static OnceLock<Mutex<ConfigurationParser>>,
+    build: impl FnOnce() -> Result<ConfigurationParser, ConfigurationError>,
+    text: &str,
+    migration: Migration,
+) -> Result<Configuration, ConfigurationError> {
+    let parser = match parser.get() {
+        Some(parser) => parser,
+        None => {
+            let built = build()?;
+            parser.get_or_init(|| Mutex::new(built))
+        }
+    };
+    parser.lock().parse_with_migration(text, migration)
+}
+
 /// Parses `text` as written, with no expansion, overrides, migration or `--dev`, for
-/// configurations built in code. Parses share one parser, so Router's schema is compiled once.
+/// configurations built in code.
 pub(crate) fn parse_as_written(text: &str) -> Result<Configuration, ConfigurationError> {
     static PARSER: OnceLock<Mutex<ConfigurationParser>> = OnceLock::new();
-    PARSER
-        .get_or_init(|| {
-            Mutex::new(
-                ExternalValues::default()
-                    .into_parser()
-                    .expect("Router's schema compiles"),
-            )
-        })
-        .lock()
-        .parse_with_migration(text, Migration::None)
+    parse_shared(
+        &PARSER,
+        || Ok(ExternalValues::default().into_parser()?),
+        text,
+        Migration::None,
+    )
+}
+
+/// Parses `text` as startup does, with the process's environment and command-line inputs. Those
+/// inputs are read on the first call; expansions such as `${env.NAME}` are still read on every
+/// call.
+pub(crate) fn parse_with_process_inputs(text: &str) -> Result<Configuration, ConfigurationError> {
+    static PARSER: OnceLock<Mutex<ConfigurationParser>> = OnceLock::new();
+    parse_shared(
+        &PARSER,
+        ConfigurationParser::new,
+        text,
+        Migration::WithinMajor,
+    )
+}
+
+/// Parses `text` with no overrides or `--dev`, so the process's environment and command line
+/// cannot change the result. The same as [`parse_configuration`] with
+/// `Expansion::builder().build()`, without building a parser for every call.
+#[cfg(test)]
+pub(crate) fn parse_without_inputs(
+    text: &str,
+    migration: Migration,
+) -> Result<Configuration, ConfigurationError> {
+    static PARSER: OnceLock<Mutex<ConfigurationParser>> = OnceLock::new();
+    parse_shared(
+        &PARSER,
+        || ConfigurationParser::with_inputs(Expansion::builder().build()),
+        text,
+        migration,
+    )
 }
 
 /// Builds independent parsers for tests supplying their own inputs.

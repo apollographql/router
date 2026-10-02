@@ -562,9 +562,8 @@ plain: "no dollars here"
         .expect("--dev disables the homepage and enables introspection");
         assert!(config.sandbox.enabled);
 
-        let error = crate::configuration::parse_configuration(
+        let error = crate::configuration::parse_without_inputs(
             text,
-            Expansion::builder().build(),
             crate::configuration::Migration::WithinMajor,
         )
         .expect_err("the homepage is enabled by default")
