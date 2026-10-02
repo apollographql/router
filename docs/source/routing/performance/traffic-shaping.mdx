@@ -233,6 +233,8 @@ traffic_shaping:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
 ```
 
+For subgraphs with query deduplication enabled, the router reports the [`apollo.router.subgraph_deduplication.requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/standard-instruments#query-deduplication) counter to your metrics exporters and to GraphOS. Its `apollo.router.subgraph_deduplication.outcome` attribute shows whether each request was sent (`leader`), reused another request's response (`follower`), or wasn't eligible (`bypassed_batch` for a query that is part of a batch, `bypassed_operation` for a mutation or subscription, batched or not). A `leader` request is forwarded to the router's later subgraph plugins, so the response cache or a coprocessor may answer it instead of the subgraph.
+
 ### HTTP/2
 
 <HttpConnection type="subgraph" />
