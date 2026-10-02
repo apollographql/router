@@ -6708,6 +6708,21 @@ impl InputObjectTypeDefinitionPosition {
             .input_object_types
             .swap_remove(&self.type_name)
         {
+            for pos in input_object_type_referencers.object_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in input_object_type_referencers
+                .interface_field_arguments
+                .iter()
+            {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in input_object_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in input_object_type_referencers.directive_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
             schema
                 .referencers
                 .input_object_types
@@ -8566,5 +8581,24 @@ mod tests {
         let list = input.field(name!("list")).get(schema.schema()).unwrap();
         assert_eq!(list.name, name!("list"));
         assert_eq!(list.ty.to_string(), "[Renamed!]!");
+    }
+
+    #[test]
+    fn renamed_input_object_updates_input_value_types() {
+        let schema = rename_and_check(
+            "input Filter { name: String nested: Filter } \
+             directive @mark(filter: Filter) on FIELD_DEFINITION \
+             interface Searchable { search(filter: Filter): String } \
+             type Query implements Searchable { search(filter: Filter): String @mark }",
+            name!("Filter"),
+            name!("MovedFilter"),
+        );
+        let nested = InputObjectTypeDefinitionPosition {
+            type_name: name!("MovedFilter"),
+        }
+        .field(name!("nested"))
+        .get(schema.schema())
+        .unwrap();
+        assert_eq!(nested.ty.to_string(), "MovedFilter");
     }
 }
