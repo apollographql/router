@@ -770,9 +770,8 @@ mod test {
                 crate::configuration::upgrade::UpgradeMode::current_minor(),
             )
             .expect("the fixture migrates");
-            let parsed = crate::configuration::parse_configuration(
+            let parsed = crate::configuration::parse_without_inputs(
                 input,
-                crate::configuration::Expansion::builder().build(),
                 crate::configuration::Migration::WithinMajor,
             )
             .unwrap_or_else(|error| panic!("{file_name}: {error}"));
