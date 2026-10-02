@@ -1910,7 +1910,7 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
     if shape.is_none() || shape.is_null() {
         return Shape::none();
     }
-    let field_shape = shape.field(key.as_str(), key.shape_location(source_id));
+    let field_shape = map_field_over_shape(shape, key, source_id);
     if field_shape.is_none() {
         return Shape::error(
             format!("field `{field}` not found", field = key.as_str()),
@@ -1918,6 +1918,36 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
         );
     }
     field_shape
+}
+
+/// Like [`Shape::field`], but an array with no possible elements maps to an
+/// empty array instead of `None`.
+///
+/// At runtime, a key applied to an array is mapped over its elements (see
+/// `apply_to_array`), so `[].a` evaluates to `[]` without errors, and so does
+/// `[[]].a` (to `[[]]`). `Shape::field` collapses an array to `None` whenever
+/// every mapped element is `None`, which is vacuously true for an empty
+/// array, so the empty case would be reported as a missing field. Unnamed
+/// arrays are mapped here so the empty case is preserved at any depth; named
+/// arrays are left to `Shape::field`, which also propagates their names.
+fn map_field_over_shape(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
+    if let ShapeCase::Array { prefix, tail } = shape.case()
+        && shape.names().next().is_none()
+    {
+        let new_prefix = prefix
+            .iter()
+            .map(|item| map_field_over_shape(item, key, source_id))
+            .collect::<Vec<_>>();
+        let new_tail = map_field_over_shape(tail, key, source_id);
+        let has_elements = !prefix.is_empty() || !tail.is_none();
+        // As in `Shape::field`: if every element that can exist lacks the
+        // field, the field will never be found.
+        if has_elements && new_tail.is_none() && new_prefix.iter().all(Shape::is_none) {
+            return Shape::none();
+        }
+        return Shape::array(new_prefix, new_tail, key.shape_location(source_id));
+    }
+    shape.field(key.as_str(), key.shape_location(source_id))
 }
 
 #[cfg(test)]
@@ -7380,5 +7410,55 @@ mod tests {
         let (result, errors) = selection.apply_to(&unknown_data);
         assert_eq!(errors, vec![]);
         assert_eq!(result, Some(json!(null)));
+    }
+
+    /// A selection that evaluates successfully must produce a value accepted
+    /// by its computed output shape (given the exact shape of the input).
+    #[rstest]
+    #[case::v0_2(ConnectSpec::V0_2)]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn field_mapped_over_empty_array_has_an_accepting_output_shape(#[case] spec: ConnectSpec) {
+        for (source, input) in [
+            ("$.a", json!([])),
+            ("$.a.b", json!([])),
+            ("$.items.a", json!({ "items": [] })),
+            ("$.a", json!([[]])),
+            ("$.a", json!([[], [[]]])),
+            ("$.a", json!([[], { "a": 1 }])),
+            (
+                "$.groups.members.id",
+                json!({ "groups": [{ "members": [] }] }),
+            ),
+            ("$([]).a", json!(null)),
+        ] {
+            let selection = JSONSelection::parse_with_spec(source, spec).unwrap();
+            let (output, errors) = selection.apply_to(&input);
+            assert_eq!(errors, vec![], "{source} on {input}");
+            let output = output.unwrap_or_else(|| panic!("{source} on {input}: no output"));
+            let context = ShapeContext::new(SourceId::Other("test".into())).with_spec(spec);
+            let shape = selection.compute_output_shape(&context, Shape::from_json_bytes(&input));
+            assert!(
+                shape.accepts_json_bytes(&output),
+                "{source} on {input}: {output} not accepted by {}",
+                shape.pretty_print()
+            );
+        }
+    }
+
+    /// Mapping a field that no element can have is still reported statically.
+    #[test]
+    fn field_missing_from_every_array_element_is_still_an_error_shape() {
+        for input in [json!([{ "b": 1 }]), json!([[{ "b": 1 }]])] {
+            let selection = JSONSelection::parse("$.a").unwrap();
+            let context = ShapeContext::new(SourceId::Other("test".into()));
+            let shape = selection.compute_output_shape(&context, Shape::from_json_bytes(&input));
+            assert!(
+                matches!(shape.case(), ShapeCase::Error(_)),
+                "{input}: {}",
+                shape.pretty_print()
+            );
+        }
     }
 }
