@@ -87,7 +87,7 @@ The `preview_entity_cache` plugin is removed in GraphOS Router v3.0.0. It was su
        enabled: true
        redis:
          urls: ["redis://localhost:6379"]
-         ttl: 24h
+       ttl: 24h
 ```
 
 ### Removed legacy Apollo trace transport and `otlp_tracing_sampler`
@@ -103,7 +103,7 @@ This only affects trace export. Usage report metrics are unchanged and continue 
 
 ### Removed `experimental_reuse_query_plans`
 
-The experimental query plan reuse feature has been removed. This has been experimental for several years and never proved useful enough to stabilize. We recommend using distributed query plan caching as well as the new [incremental query planner][].
+The experimental query plan reuse feature has been removed. We recommend using distributed query plan caching as well as the new [incremental query planner][].
 
 ### Removed `experimental_chaos`
 
@@ -155,7 +155,7 @@ The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` ins
 
 ### Changed service type in Rust plugin hooks
 
-The plugin hooks available to Rust plugins now use `BoxCloneService` rather than `BoxService`. Any tower layers your plugins use must now be `Clone`.
+The plugin hooks available to Rust plugins now use `BoxCloneService` rather than `BoxService`. Any tower service your plugin returns must now be `Clone`.
 
 Plugin hooks are called once on startup and reload.
 
@@ -245,11 +245,11 @@ These metrics now include a unit:
 - `apollo.router.cache.hit.time`
 - `apollo.router.cache.miss.time`
 - `apollo.router.operations.coprocessor.duration`
-- `apollo.router.query.planning.plan.duration`
-- `apollo.router.query.planning.total.duration`
-- `apollo.router.query.planning.warmup.duration`
+- `apollo.router.query_planning.plan.duration`
+- `apollo.router.query_planning.total.duration`
+- `apollo.router.query_planning.warmup.duration`
 - `apollo.router.schema.load.duration`
-- `apollo.router.operations.file.uploads.file.size`
+- `apollo.router.operations.file_uploads.file_size`
 
 **Upgrade step**:
 - If you use OTLP, adjust your dashboards to account for the new `apollo.router.uplink.fetch.duration` name.
