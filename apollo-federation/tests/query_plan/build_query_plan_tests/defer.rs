@@ -4208,3 +4208,88 @@ fn defer_test_user_label_shaped_like_generated_label() {
     assert!(plan.contains(r#"label: "qp__0""#));
     assert_eq!(plan.matches("label:").count(), 1);
 }
+
+#[test]
+fn defer_test_disabled_defer_keeps_requested_typename() {
+    // When `$cond` is false, the deferred fragment is merged into its non-deferred twin. The
+    // `__typename` requested only in the deferred fragment must still be fetched.
+    let planner = planner!(
+        config = config_with_defer(),
+        Subgraph1: r#"
+          type Query {
+            i: I
+          }
+
+          interface I {
+            x: Int
+          }
+
+          type A implements I {
+            x: Int
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            v1: String
+            v2: String
+          }
+        "#,
+    );
+
+    assert_plan!(planner,
+        r#"
+          query ($cond: Boolean) {
+            i {
+              ... on A {
+                x
+              }
+              ... on A @defer(if: $cond) {
+                __typename
+                x
+              }
+            }
+          }
+        "#,
+        @r###"
+    QueryPlan {
+      Condition(if: $cond) {
+        Then {
+          Defer {
+            Primary {
+              { i { ... on A { x } } }:
+              Fetch(service: "Subgraph1") {
+                {
+                  i {
+                    __typename
+                    ... on A {
+                      __typename
+                      x
+                    }
+                  }
+                }
+              },
+            }, [
+              Deferred(depends: [], path: "i") {
+                { ... on A { __typename x } }:
+              },
+            ]
+          },
+        } Else {
+          Fetch(service: "Subgraph1") {
+            {
+              i {
+                __typename
+                ... on A {
+                  __typename
+                  x
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
