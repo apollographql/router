@@ -23,11 +23,11 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Configuration;
-use crate::Notify;
 use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::subscription::notification::Notify;
 use crate::query_planner::QueryPlannerService;
 use crate::services::execution;
 use crate::services::http;

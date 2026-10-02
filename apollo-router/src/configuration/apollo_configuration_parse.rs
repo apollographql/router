@@ -293,7 +293,7 @@ fn parser_builder<T: apollo_configuration::Configuration>(
 /// Parses Router YAML with a schema compiled once, fixed overrides, and fresh file expansions.
 /// Own one parser for a sequence of configuration loads. Each load shares expansion values
 /// across validation, the retained document, and migration fallback.
-pub struct ConfigurationParser {
+pub(crate) struct ConfigurationParser {
     config: ConfigParser<ParsedConfiguration>,
     document: ConfigParser<ExpandedDocument>,
     dev_mode: bool,
@@ -348,7 +348,7 @@ impl ConfigurationParser {
     ///
     /// # Errors
     /// Returns invalid expansion-mode configuration or schema compilation errors.
-    pub fn new() -> Result<Self, ConfigurationError> {
+    pub(crate) fn new() -> Result<Self, ConfigurationError> {
         Self::with_inputs(Expansion::default()?)
     }
 
@@ -362,7 +362,7 @@ impl ConfigurationParser {
     ///
     /// # Errors
     /// Returns YAML, migration, expansion, override, schema, or typed configuration errors.
-    pub fn parse(&mut self, text: &str) -> Result<Configuration, ConfigurationError> {
+    pub(crate) fn parse(&mut self, text: &str) -> Result<Configuration, ConfigurationError> {
         self.parse_with_migration(text, Migration::WithinMajor)
     }
 

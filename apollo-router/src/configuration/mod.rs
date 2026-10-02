@@ -40,7 +40,7 @@ use serde_json::Value;
 use sha2::Digest;
 use thiserror::Error;
 
-pub use self::apollo_configuration_parse::ConfigurationParser;
+pub(crate) use self::apollo_configuration_parse::ConfigurationParser;
 pub(crate) use self::apollo_configuration_parse::Migration;
 #[cfg(test)]
 pub(crate) use self::apollo_configuration_parse::parse_configuration;
@@ -267,9 +267,8 @@ impl PartialEq for Configuration {
     }
 }
 
-/// Deserializes through [`ConfigurationParser`], so a configuration built with serde is checked
-/// like a file: against Router's schema and every plugin's validation rules. The document is
-/// taken as written, without migrations, overrides or `--dev`.
+/// Deserialize a configuration with serde. Verified against the schema and validation rules.
+/// The document is taken as written, without migrations, overrides or `--dev`.
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -695,11 +694,12 @@ impl Configuration {
     }
 }
 
-/// Parses one configuration from YAML, as router startup does. Settings from the command line and
-/// environment, such as `--listen`, `--dev`, `APOLLO_USAGE_REPORTING_INGRESS_URL` and the
-/// expansion prefix and supported modes, are read on the first call in a process; `${env.NAME}`
-/// and `${file.PATH}` are read on every call. To pick up changed settings, parse with a new
-/// [`ConfigurationParser`].
+/// Parse router configuration from YAML.
+///
+/// Settings from the command line and environment are read once on the first call and reused when
+/// parsing multiple configurations.
+/// Substitutions (including environment substitutions like `${env.NAME}`) are still read on every
+/// call.
 impl FromStr for Configuration {
     type Err = ConfigurationError;
 
