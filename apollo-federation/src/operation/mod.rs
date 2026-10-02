@@ -1762,6 +1762,7 @@ impl SelectionSet {
                      mut path,
                      response_name,
                      alias,
+                     ..
                  }| {
                     path.push(FetchDataPathElement::Key(alias, Default::default()));
                     Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
@@ -1783,38 +1784,40 @@ impl SelectionSet {
             return Ok(self.clone());
         }
 
-        let mut at_current_level: IndexMap<FetchDataPathElement, &FieldToAlias> =
-            IndexMap::default();
+        let mut at_current_level: IndexMap<(&Name, &Name), &FieldToAlias> = IndexMap::default();
         let mut remaining: Vec<&FieldToAlias> = Vec::new();
 
         for alias in aliases {
             if !alias.path.is_empty() {
                 remaining.push(alias);
             } else {
-                at_current_level.insert(
-                    FetchDataPathElement::Key(alias.response_name.clone(), Default::default()),
-                    alias,
-                );
+                at_current_level.insert((&alias.response_name, &alias.field_name), alias);
             }
         }
 
         let mut selection_map = SelectionMap::new();
         for selection in self.selections.values() {
             let path_element = selection.element().as_path_element();
-            let subselection_aliases = remaining
-                .iter()
-                .filter_map(|alias| {
-                    if alias.path.first() == path_element.as_ref() {
-                        Some(FieldToAlias {
-                            path: alias.path[1..].to_vec(),
-                            response_name: alias.response_name.clone(),
-                            alias: alias.alias.clone(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
+            let subselection_aliases = match &path_element {
+                Some(path_element) => remaining
+                    .iter()
+                    .filter_map(|alias| {
+                        if alias.path.first() == Some(path_element) {
+                            Some(FieldToAlias {
+                                path: alias.path[1..].to_vec(),
+                                ..(*alias).clone()
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                // Only an inline fragment without a type condition has no path element.
+                // `fields_in_set` adds nothing to alias paths for such a fragment, so every
+                // alias at this level, including those for fields directly at this level,
+                // also applies inside it.
+                None => aliases.to_vec(),
+            };
             let selection_set = selection.selection_set();
             let updated_selection_set = selection_set
                 .map(|selection_set| selection_set.with_field_aliased(&subselection_aliases))
@@ -1822,7 +1825,8 @@ impl SelectionSet {
 
             match selection {
                 Selection::Field(field) => {
-                    let alias = path_element.and_then(|elem| at_current_level.get(&elem));
+                    let alias =
+                        at_current_level.get(&(field.field.response_name(), field.field.name()));
                     if alias.is_none() && selection_set == updated_selection_set.as_ref() {
                         selection_map.insert(selection.clone());
                     } else {
@@ -1987,9 +1991,14 @@ pub(crate) struct SelectionSetAtPath {
     selections: Option<SelectionSet>,
 }
 
+#[derive(Clone)]
 pub(crate) struct FieldToAlias {
     path: Vec<FetchDataPathElement>,
     response_name: Name,
+    /// Name of the field to alias. Fields inside an inline fragment without a type condition
+    /// share the path of their siblings outside it, so path and response name alone don't
+    /// tell which occurrence to alias; conflicting occurrences at one path differ in name.
+    field_name: Name,
     alias: Name,
 }
 
@@ -2113,6 +2122,7 @@ fn compute_aliases_for_non_merging_fields(
                     alias_collector.push(FieldToAlias {
                         path,
                         response_name: response_name.clone(),
+                        field_name: field_name.clone(),
                         alias,
                     })
                 }
