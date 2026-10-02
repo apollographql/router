@@ -1007,6 +1007,101 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "CircuitBreakerConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for circuit breaking.\n\nControls when the circuit trips open, how long it stays open, and how many consecutive\nfailures trigger an immediate trip regardless of the overall failure rate.\n\nAll fields have sensible defaults, so an empty config is valid.\n\n# Example\n```yaml\nfailure_rate_threshold: 0.5\nwindow_size: 100\nmin_requests: 10\nopen_duration: 30s\nconsecutive_failures: 5\n```",
+      "properties": {
+        "consecutive_failures": {
+          "default": 5,
+          "description": "Number of consecutive failures that immediately trip the circuit.\n\nTrips the circuit before a full rate window fills — useful for catching hard failures\nfast. Must be ≥ 1. Defaults to `5`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "failure_rate_threshold": {
+          "default": 0.5,
+          "description": "Fraction of requests that must fail before the circuit opens.\n\nEvaluated only once the window holds at least `min_requests`. Must be in the range\n(0.0, 1.0]: a value of `1.0` trips on 100% failure; a value of `0.5` trips on 50%.\nDefaults to `0.5`.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_requests": {
+          "default": 10,
+          "description": "Minimum requests in the window before the failure rate is evaluated.\n\nPrevents the circuit from tripping on a handful of early failures. Must be ≥ 1 and\n≤ `window_size`. Defaults to `10`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "open_duration": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Duration"
+            }
+          ],
+          "default": "30s",
+          "description": "How long the circuit stays open before allowing a single probe request through.\n\nAlso bounds the probe: one still in flight this long after dispatch reopens the\ncircuit, so the next probe follows one `open_duration` later. A probe dropped before\nit reports hands the probe to the next request instead. Must be greater than zero.\nDefaults to `30s`."
+        },
+        "window_size": {
+          "default": 100,
+          "description": "Number of most recent requests the failure rate is measured over.\n\nOlder outcomes drop out of the window as new ones arrive, so the rate always reflects\ncurrent behaviour rather than the lifetime of the process. Must be ≥ `min_requests` and\nat most `1000000`. Defaults to `100`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerConnectorConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for circuit breaking on Apollo Connectors requests.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConfig"
+            }
+          ],
+          "description": "Applied to every connector source that has no entry of its own under `sources`."
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerConfig"
+          },
+          "description": "Applied to specific connector sources, keyed by `<subgraph name>.<source name>`, in place\nof `all` rather than on top of it: a source listed here takes its options from its own\nblock alone, and the default for every option that block leaves out.\n\nA `@connect` with no `@source` has no source name to be keyed by, so it takes the name\nthe router synthesizes from the directive's position instead — `products.products_Query_products_0`\nfor a `@connect` on `Query.products` in the `products` subgraph. Those names are not\nmeant to be written here: configure sourceless connectors through `all`.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerPluginConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for the circuit breaker plugin.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConfig"
+            }
+          ],
+          "description": "Applied to every subgraph that has no entry of its own under `subgraphs`."
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConnectorConfig"
+            }
+          ],
+          "description": "Applied to Apollo Connectors requests."
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerConfig"
+          },
+          "description": "Applied to specific subgraphs, in place of `all` rather than on top of it: a subgraph\nlisted here takes its options from its own block alone, and the default for every option\nthat block leaves out.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "Client": {
       "additionalProperties": false,
       "description": "HTTP client configuration",
@@ -3505,6 +3600,9 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "Duration": {
+      "type": "string"
     },
     "DurationUnit": {
       "oneOf": [
@@ -6953,7 +7051,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `RedactedError`.\n\n* When set to `RedactedError`, requests that fail JWT authentication are rejected with a\n  generic error message instead of the details of the validation failure. The details\n  remain available in the `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric.\n* When set to `Error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error, and the response contains the details of the validation failure.\n* When set to `Continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `redacted_error`.\n\n* When set to `redacted_error`, requests that fail JWT authentication are rejected with a\n  generic error message instead of the details of the validation failure. The details\n  remain available in the `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric.\n* When set to `error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error, and the response contains the details of the validation failure.\n* When set to `continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -7597,9 +7695,9 @@ expression: "&schema"
     },
     "OnError": {
       "enum": [
-        "Continue",
-        "Error",
-        "RedactedError"
+        "continue",
+        "error",
+        "redacted_error"
       ],
       "type": "string"
     },
@@ -13127,6 +13225,9 @@ expression: "&schema"
         "subgraph": null
       },
       "description": "Batching configuration."
+    },
+    "circuit_breaker": {
+      "$ref": "#/definitions/CircuitBreakerPluginConfig"
     },
     "connectors": {
       "$ref": "#/definitions/ConnectorsConfig"

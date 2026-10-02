@@ -9,10 +9,10 @@ use tower_service::Service;
 
 use crate::Configuration;
 use crate::Context;
-use crate::Notify;
 use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::subscription::notification::Notify;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph;
 use crate::services::supergraph;

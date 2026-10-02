@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use serde_json::Value;
 use serde_json::json;
@@ -18,6 +19,7 @@ use super::apollo_configuration_parse::Migration;
 use super::apollo_configuration_parse::assert_logs;
 use super::apollo_configuration_parse::migrated_copy_warning;
 use super::apollo_configuration_parse::parse_configuration;
+use super::apollo_configuration_parse::parse_without_inputs;
 use super::expansion::Expansion;
 use super::expansion::Override;
 use super::expansion::ValueType;
@@ -125,7 +127,7 @@ const CASES: &[Case] = &[
 ];
 
 fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
-    parse_configuration(text, Expansion::builder().build(), Migration::WithinMajor)
+    parse_without_inputs(text, Migration::WithinMajor)
 }
 
 /// Loads `case` the way an operator would run it.
@@ -136,7 +138,7 @@ fn load(case: &Case) -> Result<Configuration, ConfigurationError> {
             let original: Value = serde_yaml::from_str(case.text).expect("fixtures are YAML");
             let upgraded = upgrade_configuration(&original, false, UpgradeMode::Major)?;
             let upgraded = serde_yaml::to_string(&upgraded).expect("migrations serialize");
-            parse_configuration(&upgraded, Expansion::builder().build(), Migration::None)
+            parse_without_inputs(&upgraded, Migration::None)
         }
     }
 }
@@ -198,10 +200,12 @@ fn changed_settings(config: &Configuration) -> BTreeMap<String, Value> {
         }
     }
 
-    let default = effective_settings(&parse("").expect("the default configuration is valid"));
+    static DEFAULT: LazyLock<Value> = LazyLock::new(|| {
+        effective_settings(&parse("").expect("the default configuration is valid"))
+    });
     let value = effective_settings(config);
     let mut changes = BTreeMap::new();
-    walk(Some(&default), &value, &mut String::new(), &mut changes);
+    walk(Some(&DEFAULT), &value, &mut String::new(), &mut changes);
     changes
 }
 
@@ -417,7 +421,7 @@ fn unmigrated_flat_subscription_dedup_is_rejected_while_parsing() {
     let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
 
     parse(text).expect("startup migrates the flat shape");
-    let error = parse_configuration(text, Expansion::builder().build(), Migration::None)
+    let error = parse_without_inputs(text, Migration::None)
         .expect_err("typed deserialization rejects the unmigrated flat shape")
         .to_string();
     assert!(error.contains("apollo.subscription"), "{error}");

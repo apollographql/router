@@ -79,10 +79,8 @@ struct AuthenticationPlugin {
     connector: Option<ConnectorAuth>,
 }
 
-// TODO: in the next major version, rename these values to snake_case (`continue`, `error`,
-// `redacted_error`). This is the only config option in the router whose values are PascalCase; every
-// other one is snake_case. It needs a config migration, so it can't ship in a patch release.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
 enum OnError {
     Continue,
     Error,
@@ -109,15 +107,15 @@ struct JWTConf {
     sources: Vec<Source>,
     /// Control the behavior when an error occurs during the authentication process.
     ///
-    /// Defaults to `RedactedError`.
+    /// Defaults to `redacted_error`.
     ///
-    /// * When set to `RedactedError`, requests that fail JWT authentication are rejected with a
+    /// * When set to `redacted_error`, requests that fail JWT authentication are rejected with a
     ///   generic error message instead of the details of the validation failure. The details
     ///   remain available in the `apollo::authentication::jwt_status` context value and in the
     ///   `apollo.router.operations.authentication.jwt` metric.
-    /// * When set to `Error`, requests that fail JWT authentication will be rejected with a
+    /// * When set to `error`, requests that fail JWT authentication will be rejected with a
     ///   HTTP 403 error, and the response contains the details of the validation failure.
-    /// * When set to `Continue`, requests that fail JWT authentication will continue to be
+    /// * When set to `continue`, requests that fail JWT authentication will continue to be
     ///   processed by the router, but without the JWT claims in the context.
     #[serde(default)]
     on_error: OnError,

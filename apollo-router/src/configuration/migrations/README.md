@@ -76,3 +76,6 @@ In future we will be able to use these files to support offline migrations.
 
 # Testing
 Once you have made a new migration place a config file in `testdata/migrations`. It will automatically be picked up by the `upgrade_old_configuration` test.
+
+
+The fixture should contain the **old** configuration, i.e. the format your migration upgrades from, not the new one. For example, the fixture for a migration that renames `Continue` to `continue` still uses `Continue`. The `upgrade_old_configuration` test runs every file in that folder through the migrations and then validates the migrated result against the current configuration schema, so a fixture that is already in the new format proves nothing about the migration.

@@ -22,12 +22,12 @@ use tracing_futures::Instrument;
 
 use crate::Configuration;
 use crate::Context;
-use crate::Notify;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::graphql::Response;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use crate::plugins::subscription::Notify;
 use crate::plugins::subscription::SUBSCRIPTION_ERROR_EXTENSION_KEY;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;

@@ -992,6 +992,7 @@ connector:
                             },
                         ],
                     },
+                    break_status: None,
                 };
                 connector_events.on_response(&connector_response);
             },
@@ -1434,6 +1435,7 @@ subgraph:
                             },
                         ],
                     },
+                    break_status: None,
                 };
                 connector_events.on_response(&connector_response);
             },

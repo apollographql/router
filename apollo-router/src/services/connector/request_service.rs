@@ -33,7 +33,6 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::connectors::handle_responses::process_response;
-use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -176,6 +175,10 @@ impl Request {
     /// a connector request deliberately, for example to circuit break on an upstream a
     /// plugin knows to be unhealthy.
     ///
+    /// The response carries no status, so the router's own circuit breaker counts the
+    /// failure against the connector source, like any other error from a request it has
+    /// admitted.
+    ///
     /// The error's remaining fields are derived from the request and are not settable,
     /// for the same reason the coprocessor does not let a coprocessor set them: the
     /// path and response key are what merge the failure back into the right place in
@@ -190,6 +193,7 @@ impl Request {
             self.context,
             self.connector,
             self.key,
+            None,
             message,
             code,
             extensions,
@@ -225,6 +229,11 @@ pub struct Response {
     /// client. Kept private so that only the parts a customization may safely change
     /// are reachable; see the accessors on [`Response`].
     pub(crate) mapped_response: MappedResponse,
+
+    /// The status a coprocessor gave when it broke this request before it was sent, so the
+    /// circuit breaker can judge the break the way it judges a subgraph response's status.
+    /// `None` for every request that was not broken with a status.
+    pub(crate) break_status: Option<http::StatusCode>,
 }
 
 impl Response {
@@ -315,6 +324,7 @@ impl Response {
             subgraph_name,
             transport_result: Err(error),
             mapped_response,
+            break_status: None,
         }
     }
 
@@ -322,6 +332,7 @@ impl Response {
         request_context: Context,
         request_connector: Arc<Connector>,
         request_key: ResponseKey,
+        break_status: Option<http::StatusCode>,
         message: impl Into<String>,
         code: impl Into<String>,
         extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
@@ -346,6 +357,7 @@ impl Response {
                 key: request_key,
                 problems: Vec::new(),
             },
+            break_status,
         }
     }
 
@@ -377,6 +389,7 @@ impl Response {
             subgraph_name: String::new(),
             transport_result: Ok(http_response.into()),
             mapped_response,
+            break_status: None,
         }
     }
 }
@@ -429,21 +442,12 @@ impl tower::Service<Request> for ConnectorRequestService {
         let mut http_client = std::mem::replace(&mut self.http_client, fresh_client);
 
         // Load the information needed from the context
-        let (debug, connector_request_event, request_limit) =
-            request.context.extensions().with_lock(|lock| {
-                (
-                    lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
-                    lock.get::<ConnectorEventRequest>().cloned(),
-                    lock.get::<Arc<RequestLimits>>()
-                        .map(|limits| {
-                            limits.get(
-                                request.connector.as_ref().into(),
-                                request.connector.max_requests,
-                            )
-                        })
-                        .unwrap_or(None),
-                )
-            });
+        let (debug, connector_request_event) = request.context.extensions().with_lock(|lock| {
+            (
+                lock.get::<Arc<Mutex<ConnectorContext>>>().cloned(),
+                lock.get::<ConnectorEventRequest>().cloned(),
+            )
+        });
 
         let log_request_level = connector_request_event.and_then(|s| {
             if s.condition.lock().evaluate_request(&request) == Some(true) {
@@ -481,53 +485,45 @@ impl tower::Service<Request> for ConnectorRequestService {
                         subgraph_name: original_subgraph_name,
                         transport_result: Ok(TransportResponse::MappingOnly),
                         mapped_response: mapped,
+                        break_status: None,
                     })
                 }
 
                 TransportRequest::Http(http_request) => {
-                    let mut debug_request = (None, Default::default());
-                    let result = if request_limit
-                        .is_some_and(|request_limit| !request_limit.allow())
-                    {
-                        Err(Error::RequestLimitExceeded)
-                    } else {
-                        debug_request = http_request.debug;
+                    let debug_request = http_request.debug;
 
-                        log_request(
-                            &http_request.inner,
-                            log_request_level,
-                            request.connector.label.as_ref(),
-                            &request.context,
-                            &original_subgraph_name,
+                    log_request(
+                        &http_request.inner,
+                        log_request_level,
+                        request.connector.label.as_ref(),
+                        &request.context,
+                        &original_subgraph_name,
+                    );
+
+                    let (parts, body) = http_request.inner.into_parts();
+                    let http_request =
+                        http::Request::from_parts(parts, router::body::from_bytes(body));
+
+                    let result = http_client
+                        .call(crate::services::http::HttpRequest {
+                            http_request,
+                            context: request.context.clone(),
+                        })
+                        .await
+                        .map(|result| result.http_response)
+                        .map_err(|e|
+                            // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
+                            // `apollo-federation` crate, we could longer reference `BoxError` from there.
+                            Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
                         );
 
-                        let (parts, body) = http_request.inner.into_parts();
-                        let http_request =
-                            http::Request::from_parts(parts, router::body::from_bytes(body));
-
-                        let result = http_client
-                            .call(crate::services::http::HttpRequest {
-                                http_request,
-                                context: request.context.clone(),
-                            })
-                            .await
-                            .map(|result| result.http_response)
-                            .map_err(|e|
-                                // Note: this previously used `#[from] BoxError` but when we moved `Error` into the
-                                // `apollo-federation` crate, we could longer reference `BoxError` from there.
-                                Error::TransportFailure((replace_subgraph_name(e, &request.connector)).to_string())
-                            );
-
-                        u64_counter!(
-                            "apollo.router.operations.connectors",
-                            "Total number of requests to connectors",
-                            1,
-                            "connector.type" = CONNECTOR_TYPE_HTTP,
-                            "subgraph.name" = original_subgraph_name
-                        );
-
-                        result
-                    };
+                    u64_counter!(
+                        "apollo.router.operations.connectors",
+                        "Total number of requests to connectors",
+                        1,
+                        "connector.type" = CONNECTOR_TYPE_HTTP,
+                        "subgraph.name" = original_subgraph_name
+                    );
 
                     Ok(process_response(
                         result,

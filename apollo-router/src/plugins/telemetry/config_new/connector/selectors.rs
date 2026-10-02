@@ -579,6 +579,7 @@ mod tests {
                 key: response_key(),
                 problems: mapping_problems,
             },
+            break_status: None,
         }
     }
 
@@ -599,6 +600,7 @@ mod tests {
                 key: response_key(),
                 problems: vec![],
             },
+            break_status: None,
         }
     }
 
@@ -626,6 +628,7 @@ mod tests {
                 key: response_key(),
                 problems: vec![],
             },
+            break_status: None,
         }
     }
 
