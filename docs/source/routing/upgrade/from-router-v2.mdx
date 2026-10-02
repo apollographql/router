@@ -73,10 +73,10 @@ telemetry:
 
 ### Removed `preview_entity_cache` plugin
 
-The `preview_entity_cache` plugin is removed in GraphOS Router 3.0. It was superseded by `response_cache`.
+The `preview_entity_cache` plugin is removed in GraphOS Router v3.0.0. It was superseded by `response_cache`.
 
 **Upgrade step**:
-- Migrate to the new plugin:
+- Adopt the new plugin:
 
 ```diff
 -preview_entity_cache:
@@ -124,14 +124,14 @@ The `context` option in Router v3.0 no longer supports the `deprecated` option _
 
 **Upgrade step**:
 - Ensure your coprocessor code has been migrated.
-- Try running v2.x with `context: all` instead of `context: deprecated`, and validate that everything works before upgrading to v3.x.
+- Run v2.x with `context: all` instead of `context: deprecated` and validate that everything works before upgrading to v3.x.
 
 ### Removed deprecated `by_response_shape` cost mode from Demand Control
 
 The `by_response_shape` cost mode was deprecated because it's prone to under-counting the actual work involved in a federated GraphQL operation. It is now removed in favour of `by_subgraph`.
 
 **Upgrade step**:
-- Replace uses of `by_response_shape` with `by_subgraph`.
+- Use `by_subgraph` instead of `by_response_shape`.
 
 ```diff
  demand_control:
@@ -150,7 +150,7 @@ If you use the `apollo-router` crate from Rust, you may have to update your code
 The router's default process-wide rustls `CryptoProvider` is now `aws-lc-rs` instead of `ring`. This only affects consumers embedding `apollo-router` as a library:
 
 - If your binary installs `rustls::crypto::ring::default_provider()` (or otherwise assumes `ring` is the installed provider) before or after calling into `apollo-router`, the two installs will race, and whichever runs first wins. Update your own crypto-provider install to use `aws-lc-rs`, or remove it and rely on the router's install.
-- If your binary depends directly on `ring`-backed features of `reqwest`, `tonic`, `fred`, or any other ecosystem crate that uses rustls, switch to the `aws-lc-rs` equivalent.
+- If your binary depends directly on `ring`-backed features of `reqwest`, `tonic`, `fred`, or any other ecosystem crate that uses `rustls`, switch to the `aws-lc-rs` equivalent.
 
 ### Changed service type in Rust plugin hooks
 
@@ -158,7 +158,7 @@ The plugin hooks available to Rust plugins now use `BoxCloneService` rather than
 
 Plugin hooks are called once on startup and reload.
 
-Affected methods:
+The following methods are affected:
 
 - `Plugin::router_service`
 - `Plugin::supergraph_service`
@@ -168,14 +168,14 @@ Affected methods:
 
 **Upgrade step**:
 
-- Replace the `apollo_router::services::router::BoxService` type by `BoxCloneService` in your method signatures, and equivalent for the other methods:
+- Use the `BoxCloneService` type instead of `apollo_router::services::router::BoxService` in your method signatures, and equivalent for the other methods:
     - `apollo_router::services::router::BoxService` -> `apollo_router::services::router::BoxCloneService`
     - `apollo_router::services::subgraph::BoxService` -> `apollo_router::services::subgraph::BoxCloneService`
     - `apollo_router::services::supergraph::BoxService` -> `apollo_router::services::supergraph::BoxCloneService`
     - `apollo_router::services::execution::BoxService` -> `apollo_router::services::execution::BoxCloneService`
     - `apollo_router::services::connector::request_service::BoxService` -> `apollo_router::services::connector::request_service::BoxCloneService`
 - Use `.boxed_clone()` instead of `.boxed()` to return the correct service type.
-- If some of your tower layers are _not_ `Clone`, you can use the `.buffered()` layer:
+If some of your tower layers are _not_ `Clone`, use the `.buffered()` layer:
 
 ```rust
 fn router_service(service: router::BoxCloneService) -> router::BoxCloneService {
@@ -235,12 +235,12 @@ The `apollo-router` crate previously provided a `ServiceBuilderExt::checkpoint` 
 
 ### Renamed metrics
 
-Several duration and byte-count metrics gained a UCUM unit (`s` for durations, `By` for bytes).
+Several duration and byte-count metrics now include a UCUM unit (`s` for durations, `By` for bytes).
 
-These metrics were renamed
+These metrics were renamed:
 - `apollo.router.uplink.fetch.duration.seconds` was renamed to `apollo.router.uplink.fetch.duration` with the unit being `s`.
 
-These metrics gained a unit:
+These metrics now include a unit:
 - `apollo.router.cache.hit.time`
 - `apollo.router.cache.miss.time`
 - `apollo.router.operations.coprocessor.duration`
@@ -251,7 +251,7 @@ These metrics gained a unit:
 - `apollo.router.operations.file.uploads.file.size`
 
 **Upgrade step**:
-- If using OTLP, adjust dashboards to account for the new `apollo.router.uplink.fetch.duration` name.
+- If you use OTLP, adjust your dashboards to account for the new `apollo.router.uplink.fetch.duration` name.
 - If using Prometheus, see the next section.
 
 ### Renamed Prometheus metrics
@@ -276,16 +276,16 @@ The above improvement affects Prometheus metrics. The `opentelemetry-prometheus`
 
 ### Batched requests get individual subgraph spans
 
-In GraphOS Router v2.x, batched subgraph requests produced a single subgraph span for the whole batch, with a special "batch" value for `graphql.operation.name`.
+In GraphOS Router v2.x, batched subgraph requests produced a single subgraph span for the whole batch, with a special `batch` value for `graphql.operation.name`.
 
 Starting in Router 3, requests are instead only batched up at the HTTP level. This means that each subgraph request that is part of a batch emits its own full-fledged span, but only one HTTP client span is emitted for the entire batch.
 
 ### Removed deprecated `apollo.router.session.count.active` metric
 
-The `apollo.router.session.count.active` metric is removed. It was deprecated throughout the 2.x version line.
+The `apollo.router.session.count.active` metric is removed. It was deprecated throughout the v2.x version line.
 
 **Upgrade step**:
-- Update dashboards to use the `http.server.active_requests` metric instead.
+- Update your dashboards to use the `http.server.active_requests` metric instead.
 
 ### Removed deprecated span mode
 
@@ -300,7 +300,7 @@ The following describes changes to router configuration, including renamed optio
 
 ### Configuration is validated more strictly when it loads
 
-The router checks its configuration more thoroughly at startup and on reload, so a configuration that loaded with router v2.x can be rejected.
+The router checks your configuration more thoroughly at startup and on reload, so a configuration that loaded with router v2.x can be rejected.
 
 - **Error messages have a new format.** They quote the offending lines of your file. Errors in plugin configuration are reported together with other errors. Errors in values from substitutions call out the relevant environment variable or CLI flag.
 - **`router config validate` checks what startup would load.** It applies the same automatic upgrades as startup, and says when your file relies on them.
@@ -403,7 +403,7 @@ The `http2` configuration to enable communication over HTTP/2 with subgraphs and
 The `expose_query_plan` plugin has been promoted out of experimental.
 
 **Upgrade step**:
-- Replace a `plugins."experimental.expose_query_plan"` configuration by the top-level `expose_query_plan`.
+- Replace a `plugins."experimental.expose_query_plan"` configuration with the top-level `expose_query_plan`.
 
 ```yaml
 # Before (no longer supported)
@@ -434,7 +434,7 @@ attributes:
 
 ### Removed deprecated configuration fields
 
-- `traffic_shaping.deduplicate_variables` already had no effect, and is now removed
+- `traffic_shaping.deduplicate_variables` already had no effect, and is now removed.
 - `persisted_queries.experimental_local_manifests` is removed as it was stabilized in v2.x. Use `persisted_queries.local_manifests` instead.
 
 **Upgrade step**:
@@ -444,15 +444,15 @@ attributes:
 
 ### Removed retries during query plan warmup
 
-During router reloads, the query plan cache is warmed up by pre-planning recently used GraphQL queries against the new configuration and schema. In Router 2.x, if the router's compute job worker pool was overloaded, warmup would wait a bit and retry each query plan until space was available on the pool. In Router 3.0, warmup of a query is skipped if there is no space for it, so we do not queue up extra work when the router is already overloaded.
+During router reloads, the query plan cache is warmed up by pre-planning recently used GraphQL queries against the new configuration and schema. In Router 2.x, if the router's compute job worker pool was overloaded, warmup would wait a bit and retry each query plan until space was available on the pool. In Router 3.0, warmup of a query is skipped if there is no space for it, so the router does not queue up extra work when it is already overloaded.
 
-In effect, the router may switch over to the new configuration and schema on a cold cache. This can cause a further spike in 503 responses post-reload, but the router will also stabilise faster: the old and new pipelines are not competing for resources for as long.
+In effect, the router may switch over to the new configuration and schema on a cold cache. This can cause a further spike in 503 responses post-reload, but the router will also stabilize faster: the old and new pipelines are not competing for resources for as long.
 
 We expect this to be a better behaviour overall, and to occur (way) less frequently with the [incremental query planner][].
 
 ### Global variable mutation using `Fn("name")` callbacks in Rhai scripts
 
-When using the `Fn("name")` syntax to register plugin hooks in a Rhai script, mutating a global variable no longer persists across invocations of the script. It used to require holding a lock for the full runtime of the script,meaning concurrent requests had to wait for each other.
+When using the `Fn("name")` syntax to register plugin hooks in a Rhai script, mutating a global variable no longer persists across invocations of the script. The previous implementation required holding a lock for the full runtime of the script, meaning concurrent requests had to wait for each other.
 
 ```rhai
 let counter = 0
@@ -461,16 +461,16 @@ fn process_request(request) {
     return request
 }
 
-// BAD:
+// ... BAD:
 fn router_service(service) {
     service.map_request(process_request)
 }
-// BAD:
+// ... BAD:
 fn router_service(service) {
     service.map_request(Fn("process_request"))
 }
 
-// GOOD:
+// ... GOOD:
 fn router_service(service) {
     service.map_request(|request| {
         process_request(request)
@@ -485,15 +485,15 @@ We recommend not mutating global variables in Rhai scripts in general.
 
 ## New capabilities
 
-The following lists new capabilities in router v3.x that we recommend you use. These capabilities don't introduce breaking changes.
+The following lists new capabilities in router v3.x that we recommend you adopt. These capabilities don't introduce breaking changes.
 
 ### Incremental query planner
 
 GraphOS Router 3.0 preview enables the new [incremental query planner] by default.
 
-### GraphQL September 2025 Specification
+### GraphQL September 2025 specification
 
-GraphOS Router 3.0 follows the September 2025 version of the GraphQL specification by default. The new specification closes several gaps in validation in particular.
+GraphOS Router v3.0 follows the September 2025 version of the GraphQL specification by default. The new specification closes several gaps in validation in particular.
 
 - Default values for arguments in GraphQL schemas are now validated against their type.
 - `@deprecated(reason: null)` is no longer allowed in GraphQL schemas.
@@ -511,13 +511,13 @@ supergraph:
   validate_default_values: false
 ```
 
-### Graph Artifacts
+### Graph artifacts
 
 [Graph Artifacts] combine the supergraph schema and persisted queries into a single versioned OCI artifact. These can be served from any standard OCI registry. Among other benefits, using Graph Artifacts simplifies rollbacks and using self-hosted artifacts.
 
 GraphOS Router 3.0 fetches the supergraph schema and persisted queries from Apollo's Graph Artifacts OCI registry by default, replacing the legacy Apollo Uplink.
 
-### Early enforcement of GraphQL Validation
+### Early enforcement of GraphQL validation
 
 GraphQL Validation is now enforced _before_ access to `@authenticated` fields is checked. An unauthenticated, invalid GraphQL operation that references an `@authenticated` field will now produce a GraphQL validation error rather than an authorization error.
 
