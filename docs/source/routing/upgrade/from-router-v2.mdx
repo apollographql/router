@@ -330,6 +330,8 @@ With `redacted_error`, users only see "Authentication failed". The details are s
 authentication:
   router:
     jwt:
+      jwks:
+        - url: https://auth.example.com/.well-known/jwks.json
       on_error: error
 ```
 
@@ -517,6 +519,19 @@ supergraph:
 [Graph Artifacts] combine the supergraph schema and persisted queries into a single versioned OCI artifact. These can be served from any standard OCI registry. Among other benefits, using Graph Artifacts simplifies rollbacks and using self-hosted artifacts.
 
 GraphOS Router 3.0 fetches the supergraph schema and persisted queries from Apollo's Graph Artifacts OCI registry by default, replacing the legacy Apollo Uplink.
+
+#### License entitlements are not backfilled
+
+When you use Graph Artifacts, the router can read your GraphOS license from the artifact itself. Apollo adds the license identifier to the artifact's manifest only when the artifact is built **after** this capability is available, and only if it's enabled for your graph. Existing artifacts are **not** backfilled.
+
+This means that upgrading the router doesn't, by itself, cause your license to come from Graph Artifacts. If the router fetches a Graph Artifact that has no license identifier, it runs without a license (GraphOS features that require a license are unavailable) and doesn't fall back to Apollo Uplink.
+
+If you see this behavior, do one of the following:
+
+- Publish a new version of your graph so the artifact is rebuilt, and confirm that the capability is enabled for your graph.
+- If you serve Graph Artifacts from your own OCI registry, provide your license explicitly with an [offline license](/graphos/routing/license#offline-license) (`APOLLO_ROUTER_LICENSE` or a license file), which takes precedence over the artifact. The router doesn't allow an offline license together with an Apollo-hosted Graph Artifact reference. It fails at startup and asks you to specify only one license source.
+
+To check where your router gets its license, look for the `using <source> as license source` message in the startup logs, or the `opt.apollo.license.source` attribute on the `apollo.router.config.env` metric.
 
 ### Early enforcement of GraphQL validation
 
