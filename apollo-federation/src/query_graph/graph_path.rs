@@ -1018,7 +1018,7 @@ where
             && let Some(last_edge) = (*last_edge).into()
         {
             let Some(non_trivial_followup_edges) =
-                self.graph.non_trivial_followup_edges.get(&last_edge)
+                self.graph.non_trivial_followup_edges.get(last_edge.index())
             else {
                 return Err(FederationError::internal(format!(
                     "Unexpectedly missing entry for {last_edge} in non-trivial followup edges map",
