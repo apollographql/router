@@ -160,7 +160,6 @@ where
             return service.call(request).await;
         }
 
-        // Each caller builds its own response from the shared one.
         let context = request.context.clone();
         let subgraph_name = request.subgraph_name.clone();
         let id = request.id.clone();
@@ -367,7 +366,6 @@ mod tests {
         let started = Instant::now();
         let second = cancel_first_of_two(&mut service, TIMEOUT / 2).await;
 
-        // The target never answers.
         let _unanswered = target.next_request().await.expect("the target is called");
         let response = second.await.expect("the timeout answers the second caller");
         assert_eq!(response.response.status(), StatusCode::GATEWAY_TIMEOUT);
