@@ -1372,14 +1372,8 @@ mod tests {
                 "apollo.router.query_planning.plan.non_local_selections",
                 u64
             );
-            assert_histogram_count!(
-                "apollo.router.query_planning.plan.non_local_selections",
-                1 as u64
-            );
-            assert_histogram_sum!(
-                "apollo.router.query_planning.plan.non_local_selections",
-                7 as u64
-            );
+            assert_histogram_count!("apollo.router.query_planning.plan.non_local_selections", 1);
+            assert_histogram_sum!("apollo.router.query_planning.plan.non_local_selections", 7);
         }
         .with_metrics()
         .await;
