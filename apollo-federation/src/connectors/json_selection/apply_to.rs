@@ -491,6 +491,7 @@ impl ApplyToInternal for NamedSelection {
         let mut errors = Vec::new();
 
         let (value_opt, apply_errors) = self.path.apply_to_path(data, vars, input_path, spec);
+        let had_errors = !apply_errors.is_empty();
         errors.extend(apply_errors);
 
         match &self.prefix {
@@ -516,12 +517,17 @@ impl ApplyToInternal for NamedSelection {
                         ));
                     }
                     None => {
-                        errors.push(ApplyToError::new(
-                            "Inlined path produced no value".to_string(),
-                            input_path.to_vec(),
-                            self.path.range(),
-                            spec,
-                        ));
+                        // Only produce an error if the None was caused by an error.
+                        // If the path legitimately returned None (no errors), just
+                        // spread nothing silently.
+                        if had_errors {
+                            errors.push(ApplyToError::new(
+                                "Inlined path produced no value".to_string(),
+                                input_path.to_vec(),
+                                self.path.range(),
+                                spec,
+                            ));
+                        }
                     }
                 };
             }
