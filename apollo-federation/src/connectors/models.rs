@@ -414,10 +414,11 @@ impl Connector {
                 )
             }
         }
-        .map_err(|_| {
+        .map_err(|err| {
             format!(
-                "Failed to create key for connector {}",
-                self.id.coordinate()
+                "Failed to create key for connector {}: {}",
+                self.id.coordinate(),
+                err.errors
             )
         })
     }

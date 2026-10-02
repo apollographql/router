@@ -178,15 +178,19 @@ impl SelectionTrie {
                 NameCase::Field(_, field) => {
                     current = current.add_str_with_ranges(field, ranges);
                 }
-                NameCase::Item(_, idx) => {
-                    current = current.add_str_with_ranges(&idx.to_string(), ranges);
-                }
                 NameCase::AnyField(_) => current = current.add_str_with_ranges("**", ranges),
-                NameCase::AnyItem(_) | NameCase::Question(_) | NameCase::NotNone(_) => {
-                    // `*` is an iteration marker, not a path component; `?`
-                    // and `!` are presence operators that constrain the shape
-                    // of the value at the current trie position. None of them
-                    // introduce a new trie key.
+                NameCase::Item(_, _)
+                | NameCase::AnyItem(_)
+                | NameCase::Question(_)
+                | NameCase::NotNone(_) => {
+                    // `*` and `[i]` select list elements, not fields: a
+                    // consumer of `list->first` still needs all of `list`,
+                    // and a GraphQL field set cannot index into a list (an
+                    // index key here once produced `tagIds { "0" }` and broke
+                    // @key synthesis, RH-1415). `?` and `!` are presence
+                    // operators that constrain the shape of the value at the
+                    // current trie position. None of them introduce a new
+                    // trie key.
                 }
             }
         }
