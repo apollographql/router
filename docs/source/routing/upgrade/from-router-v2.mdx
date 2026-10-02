@@ -8,54 +8,6 @@ GraphOS Router v3.x includes various breaking changes when upgrading from v2.x, 
 
 This upgrade guide describes the steps to upgrade your GraphOS Router deployment from version 2.x to 3.x. It describes breaking changes and how to resolve them. It also recommends new features to use.
 
-<!--
-similar sections to v1 -> v2 upgrade, plus a section on telemetry..?
-Telemetry changes are less all-encompassing in this upgrade. It actually means we can call out the specific changes separately more easily.
-
-Claude thinks:
-Removals and deprecations (add):
-- [ ] connectors.subgraphs → sources (auto-migrated) — zach_1758
-- [x] demand_control...by_response_shape → by_subgraph — zach_1759
-- [x] persisted_queries.experimental_local_manifests → local_manifests — zach_1761
-- [x] traffic_shaping.deduplicate_variables — zach_1769
-- [x] experimental_chaos section — zach_1784
-- [x] license_enforcement / TPS rate limiting — zach_2010
-- [x] telemetry.instrumentation.spans.mode: deprecated — caroline_1773
-- [x] coprocessor context: true/false boolean form — zach_1756
-- [x] coprocessor 1.x context key aliases (context: deprecated) — caroline_1775
-- [x] apollo.router.session.count.active metric — zach_1765
-
-Promoted experimental → stable (new section, or fold into Configuration changes):
-- [x] telemetry.apollo.experimental_otlp_* → otlp_* — router_1911
-- [x] tracing/http2/expose_query_plan experimental flags — zach_1783
-
-Changes affecting Rust plugins (add):
-- [x] Buffer removal / Pending backpressure now propagates directly (box_clone_service_pipeline_improvements) — rohan_b99, separate from the BoxCloneService section already there
-- [x] Plugin Config needs Clone + Send + Sync + 'static (bryn_2123) — check if superseded by the apollo-configuration section already written; if the apollo-configuration migration already implies this bound, drop 2123 as
-redundant, else add note
-- [ ] TestHarness needs mock_subgraphs_testing feature — zach_1784
-- [x] Rhai non-curried callback scope no longer shares mutations — router_1877
-
-Telemetry changes (add):
-- [x] subgraph_metrics + extended_error_metrics defaults flip to on — zach_1910
-- [x] file-upload subgraph log event content-type now application/json — move_file_upload_layer
-  ^ XXX(@goto-bus-stop): I think this is too detailed and affects too few users. They can read the full changelog once they notice this difference.
-
-Configuration changes (add):
-- [x] JWT on_error default → RedactedError — zach_2053
-- [x] query-plan warmup retries removed (cold-cache tradeoff) — renee_1951_warmup_backpressure
-
-New section — GraphQL spec compliance (apollo-compiler v2):
-- [x] stricter default-value validation (+ validate_default_values escape hatch) — tninesling x1
-- [x] stricter @deprecated validation — tninesling x1
-- [x] introspection includeDeprecated now Boolean! — tninesling x1
-- [ ] auth-only failures: data has nulls, not data: null — bryn_1973_emptied_operations
-
-New section — Authorization response semantics:
-- [x] validation errors now answer before authorization errors — bryn_1973_gate_ordering
-  ^ moved under new capabilities
--->
-
 ## Upgrade strategy
 
 This guide starts from a configuration that works with router v2.x. If you run router v1.x, first upgrade to v2.x by following [Upgrading from Versions 1.x](/graphos/reference/upgrade/from-router-v1), using a v2.x router to upgrade your configuration.
