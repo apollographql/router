@@ -23,7 +23,7 @@ Removals and deprecations (add):
 - [x] telemetry.instrumentation.spans.mode: deprecated — caroline_1773
 - [x] coprocessor context: true/false boolean form — zach_1756
 - [x] coprocessor 1.x context key aliases (context: deprecated) — caroline_1775
-- [ ] apollo.router.session.count.active metric — zach_1765
+- [x] apollo.router.session.count.active metric — zach_1765
 
 Promoted experimental → stable (new section, or fold into Configuration changes):
 - [x] telemetry.apollo.experimental_otlp_* → otlp_* — router_1911
@@ -37,7 +37,7 @@ redundant, else add note
 - [x] Rhai non-curried callback scope no longer shares mutations — router_1877
 
 Telemetry changes (add):
-- [ ] subgraph_metrics + extended_error_metrics defaults flip to on — zach_1910
+- [x] subgraph_metrics + extended_error_metrics defaults flip to on — zach_1910
 - [x] file-upload subgraph log event content-type now application/json — move_file_upload_layer
   ^ XXX(@goto-bus-stop): I think this is too detailed and affects too few users. They can read the full changelog once they notice this difference.
 
@@ -46,13 +46,14 @@ Configuration changes (add):
 - [x] query-plan warmup retries removed (cold-cache tradeoff) — renee_1951_warmup_backpressure
 
 New section — GraphQL spec compliance (apollo-compiler v2):
-- [ ] stricter default-value validation (+ validate_default_values escape hatch) — tninesling x1
-- [ ] stricter @deprecated validation — tninesling x1
-- [ ] introspection includeDeprecated now Boolean! — tninesling x1
+- [x] stricter default-value validation (+ validate_default_values escape hatch) — tninesling x1
+- [x] stricter @deprecated validation — tninesling x1
+- [x] introspection includeDeprecated now Boolean! — tninesling x1
+- [ ] auth-only failures: data has nulls, not data: null — bryn_1973_emptied_operations
 
 New section — Authorization response semantics:
-- [ ] validation errors now answer before authorization errors — bryn_1973_gate_ordering
-- [ ] auth-only failures: data has nulls, not data: null — bryn_1973_emptied_operations
+- [x] validation errors now answer before authorization errors — bryn_1973_gate_ordering
+  ^ moved under new capabilities
 -->
 
 ## Upgrade strategy
@@ -150,7 +151,7 @@ This only affects trace export. Usage report metrics are unchanged and continue 
 
 ### Removed `experimental_reuse_query_plans`
 
-The experimental query plan reuse feature has been removed. This has been experimental for several years and never proved useful enough to stabilize. We recommend using distributed query plan caching as well as the new incremental planner <!-- TODO(@goto-bus-stop): link to incremental planning section -->
+The experimental query plan reuse feature has been removed. This has been experimental for several years and never proved useful enough to stabilize. We recommend using distributed query plan caching as well as the new [incremental query planner][].
 
 ### Removed `experimental_chaos`
 
@@ -327,6 +328,13 @@ In GraphOS Router v2.x, batched subgraph requests produced a single subgraph spa
 
 Starting in Router 3, requests are instead only batched up at the HTTP level. This means that each subgraph request that is part of a batch emits its own full-fledged span, but only one HTTP client span is emitted for the entire batch.
 
+### Removed deprecated `apollo.router.session.count.active` metric
+
+The `apollo.router.session.count.active` metric is removed. It was deprecated throughout the 2.x version line.
+
+**Upgrade step**:
+- Update dashboards to use the `http.server.active_requests` metric instead.
+
 ### Removed deprecated span mode
 
 The `telemetry.instrumentation.spans.mode` option is removed. The `spec_compliant` value is now the only behavior that the Router supports.
@@ -354,14 +362,6 @@ The router checks its configuration more thoroughly at startup and on reload, so
 - If it says your file relies on automatic upgrades, run `router config upgrade` to update the file.
 - Make sure every file referenced with `${file.PATH}` exists wherever the router runs.
 
-### Changed default for `supergraph.early_cancel` to `true`
-
-When a client disconnects, the Router now cancels the request immediately by default, consistent with most other web services.
-
-Previously the default was `false`, which caused requests to continue running in a background task even after the client disconnected.
-
-To restore the previous behavior (e.g. to preserve telemetry for canceled requests), set `early_cancel: false` in your router config.
-
 ### Changed default for JWT authentication errors to redact
 
 The `authentication.router.jwt.on_error` configuration now defaults to `redacted_error` instead of `error`.
@@ -380,6 +380,14 @@ authentication:
       on_error: error
 ```
 
+### Changed default for `supergraph.early_cancel` to `true`
+
+When a client disconnects, the Router now cancels the request immediately by default, consistent with most other web services.
+
+Previously the default was `false`, which caused requests to continue running in a background task even after the client disconnected.
+
+To restore the previous behavior (e.g. to preserve telemetry for canceled requests), set `early_cancel: false` in your router config.
+
 ### Stabilized `supergraph.log_on_broken_pipe`
 
 The `supergraph.experimental_log_on_broken_pipe` option is now named `supergraph.log_on_broken_pipe`.
@@ -388,6 +396,29 @@ This option emits a log message when a client disconnects before the Router has 
 
 **Upgrade step**:
 - Run `router config upgrade`.
+
+### Stabilized and enabled GraphOS subgraph metrics and extended error metrics
+
+GraphOS Router now reports additional per-subgraph operation metrics and extended error metrics to GraphOS by default. This powers the Studio subgraph insights and error attribution features.
+
+The configuration fields have been moved out of preview:
+
+| Old field | New field |
+| --- | --- |
+| `telemetry.apollo.preview_subgraph_metrics` | `telemetry.apollo.subgraph_metrics` |
+| `telemetry.apollo.errors.preview_extended_error_metrics` | `telemetry.apollo.errors.extended_error_metrics` |
+
+**Upgrade step**:
+- Run `router config upgrade`.
+- To opt out of extended insights, use:
+
+```yaml
+telemetry:
+  apollo:
+    subgraph_metrics: false
+    errors:
+      extended_error_metrics: disabled
+```
 
 ### Stabilized Apollo OTLP configuration
 
@@ -465,7 +496,7 @@ During router reloads, the query plan cache is warmed up by pre-planning recentl
 
 In effect, the router may switch over to the new configuration and schema on a cold cache. This can cause a further spike in 503 responses post-reload, but the router will also stabilise faster: the old and new pipelines are not competing for resources for as long.
 
-We expect this to be a better behaviour overall, and to occur (way) less frequently with the [incremental planner](#incremental-planner).
+We expect this to be a better behaviour overall, and to occur (way) less frequently with the [incremental query planner][].
 
 ### Global variable mutation using `Fn("name")` callbacks in Rhai scripts
 
@@ -504,5 +535,40 @@ We recommend not mutating global variables in Rhai scripts in general.
 
 The following lists new capabilities in router v3.x that we recommend you use. These capabilities don't introduce breaking changes.
 
-### Incremental planner
+### Incremental query planner
 
+GraphOS Router 3.0 preview enables the new [incremental query planner] by default.
+
+### GraphQL September 2025 Specification
+
+GraphOS Router 3.0 follows the September 2025 version of the GraphQL specification by default. The new specification closes several gaps in validation in particular.
+
+- Default values for arguments in GraphQL schemas are now validated against their type.
+- `@deprecated(reason: null)` is no longer allowed in GraphQL schemas.
+- `@deprecated` must not appear on required arguments or input object fields (non-null with no default value).
+- If an object or interface field is marked `@deprecated`, the interface field it implements must also be deprecated.
+- In introspection queries, the `includeDeprecated` option no longer allows `null`.
+
+**Upgrade step**:
+- Run the new router version.
+- If there are validation errors in the schema, first recompose the supergraph with the latest LTS release of composition. This will automatically fix many problems.
+- There may still be validation errors related to default values, as these cannot be fixed automatically. Work with subgraph owners to fix them, or disable the new rules:
+
+```yaml
+supergraph:
+  validate_default_values: false
+```
+
+### Graph Artifacts
+
+GraphOS Router 3.0 can load the supergraph schema from an OCI registry, instead of Apollo's proprietary Uplink service.
+
+### Early enforcement of GraphQL Validation
+
+GraphQL Validation is now enforced _before_ access to `@authenticated` fields is checked. An unauthenticated, invalid GraphQL operation that references an `@authenticated` field will now produce a GraphQL validation error rather than an authorization error.
+
+## Deploy your router
+
+Make sure that you are referencing the correct router release: **v{products.router.latest().version}**
+
+[incremental query planner]: /graphos/routing/query-planning/incremental-query-planner
