@@ -36,6 +36,11 @@ default = ["global-allocator"]
 # ```
 global-allocator = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "tikv-jemalloc-ctl/profiling"]
 
+# Exports jemalloc under the standard malloc/free names, so it also serves C allocations in the process.
+# Only for builds linked against a shared libjemalloc (JEMALLOC_OVERRIDE), where a profiler such as
+# ddprof can hook allocations through the dynamic linker.  Release binaries don't enable this.
+unprefixed-jemalloc = ["global-allocator", "tikv-jemallocator/unprefixed_malloc_on_supported_platforms"]
+
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
 dhat-ad-hoc = ["dhat"]
@@ -300,9 +305,7 @@ uname = "0.1.1"
 hyperlocal = { version = "0.9.1", default-features = false, features = [
     "client",
 ] }
-# Unprefixed so that, when linked against a shared libjemalloc via JEMALLOC_OVERRIDE, allocations
-# go through the dynamic linker, where ddprof can hook them.
-tikv-jemallocator = { version = "0.7.0", features = ["profiling", "unprefixed_malloc_on_supported_platforms"], optional = true }
+tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
 tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
 
