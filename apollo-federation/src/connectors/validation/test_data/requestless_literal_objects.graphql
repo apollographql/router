@@ -1,0 +1,68 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.4"
+    import: ["@connect", "@source"]
+  )
+
+# Requestless `@connect` directives whose selections read no fields of
+# `$root`. None of these should trigger `RequestlessSelectionUsesRequestData`:
+#
+# - `Query.featuredProduct`: JSON object literal with a nested object.
+# - `Query.featuredProductRelaxed`: same, without quotes or commas.
+# - `Query.featuredProductWrapped`: same, wrapped in `$(...)`.
+# - `Query.nestedAlias`: top-level alias whose value is an object literal
+#   (`price: { ... }`, with a colon), which does not descend into
+#   `$root.price`.
+type Price {
+  amount: Int
+  currencyCode: String
+}
+
+type Product {
+  id: ID!
+  name: String
+  price: Price
+}
+
+type Query {
+  featuredProduct: Product
+    @connect(
+      selection: """
+      {
+        "id": "sku-4417",
+        "name": "Aeron Chair",
+        "price": { "amount": 1395, "currencyCode": "USD" }
+      }
+      """
+    )
+
+  featuredProductRelaxed: Product
+    @connect(
+      selection: """
+      {
+        id: "sku-4417"
+        name: "Aeron Chair"
+        price: { amount: 1395 currencyCode: "USD" }
+      }
+      """
+    )
+
+  featuredProductWrapped: Product
+    @connect(
+      selection: """
+      $({
+        "id": "sku-4417",
+        "name": "Aeron Chair",
+        "price": { "amount": 1395, "currencyCode": "USD" }
+      })
+      """
+    )
+
+  nestedAlias: Product
+    @connect(
+      selection: """
+      id: "sku-4417"
+      price: { amount: 1395 currencyCode: "USD" }
+      """
+    )
+}

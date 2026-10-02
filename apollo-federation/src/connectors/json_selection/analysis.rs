@@ -211,6 +211,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn literal_subselection_has_no_root_consumption() {
+        // An object literal nested under an alias is a subselection over
+        // `@`, but when all of its values are literals it reads nothing from
+        // the input, so it must not mark `$root` itself as consumed.
+        for input in [
+            r#"id: "sku-4417" price: { amount: 1395 currencyCode: "USD" }"#,
+            r#"{ "id": "sku-4417", "price": { "amount": 1395, "currencyCode": "USD" } }"#,
+            r#"$({ "id": "sku-4417", "price": { "amount": 1395 } })"#,
+        ] {
+            let analysis = analyze(input);
+            match analysis.consumption().get("$root") {
+                None => {}
+                Some(root) => assert!(
+                    root.is_empty() && !root.is_leaf(),
+                    "expected no $root consumption for {input:?}, got {root} (leaf: {})",
+                    root.is_leaf(),
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn subselection_reading_input_still_marks_it_consumed() {
+        // When the subselection does read from its input, the input path
+        // is still marked as a leaf, alongside whatever the children read.
+        let analysis = analyze(r#"id: "sku-4417" price: { amount }"#);
+        let root = analysis.consumption().get("$root").expect("$root entry");
+        assert!(root.is_leaf());
+        assert_eq!(root.to_string(), "amount");
+
+        for input in ["$", "@"] {
+            let analysis = analyze(input);
+            let root = analysis.consumption().get("$root").expect("$root entry");
+            assert!(root.is_leaf(), "expected bare {input} to consume $root");
+        }
+    }
+
     // ---- RH-1345 / CNN-1093 regression coverage at the SelectionAnalysis
     // level. These tests assert directly on the consumption trie produced
     // by `SelectionAnalysis::new` rather than going through the validator,

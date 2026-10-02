@@ -1316,15 +1316,32 @@ impl ApplyToInternal for WithRange<PathList> {
                 // path as terminal so the trie has a leaf at the
                 // navigation's endpoint, matching the walker's behavior of
                 // marking a key followed by a subselection as leaf-with-
-                // children. Subsequent recursion into `selection` records
-                // additional consumption (e.g. the subselection's own
-                // fields) on top.
-                context.record_consumption(&input_shape, true);
+                // children, but only if the subselection itself consumes
+                // something. A subselection whose values are all literals,
+                // like `price: { amount: 1395 }`, reads nothing from its
+                // input, so marking that input (often `$root` itself) as
+                // consumed would claim the whole input was used.
+                //
+                // To tell, the subselection records into a fresh trie, which
+                // is then merged back into the shared one.
+                let outer = context.consumption().replace(SelectionTrie::new());
+                let output_shape = selection.compute_output_shape(
+                    context,
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                );
+                let inner = context.consumption().replace(outer);
+                let inner_consumed = !inner.is_empty();
+                context.consumption().borrow_mut().extend(&inner);
+                // Release `inner` before recording more, so the subtrees it
+                // shares with the merged trie are uniquely owned again and
+                // `Ref::make_mut` can update them in place.
+                drop(inner);
+                if inner_consumed {
+                    context.record_consumption(&input_shape, true);
+                }
 
-                (
-                    selection.compute_output_shape(context, input_shape, dollar_shape.clone()),
-                    None,
-                )
+                (output_shape, None)
             }
 
             PathList::Empty => {
