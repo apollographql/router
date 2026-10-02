@@ -34,8 +34,12 @@ impl FieldSelectionValue<'_> {
     ) -> Result<(), FederationError> {
         let self_field = &self.get().field;
         let mut selection_sets = vec![];
+        let mut other_sibling_typename = None;
         for other in others {
             let other_field = &other.field;
+            if other_sibling_typename.is_none() {
+                other_sibling_typename = other_field.sibling_typename();
+            }
             ensure!(
                 other_field.schema == self_field.schema,
                 "Cannot merge field selections from different schemas",
@@ -71,6 +75,16 @@ impl FieldSelectionValue<'_> {
                     other_field.field_position,
                 );
             }
+        }
+        // A field may carry a `__typename` selection that `optimize_sibling_typenames()` moved
+        // into it, and that must be restored eventually. Equality ignores this attachment, so an
+        // equal field without one may be the merge target: keep the attachment in that case.
+        // Only unaliased `__typename` selections are moved into attachments, so two attachments
+        // never conflict.
+        if self_field.sibling_typename().is_none()
+            && let Some(sibling_typename) = other_sibling_typename.cloned()
+        {
+            *self.get_sibling_typename_mut() = Some(sibling_typename);
         }
         if let Some(self_selection_set) = self.get_selection_set_mut() {
             self_selection_set.merge_into(selection_sets.into_iter())?;

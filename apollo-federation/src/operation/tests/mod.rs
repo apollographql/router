@@ -1976,3 +1976,70 @@ fn fragments_with_non_intersecting_types() {
         }
     "###);
 }
+
+#[cfg(test)]
+mod sibling_typename_merge_tests {
+    use super::*;
+    use crate::operation::merging::merge_selection_sets;
+
+    fn selection_set(schema: &ValidFederationSchema, query: &str) -> SelectionSet {
+        Operation::parse(schema.clone(), query, "query.graphql")
+            .unwrap()
+            .selection_set
+    }
+
+    /// Parses `query` and moves its `__typename` selections into sibling attachments.
+    fn optimized(schema: &ValidFederationSchema, query: &str) -> SelectionSet {
+        let mut set = selection_set(schema, query);
+        set.optimize_sibling_typenames(&Default::default()).unwrap();
+        assert!(
+            !set.to_string().contains("__typename"),
+            "fixture must hide __typename in an attachment: {set}"
+        );
+        set
+    }
+
+    fn restored(set: &SelectionSet) -> String {
+        set.add_back_typename_in_attachments().unwrap().to_string()
+    }
+
+    #[test]
+    fn merging_fields_preserves_typename_attachment() {
+        let schema = parse_schema("type Query { id: ID! }");
+        let untagged = selection_set(&schema, "{ id }");
+        let tagged = optimized(&schema, "{ __typename id }");
+        assert_eq!(restored(&tagged), "{ __typename id }");
+
+        let tagged_first = merge_selection_sets(vec![tagged.clone(), untagged.clone()]).unwrap();
+        assert_eq!(restored(&tagged_first), "{ __typename id }");
+        let untagged_first = merge_selection_sets(vec![untagged.clone(), tagged.clone()]).unwrap();
+        assert_eq!(restored(&untagged_first), "{ __typename id }");
+        // The receiver is shared copy-on-write with the original; it must not be affected.
+        assert_eq!(restored(&untagged), "{ id }");
+
+        let mut added = untagged.clone();
+        added
+            .add_local_selection(tagged.selections.values().next().unwrap())
+            .unwrap();
+        assert_eq!(restored(&added), "{ __typename id }");
+    }
+
+    #[test]
+    fn merging_nested_fields_preserves_typename_attachment() {
+        let schema = parse_schema("type Query { o: Obj } type Obj { id: ID! x: Int }");
+        let untagged = selection_set(&schema, "{ o { id } }");
+        let tagged = optimized(&schema, "{ o { __typename id x } }");
+
+        let merged = merge_selection_sets(vec![untagged, tagged]).unwrap();
+        assert_eq!(restored(&merged), "{ o { __typename id x } }");
+    }
+
+    #[test]
+    fn merging_tagged_fields_does_not_duplicate_typename() {
+        let schema = parse_schema("type Query { id: ID! }");
+        let tagged = optimized(&schema, "{ __typename id }");
+
+        let merged = merge_selection_sets(vec![tagged.clone(), tagged]).unwrap();
+        assert_eq!(restored(&merged), "{ __typename id }");
+    }
+}
