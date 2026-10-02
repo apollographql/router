@@ -193,7 +193,7 @@ fn router_service(service: router::BoxCloneService) -> router::BoxCloneService {
 
 The `Config` associated type of the `Plugin` and `PluginUnstable` traits must now implement `apollo_configuration::Configuration`, in place of `JsonSchema + DeserializeOwned`.
 
-For full usage documentation, see the [apollo-configuration](https://docs.rs/apollo-configuration/latest/apollo_configuration/) crate.
+For full usage documentation, see the [`apollo-configuration`](https://docs.rs/apollo-configuration/latest/apollo_configuration/) crate.
 
 The full bounds are now:
 ```rust
@@ -252,7 +252,7 @@ These metrics now include a unit:
 
 **Upgrade step**:
 - If you use OTLP, adjust your dashboards to account for the new `apollo.router.uplink.fetch.duration` name.
-- If using Prometheus, see the next section.
+- If you use Prometheus, see the next section.
 
 ### Renamed Prometheus metrics
 
