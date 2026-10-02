@@ -163,7 +163,7 @@ pub struct QueryPlannerDebugConfig {
     /// As the planner traverses the query, it estimates an upper bound on the
     /// number of "non-local" selection sets it would need to consider as
     /// possibilities. The process is aborted if the estimate exceeds this upper
-    /// bound to prevent unbounded planning time. 
+    /// bound to prevent unbounded planning time.
     ///
     /// This value currently defaults to 100_000. And is intentionally not part
     /// of configuration which can be set by users.
