@@ -414,11 +414,19 @@ async fn plan_query(
                 .context(context.clone())
                 .build(),
         )
-        .instrument(tracing::info_span!(
-            QUERY_PLANNING_SPAN_NAME,
-            "otel.kind" = "INTERNAL"
-        ))
+        .instrument(query_planning_span())
         .await?;
 
     Ok(qpr)
+}
+
+/// Fields recorded during planning must be declared here, because `tracing`
+/// drops records for fields a span didn't declare.
+pub(crate) fn query_planning_span() -> tracing::Span {
+    tracing::info_span!(
+        QUERY_PLANNING_SPAN_NAME,
+        "otel.kind" = "INTERNAL",
+        "query_planning.fuel_consumed" = tracing::field::Empty,
+        "query_planning.fuel_remaining" = tracing::field::Empty,
+    )
 }
