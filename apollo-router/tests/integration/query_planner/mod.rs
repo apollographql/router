@@ -5,6 +5,7 @@ use crate::integration::common::graph_os_enabled;
 
 mod error_paths;
 mod max_evaluated_plans;
+mod non_local_selections;
 
 const PROMETHEUS_METRICS_CONFIG: &str =
     include_str!("../telemetry/fixtures/prometheus.router.yaml");

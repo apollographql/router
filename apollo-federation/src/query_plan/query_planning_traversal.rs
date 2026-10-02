@@ -326,7 +326,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             return Err(SingleFederationError::QueryPlanComplexityExceeded {
                 message: format!(
                     "Number of non-local selections exceeds limit of {}",
-                    Self::max_non_local_selections(),
+                    traversal.parameters.config.debug.max_non_local_selections,
                 ),
             }
             .into());

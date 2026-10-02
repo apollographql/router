@@ -8,6 +8,7 @@ use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
+use std::num::NonZeroU64;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -444,6 +445,13 @@ impl Configuration {
             .and_then(NonZeroU32::new)
             .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
 
+        // This environment variable is intentionally undocumented.
+        let max_non_local_selections = std::env::var("APOLLO_ROUTER_MAX_NON_LOCAL_SELECTIONS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .and_then(NonZeroU64::new)
+            .unwrap_or(NonZeroU64::new(100_000).expect("should be not zero"));
+
         QueryPlannerConfig {
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
@@ -454,6 +462,7 @@ impl Configuration {
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+                max_non_local_selections,
             },
         }
     }

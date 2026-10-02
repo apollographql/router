@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -158,6 +159,15 @@ pub struct QueryPlannerDebugConfig {
     ///
     /// The default value is None, which specifies no limit.
     pub paths_limit: Option<u32>,
+
+    /// As the planner traverses the query, it estimates an upper bound on the
+    /// number of "non-local" selection sets it would need to consider as
+    /// possibilities. The process is aborted if the estimate exceeds this upper
+    /// bound to prevent unbounded planning time. 
+    ///
+    /// This value currently defaults to 100_000. And is intentionally not part
+    /// of configuration which can be set by users.
+    pub max_non_local_selections: NonZeroU64,
 }
 
 impl Default for QueryPlannerDebugConfig {
@@ -165,6 +175,7 @@ impl Default for QueryPlannerDebugConfig {
         Self {
             max_evaluated_plans: NonZeroU32::new(10_000).unwrap(),
             paths_limit: None,
+            max_non_local_selections: NonZeroU64::new(100_000).unwrap(),
         }
     }
 }
