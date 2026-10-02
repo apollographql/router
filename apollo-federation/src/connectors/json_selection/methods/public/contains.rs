@@ -126,7 +126,7 @@ fn contains_shape(
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
     // Ensure input is an array
-    if !Shape::tuple([], []).accepts(&input_shape) && !input_shape.accepts(&Shape::unknown([])) {
+    if !input_shape.is_array() && !input_shape.accepts(&Shape::unknown([])) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array input, but got: {input_shape}",
@@ -436,6 +436,7 @@ mod method_tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn contains_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("arr->contains($.missing)", spec).apply_to(&json!({
@@ -520,11 +521,9 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->contains requires an array input, but got: String".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->contains requires an array input, but got: String")"#,
         );
     }
 
@@ -534,13 +533,9 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::list(Shape::int([]), [])
-            ),
-            Shape::error_with_partial(
-                "Method ->contains can only compare values of the same type. Got \"a\" == Int."
-                    .to_string(),
-                Shape::bool_value(false, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"false (err "Method ->contains can only compare values of the same type. Got \"a\" == Int.")"#,
         );
     }
 
@@ -550,24 +545,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::array([Shape::int([])], Shape::none(), [])
-            ),
-            Shape::error_with_partial(
-                "Method ->contains can only compare values of the same type. Got Int == \"a\"."
-                    .to_string(),
-                Shape::bool_value(false, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"false (err "Method ->contains can only compare values of the same type. Got Int == \"a\".")"#,
         );
     }
 
     #[test]
     fn contains_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::list(Shape::string([]), [])),
-            Shape::error(
-                "Method ->contains requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::list(Shape::string([]), [])).pretty_print(),
+            r#"Unknown (err "Method ->contains requires one argument")"#,
         );
     }
 
@@ -580,11 +568,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(43)), None)
                 ],
                 Shape::list(Shape::int([]), [])
-            ),
-            Shape::error(
-                "Method ->contains requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->contains requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -598,11 +584,9 @@ mod shape_tests {
                 None,
                 Shape::list(Shape::string([]), []),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->contains requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->contains requires one argument")"#,
         );
     }
 

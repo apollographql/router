@@ -1,0 +1,45 @@
+description: |
+  `coprocessor.<stage>.context: deprecated` has been removed in Router 3.0. It is migrated to
+  `context: all`, which sends all context keys using their current names. Coprocessors and Rhai
+  scripts that referenced 1.x context key names must be updated to use the current names.
+actions:
+  - type: change
+    path: coprocessor.router.request.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.router.response.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.supergraph.request.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.supergraph.response.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.execution.request.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.execution.response.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.subgraph.all.request.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.subgraph.all.response.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.connector.all.request.context
+    from: deprecated
+    to: all
+  - type: change
+    path: coprocessor.connector.all.response.context
+    from: deprecated
+    to: all

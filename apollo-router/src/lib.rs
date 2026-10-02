@@ -16,30 +16,18 @@
 //! * [`services`] - the various services handling a GraphQL requests,
 //!   and APIs for plugins to intercept them
 
-#![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
-macro_rules! failfast_debug {
-    ($($tokens:tt)+) => {{
-        tracing::debug!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
-}
-
-macro_rules! failfast_error {
-    ($($tokens:tt)+) => {{
-        tracing::error!($($tokens)+);
-        #[cfg(feature = "failfast")]
-        panic!(
-            "failfast triggered. \
-            Please remove the feature failfast if you don't want to see these panics"
-        );
-    }};
+// Install the crypto provider explicitly, before any TLS client is built. The
+// workspace standardizes on aws-lc-rs across all rustls-backed dependencies; an
+// explicit install avoids relying on rustls' own auto-detection. The equivalent call
+// for the router binary itself lives in `executable::main`; this one covers `cargo
+// test`/`cargo nextest` unit test binaries, which never go through that entry point.
+#[cfg(test)]
+#[ctor::ctor(unsafe)]
+fn install_default_crypto_provider_for_tests() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
 #[macro_use]
@@ -68,6 +56,7 @@ mod introspection;
 pub mod layers;
 pub(crate) mod logging;
 mod orbiter;
+mod pipeline;
 mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
@@ -81,14 +70,13 @@ pub mod tracer;
 mod uplink;
 
 pub(crate) mod allocator;
-#[doc(hidden)]
-#[deprecated(
-    since = "2.16.0",
-    note = "Will be removed in 3.0. Use opentelemetry_http::HeaderExtractor / opentelemetry_http::HeaderInjector directly."
-)]
-pub mod otel_compat;
 mod registry;
 
+// Re-exports for plugins.
+pub use apollo_configuration;
+pub use apollo_redaction;
+
+pub use crate::axum_factory::Endpoint;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::Context;
@@ -96,14 +84,12 @@ pub use crate::context::extensions::Extensions;
 pub use crate::context::extensions::sync::ExtensionsMutex;
 pub use crate::executable::Executable;
 pub use crate::executable::main;
-pub use crate::plugins::subscription::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
 pub use crate::router::LicenseSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
-pub use crate::router_factory::Endpoint;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 #[cfg(any(test, feature = "snapshot"))]
@@ -125,6 +111,7 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     pub use crate::plugin::PluginFactory;
     // For tests
+    #[cfg(any(test, feature = "mock_subgraphs_testing"))]
     pub use crate::plugins::mock_subgraphs::testing_subgraph_call as mock_subgraphs_subgraph_call;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
     pub use crate::services::APOLLO_GRAPH_REF;

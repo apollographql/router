@@ -14,12 +14,12 @@
 //! processing. At each stage a [`Service`] is provided which provides an appropriate
 //! mechanism for interacting with the request and response.
 
+mod enabled;
 pub mod serde;
 #[macro_use]
 pub mod test;
 
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::fmt;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -28,14 +28,25 @@ use std::task::Context;
 use std::task::Poll;
 
 use ::serde::Deserialize;
-use ::serde::de::DeserializeOwned;
 use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+/// The crate whose `Configuration` trait every plugin's `Config` must implement.
+///
+/// Declare a plugin's `Config` with its `#[configuration]` attribute, which needs a direct
+/// dependency on `apollo-configuration`. The re-export lets a type the attribute can't express,
+/// such as a tuple struct deriving `serde::Deserialize` and `schemars::JsonSchema`, implement
+/// `apollo_configuration::Configuration` and `apollo_configuration::Validate` by hand without that
+/// dependency. A plugin `Config`'s `Validate` rules run while the router configuration is parsed,
+/// and their errors point at the offending values in the plugin's section.
+pub use apollo_configuration;
+use apollo_configuration::Configuration;
+use apollo_configuration::ErrorCollector;
+use apollo_configuration::Validate;
 use async_trait::async_trait;
+pub use enabled::Enabled;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use schemars::JsonSchema;
 use schemars::SchemaGenerator;
 use serde_json::Value;
 use tower::BoxError;
@@ -44,21 +55,66 @@ use tower::ServiceBuilder;
 use tower::buffer::future::ResponseFuture;
 
 use crate::ListenAddr;
+use crate::axum_factory::Endpoint;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::subscription::notification::Notify;
-use crate::router_factory::Endpoint;
+use crate::services::connector::request_service as connector_request;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
+type ConfigFactory = for<'de> fn(
+    &mut dyn erased_serde::Deserializer<'de>,
+) -> Result<PluginConfig, erased_serde::Error>;
+
 type InstanceFactory =
-    fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
+    fn(PluginInit<PluginConfig>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::Schema;
+
+/// A plugin's config, deserialized when the router configuration is parsed. It validates
+/// itself, so the configuration can run every plugin's rules without knowing their types.
+#[derive(Clone)]
+pub(crate) struct PluginConfig(Arc<dyn AnyConfig>);
+
+/// A plugin `Config` behind [`PluginConfig`]: its own rules plus downcasting to its type.
+trait AnyConfig: Validate + std::any::Any + Send + Sync {}
+
+impl<C: Validate + std::any::Any + Send + Sync> AnyConfig for C {}
+
+impl fmt::Debug for PluginConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Typed config may hold secrets and has no common `Debug` bound.
+        f.write_str("PluginConfig")
+    }
+}
+
+impl PluginConfig {
+    pub(crate) fn new<C: Validate + Send + Sync + 'static>(config: C) -> Self {
+        Self(Arc::new(config))
+    }
+
+    pub(crate) fn typed<C: Clone + 'static>(&self) -> Result<C, BoxError> {
+        self.downcast_ref::<C>()
+            .cloned()
+            .ok_or_else(|| "retained plugin configuration has an unexpected type".into())
+    }
+
+    /// The config, when it is a `C`.
+    pub(crate) fn downcast_ref<C: 'static>(&self) -> Option<&C> {
+        (&*self.0 as &dyn std::any::Any).downcast_ref::<C>()
+    }
+}
+
+impl Validate for PluginConfig {
+    fn validate<'a>(&self, errors: ErrorCollector<'a>) {
+        self.0.validate(errors)
+    }
+}
 
 /// Global list of plugins.
 #[linkme::distributed_slice]
@@ -79,7 +135,7 @@ pub struct PluginInit<T> {
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<crate::query_planner::SubgraphSchemas>,
 
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
@@ -139,7 +195,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
+        subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
@@ -172,7 +228,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
+        subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
         license: Arc<LicenseState>,
@@ -204,7 +260,7 @@ where
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
-        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
+        subgraph_schemas: Option<Arc<crate::query_planner::SubgraphSchemas>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
         license: Option<Arc<LicenseState>>,
@@ -249,11 +305,50 @@ impl PluginInit<serde_json::Value> {
     }
 }
 
+impl<T> PluginInit<T> {
+    /// The same initialisation context with different plugin configuration.
+    pub(crate) fn with_config<C>(&self, config: C, previous_config: Option<C>) -> PluginInit<C> {
+        PluginInit {
+            config,
+            previous_config,
+            supergraph_sdl: self.supergraph_sdl.clone(),
+            supergraph_schema_id: self.supergraph_schema_id.clone(),
+            supergraph_schema: self.supergraph_schema.clone(),
+            subgraph_schemas: self.subgraph_schemas.clone(),
+            launch_id: self.launch_id.clone(),
+            notify: self.notify.clone(),
+            license: self.license.clone(),
+            full_config: self.full_config.clone(),
+            raw_yaml: self.raw_yaml.clone(),
+        }
+    }
+
+    fn try_map_config<C>(
+        self,
+        convert: impl Fn(T) -> Result<C, BoxError>,
+    ) -> Result<PluginInit<C>, BoxError> {
+        Ok(PluginInit {
+            config: convert(self.config)?,
+            previous_config: self.previous_config.map(&convert).transpose()?,
+            supergraph_sdl: self.supergraph_sdl,
+            supergraph_schema_id: self.supergraph_schema_id,
+            supergraph_schema: self.supergraph_schema,
+            subgraph_schemas: self.subgraph_schemas,
+            launch_id: self.launch_id,
+            notify: self.notify,
+            license: self.license,
+            full_config: self.full_config,
+            raw_yaml: self.raw_yaml,
+        })
+    }
+}
+
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
 pub struct PluginFactory {
     pub(crate) name: String,
     pub(crate) hidden_from_config_json_schema: bool,
+    config_factory: ConfigFactory,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
@@ -275,25 +370,7 @@ impl PluginFactory {
 
     /// Create a plugin factory.
     pub fn new<P: PluginUnstable>(group: &str, name: &str) -> PluginFactory {
-        let plugin_factory_name = if group.is_empty() {
-            name.to_string()
-        } else {
-            format!("{group}.{name}")
-        };
-        tracing::debug!(%plugin_factory_name, "creating plugin factory");
-        PluginFactory {
-            name: plugin_factory_name,
-            hidden_from_config_json_schema: false,
-            instance_factory: |init| {
-                Box::pin(async move {
-                    let init = init.with_deserialized_config()?;
-                    let plugin = P::new(init).await?;
-                    Ok(Box::new(plugin) as Box<dyn DynPlugin>)
-                })
-            },
-            schema_factory: |generator| generator.subschema_for::<<P as PluginUnstable>::Config>(),
-            type_id: TypeId::of::<P>(),
-        }
+        Self::new_private::<P>(group, name)
     }
 
     /// Create a plugin factory.
@@ -307,9 +384,13 @@ impl PluginFactory {
         PluginFactory {
             name: plugin_factory_name,
             hidden_from_config_json_schema: P::HIDDEN_FROM_CONFIG_JSON_SCHEMA,
+            config_factory: |deserializer| {
+                let config: P::Config = erased_serde::deserialize(deserializer)?;
+                Ok(PluginConfig::new(config))
+            },
             instance_factory: |init| {
                 Box::pin(async move {
-                    let init = init.with_deserialized_config()?;
+                    let init = init.try_map_config(|config| config.typed())?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -319,11 +400,41 @@ impl PluginFactory {
         }
     }
 
+    /// Deserializes a plugin's config from the deserializer the configuration is parsed with,
+    /// so errors keep their path in the document.
+    pub(crate) fn parse_config<'de>(
+        &self,
+        deserializer: &mut dyn erased_serde::Deserializer<'de>,
+    ) -> Result<PluginConfig, erased_serde::Error> {
+        (self.config_factory)(deserializer)
+    }
+
+    /// Deserializes a plugin's config from a JSON value, such as the empty section a mandatory
+    /// plugin runs with when the configuration has none.
+    pub(crate) fn parse_config_value(
+        &self,
+        config: serde_json::Value,
+    ) -> Result<PluginConfig, BoxError> {
+        let mut deserializer = <dyn erased_serde::Deserializer>::erase(config);
+        Ok(self.parse_config(&mut deserializer)?)
+    }
+
+    /// Constructs the plugin from config deserialized by [`Self::parse_config`].
+    pub(crate) async fn create_from_config(
+        &self,
+        init: PluginInit<PluginConfig>,
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
+        (self.instance_factory)(init).await
+    }
+
+    /// Deserializes `init`'s config and constructs the plugin from it.
+    #[cfg(test)]
     pub(crate) async fn create_instance(
         &self,
         init: PluginInit<serde_json::Value>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(init).await
+        let init = init.try_map_config(|config| self.parse_config_value(config))?;
+        self.create_from_config(init).await
     }
 
     #[cfg(test)]
@@ -331,7 +442,7 @@ impl PluginFactory {
         &self,
         configuration: &serde_json::Value,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(
+        self.create_instance(
             PluginInit::fake_builder()
                 .config(configuration.clone())
                 .build(),
@@ -358,14 +469,17 @@ pub(crate) fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
 #[async_trait]
 pub trait Plugin: Send + Sync + 'static {
     /// The configuration for this plugin.
-    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    /// Declare it with `#[apollo_configuration::configuration]`. Implement [`Validate`] and
+    /// [`Configuration`] by hand only where the attribute can't express the type, such as a
+    /// tuple struct. Use `()` for a plugin without configuration.
     ///
     /// If a plugin is [registered][crate::register_plugin],
-    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
-    /// The contents of this section are deserialized into this `Config` type
-    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    /// The contents of this section are deserialized into this `Config` type and its
+    /// [`Validate`] rules run while the router configuration is parsed, so their errors point at
+    /// this section. The config is then passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: Configuration + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -379,20 +493,23 @@ pub trait Plugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define `router_service` if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
     }
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define `supergraph_service` if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         service
     }
 
@@ -402,8 +519,8 @@ pub trait Plugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         service
     }
 
@@ -432,14 +549,17 @@ pub trait Plugin: Send + Sync + 'static {
 #[async_trait]
 pub trait PluginUnstable: Send + Sync + 'static {
     /// The configuration for this plugin.
-    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    /// Declare it with `#[apollo_configuration::configuration]`. Implement [`Validate`] and
+    /// [`Configuration`] by hand only where the attribute can't express the type, such as a
+    /// tuple struct. Use `()` for a plugin without configuration.
     ///
     /// If a plugin is [registered][crate::register_plugin],
-    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
-    /// The contents of this section are deserialized into this `Config` type
-    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    /// The contents of this section are deserialized into this `Config` type and its
+    /// [`Validate`] rules run while the router configuration is parsed, so their errors point at
+    /// this section. The config is then passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: Configuration + Clone + Send + Sync + 'static;
 
     /// This is invoked once after the router starts and compiled-in
     /// plugins are registered.
@@ -453,20 +573,23 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
     }
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         service
     }
 
@@ -476,8 +599,53 @@ pub trait PluginUnstable: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
+        service
+    }
+
+    /// This service handles individual requests to Apollo Connectors.
+    ///
+    /// Define `connector_request_service` to configure this communication, for example to
+    /// dynamically add headers to pass to a REST API. The `source_name` parameter is useful if
+    /// you need to apply a customization only to specific connectors.
+    ///
+    /// One GraphQL operation may produce many connector requests, so this service is
+    /// called once per outbound request, not once per operation.
+    ///
+    /// On the request, a plugin can:
+    ///
+    /// - read and rewrite the outbound HTTP request — URI, headers, body and method —
+    ///   through [`Request::transport_request`]. Note that the method is *not*
+    ///   rewritable through the coprocessor `ConnectorRequest` stage, so a plugin that
+    ///   changes it has no coprocessor equivalent;
+    /// - read the router request that produced it, through
+    ///   [`Request::supergraph_request`];
+    /// - read and write request-scoped state through [`Request::context`];
+    /// - fail the request without making it, through
+    ///   [`Request::into_error_response`] — the equivalent of a coprocessor returning
+    ///   `Control::Break`.
+    ///
+    /// On the response, a plugin can read and write [`Response::context`], read and
+    /// rewrite the raw transport outcome through [`Response::transport_result`], and
+    /// read or replace what is returned to the client through [`Response::data`],
+    /// [`Response::error`] and their setters. Rewriting `transport_result` does not
+    /// recompute the mapped response, so changing one without the other makes
+    /// telemetry disagree with what the client receives.
+    ///
+    /// [`Request::transport_request`]: connector_request::Request::transport_request
+    /// [`Request::supergraph_request`]: connector_request::Request::supergraph_request
+    /// [`Request::context`]: connector_request::Request::context
+    /// [`Request::into_error_response`]: connector_request::Request::into_error_response
+    /// [`Response::context`]: connector_request::Response::context
+    /// [`Response::transport_result`]: connector_request::Response::transport_result
+    /// [`Response::data`]: connector_request::Response::data
+    /// [`Response::error`]: connector_request::Response::error
+    fn connector_request_service(
+        &self,
+        service: connector_request::BoxCloneService,
+        _source_name: String,
+    ) -> connector_request::BoxCloneService {
         service
     }
 
@@ -514,25 +682,32 @@ where
         Plugin::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         Plugin::router_service(self, service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         Plugin::supergraph_service(self, service)
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         Plugin::execution_service(self, service)
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         Plugin::subgraph_service(self, subgraph_name, service)
     }
+
+    // No `connector_request_service` forwarding here on purpose: the hook is only on
+    // `PluginUnstable`, so a plugin that implements the stable `Plugin` trait gets the
+    // passthrough default rather than a customization point that is still settling.
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
@@ -561,14 +736,17 @@ where
 #[async_trait]
 pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// The configuration for this plugin.
-    /// Typically a `struct` with `#[derive(serde::Deserialize)]`.
+    /// Declare it with `#[apollo_configuration::configuration]`. Implement [`Validate`] and
+    /// [`Configuration`] by hand only where the attribute can't express the type, such as a
+    /// tuple struct. Use `()` for a plugin without configuration.
     ///
     /// If a plugin is [registered][crate::register_plugin],
-    /// it can be enabled through the `plugins` section of Router YAML configuration
+    /// it can be enabled through the `plugins` section of Router YAML configuration
     /// by having a sub-section named after the plugin.
-    /// The contents of this section are deserialized into this `Config` type
-    /// and passed to [`Plugin::new`] as part of [`PluginInit`].
-    type Config: JsonSchema + DeserializeOwned + Send;
+    /// The contents of this section are deserialized into this `Config` type and its
+    /// [`Validate`] rules run while the router configuration is parsed, so their errors point at
+    /// this section. The config is then passed to [`Plugin::new`] as part of [`PluginInit`].
+    type Config: Configuration + Clone + Send + Sync + 'static;
 
     const HIDDEN_FROM_CONFIG_JSON_SCHEMA: bool = false;
 
@@ -584,20 +762,23 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         service
     }
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         service
     }
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         service
     }
 
@@ -607,8 +788,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         service
     }
 
@@ -616,17 +797,17 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
         service
     }
 
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: connector_request::BoxCloneService,
         _source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> connector_request::BoxCloneService {
         service
     }
 
@@ -663,24 +844,35 @@ where
         PluginUnstable::new(init).await
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         PluginUnstable::router_service(self, service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         PluginUnstable::supergraph_service(self, service)
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         PluginUnstable::execution_service(self, service)
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         PluginUnstable::subgraph_service(self, subgraph_name, service)
+    }
+
+    fn connector_request_service(
+        &self,
+        service: connector_request::BoxCloneService,
+        source_name: String,
+    ) -> connector_request::BoxCloneService {
+        PluginUnstable::connector_request_service(self, service, source_name)
     }
 
     /// Return the name of the plugin.
@@ -713,16 +905,19 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService;
 
     /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
     /// and before the GraphQL response payload is serialized into a raw HTTP response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
     /// Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService;
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService;
 
     /// This service handles communication between the Apollo Router and your subgraphs.
     /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
@@ -730,22 +925,22 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn subgraph_service(
         &self,
         _subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService;
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService;
 
     /// This service handles HTTP communication
     fn http_client_service(
         &self,
         _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService;
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService;
 
     /// This service handles individual requests to Apollo Connectors
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: connector_request::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService;
+    ) -> connector_request::BoxCloneService;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -771,19 +966,26 @@ where
     T: PluginPrivate,
     for<'de> <T as PluginPrivate>::Config: Deserialize<'de>,
 {
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         self.router_service(service)
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         self.supergraph_service(service)
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         self.execution_service(service)
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.subgraph_service(name, service)
     }
 
@@ -791,16 +993,16 @@ where
     fn http_client_service(
         &self,
         name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::http::BoxCloneService,
+    ) -> crate::services::http::BoxCloneService {
         self.http_client_service(name, service)
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: connector_request::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> connector_request::BoxCloneService {
         self.connector_request_service(service, source_name)
     }
 
@@ -910,14 +1112,16 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
+    // BoxCloneService is Send but not Sync. The buffer's handle (Arc + Sender) is Sync,
+    // which is required for axum's route_service handler to be usable across threads.
     service: UnconstrainedBuffer<
         router::Request,
-        <router::BoxService as Service<router::Request>>::Future,
+        <router::BoxCloneService as Service<router::Request>>::Future,
     >,
 }
 
 impl Handler {
-    pub(crate) fn new(service: router::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxCloneService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
@@ -938,8 +1142,35 @@ impl Service<router::Request> for Handler {
     }
 }
 
-impl From<router::BoxService> for Handler {
-    fn from(original: router::BoxService) -> Self {
+impl From<router::BoxCloneService> for Handler {
+    fn from(original: router::BoxCloneService) -> Self {
         Self::new(original)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct UnitPlugin;
+
+    #[async_trait]
+    impl Plugin for UnitPlugin {
+        type Config = ();
+
+        async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+            Ok(Self)
+        }
+    }
+
+    /// `type Config = ()` plugins load from a `null` section, which is how `plugin_name:` parses.
+    #[tokio::test]
+    async fn plugins_without_config_load() {
+        let factory = PluginFactory::new::<UnitPlugin>("test", "unit");
+
+        factory
+            .create_instance_without_schema(&Value::Null)
+            .await
+            .expect("a null section is a valid `()` config");
     }
 }

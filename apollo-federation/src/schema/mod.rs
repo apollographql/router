@@ -14,7 +14,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ExtensionId;
 use apollo_compiler::schema::SchemaDefinition;
@@ -50,10 +49,13 @@ use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::link_spec_definition::LINK_DIRECTIVE_URL_ARGUMENT_NAME;
 use crate::link::metadata::LinksMetadata;
+use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_registry::SPEC_REGISTRY;
+use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -71,6 +73,7 @@ pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
 pub(crate) mod definitions;
 pub(crate) mod directive_location;
+pub(crate) mod fed3_upgrader;
 pub(crate) mod field_set;
 pub(crate) mod locations;
 pub(crate) mod position;
@@ -92,6 +95,24 @@ pub(crate) fn compute_subgraph_metadata(
     )
 }
 pub(crate) mod type_and_directive_specification;
+
+/// Directives the GraphQL spec defines.
+///
+/// In JS, this is encoded indirectly in `isGraphQLBuiltInDirective`. Regardless of whether
+/// the end user redefined these directives, we consider them built-in.
+///
+/// Matched by name rather than by `Node::is_built_in`, which only reports whether a
+/// definition came from `FileId::BUILT_IN`: a schema that spells one of these out
+/// explicitly gets a definition that check no longer recognises.
+pub(crate) static GRAPHQL_BUILT_IN_DIRECTIVES: [&str; 7] = [
+    "skip",
+    "include",
+    "deprecated",
+    "specifiedBy",
+    "defer",
+    "stream",
+    "oneOf",
+];
 
 /// A GraphQL schema with federation data.
 #[derive(Clone, Debug)]
@@ -224,7 +245,7 @@ impl FederationSchema {
                 .members
                 .iter()
                 .map(|t| ObjectTypeDefinitionPosition {
-                    type_name: t.name.clone(),
+                    type_name: Name::clone(t),
                 })
                 .collect::<IndexSet<_>>(),
         })
@@ -336,7 +357,7 @@ impl FederationSchema {
     // This works even if the schema bootstrapping was not completed.
     pub(crate) fn is_fed_2(&self) -> bool {
         self.federation_link()
-            .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+            .is_some_and(|link| link.url.version >= (Version { major: 2, minor: 0 }))
     }
 
     /// `true` when this subgraph is **not** federation 2.x per resolved [`SubgraphMetadata`].
@@ -347,6 +368,58 @@ impl FederationSchema {
     pub(crate) fn is_fed_1_subgraph(&self) -> bool {
         self.subgraph_metadata()
             .is_some_and(|meta| !meta.is_fed_2_schema())
+    }
+
+    /// Rewrites the federation spec `@link` to the given federation version, keeping its imports
+    /// and alias, then adds the definitions introduced by that version and recomputes the subgraph
+    /// metadata.
+    ///
+    /// The schema must already link some version of the federation spec.
+    pub(crate) fn upgrade_federation_link(
+        &mut self,
+        version: &Version,
+    ) -> Result<(), FederationError> {
+        let Some(metadata) = self.metadata() else {
+            bail!("Cannot upgrade the federation version of a schema with no @link")
+        };
+        let link_name_in_schema = metadata.link_itself().spec_name_in_schema().clone();
+        let federation_identity = FederationSpecDefinition::latest().identity();
+        let new_url = FederationSpecDefinition::for_version(version)?
+            .url()
+            .to_string();
+
+        let mut upgraded = false;
+        for directive in self
+            .schema
+            .schema_definition
+            .make_mut()
+            .directives
+            .iter_mut()
+        {
+            if directive.name != link_name_in_schema {
+                continue;
+            }
+            for argument in directive.make_mut().arguments.iter_mut() {
+                let links_federation = argument.name == LINK_DIRECTIVE_URL_ARGUMENT_NAME
+                    && argument
+                        .value
+                        .as_str()
+                        .and_then(|url| url.parse::<Url>().ok())
+                        .is_some_and(|url| url.identity == *federation_identity);
+                if links_federation {
+                    argument.make_mut().value = new_url.as_str().into();
+                    upgraded = true;
+                }
+            }
+        }
+        if !upgraded {
+            bail!("Cannot upgrade the federation version of a schema with no federation @link")
+        }
+
+        self.collect_links_metadata()?;
+        FederationBlueprint::complete_subgraph_schema(self)?;
+        self.subgraph_metadata = compute_subgraph_metadata(self)?.map(Box::new);
+        Ok(())
     }
 
     // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
@@ -1177,7 +1250,7 @@ pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
+    schema_directive: &'schema Node<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
@@ -1194,9 +1267,19 @@ impl HasFields for KeyDirective<'_> {
     }
 }
 
-impl KeyDirective<'_> {
+impl<'schema> KeyDirective<'schema> {
     pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
         &self.target
+    }
+
+    /// Whether this key can be used to resolve the entity, i.e. `@key(resolvable:)`.
+    pub(crate) fn resolvable(&self) -> bool {
+        self.arguments.resolvable
+    }
+
+    /// The `@key` application as it appears in the AST, for reporting source locations against.
+    pub(crate) fn schema_directive(&self) -> &'schema Node<Directive> {
+        self.schema_directive
     }
 }
 
@@ -1419,18 +1502,17 @@ impl From<ValidFederationSchema> for FederationSchema {
 }
 
 pub(crate) trait SchemaElement {
-    /// Iterates over the origins of the schema element.
-    /// - Expected to use the apollo_compiler's `iter_origins` implementation.
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin>;
+    /// Iterates over the extension IDs of the schema element.
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>>;
 
     /// Returns true in the first tuple element if `self` has a definition.
     /// Returns a set of extension IDs in the second tuple element, if any.
     fn definition_and_extensions(&self) -> (bool, IndexSet<&ExtensionId>) {
         let mut extensions = IndexSet::default();
         let mut has_definition = false;
-        for origin in self.iter_origins() {
-            if let Some(extension_id) = origin.extension_id() {
-                extensions.insert(extension_id);
+        for extension_id in self.iter_extension_ids() {
+            if let Some(id) = extension_id {
+                extensions.insert(id);
             } else {
                 has_definition = true;
             }
@@ -1446,28 +1528,29 @@ pub(crate) trait SchemaElement {
         !self.extensions().is_empty()
     }
 
-    fn origin_to_use(&self) -> ComponentOrigin {
+    fn origin_extension_id(&self) -> Option<ExtensionId> {
         let (has_definition, extensions) = self.definition_and_extensions();
         // Use extension origin only when extensions exist but no definition does
         // (i.e., only extension elements are populated). Otherwise, use definition.
         // For more details, see the comments in the `add_to_schema` method.
-        // Note: Use an arbitrary extension origin, since no defined ordering between origins.
-        if !has_definition && let Some(first_extension) = extensions.first() {
-            return ComponentOrigin::Extension((*first_extension).clone());
+        // Note: Use an arbitrary extension, since no defined ordering between origins.
+        if !has_definition {
+            extensions.first().map(|id| (*id).clone())
+        } else {
+            None
         }
-        ComponentOrigin::Definition
     }
 }
 
 impl SchemaElement for SchemaDefinition {
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
-        self.iter_origins()
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>> {
+        SchemaDefinition::iter_extension_ids(self)
     }
 }
 
 impl SchemaElement for ExtendedType {
-    fn iter_origins(&self) -> impl Iterator<Item = &ComponentOrigin> {
-        self.iter_origins()
+    fn iter_extension_ids(&self) -> impl Iterator<Item = Option<&ExtensionId>> {
+        ExtendedType::iter_extension_ids(self)
     }
 }
 

@@ -746,6 +746,7 @@ mod method_tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn parse_int_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->parseInt($.missing)", spec).apply_to(&json!({
@@ -831,12 +832,8 @@ mod shape_tests {
     #[test]
     fn parse_int_shape_should_error_for_boolean_input() {
         assert_eq!(
-            get_shape(vec![], Shape::bool([])),
-            Shape::error_with_partial(
-                "Method ->parseInt can only parse strings and numbers. Found: Bool".to_string(),
-                Shape::none(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::bool([])).pretty_print(),
+            r#"None (err "Method ->parseInt can only parse strings and numbers. Found: Bool")"#,
         );
     }
 
@@ -849,12 +846,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(16.into()), None)
                 ],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->parseInt accepts at most one argument (base), but 2 were provided"
-                    .to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->parseInt accepts at most one argument (base), but 2 were provided")"#,
         );
     }
 
@@ -867,13 +861,9 @@ mod shape_tests {
                     None
                 )],
                 Shape::string([])
-            ),
-            Shape::error_with_partial(
-                "Method ->parseInt base argument must be an integer. Found: \"not_a_number\""
-                    .to_string(),
-                Shape::int([get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Int (err "Method ->parseInt base argument must be an integer. Found: \"not_a_number\"")"#,
         );
     }
 
@@ -917,24 +907,16 @@ mod shape_tests {
     #[test]
     fn parse_int_shape_should_error_for_object_input() {
         assert_eq!(
-            get_shape(vec![], Shape::empty_object([])),
-            Shape::error_with_partial(
-                "Method ->parseInt can only parse strings and numbers. Found: {}".to_string(),
-                Shape::none(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::any_object([])).pretty_print(),
+            r#"None (err "Method ->parseInt can only parse strings and numbers. Found: {...}")"#,
         );
     }
 
     #[test]
     fn parse_int_shape_should_error_for_array_input() {
         assert_eq!(
-            get_shape(vec![], Shape::tuple([], [])),
-            Shape::error_with_partial(
-                "Method ->parseInt can only parse strings and numbers. Found: []".to_string(),
-                Shape::none(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::any_array([])).pretty_print(),
+            r#"None (err "Method ->parseInt can only parse strings and numbers. Found: [...]")"#,
         );
     }
 }

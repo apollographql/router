@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::time::Duration;
 
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
@@ -31,6 +32,7 @@ use crate::query_graph::OverrideConditions;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
@@ -57,7 +59,7 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::logging::snapshot;
 
-#[derive(Debug, Clone, Hash, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct QueryPlannerConfig {
     /// If enabled, the query planner will attempt to extract common subselections into named
     /// fragments. This can significantly reduce the size of the query sent to subgraphs.
@@ -93,6 +95,9 @@ pub struct QueryPlannerConfig {
     ///
     /// If you aren't aware of this flag, you probably don't need it.
     pub type_conditioned_fetching: bool,
+
+    /// Configuration for the incremental (BULB) planner.
+    pub incremental_planner: IncrementalPlannerConfig,
 }
 
 #[allow(clippy::derivable_impls)] // it's derivable right now, but we might change the defaults
@@ -104,6 +109,80 @@ impl Default for QueryPlannerConfig {
             incremental_delivery: Default::default(),
             debug: Default::default(),
             type_conditioned_fetching: false,
+            incremental_planner: Default::default(),
+        }
+    }
+}
+
+impl QueryPlannerConfig {
+    /// Whether operations are planned by the incremental planner. There is no
+    /// legacy fallback: with native connectors the schema is unexpanded and
+    /// only the incremental planner can route it.
+    pub(crate) fn uses_incremental_planner(&self) -> bool {
+        self.incremental_planner.enabled
+    }
+}
+
+impl std::hash::Hash for QueryPlannerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Destructured so adding a field is a compile error until it is
+        // added to the hash; a silently omitted field would let config
+        // changes serve stale cached plans.
+        let Self {
+            generate_query_fragments,
+            subgraph_graphql_validation,
+            incremental_delivery,
+            debug,
+            type_conditioned_fetching,
+            incremental_planner,
+        } = self;
+        generate_query_fragments.hash(state);
+        subgraph_graphql_validation.hash(state);
+        incremental_delivery.hash(state);
+        debug.hash(state);
+        type_conditioned_fetching.hash(state);
+        // Only include incremental_planner in the hash when enabled,
+        // so the cache key for the existing planner stays unchanged.
+        if incremental_planner.enabled {
+            incremental_planner.hash(state);
+        }
+    }
+}
+
+/// Configuration for the incremental (BULB) planner. The planner drives
+/// planning field-by-field, exploring options greedily with bounded
+/// backtracking.
+#[derive(Debug, Clone, Hash, Serialize)]
+pub struct IncrementalPlannerConfig {
+    /// Use the incremental planner.
+    pub enabled: bool,
+
+    /// Beam width: how many states advance together per depth in the beam.
+    /// Wider beams capture more diversity in the search, reducing the
+    /// need for expensive backtracking iterations.
+    pub beam_width: usize,
+
+    /// Absolute cap on the additional search effort spent beyond the
+    /// planner's initial greedy pass, measured in pending-selection visits.
+    /// The greedy pass always runs to completion; fuel is the optimization
+    /// budget granted on top of it, so `fuel: 0` is pure greedy planning.
+    pub fuel: u64,
+
+    /// Optional wall-clock time limit for the search. When set, the search
+    /// returns the best complete plan found so far once the limit is
+    /// reached, which makes the chosen plan dependent on machine load.
+    /// Leave unset (the default) for fully deterministic, fuel-bounded
+    /// planning.
+    pub timeout: Option<Duration>,
+}
+
+impl Default for IncrementalPlannerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            beam_width: 16,
+            fuel: 5_000,
+            timeout: None,
         }
     }
 }
@@ -176,6 +255,19 @@ pub struct QueryPlanningStatistics {
     /// `best_plan_cost` can be NaN, if the cost is not computed or irrelevant.
     #[serde(deserialize_with = "deserialize_f64_nullable")]
     pub best_plan_cost: f64,
+    /// Incremental planner fuel spent improving on the first complete plan.
+    /// Mutations run one search per top-level field and report the search that
+    /// spent the most. `None` when the incremental planner is disabled.
+    #[serde(default, skip_serializing_if = "cell_is_none")]
+    pub fuel_consumed: Cell<Option<u64>>,
+    /// Fuel left in the search reported by `fuel_consumed`. `Some(0)` means
+    /// the budget ran out.
+    #[serde(default, skip_serializing_if = "cell_is_none")]
+    pub fuel_remaining: Cell<Option<u64>>,
+}
+
+fn cell_is_none(cell: &Cell<Option<u64>>) -> bool {
+    cell.get().is_none()
 }
 
 /// Deserialize helper for f64 that treats null as NaN.
@@ -257,6 +349,10 @@ pub struct QueryPlanner {
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
+    /// Lookup table from (type, field) to connectors, built once at planner
+    /// construction so the incremental planner can route fields to connectors
+    /// without expanding them into virtual subgraphs.
+    connector_index: Arc<crate::connectors::index::ConnectorIndex>,
     /// A set of the names of interface or union types that have inconsistent "runtime types" across
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
@@ -273,7 +369,13 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        let supergraph_schema = supergraph.schema.clone();
+        // The incremental planner plans connectors without expanding them, so
+        // it needs the entity keys expansion would have synthesized.
+        let supergraph_schema = if config.incremental_planner.enabled {
+            crate::connectors::index::add_connector_entity_keys(&supergraph.schema)?
+        } else {
+            supergraph.schema.clone()
+        };
         let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
             include_defer: config.incremental_delivery.enable_defer,
             ..Default::default()
@@ -336,7 +438,7 @@ impl QueryPlanner {
                             .try_get(subgraph.schema())?
                             .members
                             .iter()
-                            .map(|member| ObjectTypeDefinitionPosition::new(member.name.clone()))
+                            .map(|member| ObjectTypeDefinitionPosition::new(Name::clone(member)))
                             .collect(),
                     ),
                     _ => None,
@@ -357,6 +459,20 @@ impl QueryPlanner {
             .map(|position| position.type_name().clone())
             .collect::<IndexSet<_>>();
 
+        // Build the connector index from the subgraph schemas. Subgraphs
+        // without connector directives contribute nothing.
+        let mut connectors_by_subgraph = Vec::new();
+        for (subgraph_name, subgraph_schema) in query_graph.subgraph_schemas() {
+            let connectors =
+                crate::connectors::Connector::from_schema(subgraph_schema.schema(), subgraph_name)?;
+            if !connectors.is_empty() {
+                connectors_by_subgraph.push((subgraph_schema, connectors));
+            }
+        }
+        let connector_index = Arc::new(crate::connectors::index::ConnectorIndex::from_subgraphs(
+            connectors_by_subgraph,
+        )?);
+
         Ok(Self {
             config,
             federated_query_graph: Arc::new(query_graph),
@@ -364,11 +480,16 @@ impl QueryPlanner {
             api_schema,
             interface_types_with_interface_objects,
             abstract_types_with_inconsistent_runtime_types,
+            connector_index,
         })
     }
 
     pub fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
         self.federated_query_graph.subgraph_schemas()
+    }
+
+    pub fn connector_index(&self) -> &crate::connectors::index::ConnectorIndex {
+        &self.connector_index
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -411,11 +532,12 @@ impl QueryPlanner {
                     &options.check_for_cooperative_cancellation,
                 )
             },
+            !self.config.uses_incremental_planner(),
         )?;
 
         let NormalizedDefer {
             operation: normalized_operation,
-            assigned_defer_labels,
+            client_labels,
             defer_conditions,
             has_defers,
         } = normalized_operation.with_normalized_defer()?;
@@ -453,12 +575,13 @@ impl QueryPlanner {
         } else {
             SubgraphOperationCompression::Disabled
         };
+        let client_labels = Arc::new(client_labels);
         let mut processor = FetchDependencyGraphToQueryPlanProcessor::new(
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
             operation.name.clone(),
-            assigned_defer_labels,
+            client_labels.as_ref().clone(),
         );
         let mut parameters = QueryPlanningParameters {
             supergraph_schema: self.supergraph_schema.clone(),
@@ -478,6 +601,7 @@ impl QueryPlanner {
                 &self.federated_query_graph,
                 &IndexSet::from_iter(options.override_conditions),
             ),
+            connector_index: self.connector_index.clone(),
             check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
             disabled_subgraphs: self
@@ -491,17 +615,20 @@ impl QueryPlanner {
                     }
                 })
                 .collect(),
+            client_labels: client_labels.clone(),
         };
 
         let mut non_local_selection_state = options
             .non_local_selections_limit_enabled
             .then(non_local_selections_estimation::State::default);
+        let mut resolver_cache = ConditionResolverCache::new();
         let (root_node, cost) = if !defer_conditions.is_empty() {
             compute_plan_for_defer_conditionals(
                 &mut parameters,
                 &mut processor,
                 defer_conditions,
                 &mut non_local_selection_state,
+                &mut resolver_cache,
             )
         } else {
             compute_plan_internal(
@@ -509,6 +636,7 @@ impl QueryPlanner {
                 &mut processor,
                 has_defers,
                 &mut non_local_selection_state,
+                &mut resolver_cache,
             )
         }?;
 
@@ -594,6 +722,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
     let QueryPlanningParameters {
         supergraph_schema,
@@ -625,6 +754,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
         selection_set,
         has_defers,
         non_local_selection_state,
+        resolver_cache,
     )?;
     let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
     for selection_set in split_roots {
@@ -637,6 +767,7 @@ fn compute_root_serial_dependency_graph_for_mutation(
             selection_set,
             has_defers,
             non_local_selection_state,
+            resolver_cache,
         )?;
         let new_subgraph = only_root_subgraph(&new_dep_graph)?;
         if new_subgraph == prev_subgraph {
@@ -761,6 +892,7 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(FetchDependencyGraph, QueryPlanCost), FederationError> {
     trace!("Starting process to construct a parallel fetch dependency graph");
     let selection_set = parameters.operation.selection_set.clone();
@@ -769,6 +901,7 @@ fn compute_root_parallel_dependency_graph(
         selection_set,
         has_defers,
         non_local_selection_state,
+        resolver_cache,
     )?;
     snapshot!(
         "FetchDependencyGraph",
@@ -783,6 +916,7 @@ fn compute_root_parallel_best_plan(
     selection: SelectionSet,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
         parameters,
@@ -792,6 +926,7 @@ fn compute_root_parallel_best_plan(
         FetchDependencyGraphToCostProcessor,
         non_local_selection_state.as_mut(),
         None,
+        resolver_cache,
     )?;
 
     // Getting no plan means the query is essentially unsatisfiable (it's a valid query, but we can prove it will never return a result),
@@ -806,6 +941,7 @@ fn compute_root_parallel_best_plan_for_mutation(
     selection: SelectionSet,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     parameters.federated_query_graph.out_edges(parameters.head).into_iter().map(|edge_ref| {
         let mutation_subgraph = parameters.federated_query_graph.node_weight(edge_ref.target())?.source.clone();
@@ -817,6 +953,7 @@ fn compute_root_parallel_best_plan_for_mutation(
             FetchDependencyGraphToCostProcessor,
             non_local_selection_state.as_mut(),
             Some(mutation_subgraph),
+            resolver_cache,
         )?;
         planning_traversal.find_best_plan()
     }).process_results(|iter| iter
@@ -843,16 +980,50 @@ fn compute_plan_internal(
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     has_defers: bool,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     let root_kind = parameters.operation.root_kind;
 
+    let use_incremental = parameters.config.uses_incremental_planner();
     let (main, deferred, primary_selection, cost) = if root_kind
         == SchemaRootDefinitionKind::Mutation
+        && use_incremental
     {
+        // BULB planner: plan each top-level mutation field independently,
+        // then sequence the results. One naming state spans all fields so
+        // generated subgraph operation names stay unique across the plan.
+        let mut naming = crate::query_plan::incremental_planner::OperationNaming::new(
+            parameters.config.generate_query_fragments,
+        );
+        let mut plans: Vec<Option<PlanNode>> = Vec::new();
+        for field_selection in parameters
+            .operation
+            .selection_set
+            .clone()
+            .split_top_level_fields()
+        {
+            let bulb = crate::query_plan::incremental_planner::build_bulb_plan(
+                parameters,
+                &field_selection,
+                root_kind,
+                &mut naming,
+                has_defers,
+            )?;
+            plans.push(bulb.plan);
+        }
+        let mut nodes: Vec<PlanNode> = plans.into_iter().flatten().collect();
+        let plan = match nodes.len() {
+            0 => None,
+            1 => Some(nodes.remove(0)),
+            _ => Some(PlanNode::Sequence(SequenceNode { nodes })),
+        };
+        (plan, vec![], None, f64::NAN)
+    } else if root_kind == SchemaRootDefinitionKind::Mutation {
         let dependency_graphs = compute_root_serial_dependency_graph_for_mutation(
             parameters,
             has_defers,
             non_local_selection_state,
+            resolver_cache,
         )?;
         let mut main = None;
         let mut deferred = vec![];
@@ -877,11 +1048,27 @@ fn compute_plan_internal(
         }
         // No cost computation necessary. Return NaN for cost.
         (main, deferred, primary_selection, f64::NAN)
+    } else if use_incremental {
+        // BULB planner: bypass the traversal loop and FDG processing
+        // entirely; the plan is materialized directly from the FetchGraph.
+        let selection_set = parameters.operation.selection_set.clone();
+        let mut naming = crate::query_plan::incremental_planner::OperationNaming::new(
+            parameters.config.generate_query_fragments,
+        );
+        let bulb = crate::query_plan::incremental_planner::build_bulb_plan(
+            parameters,
+            &selection_set,
+            root_kind,
+            &mut naming,
+            has_defers,
+        )?;
+        (bulb.plan, vec![], None, bulb.cost)
     } else {
         let (mut dependency_graph, cost) = compute_root_parallel_dependency_graph(
             parameters,
             has_defers,
             non_local_selection_state,
+            resolver_cache,
         )?;
 
         let (main, deferred) = dependency_graph.process(&mut *processor, root_kind)?;
@@ -912,13 +1099,20 @@ fn compute_plan_for_defer_conditionals(
     processor: &mut FetchDependencyGraphToQueryPlanProcessor,
     defer_conditions: IndexMap<Name, IndexSet<String>>,
     non_local_selection_state: &mut Option<non_local_selections_estimation::State>,
+    resolver_cache: &mut ConditionResolverCache,
 ) -> Result<(Option<PlanNode>, QueryPlanCost), FederationError> {
     generate_condition_nodes(
         parameters.operation.clone(),
         defer_conditions.iter(),
         &mut |op| {
             parameters.operation = op;
-            compute_plan_internal(parameters, processor, true, non_local_selection_state)
+            compute_plan_internal(
+                parameters,
+                processor,
+                true,
+                non_local_selection_state,
+                resolver_cache,
+            )
         },
     )
 }
@@ -965,7 +1159,11 @@ impl SubgraphOperationCompression {
     pub(crate) fn compress(
         &mut self,
         operation: Operation,
+        skip_validation: bool,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        if skip_validation {
+            return self.compress_unchecked(operation);
+        }
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),
             Self::Disabled => {
@@ -980,6 +1178,16 @@ impl SubgraphOperationCompression {
                 })?;
                 Ok(operation_document)
             }
+        }
+    }
+
+    fn compress_unchecked(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
+        match self {
+            Self::GenerateFragments => Ok(operation.generate_fragments_unchecked()?),
+            Self::Disabled => operation.into_document_unchecked(),
         }
     }
 }
@@ -1435,6 +1643,7 @@ type User
             evaluated_plan_count: Cell::new(10),
             evaluated_plan_paths: Cell::new(20),
             best_plan_cost: f64::NAN,
+            ..Default::default()
         };
         let serialized = serde_json::to_string_pretty(&stats).expect("Serializing");
         insta::assert_snapshot!(serialized, @r###"

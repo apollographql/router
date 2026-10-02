@@ -171,7 +171,9 @@ fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
         }
     "#);
 
-    let document = ExecutableDocument::parse_and_validate(
+    // Since apollo-compiler 1.33.0, unconditional @defer in a subscription is rejected at
+    // document validation, before the planner's own DeferredSubscriptionUnsupported error.
+    ExecutableDocument::parse_and_validate(
         planner.api_schema().schema(),
         r#"
         subscription MySubscription {
@@ -186,11 +188,7 @@ fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
         "#,
         "trying_to_use_defer_with_a_subcription_results_in_an_error.graphql",
     )
-    .unwrap();
-
-    planner
-        .build_query_plan(&document, Some(name!(MySubscription)), Default::default())
-        .expect_err("should return an error");
+    .expect_err("unconditional @defer in a subscription must fail document validation");
 }
 
 #[test]
@@ -287,4 +285,63 @@ fn trying_to_use_include_with_a_subscription_results_in_an_error() {
     planner
         .build_query_plan(&document, Some(name!(MySubscription)), Default::default())
         .expect_err("should return an error");
+}
+
+#[test]
+fn subscription_with_an_empty_rest_plan() {
+    let planner = planner!(
+    SubgraphA: r#"
+            type Query {
+                me: User!
+            }
+
+            type Subscription {
+                onNewUser: User!
+            }
+
+            type User @key(fields: "id") {
+                id: ID!
+                name: String!
+            }
+        "#,
+    SubgraphB: r#"
+            type Query {
+                foo: Int
+            }
+
+            type User @key(fields: "id") {
+                id: ID!
+                address: String!
+            }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        // The `address` part would be fetched from subgraph B in the `Rest` part of the
+        // Subscription node, but we're skipping it, so we only have a Primary node.
+        r#"
+        subscription MySubscription {
+          onNewUser {
+            address @skip(if: true)
+          }
+        }
+        "#,
+        @r###"
+      QueryPlan {
+        Subscription {
+          Primary: {
+            Fetch(service: "SubgraphA") {
+              {
+                onNewUser {
+                  __typename
+                  id
+                }
+              }
+            },
+          },
+        },
+      }
+      "###
+    );
 }

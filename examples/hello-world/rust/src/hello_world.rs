@@ -4,8 +4,6 @@ use apollo_router::register_plugin;
 use apollo_router::services::execution;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -16,9 +14,10 @@ struct HelloWorld {
     configuration: Conf,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
+    #[config(required)]
     name: String, // The name of the entity you'd like to say hello to
 }
 
@@ -33,7 +32,10 @@ impl Plugin for HelloWorld {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         // Say hello when our service is added to the router_service
         // stage of the router plugin pipeline.
         #[cfg(test)]
@@ -46,30 +48,34 @@ impl Plugin for HelloWorld {
             // .map_request()
             // .map_response()
             // .rate_limit()
-            // .checkpoint()
+            // .checkpoint_async()
             // .timeout()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         //This is the default implementation and does not modify the default service.
         // The trait also has this implementation, and we just provide it here for illustration.
         service
     }
 
     // Called for each subgraph
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(
+        &self,
+        _name: &str,
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         // Always use service builder to compose your plugins.
         // It provides off the shelf building blocks for your plugin.
         ServiceBuilder::new()
             // .map_request()
             // .map_response()
             // .rate_limit()
-            // .checkpoint()
+            // .checkpoint_async()
             // .timeout()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

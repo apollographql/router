@@ -22,7 +22,7 @@ coprocessor:
   router:
     request:
       headers: true
-      context: true
+      context: all
       body: true
       sdl: true
     response:

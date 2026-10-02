@@ -22,6 +22,8 @@ pub struct MapFirstGraphqlResponseLayer<Callback> {
 }
 
 /// [`Service`] for mapping first graphql responses. See [`ServiceBuilderExt::map_first_graphql_response()`](crate::layers::ServiceBuilderExt::map_first_graphql_response()).
+
+#[derive(Clone)]
 pub struct MapFirstGraphqlResponseService<InnerService, Callback> {
     inner: InnerService,
     callback: Callback,
@@ -106,7 +108,7 @@ mod tests {
                             );
                             (http_parts, graphql_response)
                         })
-                        .boxed()
+                        .boxed_clone()
                 })
                 .build_supergraph()
                 .await

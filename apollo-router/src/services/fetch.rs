@@ -22,8 +22,6 @@ use crate::query_planner::subscription::SubscriptionNode;
 /// its existence.
 const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.private.subgraph.name";
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
-
 // XXX(@goto-bus-stop): The `SubscriptionRequest` should not be an enum branch here in the future.
 // The information it represents must be isolated to the subscription plugin.
 #[allow(clippy::large_enum_variant)]
@@ -41,6 +39,10 @@ pub(crate) struct FetchRequest {
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
     pub(crate) current_dir: Path,
+    /// Whether this fetch is part of the deferred portion of an `@defer` query
+    /// plan. Propagated to `subgraph::Request` so telemetry selectors can split
+    /// primary vs deferred fetches.
+    pub(crate) is_deferred: bool,
 }
 
 #[buildstructor::buildstructor]
@@ -55,6 +57,7 @@ impl FetchRequest {
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
         current_dir: Path,
+        is_deferred: bool,
     ) -> Self {
         Self {
             context,
@@ -62,6 +65,7 @@ impl FetchRequest {
             supergraph_request,
             variables,
             current_dir,
+            is_deferred,
         }
     }
 }

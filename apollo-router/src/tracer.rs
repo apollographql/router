@@ -125,7 +125,7 @@ mod test {
             .build();
         let tracer = provider.tracer_with_scope(InstrumentationScope::builder("noop").build());
 
-        let telemetry = otel::layer().force_sampling().with_tracer(tracer);
+        let telemetry = otel::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
@@ -148,7 +148,7 @@ mod test {
             .build();
         let tracer = provider
             .tracer_with_scope(opentelemetry::InstrumentationScope::builder("noop").build());
-        let telemetry = otel::layer().force_sampling().with_tracer(tracer);
+        let telemetry = otel::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);
@@ -172,7 +172,7 @@ mod test {
             .build();
         let tracer = provider
             .tracer_with_scope(opentelemetry::InstrumentationScope::builder("noop").build());
-        let telemetry = otel::layer().force_sampling().with_tracer(tracer);
+        let telemetry = otel::layer().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
         let subscriber = Registry::default().with(telemetry);

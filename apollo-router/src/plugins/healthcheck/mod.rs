@@ -93,23 +93,26 @@ impl Default for ReadinessConfig {
 }
 
 /// Configuration options pertaining to the health component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 #[schemars(rename = "HealthCheckConfig")]
 pub(crate) struct Config {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
+    #[config(default = default_health_check_listen(), skip_validate)]
     pub(crate) listen: ListenAddr,
 
     /// Set to false to disable the health check
+    #[config(default = default_health_check_enabled())]
     pub(crate) enabled: bool,
 
     /// Optionally set a custom healthcheck path
     /// Defaults to /health
+    #[config(default = default_health_check_path())]
     pub(crate) path: String,
 
     /// Optionally specify readiness configuration
+    #[config(skip_validate)]
     pub(crate) readiness: ReadinessConfig,
 }
 
@@ -130,6 +133,16 @@ fn default_health_check_path() -> String {
     "/health".to_string()
 }
 
+/// Web endpoint paths must start with `/`, but users may write `path: health`.
+fn normalize_path(path: String) -> String {
+    if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    }
+}
+
+#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Config {
     #[builder]
@@ -139,23 +152,12 @@ impl Config {
         path: Option<String>,
         readiness: Option<ReadinessConfig>,
     ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
         Self {
             listen: listen.unwrap_or_else(default_health_check_listen),
             enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
+            path: normalize_path(path.unwrap_or_else(default_health_check_path)),
             readiness: readiness.unwrap_or_default(),
         }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self::builder().build()
     }
 }
 
@@ -171,7 +173,9 @@ struct HealthCheck {
 impl PluginPrivate for HealthCheck {
     type Config = Config;
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(mut init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        init.config.path = normalize_path(init.config.path);
+
         // We always do the work to track readiness and liveness because we
         // need that data to implement our `router_service`. We only log out
         // our health tracing message if our health check is enabled.
@@ -225,7 +229,7 @@ impl PluginPrivate for HealthCheck {
 
     // Track rejected requests due to traffic shaping.
     // We always do this; even if the health check is disabled.
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         let my_rejected = self.rejected.clone();
 
         ServiceBuilder::new()
@@ -238,7 +242,7 @@ impl PluginPrivate for HealthCheck {
                 res
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     // Support the health-check endpoint for the router, incorporating both live and ready.
@@ -300,7 +304,7 @@ impl PluginPrivate for HealthCheck {
                             .build()
                     }
                 })
-                .boxed(),
+                .boxed_clone(),
             );
 
             map.insert(self.config.listen.clone(), endpoint);
@@ -344,7 +348,7 @@ mod test {
         response_status_code: StatusCode,
     ) -> (
         Option<Endpoint>,
-        Option<ServiceHandle<router::Request, router::BoxService>>,
+        Option<ServiceHandle<router::Request, router::BoxCloneService>>,
         PluginTestHarness<HealthCheck>,
     ) {
         let test_harness: PluginTestHarness<HealthCheck> = PluginTestHarness::builder()
@@ -449,7 +453,7 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -462,7 +466,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_custom_listener() {
         let router_addr = "127.0.0.1:4012";
         base_test_health_check(
@@ -475,7 +479,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_timeout_unready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -488,7 +492,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_unavailable_unready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -501,7 +505,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_timeout_ready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -514,7 +518,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_unavailable_ready() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -527,7 +531,7 @@ mod test {
         .await;
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_disabled() {
         let router_addr = "127.0.0.1:8088";
         base_test_health_check(
@@ -538,6 +542,33 @@ mod test {
             false,
         )
         .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_health_check_adds_missing_leading_slash_to_path() {
+        let listen_addr: ListenAddr = SocketAddr::from_str("127.0.0.1:8088").unwrap().into();
+        let (endpoint, _pipeline_svc, _test_harness) = get_axum_router(
+            listen_addr,
+            "health_check:\n  path: healthz\n",
+            StatusCode::OK,
+        )
+        .await;
+
+        // Routing a path without a leading `/` would panic in axum.
+        let mut axum_router = endpoint.expect("endpoint must exist").into_router();
+        let request = http::Request::builder()
+            .uri("http://127.0.0.1:8088/healthz")
+            .body(http_body_util::Empty::new())
+            .expect("valid request");
+        let response = axum_router
+            .as_service()
+            .ready()
+            .await
+            .expect("readied")
+            .call(request)
+            .await
+            .expect("called");
+        assert_health_response(response, StatusCode::OK, r#"{"status":"UP"}"#).await;
     }
 
     // Helper to build a fresh health?ready= request
@@ -573,7 +604,7 @@ mod test {
     // Uses unready=5s so the DOWN check at 2s always falls well within the recovery window,
     // regardless of when the sampling tick fires after switching to tokio::time::interval
     // (which fires the first tick immediately on first poll, during setup).
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_recovery_after_unready() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
@@ -634,7 +665,7 @@ mod test {
     // Uses unready=5s so that the DOWN checks always fall well within the recovery window,
     // avoiding a race condition on slow CI environments (ARM, Windows) where a 2s wait could
     // land right at the boundary of a 2s recovery and produce a non-deterministic result.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_multiple_unready_cycles() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
@@ -707,7 +738,7 @@ mod test {
 
     // Verifies the boundary condition: exactly `allowed` rejections must NOT trigger unready
     // because the condition is strictly `rejected_count > allowed`.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_at_rejection_threshold_stays_up() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
@@ -743,7 +774,7 @@ mod test {
     //
     // Uses unready=5s so the DOWN check at 2s is safely inside the recovery window regardless
     // of when the sampling tick fires (first tick fires immediately on first poll with interval()).
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_health_check_one_above_rejection_threshold_goes_down() {
         let router_addr = "127.0.0.1:8088";
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();

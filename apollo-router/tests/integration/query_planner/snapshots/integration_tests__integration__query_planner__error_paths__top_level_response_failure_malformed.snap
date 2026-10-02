@@ -8,7 +8,7 @@ expression: response
   },
   "errors": [
     {
-      "message": "service 'products' response was malformed: graphql response without data must contain at least one error",
+      "message": "response was malformed: graphql response without data must contain at least one error",
       "path": [],
       "extensions": {
         "service": "products",

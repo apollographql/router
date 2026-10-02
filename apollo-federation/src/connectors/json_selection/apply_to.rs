@@ -562,7 +562,7 @@ impl ApplyToInternal for NamedSelection {
         if let Some(single_output_key) = self.get_single_key() {
             let mut map = Shape::empty_map();
             map.insert(single_output_key.as_string(), path_shape);
-            Shape::record(map, self.shape_location(context.source_id()))
+            Shape::closed_record(map, self.shape_location(context.source_id()))
         } else {
             path_shape
         }
@@ -804,38 +804,61 @@ impl ApplyToInternal for WithRange<PathList> {
         input_shape: Shape,
         dollar_shape: Shape,
     ) -> Shape {
+        // Errors are now stored as metadata on `input_shape` rather than as a
+        // `ShapeCase::Error` variant wrapping a partial. Capture them up-front
+        // so they can be reapplied to whatever the structural recursion below
+        // produces. A pure error (case == Unknown carrying error metadata) has
+        // no partial structure to drive shape computation, so we short-circuit
+        // and return it as-is. Note: this collapses the distinction between
+        // error_with_partial(msg, Unknown) and error(msg) — both early-return
+        // here — so if a future call site constructs the former and expects
+        // tail computation through the Unknown partial, this path will need
+        // refinement.
+        let pending_errors: Vec<(String, Vec<Location>)> = if input_shape.has_own_errors() {
+            if matches!(input_shape.case(), ShapeCase::Unknown) {
+                return input_shape;
+            }
+            let locations: Vec<Location> = input_shape.locations().cloned().collect();
+            input_shape
+                .own_errors()
+                .map(|e| (e.message.clone(), locations.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         match input_shape.case() {
             ShapeCase::One(shapes) => {
-                return Shape::one(
+                let distributed = Shape::one(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
+                return pending_errors
+                    .into_iter()
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             ShapeCase::All(shapes) => {
-                return Shape::all(
+                let distributed = Shape::all(
                     shapes.iter().map(|shape| {
                         self.compute_output_shape(context, shape.clone(), dollar_shape.clone())
                     }),
                     input_shape.locations().cloned(),
                 );
-            }
-            ShapeCase::Error(error) => {
-                return match error.partial.as_ref() {
-                    Some(partial) => Shape::error_with_partial(
-                        error.message.clone(),
-                        self.compute_output_shape(context, partial.clone(), dollar_shape),
-                        input_shape.locations().cloned(),
-                    ),
-                    None => input_shape.clone(),
-                };
+                return pending_errors
+                    .into_iter()
+                    .fold(distributed, |acc, (msg, locs)| {
+                        Shape::error_with_partial(msg, acc, locs)
+                    });
             }
             _ => {}
         };
 
-        // Given the base cases above, we can assume below that input_shape is
-        // neither ::One, ::All, nor ::Error.
+        // Below, input_shape is neither ::One nor ::All; any pending_errors
+        // captured above will be reapplied at the bottom of this function.
 
         let mut extra_vars_opt: Option<Shape> = None;
         let (current_shape, tail_opt) = match self.as_ref() {
@@ -1042,7 +1065,7 @@ impl ApplyToInternal for WithRange<PathList> {
             }
         };
 
-        if let Some(tail) = tail_opt {
+        let tail_result = if let Some(tail) = tail_opt {
             // Recurses over extra_vars_opt, which is usually None, but could be
             // Some(object_shape) (when handling ArrowMethod::As), and might
             // sometimes be Some(error_shape) with an object partial shape.
@@ -1053,7 +1076,13 @@ impl ApplyToInternal for WithRange<PathList> {
                 input_shape: Shape,
                 dollar_shape: Shape,
             ) -> Shape {
-                match extra_vars_opt.as_ref().map(|s| s.case()) {
+                let pending_messages: Vec<String> = extra_vars_opt
+                    .as_ref()
+                    .map(|s| s.own_errors().map(|e| e.message.clone()).collect())
+                    .unwrap_or_default();
+                let tail_location = tail.shape_location(context.source_id());
+
+                let inner_shape = match extra_vars_opt.as_ref().map(|s| s.case()) {
                     Some(ShapeCase::Object { fields, .. }) => {
                         // TODO Refactor the internal ShapeContext
                         // representation to make this cloning
@@ -1066,28 +1095,26 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.compute_output_shape(&new_context, input_shape, dollar_shape)
                     }
 
-                    Some(ShapeCase::Error(shape::Error { message, partial })) => {
-                        if partial.is_some() {
-                            let tail_shape = compute_tail_shape(
-                                tail,
-                                partial,
-                                context,
-                                input_shape,
-                                dollar_shape,
-                            );
-
-                            Shape::error_with_partial(
-                                message.clone(),
-                                tail_shape,
-                                tail.shape_location(context.source_id()),
-                            )
-                        } else {
-                            Shape::error(message.clone(), tail.shape_location(context.source_id()))
-                        }
+                    // A pure error (case == Unknown carrying error metadata) has
+                    // no partial structure to drive name installation; emit a
+                    // fresh error shape carrying the same messages.
+                    Some(ShapeCase::Unknown) if !pending_messages.is_empty() => {
+                        let mut iter = pending_messages.into_iter();
+                        let first = iter.next().unwrap_or_default();
+                        return iter.fold(Shape::error(first, tail_location), |acc, msg| {
+                            acc.with_error(shape::Error { message: msg })
+                        });
                     }
 
                     _ => tail.compute_output_shape(context, input_shape, dollar_shape),
-                }
+                };
+
+                // Reattach any error metadata that was sitting on
+                // extra_vars_opt, so the structural recursion's output still
+                // surfaces the original error messages.
+                pending_messages.into_iter().fold(inner_shape, |acc, msg| {
+                    Shape::error_with_partial(msg, acc, tail_location.clone())
+                })
             }
 
             compute_tail_shape(
@@ -1101,7 +1128,16 @@ impl ApplyToInternal for WithRange<PathList> {
             )
         } else {
             current_shape
-        }
+        };
+
+        // Reapply any pending errors that were attached to the original
+        // input_shape, so callers see the same error metadata they would have
+        // seen when errors were a dedicated `ShapeCase::Error` variant.
+        pending_errors
+            .into_iter()
+            .fold(tail_result, |acc, (msg, locs)| {
+                Shape::error_with_partial(msg, acc, locs)
+            })
     }
 }
 
@@ -1383,7 +1419,7 @@ impl SubSelection {
     }
 
     /// Shape counterpart of [`Self::apply_selections_no_rebind`]: merge the
-    /// output shapes of each [`NamedSelection`] with [`Shape::all`] without
+    /// output shapes of each [`NamedSelection`] with [`Shape::merge`] without
     /// rebinding `$`. Callers pass the `dollar_shape` they want threaded.
     fn compute_selections_shape_no_rebind(
         &self,
@@ -1392,16 +1428,16 @@ impl SubSelection {
         dollar_shape: Shape,
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
-        let mut all_shape = Shape::unknown([]);
+        let mut merged_shape = Shape::unknown([]);
 
         for named_selection in self.selections.iter() {
-            // Simplifying as we go with Shape::all keeps all_shape relatively
+            // Simplifying as we go with Shape::merge keeps merged_shape relatively
             // small in the common case when all named_selection items return an
             // object shape, since those object shapes can all be merged
             // together into one object.
-            all_shape = Shape::all(
+            merged_shape = Shape::merge(
                 [
-                    all_shape,
+                    merged_shape,
                     named_selection.compute_output_shape(
                         context,
                         input_shape.clone(),
@@ -1414,15 +1450,15 @@ impl SubSelection {
             // If any named_selection item returns null instead of an object,
             // that nullifies the whole object and allows shape computation to
             // bail out early.
-            if all_shape.is_null() {
+            if merged_shape.is_null() {
                 break;
             }
         }
 
-        if all_shape.is_unknown() {
+        if merged_shape.is_unknown() {
             Shape::empty_object(locations)
         } else {
-            all_shape
+            merged_shape
         }
     }
 }
@@ -1565,6 +1601,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_selection(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1730,6 +1767,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_errors(#[case] spec: ConnectSpec) {
         let data = json!({
             "hello": "world",
@@ -1974,6 +2012,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_nested_arrays(#[case] spec: ConnectSpec) {
         let data = json!({
             "arrayOfArrays": [
@@ -2208,6 +2247,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_apply_to_variable_expressions(#[case] spec: ConnectSpec) {
         let id_object = selection!("id: $", spec).apply_to(&json!(123));
         assert_eq!(id_object, (Some(json!({"id": 123})), vec![]));
@@ -2309,17 +2349,11 @@ mod tests {
             (Some(json!({"__typename": "Product"})), vec![]),
         );
 
+        // As of connect/v0.4, a bare quoted string after an alias is a
+        // string literal, not a key-path lookup, so this no longer errors.
         assert_eq!(
             selection!(" __typename : 'Product' ").apply_to(&json!({})),
-            (
-                Some(json!({})),
-                vec![ApplyToError::new(
-                    "Property .\"Product\" not found in object".to_string(),
-                    vec![json!("Product")],
-                    Some(14..23),
-                    ConnectSpec::latest(),
-                )],
-            ),
+            (Some(json!({"__typename": "Product"})), vec![]),
         );
 
         assert_eq!(
@@ -2535,6 +2569,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_inline_paths_with_subselections(#[case] spec: ConnectSpec) {
         let data = json!({
             "id": 123,
@@ -3088,26 +3123,39 @@ mod tests {
         });
 
         assert_eq!(
-            // The grammar enforces that we must always provide identifier aliases
-            // for non-identifier properties, so the data we get back will always be
-            // GraphQL-safe.
+            // Unlike `alias: 'key' { ... }` at the top level (a key-shaped
+            // literal followed by a subselection, still read as a path in
+            // connect/v0.4), a bare `safe: 'key'` with no trailing
+            // subselection is a string literal as of v0.4, not a key lookup.
             selection!("alias: 'not an identifier' { safe: 'also.not.an.identifier' }")
                 .apply_to(&data),
             (
                 Some(json!({
                     "alias": [
-                        { "safe": 0 },
-                        { "safe": 1 },
-                        { "safe": 2 },
+                        { "safe": "also.not.an.identifier" },
+                        { "safe": "also.not.an.identifier" },
+                        { "safe": "also.not.an.identifier" },
                     ],
                 })),
                 vec![],
             ),
         );
 
+        // As of connect/v0.4, a leading bare quoted literal (with no `$.`
+        // prefix) is a string literal, not the start of a key path, so
+        // chaining `.key` off of it now applies a property lookup to the
+        // literal string itself rather than to the root value.
         assert_eq!(
             selection!("'not an identifier'.'also.not.an.identifier'").apply_to(&data),
-            (Some(json!([0, 1, 2])), vec![],),
+            (
+                None,
+                vec![ApplyToError::new(
+                    "Property .\"also.not.an.identifier\" not found in string".to_string(),
+                    vec![json!("also.not.an.identifier")],
+                    Some(20..44),
+                    ConnectSpec::latest(),
+                )],
+            ),
         );
 
         assert_eq!(
@@ -3120,9 +3168,9 @@ mod tests {
                 .apply_to(&data),
             (
                 Some(json!([
-                    { "safe": 0 },
-                    { "safe": 1 },
-                    { "safe": 2 },
+                    { "safe": "also.not.an.identifier" },
+                    { "safe": "also.not.an.identifier" },
+                    { "safe": "also.not.an.identifier" },
                 ])),
                 vec![],
             ),
@@ -3143,7 +3191,7 @@ mod tests {
                     "another": {
                         "pesky": {
                             "identifier": 123,
-                            "evil": true,
+                            "evil": "{ evil braces }",
                         },
                     },
                 })),
@@ -3171,6 +3219,7 @@ mod tests {
     #[case::latest(ConnectSpec::V0_2)]
     #[case::next(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_left_associative_path_evaluation(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("batch.id->first", spec).apply_to(&json!({
@@ -3407,7 +3456,7 @@ mod tests {
         named_shapes.insert(
             "$batch".to_string(),
             Shape::list(
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("id".to_string(), Shape::int([]));
@@ -3426,7 +3475,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3509,7 +3558,7 @@ mod tests {
         named_shapes.insert(
             "$batch".to_string(),
             Shape::list(
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("id".to_string(), Shape::int([]));
@@ -3528,7 +3577,7 @@ mod tests {
 
         let computed_batch_id =
             selection!("$batch.id", spec).compute_output_shape(&shape_context, root_shape.clone());
-        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+        assert_eq!(computed_batch_id.pretty_print(), "[...Int]");
 
         let computed_first = selection!("$batch.id->first", spec)
             .compute_output_shape(&shape_context, root_shape.clone());
@@ -3556,35 +3605,35 @@ mod tests {
             selection!("$batch.id->map(@)->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<$batch.id.*>",
+            "[...$batch.id.*]",
         );
 
         assert_eq!(
             selection!("$batch.id->map(@)->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<$batch.id.*>]",
+            "[[...$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo(@)", spec)
                 .shape()
                 .pretty_print(),
-            "List<[$batch.id.*]>",
+            "[...[$batch.id.*]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .shape()
                 .pretty_print(),
-            "[List<[$batch.id.*]>]",
+            "[[...[$batch.id.*]]]",
         );
 
         assert_eq!(
             selection!("$batch.id->map([@])->echo([@])", spec)
                 .compute_output_shape(&shape_context, root_shape,)
                 .pretty_print(),
-            "[List<[Int]>]",
+            "[[...[Int]]]",
         );
     }
 
@@ -4070,10 +4119,10 @@ mod tests {
             .pretty_print(),
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
-            // it would have been if we knew that, where friends: List<{ id:
-            // $root.friend_ids.* }> (note the * meaning any array index),
+            // it would have been if we knew that, where friends: [...{ id:
+            // $root.friend_ids.* }] (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
-            // List, rather than the friends field?
+            // array, rather than the friends field?
             r#"{
   alias: {
     x: $root.*.arrayOfArrays.*.x,
@@ -4105,7 +4154,7 @@ mod tests {
     x: $root.*.arrayOfArrays.*.x,
     y: $root.*.arrayOfArrays.*.y,
   },
-  friends: List<{ id: $root.*.friend_ids.* }>,
+  friends: [...{ id: $root.*.friend_ids.* }],
   id: $root.*.id,
   name: $root.*.name,
   xs: $root.*.arrayOfArrays.x,
@@ -4152,6 +4201,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_with_existing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4173,6 +4223,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_with_null_value(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4190,6 +4241,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_on_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4212,6 +4264,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_key_access_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4236,6 +4289,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_chained_optional_key_access(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4257,6 +4311,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_chained_optional_access_with_null_in_middle(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4276,6 +4331,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_method_on_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4293,6 +4349,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_method_with_valid_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4310,6 +4367,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_method_with_unknown_method(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4328,6 +4386,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_chaining_with_subselection_on_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4357,6 +4416,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_chaining_with_subselection_on_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4374,6 +4434,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_mixed_regular_and_optional_chaining_working_case(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4400,6 +4461,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_mixed_regular_and_optional_chaining_with_null(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4420,6 +4482,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_valid_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4446,6 +4509,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_null_data(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4463,6 +4527,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_missing_property(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4480,6 +4545,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_non_object(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4537,14 +4603,14 @@ mod tests {
             .with_spec(spec)
             .with_named_shapes([(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
                             "unreliableAuthor".to_string(),
                             Shape::one(
                                 [
-                                    Shape::record(
+                                    Shape::closed_record(
                                         {
                                             let mut map = Shape::empty_map();
                                             map.insert("age".to_string(), Shape::int([]));
@@ -4646,6 +4712,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_nested_optional_selection_sets(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4689,6 +4756,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_mixed_optional_selection_and_optional_chaining(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -4727,6 +4795,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_parsing(#[case] spec: ConnectSpec) {
         // Test that the parser correctly handles optional selection sets
         let selection = JSONSelection::parse_with_spec("$.user? { id name }", spec).unwrap();
@@ -4745,6 +4814,7 @@ mod tests {
     #[rstest]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn test_optional_selection_set_with_arrays(#[case] spec: ConnectSpec) {
         use serde_json_bytes::json;
 
@@ -5775,7 +5845,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5843,7 +5913,7 @@ mod tests {
         let shape_context = {
             let mut named_shapes = IndexMap::default();
 
-            let person_shape = Shape::record(
+            let person_shape = Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert("name".to_string(), Shape::string([]));
@@ -5855,7 +5925,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("person".to_string(), person_shape);
@@ -5911,7 +5981,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5951,7 +6021,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -5990,7 +6060,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6020,7 +6090,7 @@ mod tests {
         );
 
         // The question mark should be applied recursively to the partial shape within the error
-        assert!(result_shape.pretty_print().contains("Error"));
+        assert!(result_shape.pretty_print().contains("(err "));
         assert!(result_shape.pretty_print().contains("None"));
     }
 
@@ -6033,7 +6103,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6059,7 +6129,7 @@ mod tests {
                     shape_context.named_shapes()["$root"].clone()
                 )
                 .pretty_print(),
-            "Error<\"Something went wrong\">",
+            "Unknown (err \"Something went wrong\")",
         );
     }
 
@@ -6072,7 +6142,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6118,7 +6188,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
@@ -6157,7 +6227,7 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert("nonNullString".to_string(), Shape::string([]));
@@ -6214,17 +6284,17 @@ mod tests {
 
             named_shapes.insert(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(
                             "level1".to_string(),
-                            Shape::record(
+                            Shape::closed_record(
                                 {
                                     let mut inner_map = Shape::empty_map();
                                     inner_map.insert(
                                         "level2".to_string(),
-                                        Shape::record(
+                                        Shape::closed_record(
                                             {
                                                 let mut inner_inner_map = Shape::empty_map();
                                                 inner_inner_map
@@ -6317,7 +6387,7 @@ mod tests {
         let mut named_shapes = IndexMap::default();
         named_shapes.insert(
             "$root".to_string(),
-            Shape::record(
+            Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert(
@@ -6358,7 +6428,7 @@ mod tests {
         let mut named_shapes = IndexMap::default();
         named_shapes.insert(
             "$root".to_string(),
-            Shape::record(
+            Shape::closed_record(
                 {
                     let mut map = Shape::empty_map();
                     map.insert(
@@ -6398,7 +6468,7 @@ mod tests {
             .with_spec(spec)
             .with_named_shapes([(
                 "$root".to_string(),
-                Shape::record(
+                Shape::closed_record(
                     {
                         let mut map = Shape::empty_map();
                         map.insert(

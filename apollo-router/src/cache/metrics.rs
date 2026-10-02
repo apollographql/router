@@ -42,8 +42,7 @@ struct ClientMetrics {
     response_size: WeightedSum,
 }
 
-/// Sync gauges for Redis metrics.
-/// These are created once in the background task and recorded to periodically.
+/// Sync gauges for Redis metrics, recorded to on every collection tick.
 struct RedisGauges {
     queue_length: Gauge<u64>,
     network_latency: Gauge<f64>,
@@ -110,71 +109,49 @@ impl RedisGauges {
     }
 }
 
-/// Redis metrics collection functionality.
-///
-/// The background task that polls Redis client metrics is only spawned when
-/// `activate()` is called. This ensures all metric instruments are registered
-/// with the correct meter provider (after Telemetry.activate() has run).
+/// Polls Redis client metrics on a fixed interval and records them as gauges and
+/// counters. The polling task starts when the collector is constructed and stops when
+/// the collector is dropped.
 pub(crate) struct RedisMetricsCollector {
-    /// None until activate() is called
-    /// TODO(@goto-bus-stop): actually this should maybe be a Once?
-    abort_handle: parking_lot::Mutex<Option<AbortHandle>>,
-    pool: Arc<RedisPool>,
-    caller: &'static str,
-    metrics_interval: Duration,
+    abort_handle: AbortHandle,
 }
 
 /// Test-only accessor for checking whether the metrics task has been aborted
 #[cfg(test)]
 impl RedisMetricsCollector {
     #[allow(dead_code)]
-    pub(crate) fn abort_handle(&self) -> Option<AbortHandle> {
-        self.abort_handle.lock().clone()
+    pub(crate) fn abort_handle(&self) -> AbortHandle {
+        self.abort_handle.clone()
     }
 }
 
 impl Drop for RedisMetricsCollector {
     fn drop(&mut self) {
-        if let Some(handle) = self.abort_handle.lock().take() {
-            handle.abort();
-        }
+        self.abort_handle.abort();
     }
 }
 
 impl RedisMetricsCollector {
-    /// Create a new metrics collector.
-    ///
-    /// The background task is NOT started until `activate()` is called.
+    /// Create a new metrics collector and start its polling task.
     pub(crate) fn new(
         pool: Arc<RedisPool>,
         caller: &'static str,
         metrics_interval: Duration,
     ) -> Self {
-        Self {
-            abort_handle: parking_lot::Mutex::new(None),
-            pool,
-            caller,
-            metrics_interval,
-        }
-    }
-
-    /// Start the metrics collection task.
-    ///
-    /// This MUST be called after `Telemetry.activate()` to ensure all metric
-    /// instruments are registered with the correct meter provider.
-    pub(crate) fn activate(&self) {
-        let pool = self.pool.clone();
-        let caller = self.caller;
-        let metrics_interval = self.metrics_interval;
-
         let handle = tokio::spawn(
             async move {
                 let mut interval = tokio::time::interval(metrics_interval);
-                let gauges = RedisGauges::new();
 
                 loop {
                     interval.tick().await;
 
+                    // Recreate the gauges on every tick so they target the current
+                    // meter provider even across config reloads (this task can outlive
+                    // the provider it started under). OTel advises cloning gauges
+                    // rather than re-creating duplicates for performance; recreating a
+                    // handful of gauges once per collection interval is noise compared
+                    // to the Redis round-trip in the same tick.
+                    let gauges = RedisGauges::new();
                     let metrics = Self::collect_client_metrics(&pool);
                     gauges.record(&metrics, caller);
                     Self::emit_counter_metrics(&metrics, caller);
@@ -183,11 +160,9 @@ impl RedisMetricsCollector {
             .with_current_meter_provider(),
         );
 
-        let mut guard = self.abort_handle.lock();
-        if let Some(old) = guard.take() {
-            old.abort();
+        Self {
+            abort_handle: handle.abort_handle(),
         }
-        *guard = Some(handle.abort_handle());
     }
 
     /// Collect metrics from all Redis clients
@@ -312,7 +287,6 @@ mod tests {
             let storage = RedisCacheStorage::from_mocks(simple_map.clone())
                 .await
                 .expect("Failed to create Redis storage with mocks");
-            storage.activate();
 
             #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
             struct TestValue {

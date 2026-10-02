@@ -356,6 +356,7 @@ mod method_tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn lte_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->lte($.missing)", spec).apply_to(&json!({
@@ -429,24 +430,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
-            ),
-            Shape::error_with_partial(
-                "Method ->lte can only compare two numbers or two strings. Found Int <= \"a\""
-                    .to_string(),
-                Shape::bool_value(false, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"false (err "Method ->lte can only compare two numbers or two strings. Found Int <= \"a\"")"#,
         );
     }
 
     #[test]
     fn lte_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->lte requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->lte requires one argument")"#,
         );
     }
 
@@ -459,11 +453,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(42)), None)
                 ],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->lte requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->lte requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -477,11 +469,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->lte requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->lte requires one argument")"#,
         );
     }
 }

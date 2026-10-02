@@ -56,30 +56,8 @@ JSONSelection {
                                                                 },
                                                             ),
                                                             path: WithRange {
-                                                                node: Path(
-                                                                    PathSelection {
-                                                                        path: WithRange {
-                                                                            node: Key(
-                                                                                WithRange {
-                                                                                    node: Quoted(
-                                                                                        "property name with spaces",
-                                                                                    ),
-                                                                                    range: Some(
-                                                                                        145..172,
-                                                                                    ),
-                                                                                },
-                                                                                WithRange {
-                                                                                    node: Empty,
-                                                                                    range: Some(
-                                                                                        172..172,
-                                                                                    ),
-                                                                                },
-                                                                            ),
-                                                                            range: Some(
-                                                                                145..172,
-                                                                            ),
-                                                                        },
-                                                                    },
+                                                                node: String(
+                                                                    "property name with spaces",
                                                                 ),
                                                                 range: Some(
                                                                     145..172,
@@ -498,5 +476,5 @@ JSONSelection {
             ),
         },
     ),
-    spec: V0_3,
+    spec: V0_4,
 }

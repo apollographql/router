@@ -13,6 +13,7 @@ use std::ops::Range;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
+use apollo_compiler::parser::SourceFile;
 use apollo_compiler::parser::SourceMap;
 use nom::AsChar;
 
@@ -46,6 +47,10 @@ struct Data<'schema> {
 
     /// Where `raw_string` _starts_ in the source text
     raw_offset: usize,
+
+    /// The source file `raw_offset` is an offset into. Line/column lookups have to go through
+    /// this same file, otherwise they disagree with every other location this module reports.
+    file: &'schema SourceFile,
 }
 
 impl<'schema> GraphQLString<'schema> {
@@ -75,6 +80,7 @@ impl<'schema> GraphQLString<'schema> {
                 data: Data {
                     raw_string,
                     raw_offset: start_of_quotes + num_quotes,
+                    file,
                 },
                 common_indent: raw_string
                     .lines()
@@ -92,25 +98,26 @@ impl<'schema> GraphQLString<'schema> {
                 data: Data {
                     raw_string,
                     raw_offset: start_of_quotes + num_quotes,
+                    file,
                 },
             }
         })
     }
 
-    fn line_col_for_subslice(
-        &self,
-        substring_location: Range<usize>,
-        schema_info: &SchemaInfo,
-    ) -> Option<Range<LineColumn>> {
+    fn data(&self) -> &Data<'schema> {
+        match self {
+            GraphQLString::Standard { data } => data,
+            GraphQLString::Block { data, .. } => data,
+        }
+    }
+
+    fn line_col_for_subslice(&self, substring_location: Range<usize>) -> Option<Range<LineColumn>> {
         let start_offset = self.true_offset(substring_location.start)?;
         let end_offset = self.true_offset(substring_location.end)?;
 
-        let (line, column) = schema_info.line_col(start_offset)?;
-        let start = LineColumn { line, column };
-        let (line, column) = schema_info.line_col(end_offset)?;
-        let end = LineColumn { line, column };
-
-        Some(start..end)
+        self.data()
+            .file
+            .get_line_column_range(start_offset..end_offset)
     }
 
     /// Given an offset into the compiled string, compute the true offset in the raw source string.
@@ -197,7 +204,7 @@ pub(crate) fn subslice_location(
 ) -> Option<Range<LineColumn>> {
     GraphQLString::new(value, &schema.sources)
         .ok()
-        .and_then(|string| string.line_col_for_subslice(substring_location, schema))
+        .and_then(|string| string.line_col_for_subslice(substring_location))
 }
 
 #[cfg(test)]
@@ -210,8 +217,6 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::connectors::validation::ConnectLink;
-    use crate::connectors::validation::graphql::SchemaInfo;
 
     const SCHEMA: &str = r#"extend schema @link(url: "https://specs.apollo.dev/connect/v0.1")
         type Query {
@@ -245,10 +250,8 @@ mod tests {
         let value = &http[0].1;
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
-        let schema_info =
-            SchemaInfo::new(&schema, SCHEMA, ConnectLink::new(&schema).unwrap().unwrap());
         assert_eq!(
-            string.line_col_for_subslice(2..5, &schema_info),
+            string.line_col_for_subslice(2..5),
             Some(
                 LineColumn {
                     line: 5,
@@ -267,10 +270,8 @@ mod tests {
         let value = connect_argument(&schema, "selection");
 
         let string = GraphQLString::new(value, &schema.sources).unwrap();
-        let schema_info =
-            SchemaInfo::new(&schema, SCHEMA, ConnectLink::new(&schema).unwrap().unwrap());
         assert_eq!(
-            string.line_col_for_subslice(28..34, &schema_info),
+            string.line_col_for_subslice(28..34),
             Some(
                 LineColumn {
                     line: 10,

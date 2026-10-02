@@ -1,0 +1,193 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/cost/v0.1") {
+  query: Query
+}
+
+directive @cost(
+  weight: Int!
+) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+  overrideLabel: String
+  contextArguments: [join__ContextArgument!]
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  SUBGRAPH
+    @join__graph(name: "subgraph", url: "http://localhost:4001")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  SECURITY
+  EXECUTION
+}
+
+type Query @join__type(graph: SUBGRAPH) {
+  cheapAnimal: Animal @join__field(graph: SUBGRAPH)
+  expensiveAnimal: Animal @join__field(graph: SUBGRAPH)
+  searchResult: SearchResult @join__field(graph: SUBGRAPH)
+  objectWithCost: CostlyObject @join__field(graph: SUBGRAPH)
+  objectNoCost: PlainObject @join__field(graph: SUBGRAPH)
+  mixedUnion: MixedUnion @join__field(graph: SUBGRAPH)
+  noCostInterface: NoCostAnimal @join__field(graph: SUBGRAPH)
+  noCostUnion: NoCostUnion @join__field(graph: SUBGRAPH)
+}
+
+# --- Interface with @cost on implementations ---
+
+interface Animal @join__type(graph: SUBGRAPH) {
+  name: String
+}
+
+type Cat implements Animal
+  @join__type(graph: SUBGRAPH)
+  @join__implements(graph: SUBGRAPH, interface: "Animal")
+  @cost(weight: 3) {
+  name: String
+  indoor: Boolean
+}
+
+type Dog implements Animal
+  @join__type(graph: SUBGRAPH)
+  @join__implements(graph: SUBGRAPH, interface: "Animal")
+  @cost(weight: 5) {
+  name: String
+  breed: String
+}
+
+# --- Interface with NO @cost on implementations (default 1.0) ---
+
+interface NoCostAnimal @join__type(graph: SUBGRAPH) {
+  name: String
+}
+
+type Fish implements NoCostAnimal
+  @join__type(graph: SUBGRAPH)
+  @join__implements(graph: SUBGRAPH, interface: "NoCostAnimal") {
+  name: String
+}
+
+type Bird implements NoCostAnimal
+  @join__type(graph: SUBGRAPH)
+  @join__implements(graph: SUBGRAPH, interface: "NoCostAnimal") {
+  name: String
+}
+
+# --- Union with @cost on members ---
+
+union SearchResult
+  @join__type(graph: SUBGRAPH)
+  @join__unionMember(graph: SUBGRAPH, member: "Article")
+  @join__unionMember(graph: SUBGRAPH, member: "Video")
+  = Article | Video
+
+type Article @join__type(graph: SUBGRAPH) @cost(weight: 2) {
+  title: String
+}
+
+type Video @join__type(graph: SUBGRAPH) @cost(weight: 8) {
+  url: String
+}
+
+# --- Union with mixed: some members have @cost, some don't ---
+
+union MixedUnion
+  @join__type(graph: SUBGRAPH)
+  @join__unionMember(graph: SUBGRAPH, member: "CostlyMember")
+  @join__unionMember(graph: SUBGRAPH, member: "PlainMember")
+  = CostlyMember | PlainMember
+
+type CostlyMember @join__type(graph: SUBGRAPH) @cost(weight: 10) {
+  value: String
+}
+
+type PlainMember @join__type(graph: SUBGRAPH) {
+  value: String
+}
+
+# --- Union with NO @cost on any member (default 1.0) ---
+
+union NoCostUnion
+  @join__type(graph: SUBGRAPH)
+  @join__unionMember(graph: SUBGRAPH, member: "PlainA")
+  @join__unionMember(graph: SUBGRAPH, member: "PlainB")
+  = PlainA | PlainB
+
+type PlainA @join__type(graph: SUBGRAPH) {
+  id: ID
+}
+
+type PlainB @join__type(graph: SUBGRAPH) {
+  id: ID
+}
+
+# --- Object with @cost ---
+
+type CostlyObject @join__type(graph: SUBGRAPH) @cost(weight: 7) {
+  id: ID
+}
+
+# --- Object without @cost (default 1.0) ---
+
+type PlainObject @join__type(graph: SUBGRAPH) {
+  id: ID
+}

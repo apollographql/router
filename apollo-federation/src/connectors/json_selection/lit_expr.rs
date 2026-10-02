@@ -10,12 +10,14 @@ use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
 use nom::combinator::map;
+use nom::combinator::not;
 use nom::combinator::opt;
 use nom::combinator::recognize;
 use nom::multi::many0;
 use nom::multi::many1;
 use nom::sequence::pair;
 use nom::sequence::preceded;
+use nom::sequence::terminated;
 
 use super::ParseResult;
 use super::PathList;
@@ -27,12 +29,46 @@ use super::location::WithRange;
 use super::location::merge_ranges;
 use super::location::ranged_span;
 use super::nom_error_message;
+use super::parser::IDENTIFIER_CONTINUE_CHARS;
 use super::parser::Key;
 use super::parser::PathSelection;
 use super::parser::SubSelection;
+use super::parser::key_start_char;
 use super::parser::nom_fail_message;
 use super::parser::parse_string_literal;
 use crate::connectors::spec::ConnectSpec;
+
+/// Keys that begin with (or are prefixes of) `true`/`false`/`null`, all of
+/// which must parse as ordinary keys. Shared with `parser::tests`.
+#[cfg(test)]
+pub(super) const KEYWORD_PREFIXED_KEYS: &[&str] = &[
+    "nullField",
+    "nullish",
+    "trueField",
+    "falseField",
+    "falsey",
+    "falsePositives",
+    "null_",
+    "null2",
+    "true1",
+    "false_positives",
+    "nul",
+    "tru",
+    "fals",
+    "truthy",
+];
+
+/// Paths rooted at a number, which `LitNumber`'s digitless fraction (`1.`)
+/// used to truncate. No leading zeros, since those don't round-trip.
+#[cfg(test)]
+pub(super) const NUMBER_ROOTED_PATHS: &[&str] = &[
+    "1.foo",
+    "-1.foo",
+    "0.foo",
+    "1.f",
+    "1.foo.bar",
+    "1.\"quoted\"",
+];
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -107,7 +143,9 @@ impl LitExpr {
                 let (input, _) = spaces_or_comments(input)?;
                 Self::parse_primary(input)
             }
-            ConnectSpec::V0_3 | ConnectSpec::V0_4 => Self::parse_with_operators(input),
+            ConnectSpec::V0_3 | ConnectSpec::V0_4 | ConnectSpec::V0_5 => {
+                Self::parse_with_operators(input)
+            }
         }
     }
 
@@ -266,17 +304,31 @@ impl LitExpr {
         alt((
             map(parse_string_literal, |s| s.take_as(Self::String)),
             Self::parse_number,
-            map(ranged_span("true"), |t| {
-                WithRange::new(Self::Bool(true), t.range())
-            }),
-            map(ranged_span("false"), |f| {
-                WithRange::new(Self::Bool(false), f.range())
-            }),
-            map(ranged_span("null"), |n| {
-                WithRange::new(Self::Null, n.range())
-            }),
+            alt(Self::keywords().map(|(s, value)| Self::parse_keyword(s, value))),
         ))
         .parse(input)
+    }
+
+    /// The keyword literals. `parse_primitive` and the boundary test both
+    /// derive from this table, so new keywords should be added here rather
+    /// than as a bare `ranged_span`, which would match inside `nullField`.
+    pub(super) fn keywords() -> [(&'static str, Self); 3] {
+        [
+            ("true", Self::Bool(true)),
+            ("false", Self::Bool(false)),
+            ("null", Self::Null),
+        ]
+    }
+
+    /// Parses keyword `s` as `value`, unless an identifier character follows.
+    fn parse_keyword<'a, 'b: 'a>(
+        s: &'a str,
+        value: Self,
+    ) -> impl Parser<Span<'b>, Output = WithRange<Self>, Error = nom::error::Error<Span<'b>>> {
+        map(
+            terminated(ranged_span(s), not(one_of(IDENTIFIER_CONTINUE_CHARS))),
+            move |keyword: WithRange<&'b str>| WithRange::new(value.clone(), keyword.range()),
+        )
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -293,7 +345,12 @@ impl LitExpr {
                             spaces_or_comments,
                             ranged_span("."),
                             spaces_or_comments,
-                            recognize(many0(one_of("0123456789"))),
+                            alt((
+                                recognize(many1(one_of("0123456789"))),
+                                // A digitless fraction (`1.`) is allowed only
+                                // if no `Key` follows, so `1.foo` stays a path.
+                                recognize(not(key_start_char)),
+                            )),
                         )),
                     ),
                     |(int, frac)| {
@@ -577,6 +634,7 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::connectors::json_selection::JSONSelection;
     use crate::connectors::json_selection::MethodArgs;
     use crate::connectors::json_selection::PathList;
     use crate::connectors::json_selection::PrettyPrintable;
@@ -584,6 +642,9 @@ mod tests {
     use crate::connectors::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::connectors::json_selection::location::new_span;
     use crate::connectors::json_selection::location::new_span_with_spec;
+    use crate::connectors::json_selection::parser::Alias;
+    use crate::connectors::json_selection::parser::NamedSelection;
+    use crate::connectors::json_selection::parser::NamingPrefix;
     use crate::connectors::spec::ConnectSpec;
 
     #[track_caller]
@@ -681,7 +742,104 @@ mod tests {
     }
 
     #[test]
-    fn test_lit_expr_parse_objects() {
+    fn keywords_respect_identifier_boundary() {
+        // Every keyword crossed with every identifier-continue character.
+        for (keyword, expected) in LitExpr::keywords() {
+            let (_, parsed) = LitExpr::parse_primitive(new_span(keyword))
+                .unwrap_or_else(|e| panic!("Failed to parse '{keyword}': {e:?}"));
+            assert_eq!(
+                parsed.strip_ranges(),
+                WithRange::new(expected.clone(), None),
+                "'{keyword}' should parse as its literal",
+            );
+
+            for c in IDENTIFIER_CONTINUE_CHARS.chars() {
+                let key = format!("{keyword}{c}");
+                let (remainder, parsed) = LitExpr::parse(new_span(&key))
+                    .unwrap_or_else(|e| panic!("Failed to parse '{key}': {e:?}"));
+                assert!(span_is_all_spaces_or_comments(remainder));
+                assert_eq!(
+                    parsed.strip_ranges(),
+                    WithRange::new(
+                        LitExpr::Path(PathSelection::from_slice(&[Key::field(&key)], None)),
+                        None
+                    ),
+                    "'{key}' should parse as a key, not as the literal '{keyword}'",
+                );
+
+                // The alias position is where the bug was silent.
+                let selection = format!("alias: {key}");
+                let parsed = JSONSelection::parse(&selection)
+                    .unwrap_or_else(|e| panic!("Failed to parse '{selection}': {e:?}"));
+                assert_eq!(
+                    parsed.pretty_print_with_indentation(true, 0),
+                    selection,
+                    "'{selection}' should not split into two selections",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lit_expr_parse_keyword_prefixed_keys() {
+        for key in KEYWORD_PREFIXED_KEYS {
+            let (remainder, parsed) = LitExpr::parse(new_span(key))
+                .unwrap_or_else(|e| panic!("Failed to parse '{key}': {e:?}"));
+            assert!(span_is_all_spaces_or_comments(remainder));
+            assert_eq!(
+                parsed.strip_ranges(),
+                WithRange::new(
+                    LitExpr::Path(PathSelection::from_slice(&[Key::field(key)], None)),
+                    None
+                ),
+                "'{key}' should parse as an ordinary key, not a keyword literal",
+            );
+        }
+
+        #[track_caller]
+        fn check_primitive_matches(input: &str, expected: LitExpr) {
+            let (_, parsed) = LitExpr::parse_primitive(new_span(input))
+                .unwrap_or_else(|e| panic!("Failed to parse '{input}': {e:?}"));
+            assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
+        }
+        check_primitive_matches("null", LitExpr::Null);
+        check_primitive_matches("true", LitExpr::Bool(true));
+        check_primitive_matches("false", LitExpr::Bool(false));
+
+        // A non-identifier character ends the keyword.
+        check_primitive_matches("null.foo", LitExpr::Null);
+        check_primitive_matches("true?bar", LitExpr::Bool(true));
+        check_primitive_matches("null)", LitExpr::Null);
+        check_primitive_matches("false]", LitExpr::Bool(false));
+
+        // Before a SubSelection, a keyword is read as a Key (see the README's
+        // "Literals followed by a SubSelection").
+        #[track_caller]
+        fn check_round_trip(input: &str) {
+            let (remainder, parsed) = LitExpr::parse(new_span(input))
+                .unwrap_or_else(|e| panic!("Failed to parse '{input}': {e:?}"));
+            assert!(span_is_all_spaces_or_comments(remainder));
+            assert!(
+                matches!(parsed.as_ref(), LitExpr::Path(_)),
+                "'{input}' should parse as a key path, got {parsed:?}",
+            );
+            assert_eq!(parsed.pretty_print_with_indentation(true, 0), input);
+        }
+        check_round_trip("null { x }");
+        check_round_trip("nullField { x }");
+    }
+
+    #[test]
+    fn test_lit_expr_parse_objects_v0_3() {
+        // v0.3 and earlier parse object literals as an unordered
+        // `LitExpr::LegacyObject` map. Pinned to V0_3 so bumping
+        // `ConnectSpec::latest()` can't silently drop this coverage; v0.4+
+        // `Object` parsing is covered by `test_lit_expr_parse_objects_v0_4`.
+        #[track_caller]
+        fn check_parse(input: &str, expected: LitExpr) {
+            check_parse_with_spec(input, ConnectSpec::V0_3, expected);
+        }
+
         check_parse(
             "{a: 1}",
             LitExpr::LegacyObject({
@@ -742,6 +900,77 @@ mod tests {
             check_parse(
                 "{ a : 1, \"b\": 2 }",
                 make_expected(Key::field("a"), Key::quoted("b")),
+            );
+        }
+    }
+
+    #[test]
+    fn test_lit_expr_parse_objects_v0_4() {
+        // As of connect/v0.4, object literals are syntactically identical to
+        // a `SubSelection`, so `{a: 1}` parses as `LitExpr::Object`, wrapping
+        // one `NamedSelection` per property, rather than `LitExpr::LegacyObject`
+        // (see `test_lit_expr_parse_objects_v0_3`). Behavior is identical across
+        // v0.4 and v0.5, so assert both.
+        #[track_caller]
+        fn check_parse(input: &str, expected: LitExpr) {
+            for spec in [ConnectSpec::V0_4, ConnectSpec::V0_5] {
+                check_parse_with_spec(input, spec, expected.clone());
+            }
+        }
+
+        fn named_number(alias: Alias, value: i64) -> NamedSelection {
+            NamedSelection {
+                prefix: NamingPrefix::Alias(alias),
+                path: LitExpr::Number(serde_json::Number::from(value)).into_with_range(),
+            }
+        }
+
+        check_parse(
+            "{a: 1}",
+            LitExpr::Object(SubSelection {
+                selections: vec![named_number(Alias::field("a"), 1)],
+                ..Default::default()
+            }),
+        );
+
+        check_parse(
+            "{'a': 1}",
+            LitExpr::Object(SubSelection {
+                selections: vec![named_number(Alias::quoted("a"), 1)],
+                ..Default::default()
+            }),
+        );
+
+        {
+            fn make_expected(a_alias: Alias, b_alias: Alias) -> LitExpr {
+                LitExpr::Object(SubSelection {
+                    selections: vec![named_number(a_alias, 1), named_number(b_alias, 2)],
+                    ..Default::default()
+                })
+            }
+            check_parse(
+                "{'a': 1, 'b': 2}",
+                make_expected(Alias::quoted("a"), Alias::quoted("b")),
+            );
+            check_parse(
+                "{ a : 1, 'b': 2}",
+                make_expected(Alias::field("a"), Alias::quoted("b")),
+            );
+            check_parse(
+                "{ a : 1, b: 2}",
+                make_expected(Alias::field("a"), Alias::field("b")),
+            );
+            check_parse(
+                "{ \"a\" : 1, \"b\": 2 }",
+                make_expected(Alias::quoted("a"), Alias::quoted("b")),
+            );
+            check_parse(
+                "{ \"a\" : 1, b: 2 }",
+                make_expected(Alias::quoted("a"), Alias::field("b")),
+            );
+            check_parse(
+                "{ a : 1, \"b\": 2 }",
+                make_expected(Alias::field("a"), Alias::quoted("b")),
             );
         }
     }
@@ -872,6 +1101,92 @@ mod tests {
         }
 
         {
+            // As of connect/v0.4, object literals are syntactically identical
+            // to a `SubSelection`, so `{a: ..., b: ...}` parses as
+            // `LitExpr::Object`, preserving property order as written (unlike
+            // the unordered `LegacyObject` map used before v0.4, pinned in the
+            // block below). Identical across v0.4 and v0.5, so assert both.
+            #[track_caller]
+            fn check_parse(input: &str, expected: LitExpr) {
+                for spec in [ConnectSpec::V0_4, ConnectSpec::V0_5] {
+                    check_parse_with_spec(input, spec, expected.clone());
+                }
+            }
+
+            fn var_path(var: KnownVariable, key: &str) -> LitExpr {
+                LitExpr::Path(PathSelection {
+                    path: PathList::Var(
+                        var.into_with_range(),
+                        PathList::Key(
+                            Key::field(key).into_with_range(),
+                            PathList::Empty.into_with_range(),
+                        )
+                        .into_with_range(),
+                    )
+                    .into_with_range(),
+                })
+            }
+
+            fn named(alias: &str, value: LitExpr) -> NamedSelection {
+                NamedSelection {
+                    prefix: NamingPrefix::Alias(Alias::field(alias)),
+                    path: value.into_with_range(),
+                }
+            }
+
+            let a = named(
+                "a",
+                var_path(KnownVariable::External(Namespace::Args.to_string()), "a"),
+            );
+            let b = named(
+                "b",
+                var_path(KnownVariable::External(Namespace::This.to_string()), "b"),
+            );
+
+            check_parse(
+                r#"{
+                a: $args.a,
+                b: $this.b,
+            }"#,
+                LitExpr::Object(SubSelection {
+                    selections: vec![a.clone(), b.clone()],
+                    ..Default::default()
+                }),
+            );
+
+            check_parse(
+                r#"{
+                b: $this.b,
+                a: $args.a,
+            }"#,
+                LitExpr::Object(SubSelection {
+                    selections: vec![b.clone(), a.clone()],
+                    ..Default::default()
+                }),
+            );
+
+            check_parse(
+                r#" {
+                a : $args . a ,
+                b : $this . b
+            ,} "#,
+                LitExpr::Object(SubSelection {
+                    selections: vec![a, b],
+                    ..Default::default()
+                }),
+            );
+        }
+
+        {
+            // v0.3 parses the same object literals as an unordered
+            // `LegacyObject` map (property order not preserved, so all three
+            // orderings compare equal). Pinned to V0_3 so bumping `latest()`
+            // can't silently drop this coverage.
+            #[track_caller]
+            fn check_parse(input: &str, expected: LitExpr) {
+                check_parse_with_spec(input, ConnectSpec::V0_3, expected);
+            }
+
             let expected = LitExpr::LegacyObject({
                 let mut map = IndexMap::default();
                 map.insert(
@@ -914,7 +1229,6 @@ mod tests {
             }"#,
                 expected.clone(),
             );
-
             check_parse(
                 r#"{
                 b: $this.b,
@@ -922,7 +1236,6 @@ mod tests {
             }"#,
                 expected.clone(),
             );
-
             check_parse(
                 r#" {
                 a : $args . a ,

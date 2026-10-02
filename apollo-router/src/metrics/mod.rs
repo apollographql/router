@@ -22,9 +22,11 @@
 //! * Instruments should use non-prefixed units (i.e. By instead of MiBy) unless there is good
 //!   technical reason to not do so.
 //!
-//! NB: we have not yet modified the existing metrics because some metric exporters (notably
-//! Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
-//! change for customers.
+//! NB: some metric exporters (notably Prometheus) include the unit in the metric name, so
+//! migrating an existing metric to a `_with_unit!` macro is a breaking change for customers
+//! whose unit triggers a Prometheus name suffix (e.g. `s` → `_seconds`, `By` → `_bytes`). Router
+//! 3.x has migrated several such metrics as part of ROUTER-1777; see the router 3.x upgrade
+//! guide for the full list of renamed Prometheus metric names.
 //!
 //! ## Compatibility
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
@@ -183,8 +185,8 @@ impl Drop for HistogramTimerGuard {
     ///
     /// The duration is measured from when the guard was created to when it is dropped.
     fn drop(&mut self) {
-        self.histogram
-            .record(self.start.elapsed().as_secs_f64(), &self.attributes);
+        let elapsed = self.start.elapsed().as_secs_f64();
+        self.histogram.record(elapsed, &self.attributes);
     }
 }
 
@@ -867,12 +869,74 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
     meter_provider_internal()
 }
 
+/// Bridges `opentelemetry::global::meter*` onto the router's own meter provider.
+///
+/// Libraries cannot be handed a meter provider by their caller — per the OTel spec they create
+/// instruments from the global one. The router configures metrics through [`AggregateMeterProvider`]
+/// and nothing ever populated the global, so those instruments resolved against
+/// `NoopMeterProvider` and reached no exporter.
+///
+/// This resolves [`meter_provider_internal`] per call rather than capturing it once, so each
+/// `global::meter*` call is answered by whichever provider is current at that moment — under
+/// test, where the provider is a task local, and across config reloads alike.
+///
+/// One caveat: an already-created instrument is not rebound by a reload. A dependency that
+/// caches its instruments across a reload (in a `static`, say) would keep writing into the
+/// previous, now shut down, provider; instruments must be created per pipeline, after
+/// plugin activation. The dependencies bridged today are safe
+/// because their instruments are created per pipeline: `build_pipeline` activates plugins
+/// before it assembles the service stacks, so every reload recreates them against the
+/// freshly installed providers.
+struct DelegatingMeterProvider;
+
+impl opentelemetry::metrics::MeterProvider for DelegatingMeterProvider {
+    fn meter_with_scope(
+        &self,
+        scope: opentelemetry::InstrumentationScope,
+    ) -> opentelemetry::metrics::Meter {
+        opentelemetry::metrics::MeterProvider::meter_with_scope(&meter_provider_internal(), scope)
+    }
+}
+
+static GLOBAL_METER_PROVIDER_BRIDGE: OnceLock<()> = OnceLock::new();
+
+/// Installs the [`DelegatingMeterProvider`] as the process-wide OTel meter provider, once.
+///
+/// Idempotent: the `OnceLock` keeps repeated activations from re-entering
+/// `opentelemetry::global::set_meter_provider`, which takes a write lock on OTel's global.
+///
+/// It does *not* protect anything the host application installed — `set_meter_provider`
+/// overwrites unconditionally and OTel offers no way to read back whether a provider was already
+/// set. Callers are responsible for only reaching this in a process whose telemetry the router
+/// owns; `Activation::reload_metrics` gates the call on `OPENTELEMETRY_TRACER_HANDLE`, matching
+/// how `reload_tracing` decides whether it may touch the global tracer provider.
+pub(crate) fn install_global_meter_provider_bridge() {
+    GLOBAL_METER_PROVIDER_BRIDGE.get_or_init(|| {
+        opentelemetry::global::set_meter_provider(DelegatingMeterProvider);
+    });
+}
+
 /// Parse key/value attributes into `opentelemetry::KeyValue` structs. Should only be used within
 /// this module, as a helper for the various metric macros (ie `u64_counter!`).
 macro_rules! parse_attributes {
     ($($attr_key:literal = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+]};
     ($($($attr_key:ident).+ = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+]};
     ($attrs:expr) => {$attrs};
+}
+
+/// Implement `From<$ty> for opentelemetry::Value` for enums deriving `strum::IntoStaticStr`, so
+/// they can be passed directly as metric-attribute values instead of stringly-typed literals.
+macro_rules! impl_otel_value_from_static_str {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl From<$ty> for opentelemetry::Value {
+                fn from(value: $ty) -> Self {
+                    let s: &'static str = value.into();
+                    s.into()
+                }
+            }
+        )+
+    };
 }
 
 /// Get or create a `u64` monotonic counter metric and add a value to it.
@@ -1388,8 +1452,9 @@ macro_rules! metric {
             {
                 let instrument = get_or_create_metric!($ty, $instrument, $name, $description, $unit);
                 let attrs: &[opentelemetry::KeyValue] = &$attrs;
-                instrument.$mutation($value, attrs);
-                $guard::new(instrument.clone(), $value, attrs)
+                let value: $ty = $value;
+                instrument.$mutation(value, attrs);
+                $guard::new(instrument.clone(), value, attrs)
             }
         }
     };
@@ -1875,6 +1940,11 @@ pub(crate) trait FutureMetricsExt<T> {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
             async move {
+                // Production installs the bridge from `Activation::reload_metrics`, which tests
+                // that never activate telemetry don't reach. Installing it here means instruments
+                // that dependencies create via `opentelemetry::global` land in this task's
+                // provider, so `assert_counter!` and friends can see them.
+                install_global_meter_provider_bridge();
                 // We want to eagerly create the meter provider, the reason is that this will be shared among subtasks that use `with_current_meter_provider`.
                 let _ = meter_provider_internal();
                 let result = self.await;

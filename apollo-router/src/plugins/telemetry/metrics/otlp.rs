@@ -1,11 +1,11 @@
 use opentelemetry_otlp::MetricExporter;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
-use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::metrics::aggregation::MeterProviderType;
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::metrics::NamedMetricExporter;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
@@ -37,7 +37,7 @@ impl MetricsConfigurator for super::super::otlp::Config {
         );
         builder.with_reader(
             MeterProviderType::Public,
-            PeriodicReader::builder(named_exporter, runtime::Tokio)
+            PeriodicReader::builder(named_exporter, BlockingSafeTokioRuntime::new_for_metrics())
                 .with_interval(config.batch_processor.scheduled_delay)
                 .build(),
         );

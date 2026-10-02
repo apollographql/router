@@ -143,6 +143,9 @@ mod tests {
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
     use http::HeaderValue;
+    use tower::Service as _;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt as _;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -197,6 +200,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                output_type: None,
                 label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
@@ -213,8 +217,10 @@ mod tests {
                 supergraph_request: Default::default(),
                 operation: Default::default(),
             };
-            test_harness
-                .call_connector_request_service(connector_request, |request| Response {
+            let (mock_service, mut handle) = tower_test::mock::pair::<Request, Response>();
+            let driver = tokio::spawn(async move {
+                let (request, responder) = handle.next_request().await.unwrap();
+                responder.send_response(Response {
                     context: request.context.clone(),
                     subgraph_name: request.connector.id.subgraph_name.to_string(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
@@ -233,9 +239,23 @@ mod tests {
                         key: request.key.clone(),
                         problems: vec![],
                     },
-                })
+                    break_status: None,
+                });
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_connector_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(connector_request)
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await
@@ -285,6 +305,7 @@ mod tests {
                 request_variable_keys: Default::default(),
                 response_variable_keys: Default::default(),
                 error_settings: Default::default(),
+                output_type: None,
                 label: "label".into(),
             };
             let response_key = ResponseKey::RootField {
@@ -301,8 +322,10 @@ mod tests {
                 supergraph_request: Default::default(),
                 operation: Default::default(),
             };
-            test_harness
-                .call_connector_request_service(connector_request, |request| Response {
+            let (mock_service, mut handle) = tower_test::mock::pair::<Request, Response>();
+            let driver = tokio::spawn(async move {
+                let (request, responder) = handle.next_request().await.unwrap();
+                responder.send_response(Response {
                     context: request.context.clone(),
                     subgraph_name: request.connector.id.subgraph_name.to_string(),
                     transport_result: Ok(TransportResponse::Http(HttpResponse {
@@ -321,9 +344,23 @@ mod tests {
                         key: request.key.clone(),
                         problems: vec![],
                     },
-                })
+                    break_status: None,
+                });
+            });
+
+            let mut service = ServiceBuilder::new()
+                .layer(test_harness.instrument_connector_layer())
+                .service(mock_service);
+
+            service
+                .ready()
+                .await
+                .unwrap()
+                .call(connector_request)
                 .await
                 .expect("expecting successful response");
+
+            crate::plugin::test::await_mock_driver(driver).await;
         }
         .with_subscriber(assert_snapshot_subscriber!())
         .await

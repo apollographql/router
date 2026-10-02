@@ -46,6 +46,62 @@ pub enum ExpansionResult {
     Unchanged,
 }
 
+/// Build the `Connectors` index by parsing connector directives from the
+/// supergraph, without creating virtual subgraphs or re-merging the schema.
+/// Used when the incremental planner handles connectors natively via
+/// `FetchProtocol::Connector`.
+pub fn build_connectors_without_expansion(
+    supergraph_str: &str,
+) -> Result<Option<Connectors>, FederationError> {
+    let connect_url = ConnectSpec::identity();
+    let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
+    if !supergraph_str.contains(&connect_url) {
+        return Ok(None);
+    }
+
+    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+
+    let connect_subgraphs: Vec<_> = supergraph
+        .extract_subgraphs()?
+        .into_iter()
+        .filter(|(_, sub)| {
+            matches!(
+                ConnectLink::new(sub.schema.schema()),
+                Some(Ok(link)) if contains_connectors(&link, sub)
+            )
+        })
+        .collect();
+
+    if connect_subgraphs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut connectors_by_service_name: IndexMap<Arc<str>, Connector> = IndexMap::new();
+    for (_, sub) in connect_subgraphs {
+        let connectors = Connector::from_schema(sub.schema.schema(), &sub.name)?;
+        for connector in connectors {
+            let synthetic_name: Arc<str> = Arc::from(connector.id.synthetic_name().as_str());
+            connectors_by_service_name.insert(synthetic_name, connector);
+        }
+    }
+
+    let labels_by_service_name = connectors_by_service_name
+        .iter()
+        .map(|(service_name, connector)| (service_name.clone(), connector.label.0.clone()))
+        .collect();
+
+    let source_config_keys = connectors_by_service_name
+        .values()
+        .map(|connector| connector.source_config_key())
+        .collect();
+
+    Ok(Some(Connectors {
+        by_service_name: Arc::new(connectors_by_service_name),
+        labels_by_service_name: Arc::new(labels_by_service_name),
+        source_config_keys: Arc::new(source_config_keys),
+    }))
+}
+
 /// Expand a schema with connector directives into unique subgraphs per directive
 ///
 /// Until we have a source-aware query planner, work with connectors will need to interface
@@ -57,6 +113,14 @@ pub fn expand_connectors(
     supergraph_str: &str,
     api_schema_options: &ApiSchemaOptions,
 ) -> Result<ExpansionResult, FederationError> {
+    expand_connectors_with_options(supergraph_str, api_schema_options, true)
+}
+
+pub fn expand_connectors_with_options(
+    supergraph_str: &str,
+    api_schema_options: &ApiSchemaOptions,
+    validate_default_values: bool,
+) -> Result<ExpansionResult, FederationError> {
     // TODO: Don't rely on finding the URL manually to short out
     let connect_url = ConnectSpec::identity();
     let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
@@ -64,7 +128,11 @@ pub fn expand_connectors(
         return Ok(ExpansionResult::Unchanged);
     }
 
-    let supergraph = Supergraph::new_with_router_specs(supergraph_str)?;
+    let supergraph = Supergraph::new_with_spec_check_and_options(
+        supergraph_str,
+        &crate::router_supported_supergraph_specs(),
+        validate_default_values,
+    )?;
     let api_schema = supergraph.to_api_schema(api_schema_options.clone())?;
 
     let all_subgraphs: Vec<_> = supergraph.extract_subgraphs()?.into_iter().collect();
@@ -167,6 +235,7 @@ fn split_subgraph(
     subgraph: ValidFederationSubgraph,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
     let connector_map = Connector::from_schema(subgraph.schema.schema(), &subgraph.name)?;
+    let validate_default_values = subgraph.schema.schema().validate_default_values;
 
     // Fork based on ConnectSpec version:
     // - v0.1/v0.2/v0.3: Use legacy visitor-based expansion (frozen for compatibility)
@@ -179,10 +248,11 @@ fn split_subgraph(
             .map(|connector| {
                 // Build a subgraph using only the necessary fields from the directive
                 let schema = expander.expand(&connector)?;
-                let subgraph = Subgraph::new(
+                let subgraph = Subgraph::new_with_options(
                     connector.id.synthetic_name().as_str(),
                     &subgraph.url,
                     &schema.schema().serialize().to_string(),
+                    validate_default_values,
                 )?;
 
                 // We only validate during debug builds since we should realistically only generate valid schemas
@@ -210,10 +280,11 @@ fn split_subgraph(
             .map(|connector| {
                 // Build a subgraph using only the necessary fields from the directive
                 let schema = expander.expand(&connector)?;
-                let subgraph = Subgraph::new(
+                let subgraph = Subgraph::new_with_options(
                     connector.id.synthetic_name().as_str(),
                     &subgraph.url,
                     &schema.schema().serialize().to_string(),
+                    validate_default_values,
                 )?;
 
                 // We only validate during debug builds since we should realistically only generate valid schemas
@@ -239,16 +310,12 @@ fn split_subgraph(
 mod helpers {
     use apollo_compiler::Name;
     use apollo_compiler::Node;
-    use apollo_compiler::ast;
     use apollo_compiler::ast::Argument;
     use apollo_compiler::ast::Directive;
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::InputValueDefinition;
     use apollo_compiler::ast::Value;
     use apollo_compiler::name;
-    use apollo_compiler::schema::Component;
-    use apollo_compiler::schema::ComponentName;
-    use apollo_compiler::schema::ComponentOrigin;
     use apollo_compiler::schema::DirectiveList;
     use apollo_compiler::schema::EnumType;
     use apollo_compiler::schema::ObjectType;
@@ -293,7 +360,7 @@ mod helpers {
     fn insert_field_if_missing(
         type_pos: &TypeDefinitionPosition,
         field_name: Name,
-        field_def: Component<FieldDefinition>,
+        field_def: Node<FieldDefinition>,
         to_schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let pos: ObjectOrInterfaceFieldDefinitionPosition = match type_pos {
@@ -387,14 +454,15 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_federation_2_subgraph_schema()?;
+            let validate_default_values = self.original_schema.schema().validate_default_values;
+            let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
             let query_alias = self
                 .original_schema
                 .schema()
                 .schema_definition
                 .query
                 .as_ref()
-                .map(|m| m.name.clone())
+                .map(|m| (**m).clone())
                 .unwrap_or(name!("Query"));
             let mutation_alias = self
                 .original_schema
@@ -402,7 +470,7 @@ mod helpers {
                 .schema_definition
                 .mutation
                 .as_ref()
-                .map(|m| m.name.clone());
+                .map(|m| (**m).clone());
 
             let element = connector
                 .id
@@ -650,7 +718,7 @@ mod helpers {
                         insert_field_if_missing(
                             &key_for_type,
                             Name::new(field_name)?,
-                            Component::new(FieldDefinition {
+                            Node::new(FieldDefinition {
                                 description: field_def.description.clone(),
                                 name: field_def.name.clone(),
                                 arguments: field_def.arguments.clone(),
@@ -680,10 +748,10 @@ mod helpers {
 
             match &key_for_type {
                 TypeDefinitionPosition::Object(o) => {
-                    o.insert_directive(to_schema, Component::new(key_directive))?;
+                    o.insert_directive(to_schema, Node::new(key_directive))?;
                 }
                 TypeDefinitionPosition::Interface(i) => {
-                    i.insert_directive(to_schema, Component::new(key_directive.clone()))?;
+                    i.insert_directive(to_schema, Node::new(key_directive.clone()))?;
                     // Federation requires implementing types to also have the interface's @key
                     if let Some(implementers) = self
                         .original_schema
@@ -695,10 +763,8 @@ mod helpers {
                             let obj_pos = ObjectTypeDefinitionPosition {
                                 type_name: implementer.clone(),
                             };
-                            obj_pos.insert_directive(
-                                to_schema,
-                                Component::new(key_directive.clone()),
-                            )?;
+                            obj_pos
+                                .insert_directive(to_schema, Node::new(key_directive.clone()))?;
                         }
                     }
                 }
@@ -729,6 +795,16 @@ mod helpers {
                 .iter()
                 .any(|d| d.name == self.interface_object_name);
 
+            // Only copy keys for `@interfaceObject` types, and always as
+            // `resolvable: false`. Copying a declared `@key` onto a non-entity
+            // connector's output type (e.g. a `Query` field connector mapping
+            // from `$args`) as resolvable would give the query planner a second,
+            // spurious entity path and let it route reference resolution through
+            // the wrong connector.
+            if !is_interface_object {
+                return Ok(());
+            }
+
             let pos = ObjectTypeDefinitionPosition {
                 type_name: original_output_type.name.clone(),
             };
@@ -742,23 +818,20 @@ mod helpers {
                     .argument_by_name("fields", self.original_schema.schema())
                     .map_err(|_| internal_error!("@key(fields:) argument missing"))?;
 
-                let mut arguments = vec![Node::new(Argument {
-                    name: name!("fields"),
-                    value: key_fields.clone(),
-                })];
-
-                if is_interface_object {
-                    arguments.push(Node::new(Argument {
-                        name: name!("resolvable"),
-                        value: Node::new(Value::Boolean(false)),
-                    }));
-                }
-
                 let key = Directive {
                     name: key.name.clone(),
-                    arguments,
+                    arguments: vec![
+                        Node::new(Argument {
+                            name: name!("fields"),
+                            value: key_fields.clone(),
+                        }),
+                        Node::new(Argument {
+                            name: name!("resolvable"),
+                            value: Node::new(Value::Boolean(false)),
+                        }),
+                    ],
                 };
-                pos.insert_directive(to_schema, Component::new(key))?;
+                pos.insert_directive(to_schema, Node::new(key))?;
             }
 
             Ok(())
@@ -781,7 +854,7 @@ mod helpers {
                     value: Node::new(Value::String("__typename".to_string())),
                 })],
             };
-            pos.insert_directive(to_schema, Component::new(key_directive))?;
+            pos.insert_directive(to_schema, Node::new(key_directive))?;
             Ok(())
         }
 
@@ -801,12 +874,12 @@ mod helpers {
                 };
                 field_pos.insert(
                     schema,
-                    Component::new(FieldDefinition {
+                    Node::new(FieldDefinition {
                         description: None,
                         name: name!("_"),
                         arguments: Vec::new(),
                         ty: ty!(ID),
-                        directives: ast::DirectiveList(vec![Node::new(Directive {
+                        directives: DirectiveList(vec![Node::new(Directive {
                             name: name!("inaccessible"),
                             arguments: Vec::new(),
                         })]),
@@ -915,7 +988,7 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ty!(ID),
-                    directives: ast::DirectiveList(vec![Node::new(Directive {
+                    directives: DirectiveList(vec![Node::new(Directive {
                         name: name!("inaccessible"),
                         arguments: Vec::new(),
                     })]),
@@ -931,7 +1004,7 @@ mod helpers {
                         directives: DirectiveList::new(),
                         fields: IndexMap::from_iter([(
                             dummy_field_def.name.clone(),
-                            Component::new(dummy_field_def),
+                            Node::new(dummy_field_def),
                         )]),
                     }),
                 )?;
@@ -940,13 +1013,7 @@ mod helpers {
             SchemaRootDefinitionPosition {
                 root_kind: SchemaRootDefinitionKind::Query,
             }
-            .insert(
-                to_schema,
-                ComponentName {
-                    origin: ComponentOrigin::Definition,
-                    name: query_alias.clone(),
-                },
-            )?;
+            .insert(to_schema, query_alias.clone().to_node(None))?;
 
             Ok(())
         }
@@ -962,13 +1029,7 @@ mod helpers {
                 let mutation_root = SchemaRootDefinitionPosition {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };
-                mutation_root.insert(
-                    to_schema,
-                    ComponentName {
-                        origin: ComponentOrigin::Definition,
-                        name: mutation_alias.clone(),
-                    },
-                )?;
+                mutation_root.insert(to_schema, mutation_alias.clone().to_node(None))?;
             }
 
             Ok(())
@@ -1048,14 +1109,15 @@ mod helpers {
             &self,
             connector: &Connector,
         ) -> Result<FederationSchema, FederationError> {
-            let mut schema = new_empty_federation_2_subgraph_schema()?;
+            let validate_default_values = self.original_schema.schema().validate_default_values;
+            let mut schema = new_empty_federation_2_subgraph_schema(validate_default_values)?;
             let query_alias = self
                 .original_schema
                 .schema()
                 .schema_definition
                 .query
                 .as_ref()
-                .map(|m| m.name.clone())
+                .map(|m| (**m).clone())
                 .unwrap_or(name!("Query"));
             let mutation_alias = self
                 .original_schema
@@ -1063,7 +1125,7 @@ mod helpers {
                 .schema_definition
                 .mutation
                 .as_ref()
-                .map(|m| m.name.clone());
+                .map(|m| (**m).clone());
 
             let element = connector
                 .id
@@ -1309,7 +1371,7 @@ mod helpers {
                         insert_field_if_missing(
                             &key_for_type,
                             Name::new(field_name)?,
-                            Component::new(FieldDefinition {
+                            Node::new(FieldDefinition {
                                 description: field_def.description.clone(),
                                 name: field_def.name.clone(),
                                 arguments: field_def.arguments.clone(),
@@ -1339,10 +1401,10 @@ mod helpers {
 
             match &key_for_type {
                 TypeDefinitionPosition::Object(o) => {
-                    o.insert_directive(to_schema, Component::new(key_directive))?;
+                    o.insert_directive(to_schema, Node::new(key_directive))?;
                 }
                 TypeDefinitionPosition::Interface(i) => {
-                    i.insert_directive(to_schema, Component::new(key_directive.clone()))?;
+                    i.insert_directive(to_schema, Node::new(key_directive.clone()))?;
                     // Federation requires implementing types to also have the interface's @key
                     if let Some(implementers) = self
                         .original_schema
@@ -1354,10 +1416,8 @@ mod helpers {
                             let obj_pos = ObjectTypeDefinitionPosition {
                                 type_name: implementer.clone(),
                             };
-                            obj_pos.insert_directive(
-                                to_schema,
-                                Component::new(key_directive.clone()),
-                            )?;
+                            obj_pos
+                                .insert_directive(to_schema, Node::new(key_directive.clone()))?;
                         }
                     }
                 }
@@ -1373,8 +1433,10 @@ mod helpers {
 
         /// If the type has @interfaceObject and it doesn't have a key at this point
         /// we'll need to add a key — this is a requirement for using @interfaceObject.
-        /// For now we'll just copy over keys from the original supergraph as resolvable: false
-        /// but we need to think through the implications of that.
+        /// Keys are copied over from the original supergraph as `resolvable: false`,
+        /// and only for @interfaceObject types. That is the specified behavior in both
+        /// expanders; see `Expander::copy_interface_object_keys` for why a resolvable
+        /// key here would be wrong.
         fn copy_interface_object_keys(
             &self,
             type_name: Name,
@@ -1416,7 +1478,7 @@ mod helpers {
                             }),
                         ],
                     };
-                    pos.insert_directive(to_schema, Component::new(key))?;
+                    pos.insert_directive(to_schema, Node::new(key))?;
                 }
             }
 
@@ -1536,7 +1598,7 @@ mod helpers {
                     name: name!("_"),
                     arguments: Vec::new(),
                     ty: ty!(ID),
-                    directives: ast::DirectiveList(vec![Node::new(Directive {
+                    directives: DirectiveList(vec![Node::new(Directive {
                         name: name!("inaccessible"),
                         arguments: Vec::new(),
                     })]),
@@ -1552,7 +1614,7 @@ mod helpers {
                         directives: DirectiveList::new(),
                         fields: IndexMap::from_iter([(
                             dummy_field_def.name.clone(),
-                            Component::new(dummy_field_def),
+                            Node::new(dummy_field_def),
                         )]),
                     }),
                 )?;
@@ -1561,13 +1623,7 @@ mod helpers {
             SchemaRootDefinitionPosition {
                 root_kind: SchemaRootDefinitionKind::Query,
             }
-            .insert(
-                to_schema,
-                ComponentName {
-                    origin: ComponentOrigin::Definition,
-                    name: query_alias.clone(),
-                },
-            )?;
+            .insert(to_schema, query_alias.clone().to_node(None))?;
 
             Ok(())
         }
@@ -1583,13 +1639,7 @@ mod helpers {
                 let mutation_root = SchemaRootDefinitionPosition {
                     root_kind: SchemaRootDefinitionKind::Mutation,
                 };
-                mutation_root.insert(
-                    to_schema,
-                    ComponentName {
-                        origin: ComponentOrigin::Definition,
-                        name: mutation_alias.clone(),
-                    },
-                )?;
+                mutation_root.insert(to_schema, mutation_alias.clone().to_node(None))?;
             }
 
             Ok(())

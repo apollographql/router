@@ -4,8 +4,6 @@ use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use apollo_federation::connectors::runtime::errors::Error as ConnectorError;
-use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
@@ -21,14 +19,12 @@ use tower::ServiceExt;
 use super::COPROCESSOR_ERROR_EXTENSION;
 use super::ContextConf;
 use super::EXTERNAL_SPAN_NAME;
-use super::NewContextConf;
 use super::get_coprocessor_timer;
 use super::internalize_header_map;
 use super::record_coprocessor_operation;
 use super::update_context_from_coprocessor;
 use super::validate_coprocessor_output;
 use crate::Context;
-use crate::context::context_key_from_deprecated;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
@@ -110,10 +106,10 @@ impl ConnectorStage {
     pub(crate) fn as_service<C>(
         &self,
         http_client: C,
-        service: request_service::BoxService,
+        service: request_service::BoxCloneService,
         default_url: String,
         service_name: String,
-    ) -> request_service::BoxService
+    ) -> request_service::BoxCloneService
     where
         C: Service<HttpRequest, Response = HttpResponse, Error = BoxError>
             + Clone
@@ -226,9 +222,8 @@ impl ConnectorStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffered()
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
@@ -344,7 +339,7 @@ where
 
         const DEFAULT_BREAK_MESSAGE: &str = "Internal error";
 
-        let (message, code, extra_extensions) = match body {
+        let (message, code, extensions) = match body {
             Value::String(s) if !s.as_str().is_empty() => (
                 s.as_str().to_owned(),
                 COPROCESSOR_ERROR_EXTENSION.to_string(),
@@ -363,29 +358,18 @@ where
             ),
         };
 
-        let mut runtime_error = RuntimeError::new(&message, &request.key).with_code(code);
-        for (k, v) in extra_extensions {
-            runtime_error = runtime_error.extension(k, v);
-        }
-
-        let res = request_service::Response {
-            context: request.context.clone(),
-            subgraph_name: request.connector.id.subgraph_name.to_string(),
-            transport_result: Err(ConnectorError::TransportFailure(message)),
-            mapped_response: MappedResponse::Error {
-                error: runtime_error,
-                key: request.key,
-                problems: Vec::new(),
-            },
-        };
+        let res = request_service::Response::error_from_request(
+            request.context.clone(),
+            request.connector,
+            request.key,
+            control.get_http_status().ok(),
+            message,
+            code,
+            extensions,
+        );
 
         if let Some(context) = co_processor_output.context {
-            for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
-                    &request_config.context
-                {
-                    key = context_key_from_deprecated(key);
-                }
+            for (key, value) in context.try_into_iter()? {
                 request
                     .context
                     .upsert_json_value(key, move |_current| value);
@@ -413,11 +397,7 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
-            {
-                key = context_key_from_deprecated(key);
-            }
+        for (key, value) in context.try_into_iter()? {
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -567,12 +547,7 @@ where
     }
 
     if let Some(returned_context) = co_processor_output.context {
-        update_context_from_coprocessor(
-            &context,
-            returned_context,
-            &response_config.context,
-            &keys_sent,
-        )?;
+        update_context_from_coprocessor(&context, returned_context, &keys_sent)?;
     }
 
     if let Some(body) = co_processor_output.body {
@@ -614,7 +589,7 @@ where
 
 /// Parse structured error from a coprocessor break response body.
 /// Expects a JSON object with an `"errors"` array containing GraphQL-style errors.
-/// Returns `(message, code, extra_extensions)`.
+/// Returns `(message, code, extensions)`.
 fn parse_connector_break_error(
     obj: &serde_json_bytes::Map<ByteString, Value>,
 ) -> (String, String, serde_json_bytes::Map<ByteString, Value>) {
@@ -638,7 +613,7 @@ fn parse_connector_break_error(
         .map(|s| s.to_string())
         .unwrap_or(default_msg);
 
-    let mut extra_extensions = serde_json_bytes::Map::default();
+    let mut extensions = serde_json_bytes::Map::default();
     let code = if let Some(Value::Object(ext)) = first_error.get("extensions") {
         let code = ext
             .get("code")
@@ -646,14 +621,12 @@ fn parse_connector_break_error(
             .map(|s| s.to_string())
             .unwrap_or(default_code);
         for (k, v) in ext.iter() {
-            if k.as_str() != "code" {
-                extra_extensions.insert(k.clone(), v.clone());
-            }
+            extensions.insert(k.clone(), v.clone());
         }
         code
     } else {
         default_code
     };
 
-    (message, code, extra_extensions)
+    (message, code, extensions)
 }

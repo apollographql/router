@@ -330,6 +330,24 @@ impl OpPathElement {
             }
         }
     }
+
+    /// Rebase variant that allows concrete-to-interface rebasing for
+    /// @interfaceObject schemas. Used by the incremental planner's
+    /// `add_at_path` when building subgraph operations.
+    pub(crate) fn rebase_on_for_incremental_planner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<OpPathElement, FederationError> {
+        match self {
+            OpPathElement::Field(field) => Ok(field
+                .rebase_on_for_incremental_planner(parent_type, schema)?
+                .into()),
+            OpPathElement::InlineFragment(inline) => {
+                Ok(inline.rebase_on(parent_type, schema)?.into())
+            }
+        }
+    }
 }
 
 impl Display for OpPathElement {
@@ -2360,12 +2378,6 @@ impl OpPath {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    pub(crate) fn strip_prefix(&self, maybe_prefix: &Self) -> Option<Self> {
-        self.0
-            .strip_prefix(&*maybe_prefix.0)
-            .map(|slice| Self(slice.to_vec()))
     }
 
     pub(crate) fn with_pushed(&self, element: Arc<OpPathElement>) -> Self {

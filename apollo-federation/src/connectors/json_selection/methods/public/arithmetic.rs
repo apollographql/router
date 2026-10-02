@@ -693,6 +693,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn add_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->add($.missing)", spec).apply_to(&json!({
@@ -722,6 +723,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn sub_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->sub($.missing)", spec).apply_to(&json!({
@@ -751,6 +753,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn mul_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->mul($.missing)", spec).apply_to(&json!({
@@ -780,6 +783,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn div_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->div($.missing)", spec).apply_to(&json!({
@@ -809,6 +813,7 @@ mod tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn mod_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->mod($.missing)", spec).apply_to(&json!({
@@ -912,11 +917,9 @@ mod shape_tests {
                 "add",
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::string([]),
-            ),
-            Shape::error(
-                "Method ->add received non-numeric input".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->add received non-numeric input")"#,
         );
     }
 
@@ -930,11 +933,9 @@ mod shape_tests {
                     None,
                 )],
                 Shape::int([]),
-            ),
-            Shape::error(
-                "Method ->add received non-numeric argument 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->add received non-numeric argument 0")"#,
         );
     }
 
@@ -1053,11 +1054,9 @@ mod shape_tests {
                 "mul",
                 vec![WithRange::new(LitExpr::Number(Number::from(1)), None)],
                 Shape::string([]),
-            ),
-            Shape::error(
-                "Method ->mul received non-numeric input".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->mul received non-numeric input")"#,
         );
     }
 
@@ -1068,11 +1067,9 @@ mod shape_tests {
                 "div",
                 vec![WithRange::new(LitExpr::String("invalid".to_string()), None)],
                 Shape::int([]),
-            ),
-            Shape::error(
-                "Method ->div received non-numeric argument 0".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->div received non-numeric argument 0")"#,
         );
     }
 }

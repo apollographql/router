@@ -80,6 +80,22 @@ where
     checkpoint_fn: Arc<Pin<Box<dyn Fn(Request) -> Fut + Send + Sync + 'static>>>,
 }
 
+impl<S, Fut, Request> Clone for AsyncCheckpointService<S, Fut, Request>
+where
+    Request: Send + 'static,
+    S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+    <S as Service<Request>>::Response: Send + 'static,
+    <S as Service<Request>>::Future: Send + 'static,
+    Fut: Future<Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            service: self.service.clone(),
+            checkpoint_fn: Arc::clone(&self.checkpoint_fn),
+        }
+    }
+}
+
 impl<S, Fut, Request> AsyncCheckpointService<S, Fut, Request>
 where
     Request: Send + 'static,
@@ -147,39 +163,34 @@ mod async_checkpoint_tests {
 
     use super::*;
     use crate::layers::ServiceBuilderExt;
-    use crate::plugin::test::MockExecutionService;
     use crate::services::ExecutionRequest;
     use crate::services::ExecutionResponse;
 
     #[tokio::test]
     async fn test_service_builder() {
         let expected_label = "from_mock_service";
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        let mut execution_service = MockExecutionService::new();
-
-        execution_service
-            .expect_clone()
-            .return_once(MockExecutionService::new);
-
-        execution_service
-            .expect_call()
-            .times(1)
-            .returning(move |req| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
+        // Spawn the handle driver because the async checkpoint future is lazy — the request
+        // doesn't reach the inner service until the oneshot future is polled.
+        let label = expected_label.to_string();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                ExecutionResponse::fake_builder()
+                    .label(label)
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
+                    .unwrap(),
+            );
+        });
 
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
-            .service(execution_service);
-
-        let request = ExecutionRequest::fake_builder().build();
+            .service(mock);
 
         let actual_label = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .unwrap()
             .next_response()
@@ -188,35 +199,31 @@ mod async_checkpoint_tests {
             .label
             .unwrap();
 
-        assert_eq!(actual_label, expected_label)
+        assert_eq!(actual_label, expected_label);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn test_continue() {
         let expected_label = "from_mock_service";
-        let mut router_service = MockExecutionService::new();
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        router_service
-            .expect_clone()
-            .return_once(MockExecutionService::new);
-
-        router_service
-            .expect_call()
-            .times(1)
-            .returning(move |_req| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
+        let label = expected_label.to_string();
+        let driver = tokio::spawn(async move {
+            let (_req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                ExecutionResponse::fake_builder()
+                    .label(label)
                     .build()
-                    .unwrap())
-            });
-        let service_stack =
-            AsyncCheckpointLayer::new(|req| async { Ok(ControlFlow::Continue(req)) })
-                .layer(router_service);
+                    .unwrap(),
+            );
+        });
 
-        let request = ExecutionRequest::fake_builder().build();
+        let service_stack =
+            AsyncCheckpointLayer::new(|req| async { Ok(ControlFlow::Continue(req)) }).layer(mock);
 
         let actual_label = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .unwrap()
             .next_response()
@@ -225,16 +232,13 @@ mod async_checkpoint_tests {
             .label
             .unwrap();
 
-        assert_eq!(actual_label, expected_label)
+        assert_eq!(actual_label, expected_label);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     async fn test_return() {
-        let expected_label = "returned_before_mock_service";
-        let mut router_service = MockExecutionService::new();
-        router_service
-            .expect_clone()
-            .return_once(MockExecutionService::new);
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -244,12 +248,10 @@ mod async_checkpoint_tests {
                     .unwrap(),
             ))
         })
-        .layer(router_service);
-
-        let request = ExecutionRequest::fake_builder().build();
+        .layer(mock);
 
         let actual_label = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .unwrap()
             .next_response()
@@ -258,63 +260,55 @@ mod async_checkpoint_tests {
             .label
             .unwrap();
 
-        assert_eq!(actual_label, expected_label)
+        assert_eq!(actual_label, "returned_before_mock_service");
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
     async fn test_error() {
         let expected_error = "checkpoint_error";
-        let mut router_service = MockExecutionService::new();
-        router_service
-            .expect_clone()
-            .return_once(MockExecutionService::new);
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let service_stack =
             AsyncCheckpointLayer::new(
                 move |_req| async move { Err(BoxError::from(expected_error)) },
             )
-            .layer(router_service);
-
-        let request = ExecutionRequest::fake_builder().build();
+            .layer(mock);
 
         let actual_error = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .map(|_| unreachable!())
             .unwrap_err()
             .to_string();
 
-        assert_eq!(actual_error, expected_error)
+        assert_eq!(actual_error, expected_error);
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
     async fn test_service_builder_oneshot() {
         let expected_label = "from_mock_service";
+        let (mock, mut handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
-        let mut execution_service = MockExecutionService::new();
-        execution_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
+        let label = expected_label.to_string();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            responder.send_response(
+                ExecutionResponse::fake_builder()
+                    .label(label)
                     .context(req.context)
                     .build()
-                    .unwrap())
-            });
-
-        execution_service
-            .expect_clone()
-            .returning(MockExecutionService::new);
+                    .unwrap(),
+            );
+        });
 
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
-            .service(execution_service);
-
-        let request = ExecutionRequest::fake_builder().build();
+            .service(mock);
 
         let actual_label = service_stack
-            .oneshot(request)
+            .oneshot(ExecutionRequest::fake_builder().build())
             .await
             .unwrap()
             .next_response()
@@ -323,46 +317,48 @@ mod async_checkpoint_tests {
             .label
             .unwrap();
 
-        assert_eq!(actual_label, expected_label)
+        assert_eq!(actual_label, expected_label);
+        crate::plugin::test::await_mock_driver(driver).await;
     }
 
     #[tokio::test]
     #[should_panic]
     async fn test_service_builder_buffered_oneshot() {
-        let expected_label = "from_mock_service";
-
-        let mut execution_service = MockExecutionService::new();
-        execution_service
-            .expect_call()
-            .times(1)
-            .returning(move |req: ExecutionRequest| {
-                Ok(ExecutionResponse::fake_builder()
-                    .label(expected_label.to_string())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
+        // service_fn responds immediately (no handle to drive), which lets the first call
+        // complete so the second call can trigger the expected panic.
+        let label = "from_mock_service".to_string();
+        let svc = tower::service_fn(move |req: ExecutionRequest| {
+            let label = label.clone();
+            async move {
+                Ok::<ExecutionResponse, BoxError>(
+                    ExecutionResponse::fake_builder()
+                        .label(label)
+                        .context(req.context)
+                        .build()
+                        .unwrap(),
+                )
+            }
+        });
 
         let mut service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
             .buffered()
-            .service(execution_service);
+            .service(svc);
 
-        let request = ExecutionRequest::fake_builder().build();
-        let request_again = ExecutionRequest::fake_builder().build();
-
-        let _ = service_stack.call(request).await.unwrap();
+        let _ = service_stack
+            .call(ExecutionRequest::fake_builder().build())
+            .await
+            .unwrap();
         // Trying to use the service again should cause a panic
-        let _ = service_stack.call(request_again).await.unwrap();
+        let _ = service_stack
+            .call(ExecutionRequest::fake_builder().build())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn test_double_ready_doesnt_panic() {
-        let mut router_service = MockExecutionService::new();
-
-        router_service
-            .expect_clone()
-            .returning(MockExecutionService::new);
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let mut service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -372,7 +368,7 @@ mod async_checkpoint_tests {
                     .unwrap(),
             ))
         })
-        .layer(router_service);
+        .layer(mock);
 
         service_stack.ready().await.unwrap();
         service_stack
@@ -381,17 +377,12 @@ mod async_checkpoint_tests {
             .unwrap();
 
         assert!(service_stack.ready().await.is_ok());
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 
     #[tokio::test]
     async fn test_double_call_doesnt_panic() {
-        let mut router_service = MockExecutionService::new();
-
-        router_service.expect_clone().returning(|| {
-            let mut mes = MockExecutionService::new();
-            mes.expect_clone().returning(MockExecutionService::new);
-            mes
-        });
+        let (mock, handle) = tower_test::mock::pair::<ExecutionRequest, ExecutionResponse>();
 
         let mut service_stack = AsyncCheckpointLayer::new(|_req| async {
             Ok(ControlFlow::Break(
@@ -401,22 +392,21 @@ mod async_checkpoint_tests {
                     .unwrap(),
             ))
         })
-        .layer(router_service);
+        .layer(mock);
 
         service_stack.ready().await.unwrap();
-
         service_stack
             .call(ExecutionRequest::fake_builder().build())
             .await
             .unwrap();
 
         service_stack.ready().await.unwrap();
-
         assert!(
             service_stack
                 .call(ExecutionRequest::fake_builder().build())
                 .await
                 .is_ok()
         );
+        crate::plugin::test::assert_no_mock_calls(handle).await;
     }
 }

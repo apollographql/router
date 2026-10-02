@@ -28,42 +28,42 @@ expression: parse_result_for_snapshot(response).await
       "ships": [
         {
           "owner": {
-            "licenseNumber": 100,
+            "licenseNumber": "100",
             "name": "User100"
           }
         },
         {
           "owner": {
-            "licenseNumber": 110,
+            "licenseNumber": "110",
             "name": "User110"
           }
         },
         {
           "owner": {
-            "licenseNumber": 120,
+            "licenseNumber": "120",
             "name": "User120"
           }
         },
         {
           "owner": {
-            "licenseNumber": 120,
+            "licenseNumber": "120",
             "name": "User120"
           }
         },
         {
           "owner": {
-            "licenseNumber": 120,
+            "licenseNumber": "120",
             "name": "User120"
           }
         }
       ],
       "users": [
         {
-          "licenseNumber": 10,
+          "licenseNumber": "10",
           "name": "User10"
         },
         {
-          "licenseNumber": 11,
+          "licenseNumber": "11",
           "name": "User11"
         }
       ]

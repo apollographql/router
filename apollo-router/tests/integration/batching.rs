@@ -1,10 +1,13 @@
+use apollo_router::graphql;
 use apollo_router::graphql::Request;
 use insta::assert_yaml_snapshot;
 use itertools::Itertools;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
+use crate::integration::IntegrationTest;
 use crate::integration::ValueExt as _;
+use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
@@ -108,6 +111,69 @@ async fn it_supports_multi_subgraph_batching() -> Result<(), BoxError> {
         entryB:
           index: 2
     "###);
+    }
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_rejects_a_batched_deferred_query() -> Result<(), BoxError> {
+    const MULTIPART_DEFER_CONTENT_TYPE: &str =
+        r#"multipart/mixed;boundary="graphql";deferSpec=20220824"#;
+    const REQUEST_COUNT: usize = 2;
+
+    let requests: Vec<_> = (0..REQUEST_COUNT)
+        .map(|index| {
+            Request::fake_builder()
+                .query(format!(
+                    "query op{index}{{ entryA(count: {REQUEST_COUNT}) {{ ... @defer {{ index }} }} }}"
+                ))
+                .build()
+        })
+        .collect();
+
+    // Start up the router. We don't expect any subgraph requests.
+    let mut router = IntegrationTest::builder()
+        .config(CONFIG)
+        .supergraph("tests/fixtures/batching/schema.graphql")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // Execute the request
+    let request = serde_json::to_value(requests)?;
+    let (_span, response) = router
+        .execute_query(
+            Query::builder()
+                .header(
+                    http::header::ACCEPT.to_string(),
+                    MULTIPART_DEFER_CONTENT_TYPE,
+                )
+                .body(request)
+                .build(),
+        )
+        .await;
+
+    let responses = serde_json::from_slice::<Vec<graphql::Response>>(&response.bytes().await?)?;
+
+    if graph_os_enabled() {
+        assert_eq!(responses.len(), REQUEST_COUNT);
+        for response in &responses {
+            assert_eq!(response.errors.len(), 1);
+            assert_eq!(
+                response.errors[0].message,
+                "Deferred responses and subscriptions aren't supported in batches"
+            );
+            assert_eq!(
+                response.errors[0]
+                    .extensions
+                    .get("code")
+                    .and_then(|v| v.as_str()),
+                Some("BATCHING_DEFER_UNSUPPORTED")
+            );
+        }
     }
 
     Ok(())

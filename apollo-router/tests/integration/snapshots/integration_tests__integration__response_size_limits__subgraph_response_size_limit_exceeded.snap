@@ -6,7 +6,7 @@ expression: response_json
   "data": null,
   "errors": [
     {
-      "message": "HTTP fetch failed from 'products': subgraph response body exceeded limit of 50 bytes",
+      "message": "HTTP fetch failed: subgraph response body exceeded limit of 50 bytes",
       "path": [],
       "extensions": {
         "code": "SUBREQUEST_HTTP_ERROR",

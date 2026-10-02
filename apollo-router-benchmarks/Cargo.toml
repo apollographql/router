@@ -1,13 +1,13 @@
 [package]
 name = "apollo-router-benchmarks"
-version = "2.17.0"
+version = "3.0.0-preview.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"
 publish = false
 
 [dev-dependencies]
-apollo-router = { path = "../apollo-router" }
+apollo-router = { path = "../apollo-router", features = ["mock_subgraphs_testing"] }
 criterion = { version = "0.8", features = ["async_tokio", "async_futures"] }
 futures = "0.3"
 memory-stats = "1.1.0"
@@ -32,6 +32,10 @@ harness = false
 
 [[bench]]
 name = "rhai_string_interning"
+harness = false
+
+[[bench]]
+name = "rhai_scope_lock"
 harness = false
 
 [[bench]]

@@ -222,7 +222,7 @@ The `jaeger` exporter has been removed, as Jaeger now fully supports the OTLP fo
 
 - Change your router config to use the `otlp` exporter:
 
-```yaml title="router.yaml"
+```yaml title="router.yaml" novalidate
 telemetry:
   exporters:
     tracing:
@@ -412,12 +412,6 @@ The [context key renames](#renamed-context-keys) may impact your coprocessor log
 
 You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
 
-<Note>
-
-`context: true` is an alias for `context: deprecated`. In a future major release, the `context: true` setting will be removed.
-
-</Note>
-
 You can now also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
 
 **Upgrade step**: Either upgrade your coprocessor to use the new context keys, or add `context: deprecated` to your coprocessor configuration.
@@ -429,7 +423,7 @@ coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   router:
     request:
-      context: false # Do not send any context entries
+      context: none # Do not send any context entries
   supergraph:
     request:
       headers: true

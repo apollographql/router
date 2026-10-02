@@ -358,6 +358,7 @@ mod method_tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn ne_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->ne($.missing)", spec).apply_to(&json!({
@@ -442,24 +443,17 @@ mod shape_tests {
             get_shape(
                 vec![WithRange::new(LitExpr::String("a".to_string()), None)],
                 Shape::int([])
-            ),
-            Shape::error_with_partial(
-                "Method ->ne can only compare values of the same type. Got Int != \"a\"."
-                    .to_string(),
-                Shape::bool_value(true, [get_location()]),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"true (err "Method ->ne can only compare values of the same type. Got Int != \"a\".")"#,
         );
     }
 
     #[test]
     fn ne_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->ne requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->ne requires one argument")"#,
         );
     }
 
@@ -472,11 +466,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Number(Number::from(43)), None)
                 ],
                 Shape::int([])
-            ),
-            Shape::error(
-                "Method ->ne requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->ne requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -490,11 +482,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->ne requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->ne requires one argument")"#,
         );
     }
 

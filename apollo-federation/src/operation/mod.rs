@@ -41,7 +41,6 @@ use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
-use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::operation::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -205,6 +204,7 @@ pub struct Operation {
     pub(crate) name: Option<Name>,
     pub(crate) variables: Arc<Vec<Node<executable::VariableDefinition>>>,
     pub(crate) directives: DirectiveList,
+    pub(crate) description: Option<Node<str>>,
     pub(crate) selection_set: SelectionSet,
 }
 
@@ -228,6 +228,7 @@ impl Operation {
             name: operation.name.clone(),
             variables: Arc::new(operation.variables.clone()),
             directives: operation.directives.clone().into(),
+            description: operation.description.clone(),
             selection_set: SelectionSet::from_selection_set(
                 &operation.selection_set,
                 &FragmentSpreadCache::init(&document.fragments, &schema, &never_cancel),
@@ -1082,6 +1083,7 @@ impl SelectionSet {
             type_position.type_name().clone(),
             source_text,
             false,
+            crate::schema::field_set::FieldSetValidation::Validate,
         )?
         .0;
         let fragments = Default::default();
@@ -1731,6 +1733,99 @@ impl SelectionSet {
                 }
             }
             // If we don't have any path, we rebase and merge in the given sub selections at the root.
+            None => {
+                if let Some(sel) = selection_set {
+                    self.add_selection_set(sel)?
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Like `add_at_path`, but uses the incremental planner's broader
+    /// rebase rules that allow concrete-to-interface rebasing for
+    /// @interfaceObject schemas.
+    pub(crate) fn add_at_path_for_incremental_planner(
+        &mut self,
+        path: &[Arc<OpPathElement>],
+        selection_set: Option<&Arc<SelectionSet>>,
+    ) -> Result<(), FederationError> {
+        match path.split_first() {
+            Some((ele, path @ &[_, ..])) => {
+                let element =
+                    ele.rebase_on_for_incremental_planner(&self.type_position, &self.schema)?;
+                let Some(sub_selection_type) = element.sub_selection_type_position()? else {
+                    return Err(FederationError::internal(
+                        "add_at_path encountered a non-composite field type",
+                    ));
+                };
+                let element_key = element.key().to_owned_key();
+                let mut selection = Arc::make_mut(&mut self.selections)
+                    .entry(element_key.as_borrowed_key())
+                    .or_insert(|| {
+                        Selection::from_element(
+                            element,
+                            Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
+                        )
+                    })?;
+                match &mut selection {
+                    SelectionValue::Field(field) => match field.get_selection_set_mut() {
+                        Some(sub) => {
+                            sub.add_at_path_for_incremental_planner(path, selection_set)?
+                        }
+                        None => {
+                            return Err(FederationError::internal(
+                                "add_at_path: field without subselection",
+                            ));
+                        }
+                    },
+                    SelectionValue::InlineFragment(fragment) => fragment
+                        .get_selection_set_mut()
+                        .add_at_path_for_incremental_planner(path, selection_set)?,
+                };
+            }
+            Some((ele, &[])) => {
+                let element =
+                    ele.rebase_on_for_incremental_planner(&self.type_position, &self.schema)?;
+                if selection_set.is_none() || selection_set.is_some_and(|s| s.is_empty()) {
+                    if !ele.is_terminal()? {
+                        return Ok(());
+                    } else {
+                        let selection = Selection::from_element(element, None)?;
+                        self.add_local_selection(&selection)?
+                    }
+                } else {
+                    let sub_selection_type_pos =
+                        element.sub_selection_type_position()?.ok_or_else(|| {
+                            FederationError::internal(
+                                "Element has a selection set with non-composite base type",
+                            )
+                        })?;
+                    let selection_set = selection_set
+                        .map(|selection_set| {
+                            let selections = selection_set.without_unnecessary_fragments(
+                                &sub_selection_type_pos,
+                                &self.schema,
+                            );
+                            let mut rebased = SelectionSet::empty(
+                                self.schema.clone(),
+                                sub_selection_type_pos.clone(),
+                            );
+                            for selection in selections.iter() {
+                                rebased.add_local_selection(
+                                    &selection.rebase_on_for_incremental_planner(
+                                        &sub_selection_type_pos,
+                                        &self.schema,
+                                    )?,
+                                )?;
+                            }
+                            Ok::<_, FederationError>(rebased)
+                        })
+                        .transpose()?;
+                    let selection = Selection::from_element(element, selection_set)?;
+                    self.add_local_selection(&selection)?
+                }
+            }
             None => {
                 if let Some(sel) = selection_set {
                     self.add_selection_set(sel)?
@@ -2410,55 +2505,31 @@ pub(crate) struct NormalizedDefer {
     pub(crate) operation: Operation,
     /// True if the operation contains any @defer applications.
     pub(crate) has_defers: bool,
-    /// `@defer(label:)` values assigned by normalization.
-    pub(crate) assigned_defer_labels: IndexSet<String>,
+    /// Client-visible label for each label assigned during normalization: `None` for defers
+    /// that had no label, `Some(original)` for duplicate labels renamed to stay unique during
+    /// planning (a labeled `@defer` in a fragment spread multiple times). Restored on the
+    /// emitted `DeferNode`s.
+    pub(crate) client_labels: IndexMap<String, Option<String>>,
     /// Map of variable conditions to the @defer labels depending on those conditions.
     pub(crate) defer_conditions: IndexMap<Name, IndexSet<String>>,
 }
 
+#[derive(Default)]
 struct DeferNormalizer {
-    used_labels: IndexSet<String>,
-    assigned_labels: IndexSet<String>,
+    /// See [`NormalizedDefer::client_labels`].
+    client_labels: IndexMap<String, Option<String>>,
     conditions: IndexMap<Name, IndexSet<String>>,
-    label_offset: usize,
 }
 
 impl DeferNormalizer {
-    fn new(selection_set: &SelectionSet) -> Result<Self, FederationError> {
-        let mut digest = Self {
-            used_labels: IndexSet::default(),
-            label_offset: 0,
-            assigned_labels: IndexSet::default(),
-            conditions: IndexMap::default(),
-        };
-        let mut stack = selection_set.into_iter().collect::<Vec<_>>();
-        while let Some(selection) = stack.pop() {
-            if let Selection::InlineFragment(inline) = selection
-                && let Some(args) = inline.inline_fragment.defer_directive_arguments()?
-            {
-                let DeferDirectiveArguments { label, if_: _ } = args;
-                if let Some(label) = label {
-                    // Reject duplicate labels (should've been a validation error)
-                    if digest.used_labels.contains(&label) {
-                        return Err(SingleFederationError::DuplicateDeferLabel { label }.into());
-                    }
-                    digest.used_labels.insert(label);
-                }
-            }
-            stack.extend(selection.selection_set().into_iter().flatten());
-        }
-        Ok(digest)
-    }
-
-    fn get_label(&mut self) -> String {
-        loop {
-            let digest = format!("qp__{}", self.label_offset);
-            self.label_offset += 1;
-            if !self.used_labels.contains(&digest) {
-                self.assigned_labels.insert(digest.clone());
-                return digest;
-            }
-        }
+    /// Returns the planning label for a `@defer` occurrence. Planning requires unique labels,
+    /// but a labeled `@defer` in a fragment spread multiple times occurs repeatedly once
+    /// fragments are expanded, so every occurrence gets a generated label, with the
+    /// client-visible label recorded in `client_labels` for the emitted plan to restore.
+    fn label_for(&mut self, client_label: Option<String>) -> String {
+        let label = format!("qp__{}", self.client_labels.len());
+        self.client_labels.insert(label.clone(), client_label);
+        label
     }
 
     fn register_condition(&mut self, label: String, cond: Name) {
@@ -2515,10 +2586,6 @@ impl InlineFragmentSelection {
             }
         }
 
-        if args_copy.label.is_none() {
-            args_copy.label = Some(normalizer.get_label());
-        }
-
         if remove_defer {
             let directives: DirectiveList = self
                 .inline_fragment
@@ -2529,6 +2596,8 @@ impl InlineFragmentSelection {
                 .collect();
             return Ok(self.with_updated_directives(directives));
         }
+
+        args_copy.label = Some(normalizer.label_for(args_copy.label.take()));
 
         // NOTE: If this is `Some`, it will be a variable.
         if let Some(BooleanOrVariable::Variable(cond)) = args_copy.if_.clone() {
@@ -2686,19 +2755,19 @@ impl Operation {
     /// `.reuse_fragments()`.
     pub(crate) fn with_normalized_defer(mut self) -> Result<NormalizedDefer, FederationError> {
         if self.has_defer() {
-            let mut normalizer = DeferNormalizer::new(&self.selection_set)?;
+            let mut normalizer = DeferNormalizer::default();
             self.selection_set = self.selection_set.normalize_defer(&mut normalizer)?;
             Ok(NormalizedDefer {
                 operation: self,
                 has_defers: true,
-                assigned_defer_labels: normalizer.assigned_labels,
+                client_labels: normalizer.client_labels,
                 defer_conditions: normalizer.conditions,
             })
         } else {
             Ok(NormalizedDefer {
                 operation: self,
                 has_defers: false,
-                assigned_defer_labels: IndexSet::default(),
+                client_labels: IndexMap::default(),
                 defer_conditions: IndexMap::default(),
             })
         }
@@ -2815,6 +2884,7 @@ impl TryFrom<&Operation> for executable::Operation {
             variables: normalized_operation.variables.deref().clone(),
             directives: normalized_operation.directives.iter().cloned().collect(),
             selection_set: (&normalized_operation.selection_set).try_into()?,
+            description: normalized_operation.description.clone(),
         })
     }
 }
@@ -2903,8 +2973,7 @@ impl TryFrom<&Field> for executable::Field {
         let definition = normalized_field
             .field_position
             .get(normalized_field.schema.schema())?
-            .node
-            .to_owned();
+            .clone();
         let selection_set = executable::SelectionSet {
             ty: definition.ty.inner_named_type().clone(),
             selections: vec![],
@@ -2982,6 +3051,47 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
         coerce_executable_values(value.schema.schema(), &mut document);
         Ok(document.validate(value.schema.schema())?)
     }
+}
+
+impl Operation {
+    /// Build an executable document without validation. The caller is
+    /// responsible for ensuring correctness (e.g. structurally-constructed
+    /// operations from the query planner). Debug builds still validate to
+    /// catch construction bugs early.
+    pub(crate) fn into_document_unchecked(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+        let operation = executable::Operation::try_from(&self)?;
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        coerce_executable_values(self.schema.schema(), &mut document);
+        assume_generated_document_valid(
+            document,
+            self.schema.schema(),
+            VALIDATE_GENERATED_DOCUMENTS,
+            "into_document_unchecked",
+        )
+    }
+}
+
+/// Debug builds validate generated subgraph documents; release builds trust
+/// structural construction and skip the O(n) pass.
+pub(crate) const VALIDATE_GENERATED_DOCUMENTS: bool = cfg!(debug_assertions);
+
+/// Wraps a planner-generated document as valid, checking it first only when
+/// `validate` is set. A failed check is a planning error, not a panic.
+pub(crate) fn assume_generated_document_valid(
+    document: executable::ExecutableDocument,
+    schema: &Valid<apollo_compiler::Schema>,
+    validate: bool,
+    producer: &str,
+) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
+    if validate && let Err(err) = document.clone().validate(schema) {
+        return Err(FederationError::internal(format!(
+            "{producer} produced invalid document: {err}"
+        )));
+    }
+    Ok(Valid::assume_valid(document))
 }
 
 // Display implementations for the operation types.
@@ -3208,6 +3318,7 @@ pub(crate) fn normalize_operation(
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
     check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    strip_sibling_typenames: bool,
 ) -> Result<Operation, FederationError> {
     let fragment_cache = FragmentSpreadCache::init(fragments, schema, check_cancellation);
     let mut normalized_selection_set = SelectionSet::from_selection_set(
@@ -3223,7 +3334,15 @@ pub(crate) fn normalize_operation(
     normalized_selection_set = normalized_selection_set
         .flatten_unnecessary_fragments(&normalized_selection_set.type_position, schema)?;
     remove_introspection(&mut normalized_selection_set);
-    normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    // The strip is an exhaustive-planner optimization whose fetch
+    // construction restores the attachments; the incremental planner routes
+    // __typename like any other field and would immediately rebuild the
+    // stripped branches, retaining a rewritten copy of the operation for the
+    // whole planning session.
+    if strip_sibling_typenames {
+        normalized_selection_set
+            .optimize_sibling_typenames(interface_types_with_interface_objects)?;
+    }
 
     let normalized_operation = Operation {
         schema: schema.clone(),
@@ -3231,6 +3350,7 @@ pub(crate) fn normalize_operation(
         name: operation.name.clone(),
         variables: Arc::new(operation.variables.clone()),
         directives: operation.directives.clone().into(),
+        description: operation.description.clone(),
         selection_set: normalized_selection_set,
     };
     Ok(normalized_operation)

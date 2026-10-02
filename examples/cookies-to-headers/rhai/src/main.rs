@@ -33,48 +33,39 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use apollo_router::graphql;
-    use apollo_router::plugin::test;
     use apollo_router::services::subgraph;
     use apollo_router::services::supergraph;
     use http::StatusCode;
-    use tower::util::ServiceExt;
+    use tower::util::ServiceExt as _;
 
     #[tokio::test]
     async fn test_subgraph_processes_cookies() {
-        // create a mock service we will use to test our plugin
-        let mut mock_service = test::MockSubgraphService::new();
-
         // The expected reply is going to be JSON returned in the SubgraphResponse { data } section.
         let expected_mock_response_data = "response created within the mock";
 
-        // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().returning(move || {
-            let mut mock_service = test::MockSubgraphService::new();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: subgraph::Request| {
-                    // Let's make sure our request contains our new headers
-                    assert_eq!(
-                        req.subgraph_request
-                            .headers()
-                            .get("yummy_cookie")
-                            .expect("yummy_cookie is present"),
-                        "choco"
-                    );
-                    assert_eq!(
-                        req.subgraph_request
-                            .headers()
-                            .get("tasty_cookie")
-                            .expect("tasty_cookie is present"),
-                        "strawberry"
-                    );
-                    req.context
-                        .insert("mock_data", expected_mock_response_data.to_owned())
-                        .unwrap();
-                    Ok(subgraph::Response::fake_builder().build())
-                });
-            mock_service
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            // Let's make sure our request contains our new headers
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get("yummy_cookie")
+                    .expect("yummy_cookie is present"),
+                "choco"
+            );
+            assert_eq!(
+                req.subgraph_request
+                    .headers()
+                    .get("tasty_cookie")
+                    .expect("tasty_cookie is present"),
+                "strawberry"
+            );
+            req.context
+                .insert("mock_data", expected_mock_response_data.to_owned())
+                .unwrap();
+            responder.send_response(subgraph::Response::fake_builder().build());
         });
 
         let config = serde_json::json!({
@@ -87,7 +78,7 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .subgraph_hook(move |_, _| mock_service.clone().boxed())
+            .subgraph_hook(move |_, _| mock_service.clone().boxed_clone())
             .supergraph_hook(|service| {
                 service
                     .map_response(|response| {
@@ -97,7 +88,7 @@ mod tests {
                             stream_item
                         })
                     })
-                    .boxed()
+                    .boxed_clone()
             })
             .build_router()
             .await
@@ -129,6 +120,10 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
 
         // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.unwrap())
+        assert_eq!(expected_mock_response_data, response.data.unwrap());
+        tokio::time::timeout(std::time::Duration::from_secs(5), driver)
+            .await
+            .expect("mock driver timed out")
+            .unwrap();
     }
 }

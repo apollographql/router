@@ -12,19 +12,14 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_router::plugin::test;
     use apollo_router::services::supergraph;
     use http::StatusCode;
     use tower::util::ServiceExt;
 
     #[tokio::test]
     async fn test_router_forbids_anonymous_operation() {
-        let mut mock_service = test::MockSupergraphService::new();
-        // create a mock service we will use to test our plugin
-        // Let's set up our mock to make sure it will be called once
-        mock_service
-            .expect_clone()
-            .return_once(test::MockSupergraphService::new);
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<supergraph::Request, supergraph::Response>();
 
         let config = serde_json::json!({
             "rhai": {
@@ -35,7 +30,7 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .supergraph_hook(move |_| mock_service.clone().boxed())
+            .supergraph_hook(move |_| mock_service.clone().boxed_clone())
             .build_router()
             .await
             .unwrap();
@@ -56,5 +51,11 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
             service_response.response.status()
         );
+        if matches!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), handle.next_request()).await,
+            Ok(Some(_))
+        ) {
+            panic!("mock service was called but should not have been");
+        }
     }
 }

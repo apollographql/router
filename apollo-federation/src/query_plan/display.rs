@@ -79,6 +79,7 @@ impl FetchNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
         let Self {
             subgraph_name,
+            protocol: _,
             id,
             variable_usages: _,
             requires,

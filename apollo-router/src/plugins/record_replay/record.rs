@@ -11,7 +11,7 @@ use http_body_util::BodyExt;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
-use tower::ServiceExt as TowerServiceExt;
+use tower::ServiceExt;
 
 use super::recording::Recording;
 use super::recording::RequestDetails;
@@ -28,13 +28,14 @@ use crate::services::supergraph;
 const RECORD_HEADER: &str = "x-apollo-router-record";
 
 /// Request recording configuration.
-#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 struct RecordConfig {
     /// The recording plugin is disabled by default.
+    #[config(required)]
     enabled: bool,
     /// The path to the directory where recordings will be stored. Defaults to
     /// the current working directory.
+    #[config(skip_validate)]
     storage_path: Option<PathBuf>,
 }
 
@@ -79,7 +80,7 @@ impl Plugin for Record {
         Ok(plugin)
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -140,10 +141,13 @@ impl Plugin for Record {
                 }
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -209,10 +213,10 @@ impl Plugin for Record {
                 })
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
                 req.context.extensions().with_lock(|lock| {
@@ -224,14 +228,14 @@ impl Plugin for Record {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         if !self.enabled {
             return service;
         }
@@ -293,7 +297,7 @@ impl Plugin for Record {
                 },
             )
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 

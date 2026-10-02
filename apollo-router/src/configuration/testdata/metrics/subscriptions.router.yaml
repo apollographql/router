@@ -4,10 +4,13 @@ subscription:
     passthrough:
       all:
         protocol: graphql_ws
+        max_reconnect_attempts: 5
+        reconnect_delay: 2s
     callback:
       path: /graphql
       public_url: https://example.com/graphql
   deduplication:
-    enabled: false
+    all:
+      enabled: false
   queue_capacity: 2
   max_opened_subscriptions: 3

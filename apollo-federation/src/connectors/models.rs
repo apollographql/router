@@ -14,6 +14,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Type;
 use apollo_compiler::validation::Valid;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
@@ -76,6 +77,13 @@ pub struct Connector {
     pub batch_settings: Option<ConnectBatchArguments>,
 
     pub error_settings: ConnectorErrorsSettings,
+
+    /// The GraphQL type this field is declared to return. `None` when
+    /// unknown, e.g. for type-level connectors, which have no field
+    /// definition to inspect. Used at runtime (via `Type::is_list` /
+    /// `Type::is_non_null`) to detect shape mismatches between the connector
+    /// response and the expected field type.
+    pub output_type: Option<Type>,
 
     /// A label for use in debugging and logging. Includes ID, transport method, and path.
     pub label: Label,
@@ -276,6 +284,11 @@ impl Connector {
             transport.as_ref(),
             entity_resolver.as_ref(),
         );
+        let output_type = connect
+            .position
+            .field_definition(schema)
+            .map(|f| f.ty.clone());
+
         let id = ConnectId {
             subgraph_name: subgraph_name.to_string(),
             source_name,
@@ -298,6 +311,7 @@ impl Connector {
             response_variable_keys,
             batch_settings,
             error_settings,
+            output_type,
             label,
         })
     }
@@ -754,6 +768,13 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                output_type: Some(
+                    List(
+                        Named(
+                            "User",
+                        ),
+                    ),
+                ),
                 label: Label(
                     "connectors.json http: GET /users",
                 ),
@@ -961,6 +982,13 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                output_type: Some(
+                    List(
+                        Named(
+                            "Post",
+                        ),
+                    ),
+                ),
                 label: Label(
                     "connectors.json http: GET /posts",
                 ),

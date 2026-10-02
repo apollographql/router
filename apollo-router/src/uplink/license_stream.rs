@@ -112,7 +112,11 @@ impl From<license_query::ResponseData> for UplinkResponse<License> {
                         },
                         Err(error) => UplinkResponse::Error {
                             retry_later: true,
-                            code: "INVALID_LICENSE".to_string(),
+                            code: if error.is_version_incompatible() {
+                                "LICENSE_VERSION_INCOMPATIBLE".to_string()
+                            } else {
+                                "INVALID_LICENSE".to_string()
+                            },
                             message: error.to_string(),
                         },
                     }

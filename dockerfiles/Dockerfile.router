@@ -1,4 +1,7 @@
-FROM debian:bookworm-slim AS downloader
+# Must be declared before any FROM so it can be used in FROM stage selection.
+ARG DEBUG_IMAGE=false
+
+FROM debian:trixie-slim AS downloader
 ARG ROUTER_RELEASE=latest
 ARG ARTIFACT_URL=
 ARG CIRCLE_TOKEN=
@@ -20,7 +23,18 @@ WORKDIR /
 COPY download_and_validate_router.sh /tmp/download_and_validate_router.sh
 RUN chmod +x /tmp/download_and_validate_router.sh && /tmp/download_and_validate_router.sh
 
-FROM debian:bookworm-slim AS distro
+# Use a multi-stage build to install the debug tools if DEBUG_IMAGE is true
+FROM rust:slim-trixie AS install-debug-tools-true
+# We use the rust addr2line to avoid this error/perf issue https://github.com/iced-rs/iced/issues/2394
+RUN cargo install addr2line --locked --features="bin"
+RUN cargo install flamegraph --locked
+
+FROM rust:slim-trixie AS install-debug-tools-false
+# Do nothing
+
+FROM install-debug-tools-${DEBUG_IMAGE} AS install-debug-tools
+
+FROM debian:trixie-slim AS distro
 ARG DEBUG_IMAGE=false
 ARG REPO_URL=https://github.com/apollographql/router
 ARG BASE_VERSION
@@ -38,13 +52,17 @@ RUN \
   && apt-get install -y \
     ca-certificates
 
-# If debug image, install heaptrack and make a data directory
+# If debug image, install perf and heaptrack and make a data directory
 RUN \
   if [ "${DEBUG_IMAGE}" = "true" ]; then \
-    apt-get install -y heaptrack && \
+    apt-get install -y linux-perf heaptrack && \
     mkdir data && \
     chown router data; \
   fi
+
+# Copy the debug tools from the install-debug-tools stage if DEBUG_IMAGE was true.
+COPY --from=install-debug-tools /usr/local/cargo/bin/flamegraph* /usr/bin/
+COPY --from=install-debug-tools /usr/local/cargo/bin/addr2line* /usr/bin/
 
 # Clean up apt lists
 RUN rm -rf /var/lib/apt/lists/*

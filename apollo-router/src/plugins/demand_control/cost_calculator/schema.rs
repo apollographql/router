@@ -73,7 +73,10 @@ pub(in crate::plugins::demand_control) struct ListSizeDirectiveEntry {
 
 pub(in crate::plugins::demand_control) struct FieldDefinition {
     ty: ExtendedType,
-    cost_directive: Option<CostDirective>,
+    /// `@cost` from the field definition itself (per-resolution cost).
+    field_cost_directive: Option<CostDirective>,
+    /// `@cost` from the returned type definition (per-instance cost).
+    return_type_cost_directive: Option<CostDirective>,
     /// All `@listSize` directives on this field, each with its parsed sizedFields (if any).
     list_size_directive_entries: Vec<ListSizeDirectiveEntry>,
     requires_directive: Option<RequiresDirective>,
@@ -96,8 +99,10 @@ impl FieldDefinition {
                     field_definition.name,
                 ))
             })?;
-        let cost_directive =
-            CostSpecDefinition::cost_directive_from_field(schema, field_definition, field_type);
+        let field_cost_directive =
+            CostSpecDefinition::cost_directive_from_field(schema, field_definition);
+        let return_type_cost_directive =
+            CostSpecDefinition::cost_directive_from_return_type(schema, field_type);
         let directives = CostSpecDefinition::list_size_directives_from_field_definition(
             schema,
             field_definition,
@@ -133,7 +138,8 @@ impl FieldDefinition {
 
         Ok(Self {
             ty: field_type.clone(),
-            cost_directive,
+            field_cost_directive,
+            return_type_cost_directive,
             list_size_directive_entries,
             requires_directive,
             arguments,
@@ -144,8 +150,14 @@ impl FieldDefinition {
         &self.ty
     }
 
-    pub(in crate::plugins::demand_control) fn cost_directive(&self) -> Option<&CostDirective> {
-        self.cost_directive.as_ref()
+    pub(in crate::plugins::demand_control) fn field_cost_directive(
+        &self,
+    ) -> Option<&CostDirective> {
+        self.field_cost_directive.as_ref()
+    }
+
+    pub(in crate::plugins::demand_control) fn type_cost_directive(&self) -> Option<&CostDirective> {
+        self.return_type_cost_directive.as_ref()
     }
 
     /// All `@listSize` directives on this field, each with its parsed sizedFields (if any).

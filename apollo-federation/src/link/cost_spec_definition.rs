@@ -9,7 +9,6 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::name;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Value;
 use apollo_compiler::ty;
@@ -94,7 +93,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             if let Some(cost_directive) = cost_directive {
                 pos.insert_directive(
                     subgraph_schema,
-                    Component::from(Self::cost_directive(
+                    Node::from(Self::cost_directive(
                         subgraph_schema,
                         cost_directive.arguments.clone(),
                     )?),
@@ -106,7 +105,7 @@ macro_rules! propagate_demand_control_directives_to_position {
             if let Some(list_size_directive) = list_size_directive {
                 pos.insert_directive(
                     subgraph_schema,
-                    Component::from(Self::list_size_directive(
+                    Node::from(Self::list_size_directive(
                         subgraph_schema,
                         list_size_directive.arguments.clone(),
                     )?),
@@ -222,14 +221,45 @@ impl CostSpecDefinition {
     pub fn cost_directive_from_field(
         schema: &FederationSchema,
         field: &FieldDefinition,
-        ty: &ExtendedType,
     ) -> Option<CostDirective> {
         let directive_name = Self::cost_directive_name(schema);
         if let Some(name) = directive_name.as_ref() {
             CostDirective::from_directives(name, &field.directives)
-                .or(CostDirective::from_schema_directives(name, ty.directives()))
         } else {
             None
+        }
+    }
+
+    pub fn cost_directive_from_return_type(
+        schema: &FederationSchema,
+        ty: &ExtendedType,
+    ) -> Option<CostDirective> {
+        let directive_name = Self::cost_directive_name(schema);
+        let name = directive_name.as_ref()?;
+        match ty {
+            ExtendedType::Interface(iface) => {
+                let implementers_map = schema.schema().implementers_map();
+                implementers_map
+                    .get(&iface.name)
+                    .into_iter()
+                    .flat_map(|imp| imp.objects.iter())
+                    .filter_map(|obj_name| {
+                        let obj_type = schema.schema().types.get(obj_name)?;
+                        CostDirective::from_schema_directives(name, obj_type.directives())
+                    })
+                    .max_by(|a, b| a.weight().partial_cmp(&b.weight()).unwrap())
+            }
+            ExtendedType::Union(union_type) => union_type
+                .members
+                .iter()
+                .filter_map(|member_name| {
+                    let member_type = schema.schema().types.get(member_name.as_str())?;
+                    CostDirective::from_schema_directives(name, member_type.directives())
+                })
+                .max_by(|a, b| a.weight().partial_cmp(&b.weight()).unwrap()),
+            // NOTE: `@cost` is only applicable on ENUM, OBJECT or SCALAR, validation will already
+            // verify it is applied to correct target so below is safe
+            _ => CostDirective::from_schema_directives(name, ty.directives()),
         }
     }
 
@@ -285,7 +315,7 @@ impl CostSpecDefinition {
                 DirectiveLocation::Scalar,
             ],
             Some(DirectiveCompositionOptions {
-                supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
+                supergraph_specification: &|v| COST_VERSIONS.get_dyn_maximum_allowed_version(v),
                 static_argument_transform: None,
                 use_join_directive: false,
             }),
@@ -332,7 +362,7 @@ impl CostSpecDefinition {
             false,
             &[DirectiveLocation::FieldDefinition],
             Some(DirectiveCompositionOptions {
-                supergraph_specification: &|v| COST_VERSIONS.get_dyn_minimum_required_version(v),
+                supergraph_specification: &|v| COST_VERSIONS.get_dyn_maximum_allowed_version(v),
                 static_argument_transform: None,
                 use_join_directive: false,
             }),
@@ -397,7 +427,7 @@ impl CostDirective {
 
     pub(crate) fn from_schema_directives(
         directive_name: &Name,
-        directives: &apollo_compiler::schema::DirectiveList,
+        directives: &DirectiveList,
     ) -> Option<Self> {
         directives
             .get(directive_name)?

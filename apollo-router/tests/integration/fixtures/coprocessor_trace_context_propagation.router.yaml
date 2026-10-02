@@ -1,0 +1,22 @@
+coprocessor:
+  url: "<coprocessor-address>"
+  router:
+    request:
+      body: true
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+      common:
+        service_name: router
+        # Force every trace to sample regardless of the inbound request, so the
+        # coprocessor's outbound http_request span is always exported.
+        sampler: 1.0
+        parent_based_sampler: false
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 10ms

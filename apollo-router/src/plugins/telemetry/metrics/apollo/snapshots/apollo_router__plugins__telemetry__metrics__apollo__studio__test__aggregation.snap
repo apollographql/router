@@ -1,12 +1,10 @@
 ---
 source: apollo-router/src/plugins/telemetry/metrics/apollo/studio.rs
 expression: aggregated_metrics
-snapshot_kind: text
 ---
 {
   "traces_per_query": {
     "report_key_1": {
-      "traces": [],
       "stats_with_context": [
         [
           {

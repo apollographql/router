@@ -18,19 +18,6 @@ use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::uri::Scheme;
 use parking_lot::Mutex;
-use rhai::AST;
-use rhai::Array;
-use rhai::Dynamic;
-use rhai::Engine;
-use rhai::EvalAltResult;
-use rhai::FnPtr;
-use rhai::Instant;
-use rhai::Map;
-use rhai::Scope;
-use rhai::module_resolvers::FileModuleResolver;
-use rhai::plugin::*;
-use rhai::serde::from_dynamic;
-use rhai::serde::to_dynamic;
 use tower::BoxError;
 use uuid::Uuid;
 
@@ -44,7 +31,6 @@ use crate::configuration::expansion;
 use crate::context::PERSISTED_QUERY_ID;
 use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
 use crate::plugins::demand_control::COST_ACTUAL_KEY;
 use crate::plugins::demand_control::COST_BY_SUBGRAPH_ACTUAL_KEY;
 use crate::plugins::demand_control::COST_BY_SUBGRAPH_ESTIMATED_KEY;
@@ -55,6 +41,31 @@ use crate::plugins::demand_control::COST_STRATEGY_KEY;
 use crate::plugins::response_cache;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::query_planner::APOLLO_OPERATION_ID;
+
+// Helper module so we can skip formatting & interleave comments correctly. 💀
+#[rustfmt::skip]
+mod rhai_imports {
+    // Explicitly list those types that we actually use;
+    pub(super) use rhai::AST;
+    pub(super) use rhai::Array;
+    pub(super) use rhai::Dynamic;
+    pub(super) use rhai::Engine;
+    pub(super) use rhai::EvalAltResult;
+    pub(super) use rhai::FnPtr;
+    pub(super) use rhai::ImmutableString;
+    pub(super) use rhai::Instant;
+    pub(super) use rhai::Map;
+    pub(super) use rhai::NativeCallContext;
+    pub(super) use rhai::Scope;
+    pub(super) use rhai::combine_with_exported_module;
+    pub(super) use rhai::exported_module;
+    pub(super) use rhai::module_resolvers::FileModuleResolver;
+    pub(super) use rhai::plugin::export_module;
+    pub(super) use rhai::serde::from_dynamic;
+    pub(super) use rhai::serde::to_dynamic;
+}
+
+use rhai_imports::*;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
@@ -1283,6 +1294,12 @@ mod router_plugin {
             .map(|x| x.as_millis() as i64)
     }
 
+    // Test-only helper used to prove which thread a script runs on. Not part of the
+    // documented Rhai API.
+    pub(crate) fn current_thread_id() -> String {
+        format!("{:?}", std::thread::current().id())
+    }
+
     // Add query plan getter to execution request
     #[rhai_fn(get = "query_plan")]
     pub(crate) fn execution_request_query_plan_get(
@@ -1461,7 +1478,6 @@ impl Rhai {
             "APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS".into(),
             SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS.to_string().into(),
         );
-        global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
         global_variables.insert(
             "APOLLO_RESPONSE_CACHE_KEY".into(),
             response_cache::plugin::CONTEXT_CACHE_KEY.into(),

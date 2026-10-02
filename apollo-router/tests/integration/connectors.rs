@@ -596,131 +596,6 @@ mod coprocessor {
     }
 }
 
-mod entity_cache {
-    use std::path::PathBuf;
-
-    use tower::BoxError;
-
-    use crate::integration::IntegrationTest;
-    use crate::integration::common::graph_os_enabled;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
-        // Ensure that we have the test keys before running
-        // Note: The [IntegrationTest] ensures that these test credentials get
-        // set before running the router.
-        if !graph_os_enabled() {
-            return Ok(());
-        };
-
-        let mut router = IntegrationTest::builder()
-            .config(
-                r#"
-                preview_entity_cache:
-                  enabled: true
-                  subgraph:
-                    all:
-                      enabled: true
-        "#,
-            )
-            .supergraph(PathBuf::from_iter([
-                "tests",
-                "fixtures",
-                "connectors",
-                "quickstart.graphql",
-            ]))
-            .build()
-            .await;
-
-        router.start().await;
-        router
-            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` indirectly targets a connector-enabled subgraph, which is not supported"#)
-            .await;
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
-        // Ensure that we have the test keys before running
-        // Note: The [IntegrationTest] ensures that these test credentials get
-        // set before running the router.
-        if !graph_os_enabled() {
-            return Ok(());
-        };
-
-        let mut router = IntegrationTest::builder()
-            .config(
-                r#"
-                preview_entity_cache:
-                  enabled: true
-                  subgraph:
-                    all:
-                      enabled: false
-                    subgraphs:
-                      connectors:
-                        enabled: true
-        "#,
-            )
-            .supergraph(PathBuf::from_iter([
-                "tests",
-                "fixtures",
-                "connectors",
-                "quickstart.graphql",
-            ]))
-            .build()
-            .await;
-
-        router.start().await;
-        router
-            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` is explicitly configured for connector-enabled subgraph"#)
-            .await;
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn no_incompatible_warnings_with_overrides() -> Result<(), BoxError> {
-        // Ensure that we have the test keys before running
-        // Note: The [IntegrationTest] ensures that these test credentials get
-        // set before running the router.
-        if !graph_os_enabled() {
-            return Ok(());
-        };
-
-        let mut router = IntegrationTest::builder()
-            .config(
-                r#"
-                preview_entity_cache:
-                  enabled: true
-                  subgraph:
-                    all:
-                      enabled: false
-                    subgraphs:
-                      connectors:
-                        enabled: false
-        "#,
-            )
-            .supergraph(PathBuf::from_iter([
-                "tests",
-                "fixtures",
-                "connectors",
-                "quickstart.graphql",
-            ]))
-            .build()
-            .await;
-
-        router.start().await;
-        router
-            .assert_log_not_contains(
-                r#""subgraph":"connectors","message":"plugin `preview_entity_cache`"#,
-            )
-            .await;
-
-        Ok(())
-    }
-}
-
 mod headers {
     use std::path::PathBuf;
 
@@ -874,6 +749,7 @@ mod telemetry {
             telemetry:
               apollo:
                 errors:
+                  extended_error_metrics: disabled
                   subgraph:
                     all:
                       send: true
@@ -890,7 +766,7 @@ mod telemetry {
 
         router.start().await;
         router
-            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `extended_error_metrics` is enabled"#)
             .await;
 
         Ok(())
@@ -911,6 +787,7 @@ mod telemetry {
                 telemetry:
                   apollo:
                     errors:
+                      extended_error_metrics: disabled
                       subgraph:
                         all:
                           send: false
@@ -930,7 +807,7 @@ mod telemetry {
 
         router.start().await;
         router
-            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
+            .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `extended_error_metrics` is enabled"#)
             .await;
 
         Ok(())
@@ -991,7 +868,7 @@ mod telemetry {
                 telemetry:
                   apollo:
                     errors:
-                      preview_extended_error_metrics: enabled
+                      extended_error_metrics: enabled
                       subgraph:
                         all:
                           send: true
@@ -1026,6 +903,24 @@ mod tls {
     use crate::integration::IntegrationTest;
     use crate::integration::common::graph_os_enabled;
 
+    /// A `${file.PATH}` reference as a YAML scalar. JSON strings are valid YAML, and encoding
+    /// keeps the backslashes in a Windows path from being read as YAML escapes.
+    fn file_reference(path: &str) -> String {
+        serde_json::to_string(&format!("${{file.{path}}}")).expect("a string serializes")
+    }
+
+    #[test]
+    fn file_reference_keeps_windows_paths_intact() {
+        let path = r"C:\Users\runner\router\apollo-router/src/services/http/testdata/CA/ca.crt";
+        let yaml = format!("certificate_authorities: {}", file_reference(path));
+        let parsed: serde_yaml::Value =
+            serde_yaml::from_str(&yaml).expect("the reference is valid YAML");
+        assert_eq!(
+            parsed["certificate_authorities"].as_str(),
+            Some(format!("${{file.{path}}}").as_str())
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
         // Ensure that we have the test keys before running
@@ -1035,16 +930,21 @@ mod tls {
             return Ok(());
         };
 
+        // A missing `${file.PATH}` fails configuration loading, so reference a real CA.
+        let ca = file_reference(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/services/http/testdata/CA/ca.crt"
+        ));
         let mut router = IntegrationTest::builder()
-            .config(
+            .config(format!(
                 r#"
                 tls:
                   subgraph:
                     subgraphs:
                       connectors:
-                        certificate_authorities: "${file./path/to/product_ca.crt}"
-        "#,
-            )
+                        certificate_authorities: {ca}
+        "#
+            ))
             .supergraph(PathBuf::from_iter([
                 "tests",
                 "fixtures",

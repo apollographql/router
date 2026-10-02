@@ -18,24 +18,25 @@ jobs:
       actions: read
 
     steps:
-      # we only want certain folks to be able to do this to control spend (for now); currently that's just the graphos team
+      # we only want certain folks to be able to do this to control spend (for now); currently that's the router-core team
       # NOTE: hardcoded due to an issue with the GitHub PAT; update this list as team membership changes
       - name: Check team membership
         id: team-check
         env:
           COMMENTER: ${{ github.event.comment.user.login }}
+          GH_TOKEN: ${{ secrets.APOLLO_BOT2_GITHUB_PAT }}
         run: |
-          GRAPHOS_TEAM=(morriswchris BoD abernix Jephuff phryneas BobaFetters conwuegb alyssahursh carodewig aaronArinder rohan-b99 tayrrible jasmine-fernandes-apollo)
-          if [[ " ${GRAPHOS_TEAM[*]} " == *" $COMMENTER "* ]]; then
+          ROUTER_CORE_TEAM=(fnichol BrynCooke goto-bus-stop BobaFetters conwuegb alyssahursh aaronArinder rohan-b99)
+          if [[ " ${ROUTER_CORE_TEAM[*]} " == *" $COMMENTER "* ]]; then
             echo "is_member=true" >> $GITHUB_OUTPUT
           else
             echo "is_member=false" >> $GITHUB_OUTPUT
-            echo "::notice::$COMMENTER is not an active member of the team — skipping review."
+            echo "::notice::$COMMENTER is not a member of router-core — skipping review."
           fi
 
       - name: Checkout PR code
         if: steps.team-check.outputs.is_member == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: refs/pull/${{ github.event.issue.number }}/head
 
@@ -45,7 +46,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          claude_args: '--model claude-opus-4-8 --append-system-prompt "Always post a PR comment summarizing your decision, even if you decide to STOP without doing a full review."'
+          claude_args: '--model claude-fable-5 --append-system-prompt "Always post a PR comment summarizing your decision, even if you decide to STOP without doing a full review. Never launch a Task/Agent in background or async mode (i.e. never pass run_in_background: true, and never say you will wait for an agent and then end your turn) -- this is a one-shot headless run with no mechanism to resume the session when a background agent completes, so backgrounded work is silently lost and the review never gets posted. Launch every subagent synchronously: batch independent agent calls into a single turn and wait for all of them to return real results before proceeding. When the code-review command eligibility check says the PR already has a code review from an earlier run, treat that as disqualifying only if no commits have landed since that earlier review comment was posted -- compare the timestamp of the prior review comment against the timestamp of the most recent commit on the PR. If new commits were pushed after the last review comment, treat the PR as eligible and proceed with a fresh review of the current diff. Do not treat a release/version-bump/backport PR (eg. titled prep release, or a backport PR, or one opened by a release-automation bot) as automated-therefore-skippable in the eligibility check -- those still get a full review like any other PR."'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.issue.number }} --comment'

@@ -1,0 +1,46 @@
+{
+    "mocks": [
+        {
+            "request": {
+                "query": "query($representations: [_Any!]!, $movieResultParam: String) { _entities(representations: $representations) { ... on EntityCollectionSection { title artwork(params: $movieResultParam) } ... on GallerySection { artwork(params: $movieResultParam) } } }",
+                "variables": {
+                    "movieResultParam": "movieResultEnabled",
+                    "representations": [
+                        {"__typename": "EntityCollectionSection", "id": "ecs1"},
+                        {"__typename": "GallerySection", "id": "gs1"}
+                    ]
+                }
+            },
+            "response": {
+                "errors": [
+                    {
+                        "message": "Your request has been timed out",
+                        "extensions": {
+                            "code": "GATEWAY_TIMEOUT"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "request": {
+                "query": "query($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on EntityCollectionSection { title artwork(params: $articleResultParam) } ... on GallerySection { artwork(params: $articleResultParam) } } }",
+                "variables": {
+                    "articleResultParam": "articleResultEnabled",
+                    "representations": [
+                        {"__typename": "EntityCollectionSection", "id": "ecs2"},
+                        {"__typename": "GallerySection", "id": "gs2"}
+                    ]
+                }
+            },
+            "response": {
+                "data": {
+                    "_entities": [
+                        {"title": "ecs2 title", "artwork": "articleResultEnabled artwork"},
+                        {"artwork": "articleResultEnabled artwork"}
+                    ]
+                }
+            }
+        }
+    ]
+}

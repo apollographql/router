@@ -387,7 +387,7 @@ impl SelectionSet {
     // PORT_NOTE: in JS, this was called "normalize".
     // PORT_NOTE: in JS, this had a `recursive: false` flag, which would only apply the
     // simplification at the top level. This appears to be unused.
-    pub(super) fn flatten_unnecessary_fragments(
+    pub(crate) fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,

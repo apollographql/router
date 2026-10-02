@@ -1,5 +1,6 @@
 mod common;
 mod new;
+mod notes;
 mod pre_verify;
 mod prepare;
 mod reconcile;
@@ -8,6 +9,7 @@ mod status;
 
 use anyhow::Result;
 pub(crate) use new::New;
+pub(crate) use notes::Notes;
 pub(crate) use pre_verify::PreVerify;
 pub(crate) use prepare::Prepare;
 pub(crate) use reconcile::Reconcile;
@@ -29,6 +31,9 @@ pub enum Command {
 
     /// Show the current state of release work across all release lines.
     Status(Status),
+
+    /// Extract a version's CHANGELOG section — and optionally post to its GitHub Release body.
+    Notes(Notes),
 }
 
 impl Command {
@@ -39,6 +44,7 @@ impl Command {
             Command::PreVerify => PreVerify::run(),
             Command::Reconcile(command) => command.run(),
             Command::Status(command) => command.run(),
+            Command::Notes(command) => command.run(),
         }
     }
 }

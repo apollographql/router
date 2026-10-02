@@ -12,8 +12,6 @@ use http::StatusCode;
 use http_body_util::BodyExt;
 use http_body_util::Full;
 use multimap::MultiMap;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json::json;
 use tower::BoxError;
 use tower::Service;
@@ -25,9 +23,10 @@ struct EchoCoProcessor {
     configuration: Conf,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[apollo_configuration::configuration]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
+    #[config(required)]
     port: u16, // The port the custom echo server will listen to
 }
 
@@ -48,7 +47,7 @@ impl Plugin for EchoCoProcessor {
     // written in a language you're comfortable with.
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let web_endpoint =
-            Endpoint::from_router_service("/".to_string(), SimpleEndpoint {}.boxed());
+            Endpoint::from_router_service("/".to_string(), SimpleEndpoint {}.boxed_clone());
 
         let mut endpoints = MultiMap::new();
         let socket_addr: SocketAddr = format!("127.0.0.1:{}", self.configuration.port)
@@ -62,6 +61,7 @@ impl Plugin for EchoCoProcessor {
 
 // This is a simple server, that will do a couple of transforms to payloads and return it.
 // In real life you will implement this outside the router, in your favorite language.
+#[derive(Clone)]
 struct SimpleEndpoint {}
 
 impl Service<router::Request> for SimpleEndpoint {

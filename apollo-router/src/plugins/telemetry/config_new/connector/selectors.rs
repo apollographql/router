@@ -508,6 +508,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "label".into(),
         }
     }
@@ -578,6 +579,7 @@ mod tests {
                 key: response_key(),
                 problems: mapping_problems,
             },
+            break_status: None,
         }
     }
 
@@ -598,6 +600,7 @@ mod tests {
                 key: response_key(),
                 problems: vec![],
             },
+            break_status: None,
         }
     }
 
@@ -625,6 +628,7 @@ mod tests {
                 key: response_key(),
                 problems: vec![],
             },
+            break_status: None,
         }
     }
 

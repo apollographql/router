@@ -42,7 +42,7 @@ expression: response
   },
   "errors": [
     {
-      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "message": "HTTP fetch failed: 404: Not Found",
       "path": [
         "topProducts",
         0,
@@ -60,7 +60,7 @@ expression: response
       }
     },
     {
-      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "message": "HTTP fetch failed: subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
       "path": [
         "topProducts",
         0,
@@ -78,7 +78,7 @@ expression: response
       }
     },
     {
-      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "message": "HTTP fetch failed: 404: Not Found",
       "path": [
         "topProducts",
         0,
@@ -96,7 +96,7 @@ expression: response
       }
     },
     {
-      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "message": "HTTP fetch failed: subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
       "path": [
         "topProducts",
         0,
@@ -114,7 +114,7 @@ expression: response
       }
     },
     {
-      "message": "HTTP fetch failed from 'accounts': 404: Not Found",
+      "message": "HTTP fetch failed: 404: Not Found",
       "path": [
         "topProducts",
         1,
@@ -132,7 +132,7 @@ expression: response
       }
     },
     {
-      "message": "HTTP fetch failed from 'accounts': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
+      "message": "HTTP fetch failed: subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json",
       "path": [
         "topProducts",
         1,

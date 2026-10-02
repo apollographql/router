@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use apollo_redaction::Redacted;
 use aws_config::provider_config::ProviderConfig;
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::ProvideCredentials;
@@ -26,7 +27,6 @@ use http::Request;
 use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
@@ -39,13 +39,15 @@ use crate::services::router::body::RouterBody;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
-    access_key_id: String,
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
+    access_key_id: Redacted<String>,
     /// The secret key used to sign requests.
-    secret_access_key: String,
+    #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
+    secret_access_key: Redacted<String>,
     /// The AWS region this chain applies to.
     region: String,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
@@ -62,8 +64,8 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
         Self: 'a,
     {
         aws_credential_types::provider::future::ProvideCredentials::ready(Ok(Credentials::new(
-            self.access_key_id.clone(),
-            self.secret_access_key.clone(),
+            self.access_key_id.unredact().clone(),
+            self.secret_access_key.unredact().clone(),
             None,
             None,
             "apollo-router",
@@ -72,7 +74,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 }
 
 /// Configuration of the DefaultChainProvider
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
@@ -86,7 +88,7 @@ pub(crate) struct DefaultChainConfig {
 }
 
 /// Specify assumed role configuration.
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
@@ -99,7 +101,7 @@ pub(crate) struct AssumeRoleProvider {
 }
 
 /// Configure AWS sigv4 auth.
-#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
@@ -117,7 +119,7 @@ impl AWSSigV4Config {
                         &SdkConfig::builder()
                             .http_client(
                                 aws_smithy_http_client::Builder::new()
-                                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                                     .build_https(),
                             )
                             .sleep_impl(TokioSleep::new())
@@ -190,7 +192,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
         ProviderConfig::default()
             .with_http_client(
                 aws_smithy_http_client::Builder::new()
-                    .tls_provider(Provider::Rustls(CryptoMode::Ring))
+                    .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
                     .build_https(),
             )
             .with_sleep_impl(TokioSleep::new())
@@ -198,7 +200,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
     )
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
@@ -206,14 +208,17 @@ pub(crate) enum AuthConfig {
 }
 
 /// Configure subgraph authentication
+// Holds AWS credentials, so it cannot serialize its defaults: the schema declares them by hand.
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "AuthenticationSubgraphConfig")]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) all: Option<AuthConfig>,
     #[serde(default)]
+    #[schemars(extend("default" = {}))]
     /// Create a configuration that will apply only to a specific subgraph.
     pub(crate) subgraphs: HashMap<String, AuthConfig>,
 }
@@ -493,8 +498,8 @@ impl SubgraphAuth {
     pub(super) fn subgraph_service(
         &self,
         name: &str,
-        service: crate::services::subgraph::BoxService,
-    ) -> crate::services::subgraph::BoxService {
+        service: crate::services::subgraph::BoxCloneService,
+    ) -> crate::services::subgraph::BoxCloneService {
         if let Some(signing_params) = self.params_for_service(name) {
             ServiceBuilder::new()
                 .map_request(move |mut req: SubgraphRequest| {
@@ -504,7 +509,7 @@ impl SubgraphAuth {
                     req
                 })
                 .service(service)
-                .boxed()
+                .boxed_clone()
         } else {
             service
         }
@@ -523,6 +528,7 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    static_assertions::assert_not_impl_any!(AWSSigV4HardcodedConfig: serde::Serialize);
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
@@ -536,17 +542,31 @@ mod test {
     use super::*;
     use crate::Context;
     use crate::graphql::Request;
-    use crate::plugin::test::MockSubgraphService;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
+
+    #[test]
+    fn advertised_defaults_match_the_runtime_defaults() {
+        use crate::configuration::schema::advertised_defaults;
+
+        advertised_defaults::assert_describes_default::<Config>(
+            advertised_defaults::of_every_property("AuthenticationSubgraphConfig"),
+        );
+        advertised_defaults::assert_describes_default::<
+            crate::plugins::authentication::connector::Config,
+        >(advertised_defaults::of_every_property(
+            "AuthenticationConnectorConfig",
+        ));
+    }
 
     async fn test_signing_settings(service_name: &str) -> SigningSettings {
         let params: SigningParamsConfig = make_signing_params(
             &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                access_key_id: "id".to_string(),
-                secret_access_key: "secret".to_string(),
+                access_key_id: Redacted::new("id".to_string()),
+                secret_access_key: Redacted::new("secret".to_string()),
                 region: "us-east-1".to_string(),
                 service_name: service_name.to_string(),
                 assume_role: None,
@@ -638,30 +658,28 @@ mod test {
     async fn test_lattice_body_payload_should_be_unsigned() -> Result<(), BoxError> {
         let subgraph_request = example_request();
 
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                let http_request = get_signed_request(request, "products".to_string());
-                assert_eq!(
-                    "UNSIGNED-PAYLOAD",
-                    http_request
-                        .headers()
-                        .get("x-amz-content-sha256")
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                );
-                true
-            })
-            .returning(example_response);
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let http_request = get_signed_request(&request, "products".to_string());
+            assert_eq!(
+                "UNSIGNED-PAYLOAD",
+                http_request
+                    .headers()
+                    .get("x-amz-content-sha256")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+            );
+            responder.send_response(example_response(request).unwrap());
+        });
 
         let mut service = SubgraphAuth {
             signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                        access_key_id: "id".to_string(),
-                        secret_access_key: "secret".to_string(),
+                        access_key_id: Redacted::new("id".to_string()),
+                        secret_access_key: Redacted::new("secret".to_string()),
                         region: "us-east-1".to_string(),
                         service_name: "vpc-lattice-svcs".to_string(),
                         assume_role: None,
@@ -674,9 +692,10 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -684,37 +703,51 @@ mod test {
     async fn test_aws_sig_v4_headers() -> Result<(), BoxError> {
         let subgraph_request = example_request();
 
-        let mut mock = MockSubgraphService::new();
-        mock.expect_call()
-            .times(1)
-            .withf(|request| {
-                let http_request = get_signed_request(request, "products".to_string());
-                let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
-                let authorization_header_str = http_request.headers().get("authorization").unwrap().to_str().unwrap();
-                assert_eq!(match authorization_regex.find(authorization_header_str) {
+        let (mock, mut handle) = tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+        let driver = tokio::spawn(async move {
+            let (request, responder) = handle.next_request().await.unwrap();
+            let http_request = get_signed_request(&request, "products".to_string());
+            let authorization_regex = Regex::new(r"AWS4-HMAC-SHA256 Credential=id/\d{8}/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=[a-f0-9]{64}").unwrap();
+            let authorization_header_str = http_request
+                .headers()
+                .get("authorization")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                match authorization_regex.find(authorization_header_str) {
                     Some(m) => m.as_str(),
-                    None => "no match"
-                }, authorization_header_str);
-
-                let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
-                let x_amz_date_header_str = http_request.headers().get("x-amz-date").unwrap().to_str().unwrap();
-                assert_eq!(match x_amz_date_regex.find(x_amz_date_header_str) {
+                    None => "no match",
+                },
+                authorization_header_str
+            );
+            let x_amz_date_regex = Regex::new(r"\d{8}T\d{6}Z").unwrap();
+            let x_amz_date_header_str = http_request
+                .headers()
+                .get("x-amz-date")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                match x_amz_date_regex.find(x_amz_date_header_str) {
                     Some(m) => m.as_str(),
-                    None => "no match"
-                }, x_amz_date_header_str);
-
-                assert_eq!(http_request.headers().get("x-amz-content-sha256").unwrap(), "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c");
-
-                true
-            })
-            .returning(example_response);
+                    None => "no match",
+                },
+                x_amz_date_header_str
+            );
+            assert_eq!(
+                http_request.headers().get("x-amz-content-sha256").unwrap(),
+                "255959b4c6e11c1080f61ce0d75eb1b565c1772173335a7828ba9c13c25c0d8c"
+            );
+            responder.send_response(example_response(request).unwrap());
+        });
 
         let mut service = SubgraphAuth {
             signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                        access_key_id: "id".to_string(),
-                        secret_access_key: "secret".to_string(),
+                        access_key_id: Redacted::new("id".to_string()),
+                        secret_access_key: Redacted::new("secret".to_string()),
                         region: "us-east-1".to_string(),
                         service_name: "s3".to_string(),
                         assume_role: None,
@@ -727,9 +760,10 @@ mod test {
                 subgraphs: Default::default(),
             }),
         }
-        .subgraph_service("test_subgraph", mock.boxed());
+        .subgraph_service("test_subgraph", mock.boxed_clone());
 
         service.ready().await?.call(subgraph_request).await?;
+        crate::plugin::test::await_mock_driver(driver).await;
         Ok(())
     }
 
@@ -742,9 +776,9 @@ mod test {
         use super::*;
         use crate::Context;
         use crate::graphql::Request;
-        use crate::plugin::test::MockSubgraphService;
         use crate::query_planner::fetch::OperationKind;
         use crate::services::SubgraphRequest;
+        use crate::services::subgraph;
 
         async fn call_subgraph(
             name: &str,
@@ -770,17 +804,20 @@ mod test {
                 .subgraph_name(name.to_string())
                 .build();
 
-            let mut mock = MockSubgraphService::new();
-            mock.expect_call()
-                .times(1)
-                .returning(super::example_response);
+            let (mock, mut handle) =
+                tower_test::mock::pair::<subgraph::Request, subgraph::Response>();
+            let driver = tokio::spawn(async move {
+                let (req, responder) = handle.next_request().await.unwrap();
+                responder.send_response(super::example_response(req).unwrap());
+            });
 
             SubgraphAuth { signing_params }
-                .subgraph_service(name, mock.boxed())
+                .subgraph_service(name, mock.boxed_clone())
                 .ready()
                 .await?
                 .call(request)
                 .await?;
+            crate::plugin::test::await_mock_driver(driver).await;
 
             Ok(())
         }
@@ -793,8 +830,8 @@ mod test {
             let signing_params = Arc::new(
                 make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
-                        access_key_id: "id".to_string(),
-                        secret_access_key: "secret".to_string(),
+                        access_key_id: Redacted::new("id".to_string()),
+                        secret_access_key: Redacted::new("secret".to_string()),
                         region: "us-east-1".to_string(),
                         service_name: "execute-api".to_string(),
                         assume_role: None,
@@ -853,8 +890,8 @@ mod test {
                         make_signing_params(
                             &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(
                                 AWSSigV4HardcodedConfig {
-                                    access_key_id: "id".to_string(),
-                                    secret_access_key: "secret".to_string(),
+                                    access_key_id: Redacted::new("id".to_string()),
+                                    secret_access_key: Redacted::new("secret".to_string()),
                                     region: "us-east-1".to_string(),
                                     service_name: "execute-api".to_string(),
                                     assume_role: None,
@@ -1049,5 +1086,32 @@ mod test {
         })
         .join()
         .unwrap()
+    }
+
+    #[test]
+    fn redacted_aws_credentials_are_hidden_from_debug_output() {
+        let config = AWSSigV4HardcodedConfig {
+            access_key_id: Redacted::new("AKIASCRATCHACCESSKEY".to_string()), // gitleaks:allow
+            secret_access_key: Redacted::new("wJalrXUtSecretAccessKeyScratch123".to_string()),
+            region: "us-east-1".to_string(),
+            service_name: "s3".to_string(),
+            assume_role: None,
+        };
+
+        let debug = format!("{config:?}");
+        assert!(
+            !debug.contains("AKIASCRATCHACCESSKEY"), // gitleaks:allow
+            "access key ID must not appear in Debug output: {debug}"
+        );
+        assert!(
+            !debug.contains("wJalrXUtSecretAccessKeyScratch123"),
+            "secret access key must not appear in Debug output: {debug}"
+        );
+
+        assert_eq!(config.access_key_id.unredact(), "AKIASCRATCHACCESSKEY"); // gitleaks:allow
+        assert_eq!(
+            config.secret_access_key.unredact(),
+            "wJalrXUtSecretAccessKeyScratch123"
+        );
     }
 }

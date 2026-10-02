@@ -21,8 +21,6 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt as _;
 use tower_service::Service;
 use tracing::Instrument;
 use tracing::Span;
@@ -38,20 +36,14 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
-use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::Plugins;
-use crate::services::execution;
-use crate::services::fetch_service::FetchServiceFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::services::fetch_service::FetchService;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
@@ -62,11 +54,11 @@ use crate::spec::query::subselections::BooleanValues;
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
+    pub(crate) fetch_service: FetchService,
     pub(crate) configuration: Arc<Configuration>,
     /// Subscription config if enabled
-    subscription_config: Option<SubscriptionConfig>,
-    apollo_telemetry_config: Option<ApolloTelemetryConfig>,
+    pub(crate) subscription_config: Option<SubscriptionConfig>,
+    pub(crate) apollo_telemetry_config: Option<ApolloTelemetryConfig>,
 }
 
 type CloseSignal = broadcast::Sender<()>;
@@ -149,7 +141,7 @@ impl ExecutionService {
             .query_plan
             .execute(
                 &context,
-                &self.fetch_service_factory,
+                &self.fetch_service,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
                 &self.subgraph_schemas,
@@ -297,7 +289,6 @@ impl ExecutionService {
         let variables_set = query.defer_variables_set(variables);
 
         tracing::debug_span!("format_response").in_scope(|| {
-            let mut paths = Vec::new();
             if !query.unauthorized.paths.is_empty() {
                 query.unauthorized.log_unauthorized_paths();
                 query
@@ -305,23 +296,13 @@ impl ExecutionService {
                     .update_response_with_unauthorized_path_errors(&mut response);
             }
 
-            if let Some(filtered_query) = query.filtered_query.as_ref() {
-                paths = filtered_query.format_response(
-                    &mut response,
-                    variables.clone(),
-                    schema.api_schema(),
-                    variables_set,
-                    insert_result_coercion_errors,
-                );
-            }
-
-            paths.extend(query.format_response(
+            let paths = query.format_response_filtered_then_original(
                 &mut response,
                 variables.clone(),
                 schema.api_schema(),
                 variables_set,
                 insert_result_coercion_errors,
-            ));
+            );
 
             for error in response.errors.iter_mut() {
                 if let Some(path) = &mut error.path {
@@ -370,9 +351,12 @@ impl ExecutionService {
 
                 response.errors.retain(|error| match &error.path {
                     None => true,
-                    Some(error_path) => {
-                        query.contains_error_path(&response.label, error_path, variables_set)
-                    }
+                    Some(error_path) => query.contains_error_path(
+                        &response.label,
+                        response.path.as_ref(),
+                        error_path,
+                        variables_set,
+                    ),
                 });
 
                 response.label = rewrite_defer_label(&response);
@@ -449,8 +433,12 @@ impl ExecutionService {
                     .filter(|error| match &error.path {
                         None => false,
                         Some(error_path) => {
-                            query.contains_error_path(&response.label, error_path, variables_set)
-                                && error_path_matches_response_path(error_path, &path)
+                            query.contains_error_path(
+                                &response.label,
+                                response.path.as_ref(),
+                                error_path,
+                                variables_set,
+                            ) && error_path_matches_response_path(error_path, &path)
                         }
                     })
                     .cloned()
@@ -555,6 +543,7 @@ fn filter_stream(
 ) -> ReceiverStream<Response> {
     let (mut sender, receiver) = mpsc::channel(10);
 
+    // XXX(@goto-bus-stop): we ignore the error here, doesn't seem great?
     tokio::task::spawn(async move {
         let mut seen_last_message =
             consume_responses(first, &mut stream, &mut sender, stream_mode).await?;
@@ -571,10 +560,10 @@ fn filter_stream(
                 StreamMode::Defer => Response::builder().has_next(false).build(),
                 StreamMode::Subscription => Response::builder().subscribed(false).build(),
             };
-            sender.send(res).await?;
+            sender.send(res).await.map_err(|_| SendError(()))?;
         }
 
-        Ok::<_, SendError<Response>>(())
+        Ok::<_, SendError<()>>(())
     });
 
     receiver.into()
@@ -586,7 +575,7 @@ async fn consume_responses(
     stream: &mut Receiver<Response>,
     sender: &mut Sender<Response>,
     stream_mode: StreamMode,
-) -> Result<bool, SendError<Response>> {
+) -> Result<bool, SendError<()>> {
     loop {
         match stream.try_recv() {
             Err(err) => {
@@ -594,7 +583,10 @@ async fn consume_responses(
                     // no messages available, but the channel is not closed
                     // this means more deferred responses can come
                     TryRecvError::Empty => {
-                        sender.send(current_response).await?;
+                        sender
+                            .send(current_response)
+                            .await
+                            .map_err(|_| SendError(()))?;
                         return Ok(false);
                     }
                     // the channel is closed
@@ -606,7 +598,10 @@ async fn consume_responses(
                             StreamMode::Subscription => current_response.subscribed = Some(false),
                         }
 
-                        sender.send(current_response).await?;
+                        sender
+                            .send(current_response)
+                            .await
+                            .map_err(|_| SendError(()))?;
                         return Ok(true);
                     }
                 }
@@ -614,55 +609,13 @@ async fn consume_responses(
             // there might be other deferred responses after this one,
             // so we should call `try_next` again
             Ok(response) => {
-                sender.send(current_response).await?;
+                sender
+                    .send(current_response)
+                    .await
+                    .map_err(|_| SendError(()))?;
                 current_response = response;
             }
         }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct ExecutionServiceFactory {
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) plugins: Arc<Plugins>,
-    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
-    pub(crate) configuration: Arc<Configuration>,
-}
-
-impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
-    type Service = execution::BoxService;
-
-    fn create(&self) -> Self::Service {
-        let subscription_plugin_conf = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-            .map(|p| p.config.clone());
-        let apollo_telemetry_conf = self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == "apollo.telemetry")
-            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
-            .map(|t| t.config.apollo.clone());
-
-        ServiceBuilder::new()
-            .service(
-                self.plugins.iter().rev().fold(
-                    crate::services::execution::service::ExecutionService {
-                        schema: self.schema.clone(),
-                        fetch_service_factory: self.fetch_service_factory.clone(),
-                        subscription_config: subscription_plugin_conf,
-                        subgraph_schemas: self.subgraph_schemas.clone(),
-                        apollo_telemetry_config: apollo_telemetry_conf,
-                        configuration: Arc::clone(&self.configuration),
-                    }
-                    .boxed(),
-                    |acc, (_, e)| e.execution_service(acc),
-                ),
-            )
-            .boxed()
     }
 }
 

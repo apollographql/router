@@ -13,9 +13,7 @@ pub(super) struct HeadersIncompatPlugin {
 impl HeadersIncompatPlugin {
     pub(super) fn from_config(config: &Configuration) -> Option<Self> {
         config
-            .apollo_plugins
-            .plugins
-            .get("headers")
+            .document_section("headers")
             .and_then(|headers| serde_json::from_value(headers.clone()).ok())
             .map(|subgraphs| HeadersIncompatPlugin { config: subgraphs })
     }

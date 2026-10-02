@@ -355,9 +355,10 @@ where
         match http_request::<Query>(client, url.as_str(), request_body).await {
             Ok(response) => match response.data.map(Into::into) {
                 None => {
-                    f64_histogram!(
-                        "apollo.router.uplink.fetch.duration.seconds",
+                    f64_histogram_with_unit!(
+                        "apollo.router.uplink.fetch.duration",
                         "Duration of Apollo Uplink fetches.",
+                        "s",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -370,9 +371,10 @@ where
                     id,
                     delay,
                 }) => {
-                    f64_histogram!(
-                        "apollo.router.uplink.fetch.duration.seconds",
+                    f64_histogram_with_unit!(
+                        "apollo.router.uplink.fetch.duration",
                         "Duration of Apollo Uplink fetches.",
+                        "s",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -395,9 +397,10 @@ where
                     }
                 }
                 Some(UplinkResponse::Unchanged { id, delay }) => {
-                    f64_histogram!(
-                        "apollo.router.uplink.fetch.duration.seconds",
+                    f64_histogram_with_unit!(
+                        "apollo.router.uplink.fetch.duration",
                         "Duration of Apollo Uplink fetches.",
+                        "s",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -410,9 +413,10 @@ where
                     code,
                     retry_later,
                 }) => {
-                    f64_histogram!(
-                        "apollo.router.uplink.fetch.duration.seconds",
+                    f64_histogram_with_unit!(
+                        "apollo.router.uplink.fetch.duration",
                         "Duration of Apollo Uplink fetches.",
+                        "s",
                         now.elapsed().as_secs_f64(),
                         query = query,
                         url = url.to_string(),
@@ -428,9 +432,10 @@ where
                 }
             },
             Err(err) => {
-                f64_histogram!(
-                    "apollo.router.uplink.fetch.duration.seconds",
+                f64_histogram_with_unit!(
+                    "apollo.router.uplink.fetch.duration",
                     "Duration of Apollo Uplink fetches.",
+                    "s",
                     now.elapsed().as_secs_f64(),
                     query = query,
                     url = url.to_string(),

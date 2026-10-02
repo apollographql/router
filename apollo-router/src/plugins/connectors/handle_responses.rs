@@ -44,6 +44,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::fetch::AddSubgraphNameExt;
+use crate::services::http::IncompleteResponseBody;
 
 // --- ERRORS ------------------------------------------------------------------
 
@@ -105,9 +106,10 @@ where
         Ok(response) => {
             let (parts, body) = response.into_parts();
 
-            let result = Ok(TransportResponse::Http(HttpResponse {
-                inner: parts.clone(),
-            }));
+            let mut result: Result<TransportResponse, Error> =
+                Ok(TransportResponse::Http(HttpResponse {
+                    inner: parts.clone(),
+                }));
 
             let make_err = |message: String, code: &str| -> Box<RuntimeError> {
                 let mut err = RuntimeError::new(message, &response_key);
@@ -142,6 +144,9 @@ where
                 .extensions()
                 .with_lock(|e| e.get::<ConnectorResponseSizeLimit>().copied());
 
+            // Whether the body failed to arrive in full for a reason of the source's own, as
+            // opposed to the router cutting it off at the response size limit.
+            let mut body_incomplete = false;
             let body_result: Result<_, Box<RuntimeError>> = match response_size_limit {
                 Some(ConnectorResponseSizeLimit(limit)) => {
                     Limited::new(body, limit)
@@ -159,15 +164,22 @@ where
                                     .record("apollo.connector.response.aborted", "response_size_limit");
                                 make_limit_err(limit)
                             } else {
+                                body_incomplete = true;
                                 make_invalid_response_err()
                             }
                         })
                 }
-                None => body
-                    .collect()
-                    .await
-                    .map_err(|_| make_invalid_response_err()),
+                None => body.collect().await.map_err(|_| {
+                    body_incomplete = true;
+                    make_invalid_response_err()
+                }),
             };
+            if body_incomplete && let Ok(TransportResponse::Http(http_response)) = &mut result {
+                http_response
+                    .inner
+                    .extensions
+                    .insert(IncompleteResponseBody);
+            }
 
             let deserialized_body = body_result.and_then(|body| {
                 let body = body.to_bytes();
@@ -259,6 +271,7 @@ where
         subgraph_name: connector.id.subgraph_name.to_string(),
         transport_result: result,
         mapped_response,
+        break_status: None,
     }
 }
 
@@ -334,6 +347,7 @@ fn log_connectors_event(
                     key: response_key,
                     problems: vec![],
                 },
+                break_status: None,
             };
             if event.condition.evaluate_response(&response) {
                 Some(event.level)
@@ -397,6 +411,7 @@ mod tests {
     use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::runtime::errors::RuntimeError;
+    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
@@ -406,8 +421,30 @@ mod tests {
     use crate::Context;
     use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
+    use crate::services::http::IncompleteResponseBody;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
+
+    /// `->withError` has to be reachable from a connector schema, and the
+    /// `is_public()` gate that decides so cannot be observed from
+    /// apollo-federation's own tests: `ArrowMethod::lookup` resolves every
+    /// method under `cfg!(test)`, public or not. Here apollo-federation is a
+    /// dependency compiled without `--test`, so the gate is live and demoting
+    /// `->withError` back to the `future` namespace fails this test.
+    #[test]
+    fn with_error_is_available_to_connector_schemas() {
+        let selection =
+            JSONSelection::parse("id status: code->withError('unrecognized type code')").unwrap();
+
+        let (value, errors) = selection.apply_to(&json!({ "id": "1", "code": 7 }));
+
+        // The value flows through untouched: ->withError records, never rewrites.
+        assert_eq!(value, Some(json!({ "id": "1", "status": 7 })));
+        assert_eq!(
+            errors.iter().map(|error| error.message()).collect_vec(),
+            vec!["unrecognized type code"],
+        );
+    }
 
     #[test]
     fn from_runtime_error_transfers_span_event_emitted_flag() {
@@ -466,6 +503,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -581,6 +619,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -697,6 +736,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -824,6 +864,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -955,6 +996,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1240,6 +1282,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1338,6 +1381,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: IndexMap::from_iter([(Namespace::Status, Default::default())]),
             error_settings,
+            output_type: None,
             label: Label::from("test label"),
         });
 
@@ -1446,6 +1490,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "test label".into(),
         })
     }
@@ -1527,6 +1572,18 @@ mod tests {
         )
         .await;
 
+        // The router cut this body off itself, so it must not be counted against the source.
+        let Ok(TransportResponse::Http(http_response)) = &result.transport_result else {
+            panic!("the source answered: {:?}", result.transport_result);
+        };
+        assert!(
+            http_response
+                .inner
+                .extensions
+                .get::<IncompleteResponseBody>()
+                .is_none()
+        );
+
         let graphql_response =
             super::aggregate_responses(vec![result.mapped_response], Context::new())
                 .unwrap()
@@ -1537,6 +1594,47 @@ mod tests {
             errors[0].message.contains("exceeded limit of 5 bytes"),
             "unexpected error message: {}",
             errors[0].message
+        );
+    }
+
+    /// A connection that drops part of the way through the body keeps the status the headers
+    /// carried, so the transport result is marked for the circuit breaker to tell it apart from
+    /// an answer.
+    #[tokio::test]
+    async fn process_response_marks_a_body_that_did_not_arrive_in_full() {
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let body = router::body::from_result_stream(futures::stream::iter([
+            Ok(bytes::Bytes::from_static(br#"{"data":"#)),
+            Err(std::io::Error::from(std::io::ErrorKind::ConnectionReset)),
+        ]));
+        let response = http::Response::builder().body(body).unwrap();
+
+        let result = process_response(
+            Ok(response),
+            key,
+            make_connector(),
+            &Context::new(),
+            (None, Default::default()),
+            None,
+            make_supergraph_request(),
+            Default::default(),
+        )
+        .await;
+
+        let Ok(TransportResponse::Http(http_response)) = &result.transport_result else {
+            panic!("the headers arrived: {:?}", result.transport_result);
+        };
+        assert_eq!(http_response.inner.status, http::StatusCode::OK);
+        assert!(
+            http_response
+                .inner
+                .extensions
+                .get::<IncompleteResponseBody>()
+                .is_some()
         );
     }
 
@@ -1586,6 +1684,7 @@ mod tests {
                 source_extensions: None,
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1716,6 +1815,7 @@ mod tests {
                 source_extensions: None,
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
+            output_type: None,
             label: "test label".into(),
         });
 
@@ -1821,6 +1921,7 @@ mod tests {
                 ),
                 connect_is_success: Some(JSONSelection::parse("$status->eq(200)").unwrap()),
             },
+            output_type: None,
             label: "test label".into(),
         });
 

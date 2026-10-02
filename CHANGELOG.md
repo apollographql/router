@@ -54,8 +54,6 @@ Off by default; existing deployments see no behavior change.
 
 By [@aaronArinder](https://github.com/aaronArinder) in https://github.com/apollographql/router/pull/9811
 
-
-
 # [2.16.1] - 2026-07-20
 
 ## 🐛 Fixes

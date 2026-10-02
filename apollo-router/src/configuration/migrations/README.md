@@ -22,7 +22,12 @@ actions:
     path: some.destination
   - type: add
     path: some.destination
+    name: someName
     value: someValue
+  - type: change
+    path: some.destination
+    from: oldValue
+    to: newValue
   - type: log
     level: error
     path: some.source
@@ -30,6 +35,17 @@ actions:
 ```
 
 Each action is applied in order. Use the following formats for from, to and path.
+
+## Actions
+
+| action | description |
+---------|-------------|
+| move | Moves the value at `from` to `to`, removing `from`. No-op if `from` doesn't exist. |
+| copy | Copies the value at `from` to `to`, leaving `from` in place. No-op if `from` doesn't exist. |
+| delete | Removes the value at `path`. No-op if `path` doesn't exist. |
+| add | Sets `path.name` to `value`. Only applies if `path` already exists and `path.name` does not — parent structure is never created. |
+| change | Replaces the value at `path` with `to`, but only if it currently equals `from`. No-op if `path` doesn't exist or holds a different value. `from` and `to` are compared/written as whole YAML values, so either may be a scalar, a map or a list. |
+| log | Migrates nothing; just logs `log` at `level` when `path` matches something. Useful when moving a feature from experimental to GA in a way that isn't backward compatible. |
 
 ## Getter (from)
 | syntax | description |
@@ -60,3 +76,6 @@ In future we will be able to use these files to support offline migrations.
 
 # Testing
 Once you have made a new migration place a config file in `testdata/migrations`. It will automatically be picked up by the `upgrade_old_configuration` test.
+
+
+The fixture should contain the **old** configuration, i.e. the format your migration upgrades from, not the new one. For example, the fixture for a migration that renames `Continue` to `continue` still uses `Continue`. The `upgrade_old_configuration` test runs every file in that folder through the migrations and then validates the migrated result against the current configuration schema, so a fixture that is already in the new format proves nothing about the migration.

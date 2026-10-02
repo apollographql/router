@@ -88,16 +88,6 @@ You can attach custom attributes using [router selectors](/router/configuration/
 - `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
-## Session
-
-- `apollo.router.session.count.active` - Number of in-flight GraphQL requests. **Deprecated**: use `http.server.active_requests` instead.
-
-<Note>
-
-`apollo.router.session.count.active` is a legacy Apollo-specific metric. Apollo recommends using [`http.server.active_requests`](/graphos/routing/observability/router-telemetry-otel/enabling-telemetry/instruments#opentelemetry-standard-instruments) instead, which follows OpenTelemetry semantic conventions and is the standard way to measure in-flight HTTP requests. `apollo.router.session.count.active` might be removed in a future release.
-
-</Note>
-
 ## Cache
 
 - `apollo.router.cache.size` — Number of entries in the cache
@@ -172,7 +162,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 
 ## Performance
 
-- `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
+- `apollo.router.schema.load.duration` - Time spent loading the schema in seconds.
 - `apollo.router.request.memory` - Histogram of memory allocated during request processing, in bytes. Tracks memory allocation patterns for the entire request lifecycle, including GraphQL parsing, validation, query planning, response composition, and plugin execution. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `router.request`)
@@ -180,10 +170,23 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 ## Query planning
 
 - `apollo.router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
-- `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
+- `apollo.router.query_planning.warmup.operations` - Counter of operations processed during query planner warm-up. Together with `apollo.router.query_planning.warmup.operations.expected`, this lets you compute warm-up coverage (planned / expected). Attributes:
+  - `outcome`: The result of warming up the operation. Shares the `apollo.router.query_planning.plan.duration` values (`success`, `timeout`, `cancelled`, `error`), plus `memory_limit` for memory-limit cancellations and `reused` for operations whose plan was carried over from the previous cache (or already present) rather than planned fresh.
+  - `source`: Where the operation came from (`persisted_query` for the persisted-query manifest, `cache` for operations carried over from the previous in-memory cache)
+- `apollo.router.query_planning.warmup.operations.expected` - Counter of operations that warm-up intended to plan. Attributes:
+  - `source`: Where the operation came from (`persisted_query`, `cache`)
+- `apollo.router.query_planning.warmup.backpressure` - Counter of the number of times warm-up retried after a temporary compute-backpressure error. Attributes:
+  - `source`: Where the operation came from (`persisted_query`, `cache`)
+  - `phase`: The warm-up phase where backpressure occurred (`parse` for document parsing, `plan` for the planner call)
+- `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only. Attributes:
+  - `planner`: The query planner implementation that produced the plan (for example, `rust`)
+  - `outcome`: The result of planning the operation (`success`, `timeout`, `cancelled`, `error`)
+  - `job.type`: The compute-job type that produced the plan (`query_planning` for a regular request, `query_planning_warmup` for query planner warm-up), matching the `job.type` attribute on `apollo.router.compute_jobs.duration`
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.plan.evaluated_plans` - Histogram of the number of evaluated query plans.
 - `apollo.router.query_planning.plan.evaluated_paths` - Histogram of the number of paths (including intermediate ones) the planner considers before generating a plan. High values often correlate with long planning times on complex schemas or queries. Tune the limits as described in [Tuning query planner limits](/graphos/routing/query-planning/query-planning-best-practices#tuning-query-planner-limits).
+- `apollo.router.query_planning.plan.fuel_consumed` - Histogram of the fuel the [incremental query planner](/graphos/routing/query-planning/incremental-query-planner) spends improving on its first complete plan. Only recorded when the incremental planner is enabled.
+- `apollo.router.query_planning.plan.fuel_remaining` - Histogram of the fuel left when the incremental query planner stops searching. A value of `0` means the planner ran out of fuel before it finished exploring alternatives. Only recorded when the incremental planner is enabled. Both fuel histograms use the buckets `0`, `1`, `10`, `100`, `1000`, `10000`, `100000`, and `1000000` instead of the global `buckets` setting.
 - `apollo.router.query_planner.memory` - Histogram of memory allocated during query planning, in bytes. Tracks memory allocation patterns specifically for query planning operations executed in the compute job thread pool. Attributes:
   - `allocation.type`: The type of memory operation (`allocated`, `deallocated`, `zeroed`, `reallocated`)
   - `context`: The context name where the allocation occurred (e.g., `query_planning`)
@@ -210,7 +213,7 @@ The `apollo.router.cache.redis.errors` metric also includes an `error_type` attr
 
 </Tip>
 
-- `apollo.router.uplink.fetch.duration.seconds` - Uplink request duration, attributes:
+- `apollo.router.uplink.fetch.duration` - Uplink request duration, attributes:
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `License`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
@@ -292,8 +295,10 @@ telemetry:
             subgraph.name: true
             client.name: true
 ```
-- `apollo.router.operations.subscriptions.terminated.subgraph` - Number of subgraph WebSocket connections closed by the subgraph. Incremented once per subgraph connection closure. Each deduplicated client sharing that connection will also emit a corresponding `terminated` event with `reason=server_close`. Attributes:
+- `apollo.router.operations.subscriptions.terminated.subgraph` - Number of subgraph WebSocket subscriptions ended by the subgraph closing the connection. Incremented once per subscription that terminates because of a subgraph-side closure. When `max_reconnect_attempts > 0`, intermediate closures that are recovered by a successful reconnect are not counted — only the final closure that ends the subscription (either a normal server-sent `complete` or the closure after all reconnect attempts are exhausted) increments this counter. Each deduplicated client sharing that subscription will also emit a corresponding `terminated.client` event with `reason=server_close`. Attributes:
   - `subgraph.name`: The name of the subgraph that closed the connection.
+- `apollo.router.operations.subscriptions.reconnect` - Number of subgraph WebSocket reconnect attempts. Incremented once per attempt when `max_reconnect_attempts > 0` is configured and the connection drops unexpectedly. Counts only attempts that actually issue a handshake — a closing signal received during the reconnect delay or during the handshake itself short-circuits without incrementing. Attributes:
+  - `subgraph.name`: The name of the subgraph being reconnected to.
 
 ## Batching
 
@@ -312,12 +317,12 @@ telemetry:
 
 - `apollo.router.telemetry.studio.reports` - The number of reports submitted to GraphOS Studio by the router.
   - `report.type`: The type of report submitted: "traces" or "metrics"
-  - `report.protocol`: Either "apollo" or "otlp", depending on the otlp_tracing_sampler configuration.
+  - `report.protocol`: "apollo" for usage report metrics, "otlp" for traces.
 
 ## Telemetry
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
-  - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
+  - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
 - `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket.

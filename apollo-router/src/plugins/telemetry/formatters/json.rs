@@ -180,9 +180,7 @@ where
 
         // Get otel attributes
         {
-            let otel_attributes = ext
-                .get::<OtelData>()
-                .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+            let otel_attributes = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes);
             if let Some(otel_attributes) = otel_attributes {
                 for kv in otel_attributes.iter().filter(|kv| {
                     let key_name = kv.key.as_str();
@@ -353,17 +351,10 @@ where
             let mut serializer = serializer.serialize_map(None)?;
 
             if self.config.display_timestamp {
-                #[cfg(test)]
-                {
-                    serializer.serialize_entry("timestamp", "[timestamp]")?;
-                }
-                #[cfg(not(test))]
-                {
-                    let timestamp = time::OffsetDateTime::now_utc()
-                        .format(&time::format_description::well_known::Iso8601::DEFAULT)
-                        .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
-                    serializer.serialize_entry("timestamp", &timestamp)?;
-                }
+                let timestamp = time::OffsetDateTime::now_utc()
+                    .format(&time::format_description::well_known::Iso8601::DEFAULT)
+                    .map_err(|e| serde::ser::Error::custom(e.to_string()))?;
+                serializer.serialize_entry("timestamp", &timestamp)?;
             }
 
             if self.config.display_level {
@@ -523,8 +514,8 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
         let ext = root_span.extensions();
         // Extract dd_trace_id, this could be in otel data or log attributes
         if let Some(otel_data) = ext.get::<OtelData>()
-            && let Some(attributes) = otel_data.builder.attributes.as_ref()
-            && let Some(kv) = attributes
+            && let Some(kv) = otel_data
+                .attributes
                 .iter()
                 .find(|kv| kv.key.as_str() == "dd.trace_id")
         {
@@ -558,9 +549,7 @@ where
 
             // Get otel attributes
             {
-                let otel_attributes = ext
-                    .get::<OtelData>()
-                    .and_then(|otel_data| otel_data.builder.attributes.as_ref());
+                let otel_attributes = ext.get::<OtelData>().map(|otel_data| &otel_data.attributes);
                 if let Some(otel_attributes) = otel_attributes {
                     attributes.extend(
                         otel_attributes
@@ -639,6 +628,9 @@ impl fmt::Debug for WriteAdaptor<'_> {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry::InstrumentationScope;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use tracing::subscriber;
     use tracing_core::Event;
     use tracing_core::Subscriber;
@@ -653,6 +645,11 @@ mod test {
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
     use crate::plugins::telemetry::otel;
+
+    fn make_tracer() -> opentelemetry_sdk::trace::Tracer {
+        SdkTracerProvider::default()
+            .tracer_with_scope(InstrumentationScope::builder("test").build())
+    }
 
     struct RequiresDatadogLayer;
     impl<S> Layer<S> for RequiresDatadogLayer
@@ -675,7 +672,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer().with_tracer(make_tracer())),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -690,7 +687,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
@@ -707,7 +704,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynAttributeLayer)
-                .with(otel::layer().force_sampling()),
+                .with(otel::layer()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

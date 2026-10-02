@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.2:subgraph:user:type:Query:hash:ccd882a1b807924d239294989e07e5564019da5d171b08db6fddefd883d0883a:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:user:type:Query:hash:d63d46fceb2f3d645954f0f715ff6edaeeeb62061b8b0ef908c7d0676aaf8a1f:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "currentUser",
       "subgraph-user",
@@ -60,12 +60,12 @@ expression: cache_keys
     ]
   },
   {
-    "key": "version:1.2:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:0367f76631939f4bc11ce32df88c509648c63b8c2bb8654242185c9b9f0c95b1:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:orga:type:Organization:representation:f6e8c0c4f36d6c0d11330be52b76316559e0390ff75fd002ed3fa73f9b6470f7:hash:865d550c632f13af8a0cb993e9e0c05e937f9dea36aac19ecee9a1f310768c5c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-1",
-      "subgraph-test",
-      "type-test-Organization"
+      "subgraph-orga",
+      "type-orga-Organization"
     ],
     "indexes": {
       "subgraph": true,
@@ -78,7 +78,7 @@ expression: cache_keys
         "id": "1"
       }
     },
-    "subgraphName": "test",
+    "subgraphName": "orga",
     "subgraphRequest": {
       "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }",
       "variables": {
@@ -109,12 +109,12 @@ expression: cache_keys
     "warnings": []
   },
   {
-    "key": "version:1.2:subgraph:orga:type:Organization:representation:07ea57c08f759cd09342c5a65d5d726fb5930a9796b1ec27a82189e5694dcc2b:hash:0367f76631939f4bc11ce32df88c509648c63b8c2bb8654242185c9b9f0c95b1:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
+    "key": "version:1.2:subgraph:orga:type:Organization:representation:07ea57c08f759cd09342c5a65d5d726fb5930a9796b1ec27a82189e5694dcc2b:hash:865d550c632f13af8a0cb993e9e0c05e937f9dea36aac19ecee9a1f310768c5c:data:070af9367f9025bd796a1b7e0cd1335246f658aa4857c3a4d6284673b7d07fa6",
     "invalidationKeys": [
       "organization",
       "organization-3",
-      "subgraph-test",
-      "type-test-Organization"
+      "subgraph-orga",
+      "type-orga-Organization"
     ],
     "indexes": {
       "subgraph": true,
@@ -127,7 +127,7 @@ expression: cache_keys
         "id": "3"
       }
     },
-    "subgraphName": "test",
+    "subgraphName": "orga",
     "subgraphRequest": {
       "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { name } } }",
       "variables": {

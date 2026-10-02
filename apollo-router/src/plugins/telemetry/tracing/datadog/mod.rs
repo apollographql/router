@@ -41,12 +41,12 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::datadog_exporter;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
@@ -274,11 +274,13 @@ impl TracingConfigurator for Config {
         };
         let named_exporter = NamedSpanExporter::new(wrapper, "datadog");
 
-        let batch_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("datadog-tracing"))
-                .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
-                .build()
-                .filtered();
+        let batch_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("datadog-tracing"),
+        )
+        .with_batch_config(self.batch_processor.clone().with_env_overrides()?.into())
+        .build()
+        .filtered();
 
         let common = builder.tracing_common();
 
@@ -365,10 +367,10 @@ impl SpanExporter for ExporterWrapper {
         }
         self.delegate.export(batch)
     }
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         self.delegate.shutdown()
     }
-    fn force_flush(&mut self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         self.delegate.force_flush()
     }
     fn set_resource(&mut self, resource: &Resource) {

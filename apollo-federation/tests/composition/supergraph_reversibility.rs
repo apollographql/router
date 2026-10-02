@@ -35,7 +35,8 @@ fn compose_and_test_reversibility(subgraphs: &[ServiceDefinition<'_>]) {
             .expect("Expected subgraph schema unexpectedly failed to convert to Fed 2.")
             .expand_links()
             .expect("Expected subgraph schema unexpectedly failed to expand")
-            .assume_validated();
+            .validate()
+            .expect("expanded subgraph is valid");
 
         let actual_schema = actual_subgraph.schema.schema().clone().into_inner();
         let actual_schema = normalize_schema(actual_schema);
@@ -161,6 +162,43 @@ mod interface_object_tests {
                 type I @interfaceObject @key(fields: "id") {
                     id: ID!
                     x: Int
+                }
+            "#,
+        };
+
+        compose_and_test_reversibility(&[subgraph_s1, subgraph_s2]);
+    }
+}
+
+mod one_of_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_one_of_on_input_objects() {
+        let subgraph_s1 = ServiceDefinition {
+            name: "S1",
+            type_defs: r#"
+                type Query {
+                    findFromS1(input: FindInput): String
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
+                }
+            "#,
+        };
+
+        let subgraph_s2 = ServiceDefinition {
+            name: "S2",
+            type_defs: r#"
+                type Query {
+                    findFromS2(input: FindInput): String
+                }
+
+                input FindInput @oneOf {
+                    id: ID
+                    name: String
                 }
             "#,
         };

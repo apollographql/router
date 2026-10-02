@@ -110,12 +110,20 @@ pub(crate) fn parse_field_set(
 /// a boolean indicating whether the field set was modified to fix such string/enum value issues.
 ///
 /// Outside these specific purposes, you should prefer to use `parse_field_set()` instead.
+#[derive(Clone, Copy)]
+pub(crate) enum FieldSetValidation {
+    Validate,
+    Skip,
+}
+
 pub(crate) fn parse_field_set_without_normalization(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
     field_set: &str,
     fix_string_enum_values: bool,
+    validation: FieldSetValidation,
 ) -> Result<(executable::SelectionSet, bool), FederationError> {
+    let validate = matches!(validation, FieldSetValidation::Validate);
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let (field_set, is_modified) = if fix_string_enum_values {
@@ -126,15 +134,20 @@ pub(crate) fn parse_field_set_without_normalization(
             "field_set.graphql",
         )?;
         let is_modified = fix_string_enum_values_in_field_set(schema, &mut field_set);
-        field_set.validate(schema)?;
+        if validate {
+            field_set.validate(schema)?;
+        }
         // `FieldSet::validate()` strangely doesn't return `Valid<FieldSet>`, so we instead use
         // `Valid::assume_valid()` here.
         (Valid::assume_valid(field_set), is_modified)
-    } else {
+    } else if validate {
         (
             FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?,
             false,
         )
+    } else {
+        let field_set = FieldSet::parse(schema, parent_type_name, field_set, "field_set.graphql")?;
+        (Valid::assume_valid(field_set), false)
     };
     Ok((field_set.into_inner().selection_set, is_modified))
 }

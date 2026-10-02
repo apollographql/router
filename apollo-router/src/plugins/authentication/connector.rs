@@ -19,8 +19,8 @@ pub(super) struct ConnectorAuth {
 impl ConnectorAuth {
     pub(super) fn connector_request_service(
         &self,
-        service: connector::request_service::BoxService,
-    ) -> connector::request_service::BoxService {
+        service: connector::request_service::BoxCloneService,
+    ) -> connector::request_service::BoxCloneService {
         let signing_params = self.signing_params.clone();
         ServiceBuilder::new()
             .map_request(move |mut req: connector::request_service::Request| {
@@ -38,16 +38,18 @@ impl ConnectorAuth {
                 req
             })
             .service(service)
-            .boxed()
+            .boxed_clone()
     }
 }
 
 /// Configure connector authentication
+// Holds AWS credentials, so it cannot serialize its defaults: the schema declares them by hand.
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[schemars(rename = "AuthenticationConnectorConfig")]
 pub(crate) struct Config {
     #[serde(default)]
+    #[schemars(extend("default" = {}))]
     /// Create a configuration that will apply only to a specific source.
     pub(crate) sources: HashMap<String, AuthConfig>,
 }

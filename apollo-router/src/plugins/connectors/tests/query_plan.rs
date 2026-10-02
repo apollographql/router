@@ -45,9 +45,7 @@ async fn basic_batch() {
         "query { users { id name username } }",
         Default::default(),
         Some(serde_json_bytes::json!({
-            "plugins": {
-              "experimental.expose_query_plan": true
-            }
+            "expose_query_plan": true
         })),
         |req| {
             req.router_request
@@ -97,7 +95,7 @@ async fn basic_batch() {
                   "inputRewrites": null,
                   "outputRewrites": null,
                   "contextRewrites": null,
-                  "schemaAwareHash": "da703b46a14365beb044a94b515e4fd95a417f2bff02ecf0880a1d37898443cf",
+                  "schemaAwareHash": "04e75a043e515a3c38b02c3e26a2e73ae009191d6e2bd1d0a0f207df011e9280",
                   "authorization": {
                     "is_authenticated": false,
                     "scopes": [],
@@ -137,7 +135,7 @@ async fn basic_batch() {
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "403a0e4a0bd0cca08bf1bc22b7ad8fba729baf40669505e1a6281af1b8e2f70c",
+                    "schemaAwareHash": "3db3129f45bca54cbf34a3a818a9d19d45110ec9d489530c244994f5e949a411",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

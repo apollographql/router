@@ -4,7 +4,6 @@
 
 mod field_type;
 mod fragments;
-pub(crate) mod operation_limits;
 pub(crate) mod query;
 mod schema;
 mod selection;

@@ -1,0 +1,19 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: error
+---
+apollo::configuration::schema
+
+  × schema validation error
+  ╰─▶ schema validation error
+
+Error: apollo::configuration::validation
+
+  × Additional properties are not allowed ('subgraphs' was unexpected)
+   ╭─[4:1]
+ 3 │   path: /
+ 4 │ subgraphs:
+   · ────┬────
+   ·     ╰── Additional properties are not allowed ('subgraphs' was unexpected)
+ 5 │   account: true
+   ╰────

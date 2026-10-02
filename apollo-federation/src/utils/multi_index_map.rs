@@ -42,6 +42,15 @@ where
     }
 }
 
+impl<K, V> IntoIterator for MultiIndexMap<K, V> {
+    type Item = (K, Vec<V>);
+    type IntoIter = indexmap::map::IntoIter<K, Vec<V>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 impl<K, V> FromIterator<(K, V)> for MultiIndexMap<K, V>
 where
     K: Eq + Hash,

@@ -46,6 +46,17 @@ async fn test_subscription_callback() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
+    // See `wait_for_router_ready` doc below — `assert_started` only matches
+    // the `GraphQL endpoint exposed` log line, emitted before the axum
+    // server task is actually polling connections. This test previously
+    // lacked this probe even though its siblings
+    // (`test_subscription_callback_error_payload`,
+    // `test_subscription_callback_pure_error_payload`) gained it after
+    // hitting exactly this race on CI — the initial `execute_query` POST
+    // below is exposed to the identical TOCTOU window.
+    let router_url = format!("http://{}/", router.bind_address());
+    wait_for_router_ready(&router_url, tokio::time::Duration::from_secs(90)).await;
+
     let subscription_query = r#"subscription { userWasCreated(intervalMs: 100, nbEvents: 3) { name reviews { body } } }"#;
 
     // Send subscription request to router

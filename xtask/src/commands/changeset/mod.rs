@@ -479,7 +479,7 @@ impl Create {
                     .default(false)
                     .with_prompt(format!(
                         "Do you want to run `git add {}`?",
-                        &new_changeset_path,
+                        new_changeset_path,
                     ))
                     .interact()?
                 {

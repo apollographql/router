@@ -12,3 +12,4 @@ expression: "&metrics.non_zero()"
           opt.mode.callback: true
           opt.mode.passthrough: true
           opt.queue_capacity: true
+          opt.reconnect: 5

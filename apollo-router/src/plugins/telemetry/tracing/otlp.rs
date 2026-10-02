@@ -10,6 +10,7 @@ use tonic::metadata::MetadataMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::otlp::Config;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
@@ -17,7 +18,6 @@ use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
 use crate::plugins::telemetry::tracing::NamedSpanExporter;
-use crate::plugins::telemetry::tracing::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 
 impl TracingConfigurator for super::super::otlp::Config {
@@ -35,11 +35,13 @@ impl TracingConfigurator for super::super::otlp::Config {
 
         let exporter = config.build_span_exporter()?;
         let named_exporter = NamedSpanExporter::new(exporter, "otlp");
-        let batch_span_processor =
-            BatchSpanProcessor::builder(named_exporter, NamedTokioRuntime::new("otlp-tracing"))
-                .with_batch_config(config.batch_processor.clone().with_env_overrides()?.into())
-                .build()
-                .filtered();
+        let batch_span_processor = BatchSpanProcessor::builder(
+            named_exporter,
+            BlockingSafeTokioRuntime::new_for_tracing("otlp-tracing"),
+        )
+        .with_batch_config(config.batch_processor.clone().with_env_overrides()?.into())
+        .build()
+        .filtered();
 
         let common = builder.tracing_common();
         let datadog_agent_sampling = common.preview_datadog_agent_sampling.unwrap_or(false);

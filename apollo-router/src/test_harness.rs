@@ -15,27 +15,28 @@ use tower_http::trace::MakeSpan;
 use tracing_futures::Instrument;
 
 use crate::AllowedFeature;
-use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
+use crate::pipeline::build_apq_expander;
+use crate::pipeline::build_query_parsing_service;
+use crate::pipeline::build_router_service;
+use crate::pipeline::build_supergraph_for_test_harness;
+use crate::pipeline::connect_apq_redis;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
 use crate::plugin::test::MockSubgraph;
+#[cfg(any(test, feature = "mock_subgraphs_testing"))]
 use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::otel::init_telemetry;
-use crate::router_factory::YamlRouterFactory;
-use crate::services::HasSchema;
-use crate::services::SupergraphCreator;
+use crate::services::Plugins;
 use crate::services::execution;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
+use crate::services::layers::persisted_queries::PersistedQueryExpander;
 use crate::services::router;
-use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
@@ -59,6 +60,12 @@ pub(crate) mod http_snapshot;
 ///
 /// On the subgraph side, this test harness never makes network requests to subgraphs
 /// unless [`with_subgraph_network_requests`][Self::with_subgraph_network_requests] is called.
+///
+/// Subgraph mocking is implemented by an internal plugin gated behind the `mock_subgraphs_testing`
+/// Cargo feature (always enabled for `cfg(test)` builds of this crate). Consumers outside this
+/// crate that build in release mode, or without that feature, must either enable it or call
+/// [`with_subgraph_network_requests`][Self::with_subgraph_network_requests] — otherwise building
+/// the harness returns an error rather than silently making real network requests.
 ///
 /// Compared to running a full [`RouterHttpServer`][crate::RouterHttpServer],
 /// this test harness is lacking:
@@ -116,18 +123,14 @@ impl<'a> TestHarness<'a> {
     /// Specifies the logging level. Note that this function may not be called more than once.
     /// log_level is in RUST_LOG format.
     pub fn log_level(self, log_level: &'a str) -> Self {
-        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
-        let log_level = format!("{log_level},salsa=error");
-        init_telemetry(&log_level).expect("failed to setup logging");
+        init_telemetry(log_level).expect("failed to setup logging");
         self
     }
 
     /// Specifies the logging level. Note that this function will silently fail if called more than once.
     /// log_level is in RUST_LOG format.
     pub fn try_log_level(self, log_level: &'a str) -> Self {
-        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
-        let log_level = format!("{log_level},salsa=error");
-        let _ = init_telemetry(&log_level);
+        let _ = init_telemetry(log_level);
         self
     }
 
@@ -254,7 +257,7 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::router_service`]
     pub fn router_hook(
         self,
-        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+        callback: impl Fn(router::BoxCloneService) -> router::BoxCloneService + Send + Sync + 'static,
     ) -> Self {
         self.extra_plugin(RouterServicePlugin(callback))
     }
@@ -262,7 +265,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::supergraph_service`]
     pub fn supergraph_hook(
         self,
-        callback: impl Fn(supergraph::BoxService) -> supergraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(supergraph::BoxCloneService) -> supergraph::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SupergraphServicePlugin(callback))
     }
@@ -270,7 +276,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::execution_service`]
     pub fn execution_hook(
         self,
-        callback: impl Fn(execution::BoxService) -> execution::BoxService + Send + Sync + 'static,
+        callback: impl Fn(execution::BoxCloneService) -> execution::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(ExecutionServicePlugin(callback))
     }
@@ -278,7 +287,10 @@ impl<'a> TestHarness<'a> {
     /// Adds a callback-based hook similar to [`Plugin::subgraph_service`]
     pub fn subgraph_hook(
         self,
-        callback: impl Fn(&str, subgraph::BoxService) -> subgraph::BoxService + Send + Sync + 'static,
+        callback: impl Fn(&str, subgraph::BoxCloneService) -> subgraph::BoxCloneService
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.extra_plugin(SubgraphServicePlugin(callback))
     }
@@ -289,6 +301,10 @@ impl<'a> TestHarness<'a> {
     /// (unless [`schema`][Self::schema] is also not called).
     /// This behavior can be changed by implementing [`Plugin::subgraph_service`]
     /// on a plugin given to [`extra_plugin`][Self::extra_plugin].
+    ///
+    /// Not calling this requires the `mock_subgraphs_testing` Cargo feature (or a `cfg(test)`
+    /// build of this crate) to provide the mocking; without it, building the harness fails with
+    /// an error instead of silently making real network requests.
     pub fn with_subgraph_network_requests(mut self) -> Self {
         self.subgraph_network_requests = true;
         self
@@ -296,24 +312,44 @@ impl<'a> TestHarness<'a> {
 
     pub(crate) async fn build_common(
         self,
-    ) -> Result<(Arc<Configuration>, Arc<Schema>, SupergraphCreator), BoxError> {
+    ) -> Result<
+        (
+            Arc<Configuration>,
+            Arc<Schema>,
+            Arc<Plugins>,
+            supergraph::BoxCloneService,
+        ),
+        BoxError,
+    > {
+        #[cfg_attr(not(any(test, feature = "mock_subgraphs_testing")), allow(unused_mut))]
         let mut config = self.configuration.unwrap_or_default();
-        let has_legacy_mock_subgraphs_plugin = self.extra_plugins.iter().any(|(_, dyn_plugin)| {
-            dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
-        });
-        if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
-            Arc::make_mut(&mut config)
-                .apollo_plugins
-                .plugins
-                .entry("experimental_mock_subgraphs")
-                .or_insert_with(canned::mock_subgraphs);
+        #[cfg(any(test, feature = "mock_subgraphs_testing"))]
+        {
+            let has_legacy_mock_subgraphs_plugin =
+                self.extra_plugins.iter().any(|(_, dyn_plugin)| {
+                    dyn_plugin.name() == *crate::plugins::mock_subgraphs::PLUGIN_NAME
+                });
+            if self.schema.is_none() && !has_legacy_mock_subgraphs_plugin {
+                Arc::make_mut(&mut config).add_apollo_plugin_if_absent(
+                    "experimental_mock_subgraphs",
+                    canned::mock_subgraphs,
+                )?;
+            }
+            if !self.subgraph_network_requests {
+                Arc::make_mut(&mut config)
+                    .add_apollo_plugin_if_absent("experimental_mock_subgraphs", || {
+                        serde_json::json!({})
+                    })?;
+            }
         }
+        #[cfg(not(any(test, feature = "mock_subgraphs_testing")))]
         if !self.subgraph_network_requests {
-            Arc::make_mut(&mut config)
-                .apollo_plugins
-                .plugins
-                .entry("experimental_mock_subgraphs")
-                .or_insert(serde_json::json!({}));
+            return Err(
+                "TestHarness subgraph mocking requires the `mock_subgraphs_testing` \
+                 Cargo feature on `apollo-router`; either enable it or call \
+                 `.with_subgraph_network_requests()` to opt into making real network requests"
+                    .into(),
+            );
         }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = self.schema.unwrap_or(canned_schema);
@@ -322,26 +358,24 @@ impl<'a> TestHarness<'a> {
         let license = self.license.unwrap_or(Arc::new(LicenseState::Licensed {
             limits: Default::default(),
         }));
-        let supergraph_creator = YamlRouterFactory
-            .inner_create_supergraph(
-                config.clone(),
-                schema.clone(),
-                None,
-                Some(self.extra_plugins),
-                license,
-                None,
-            )
-            .await?;
 
-        Ok((config, schema, supergraph_creator))
+        let (plugins, supergraph_pipeline) = build_supergraph_for_test_harness(
+            config.clone(),
+            schema.clone(),
+            self.extra_plugins,
+            license,
+        )
+        .await?;
+
+        Ok((config, schema, plugins, supergraph_pipeline))
     }
 
     /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (config, schema, supergraph_creator) = self.build_common().await?;
+        let (config, schema, _plugins, supergraph_service) = self.build_common().await?;
 
         Ok(tower::service_fn(move |request: supergraph::Request| {
-            let router = supergraph_creator.make();
+            let router = supergraph_service.clone();
 
             // The supergraph service expects a ParsedDocument in the context. In the real world,
             // that is always populated by the router service. For the testing harness, however,
@@ -353,7 +387,7 @@ impl<'a> TestHarness<'a> {
             if let Some(query_str) = body.query.as_deref() {
                 let operation_name = body.operation_name.as_deref();
                 if !request.context.extensions().with_lock(|lock| {
-                    lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
+                    lock.contains_key::<crate::services::query_parsing::ParsedDocument>()
                 }) {
                     let doc = crate::spec::Query::parse_document(
                         query_str,
@@ -363,7 +397,7 @@ impl<'a> TestHarness<'a> {
                     )
                     .expect("parse error in test");
                     request.context.extensions().with_lock(|lock| {
-                        lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+                        lock.insert::<crate::services::query_parsing::ParsedDocument>(doc)
                     });
                 }
             }
@@ -375,21 +409,26 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
-        let (config, _schema, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
-            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
-            Arc::new(supergraph_creator),
-            config.clone(),
-        )
-        .await
-        .unwrap();
+        let (config, schema, plugins, supergraph_service) = self.build_common().await?;
+        let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
+
+        let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
+        let router_service = build_router_service(
+            supergraph_service,
+            apq_expander,
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
+            query_parsing_service,
+            schema,
+            &config,
+            plugins,
+        );
 
         Ok(tower::service_fn(move |request: router::Request| {
-            let router = ServiceBuilder::new().service(router_creator.make()).boxed();
+            let router = ServiceBuilder::new()
+                .service(router_service.clone())
+                .boxed();
             let span = PropagatingMakeSpan {
                 license: Default::default(),
-                span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);
             async move { router.oneshot(request).await }.instrument(span)
@@ -401,21 +440,29 @@ impl<'a> TestHarness<'a> {
     pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::axum_factory::axum_http_server_factory::make_axum_router;
-        use crate::router_factory::RouterFactory;
+        use crate::axum_factory::utils::connection_router_service;
 
-        let (config, _schema, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&config)).await,
-            Arc::new(PersistedQueryLayer::new(&config).await.unwrap()),
-            Arc::new(supergraph_creator),
-            config.clone(),
-        )
-        .await?;
+        let (config, schema, plugins, supergraph_service) = self.build_common().await?;
+        let query_parsing_service = build_query_parsing_service(schema.clone(), config.clone());
 
-        let web_endpoints = router_creator.web_endpoints();
+        let apq_expander = build_apq_expander(&config, connect_apq_redis(&config).await?);
+
+        let mut web_endpoints = multimap::MultiMap::new();
+        plugins
+            .values()
+            .for_each(|p| web_endpoints.extend(p.web_endpoints()));
+
+        let pipeline_router_service = build_router_service(
+            supergraph_service,
+            apq_expander,
+            Arc::new(PersistedQueryExpander::new(&config).await.unwrap()),
+            query_parsing_service,
+            schema,
+            &config,
+            plugins,
+        );
 
         let routers = make_axum_router(
-            router_creator,
             &config,
             web_endpoints,
             Arc::new(LicenseState::Licensed {
@@ -423,6 +470,15 @@ impl<'a> TestHarness<'a> {
             }),
         )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
+
+        // The router reads its pipeline from a request extension, which the server factory
+        // populates. Add the same extension here so the returned service is callable.
+        let router_service = connection_router_service(pipeline_router_service);
+        let router = ServiceBuilder::new()
+            .layer(tower_http::add_extension::AddExtensionLayer::new(
+                router_service,
+            ))
+            .service(router);
         Ok(router.boxed())
     }
 }
@@ -442,7 +498,7 @@ struct SubgraphServicePlugin<F>(F);
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+    F: 'static + Send + Sync + Fn(router::BoxCloneService) -> router::BoxCloneService,
 {
     type Config = ();
 
@@ -450,7 +506,7 @@ where
         unreachable!()
     }
 
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+    fn router_service(&self, service: router::BoxCloneService) -> router::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -458,7 +514,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SupergraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(supergraph::BoxService) -> supergraph::BoxService,
+    F: 'static + Send + Sync + Fn(supergraph::BoxCloneService) -> supergraph::BoxCloneService,
 {
     type Config = ();
 
@@ -466,7 +522,10 @@ where
         unreachable!()
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn supergraph_service(
+        &self,
+        service: supergraph::BoxCloneService,
+    ) -> supergraph::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -474,7 +533,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for ExecutionServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(execution::BoxService) -> execution::BoxService,
+    F: 'static + Send + Sync + Fn(execution::BoxCloneService) -> execution::BoxCloneService,
 {
     type Config = ();
 
@@ -482,7 +541,7 @@ where
         unreachable!()
     }
 
-    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+    fn execution_service(&self, service: execution::BoxCloneService) -> execution::BoxCloneService {
         (self.0)(service)
     }
 }
@@ -490,7 +549,7 @@ where
 #[async_trait::async_trait]
 impl<F> Plugin for SubgraphServicePlugin<F>
 where
-    F: 'static + Send + Sync + Fn(&str, subgraph::BoxService) -> subgraph::BoxService,
+    F: 'static + Send + Sync + Fn(&str, subgraph::BoxCloneService) -> subgraph::BoxCloneService,
 {
     type Config = ();
 
@@ -501,8 +560,8 @@ where
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         (self.0)(subgraph_name, service)
     }
 }
@@ -529,11 +588,11 @@ impl Plugin for MockedSubgraphs {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        default: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        default: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         self.0
             .get(subgraph_name)
-            .map(|service| service.clone().boxed())
+            .map(|service| service.clone().boxed_clone())
             .unwrap_or(default)
     }
 }

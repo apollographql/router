@@ -142,9 +142,21 @@ fn filter_shape(
         );
     };
 
-    // Compute the shape of the filter condition argument
+    // Compute the shape of the filter condition argument.
+    //
+    // The runtime applies the condition once per array element (`@` = element),
+    // so the condition must be shaped against the array's ELEMENT shape, not the
+    // whole array. Passing `input_shape` directly only happened to work when the
+    // input was `Unknown` (the lenient check below accepts it); for a concrete
+    // list — e.g. the output of a prior `->filter`, which is `[...]` — a
+    // condition like `@.field->eq(…)` mapped `.field` across the list and then
+    // applied the comparison to a list, yielding a non-boolean shape and a
+    // spurious `(err "->filter condition must return a boolean value")`. That
+    // error then propagated into expansion as an empty output object type.
+    // `any_item` matches the per-element runtime semantics and is robust to
+    // chaining.
     let condition_shape =
-        first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
+        first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape);
 
     // Validate that the condition evaluates to a boolean or
     // something that could become a boolean
@@ -300,6 +312,7 @@ mod method_tests {
     #[case::v0_2(ConnectSpec::V0_2)]
     #[case::v0_3(ConnectSpec::V0_3)]
     #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
     fn filter_should_return_none_when_argument_evaluates_to_none(#[case] spec: ConnectSpec) {
         assert_eq!(
             selection!("$.a->filter($.missing)", spec).apply_to(&json!({
@@ -344,10 +357,12 @@ mod shape_tests {
     use shape::location::SourceId;
 
     use super::*;
+    use crate::connectors::ConnectSpec;
     use crate::connectors::Key;
     use crate::connectors::PathSelection;
     use crate::connectors::json_selection::PathList;
     use crate::connectors::json_selection::lit_expr::LitExpr;
+    use crate::connectors::json_selection::location::new_span_with_spec;
 
     fn get_location() -> Location {
         Location {
@@ -413,22 +428,17 @@ mod shape_tests {
                     None
                 )],
                 Shape::string([])
-            ),
-            Shape::error(
-                "->filter condition must return a boolean value".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "->filter condition must return a boolean value")"#,
         );
     }
 
     #[test]
     fn filter_shape_should_error_on_no_args() {
         assert_eq!(
-            get_shape(vec![], Shape::string([])),
-            Shape::error(
-                "Method ->filter requires one argument".to_string(),
-                [get_location()]
-            )
+            get_shape(vec![], Shape::string([])).pretty_print(),
+            r#"Unknown (err "Method ->filter requires one argument")"#,
         );
     }
 
@@ -441,11 +451,9 @@ mod shape_tests {
                     WithRange::new(LitExpr::Bool(false), None)
                 ],
                 Shape::string([])
-            ),
-            Shape::error(
-                "Method ->filter requires only one argument, but 2 were provided".to_string(),
-                []
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->filter requires only one argument, but 2 were provided")"#,
         );
     }
 
@@ -459,11 +467,9 @@ mod shape_tests {
                 None,
                 Shape::string([]),
                 Shape::none(),
-            ),
-            Shape::error(
-                "Method ->filter requires one argument".to_string(),
-                [get_location()]
             )
+            .pretty_print(),
+            r#"Unknown (err "Method ->filter requires one argument")"#,
         );
     }
 
@@ -480,5 +486,48 @@ mod shape_tests {
         // Unknown shapes should be accepted as they could produce boolean values at runtime
         let result = get_shape(vec![path.into_with_range()], input_shape.clone());
         assert_eq!(result, Shape::list(input_shape.any_item([]), []));
+    }
+
+    // Parse a `@`-rooted condition expression (e.g. `@.x->eq(true)`) the way it
+    // appears inside `->filter(...)`.
+    fn parse_condition(input: &str) -> WithRange<LitExpr> {
+        LitExpr::parse(new_span_with_spec(input, ConnectSpec::V0_4))
+            .unwrap()
+            .1
+    }
+
+    // Regression: chained `->filter(...)` must shape each condition against the
+    // array's element, not the whole array. The first filter turns an `Unknown`
+    // input into a concrete `[...Unknown]`; the second filter then receives that
+    // list. Before the fix, the second filter's condition (`@.field->gt(0)`)
+    // mapped `.field` across the list and applied `->gt` to a list, producing
+    // `(err "->filter condition must return a boolean value")`. The expander
+    // turned that error shape into an empty output object type, which slipped
+    // past release builds (validation skipped) and surfaced downstream as a
+    // composition `SATISFIABILITY_ERROR` (e.g. Relay-pagination connectors with
+    // `active*` filters). See integration fixture `chained_filter_v0_4.graphql`.
+    #[test]
+    fn filter_shape_supports_chained_filters() {
+        // First filter over an `Unknown` input (e.g. `$.results`), as a connector
+        // mapping would produce.
+        let after_first = get_shape(
+            vec![parse_condition("@.inactiveSwitch->eq(\"A\")")],
+            Shape::unknown([]),
+        );
+        assert!(
+            !after_first.has_own_errors(),
+            "first ->filter unexpectedly errored: {}",
+            after_first.pretty_print()
+        );
+
+        // Second filter receives the first filter's concrete list output. This is
+        // the case that previously produced a spurious non-boolean-condition
+        // error.
+        let after_second = get_shape(vec![parse_condition("@.locNumber->gt(0)")], after_first);
+        assert!(
+            !after_second.has_own_errors(),
+            "chained ->filter produced an error shape (regression): {}",
+            after_second.pretty_print()
+        );
     }
 }

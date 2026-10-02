@@ -57,7 +57,7 @@ mod tests {
 
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::connectors::tracing::connect_spec_counts;
-    use crate::services::connector_service::ConnectorServiceFactory;
+    use crate::services::connector_service::ConnectorServices;
     use crate::spec::Schema;
 
     #[test]
@@ -88,6 +88,7 @@ mod tests {
             request_variable_keys: Default::default(),
             response_variable_keys: Default::default(),
             error_settings: Default::default(),
+            output_type: None,
             label: "label".into(),
         };
 
@@ -117,7 +118,7 @@ mod tests {
         async {
             let config = Arc::default();
             let schema = Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
-            let _factory = ConnectorServiceFactory::empty(Arc::from(schema));
+            let _services = ConnectorServices::empty(Arc::from(schema));
 
             assert_gauge!(
                 "apollo.router.schema.connectors",

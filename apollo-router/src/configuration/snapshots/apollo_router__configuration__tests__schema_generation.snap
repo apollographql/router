@@ -41,7 +41,8 @@ expression: "&schema"
       "properties": {
         "access_key_id": {
           "description": "The ID for this access key.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "assume_role": {
           "anyOf": [
@@ -60,7 +61,8 @@ expression: "&schema"
         },
         "secret_access_key": {
           "description": "The secret key used to sign requests.",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         },
         "service_name": {
           "description": "The service you're trying to access, eg: \"s3\", \"vpc-lattice-svcs\", etc.",
@@ -120,12 +122,6 @@ expression: "&schema"
         {
           "const": "by_subgraph",
           "description": "Computes the cost of each subgraph response and sums them to get the total query cost.",
-          "type": "string"
-        },
-        {
-          "const": "by_response_shape",
-          "deprecated": true,
-          "description": "Computes the cost based on the final structure of the composed response, not including any\ninterim structures from subgraph responses that did not make it to the composed response.",
           "type": "string"
         }
       ]
@@ -194,7 +190,7 @@ expression: "&schema"
         },
         "endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/api/ingress/traces",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "description": "The Apollo Studio endpoint for exporting usage report metrics.",
           "type": "string"
         },
         "errors": {
@@ -209,29 +205,6 @@ expression: "&schema"
           "default": false,
           "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
           "type": "boolean"
-        },
-        "experimental_otlp_endpoint": {
-          "default": "https://usage-reporting.api.apollographql.com/",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
-          "type": "string"
-        },
-        "experimental_otlp_metrics_protocol": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Protocol"
-            }
-          ],
-          "default": "grpc",
-          "description": "OTLP protocol used for OTel metrics.\nNote this is only intended for use in tests."
-        },
-        "experimental_otlp_tracing_protocol": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Protocol"
-            }
-          ],
-          "default": "grpc",
-          "description": "OTLP protocol used for OTel traces.\nNote this only applies if OTel traces are enabled and is only intended for use in tests."
         },
         "field_level_instrumentation_sampler": {
           "allOf": [
@@ -273,13 +246,28 @@ expression: "&schema"
           ],
           "description": "Set the Apollo usage report reference reporting mode to use."
         },
-        "otlp_tracing_sampler": {
+        "otlp_endpoint": {
+          "default": "https://usage-reporting.api.apollographql.com/",
+          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "type": "string"
+        },
+        "otlp_metrics_protocol": {
           "allOf": [
             {
-              "$ref": "#/definitions/SamplerOption"
+              "$ref": "#/definitions/Protocol"
             }
           ],
-          "description": "Percentage of traces to send via the OTel protocol when sending to Apollo Studio."
+          "default": "grpc",
+          "description": "OTLP protocol used for OTel metrics.\nNote this is only intended for use in tests."
+        },
+        "otlp_tracing_protocol": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Protocol"
+            }
+          ],
+          "default": "grpc",
+          "description": "OTLP protocol used for OTel traces.\nNote this only applies if OTel traces are enabled and is only intended for use in tests."
         },
         "sampler": {
           "anyOf": [
@@ -290,7 +278,7 @@ expression: "&schema"
               "type": "null"
             }
           ],
-          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
+          "description": "Per-exporter sampler for traces sent to Apollo Studio.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`.\n\nWhatever this sampler lets through is then subject to `tracing.throttle`, which acts as a\nback-stop that further reduces trace volume sent to Apollo Studio."
         },
         "send_headers": {
           "allOf": [
@@ -318,7 +306,7 @@ expression: "&schema"
           "description": "Set the signature normalization algorithm to use when sending Apollo usage reports."
         },
         "subgraph_metrics": {
-          "default": false,
+          "default": true,
           "description": "Enable sending additional subgraph metrics to Apollo Studio via OTLP",
           "type": "boolean"
         },
@@ -332,6 +320,21 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ApolloTraceThrottleConfig": {
+      "description": "The back-stop strategy used to throttle the volume of traces exported to Apollo Studio, after\nhead sampling.",
+      "oneOf": [
+        {
+          "const": "representative_traces",
+          "description": "Send at most one representative trace per minute for each distinct combination of dimensions\n(operation, client, latency bucket, error status, operation type). Duplicate traces sharing\na combination already seen within the current minute are dropped. These traces would end up\nbeing dropped by Apollo at ingestion time anyway.",
+          "type": "string"
+        },
+        {
+          "const": "rate_limited",
+          "description": "Send every trace, but cap the export rate at a fixed maximum of 100 traces per second (per\nrouter instance). Cheaper than `representative_traces` in CPU and memory, at the cost of a\nless even sample. The rate is not configurable.",
+          "type": "string"
+        }
+      ]
     },
     "ApolloUsageReportsBatchProcessorConfiguration": {
       "properties": {
@@ -607,6 +610,7 @@ expression: "&schema"
       "type": "object"
     },
     "AuthorizationConfig": {
+      "additionalProperties": false,
       "description": "Authorization plugin",
       "properties": {
         "directives": {
@@ -810,6 +814,21 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "BuiltInValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test built-in plugin with a validated nested setting.",
+      "properties": {
+        "inner": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NestedName"
+            }
+          ],
+          "description": "A setting with its own validation rule."
+        }
+      },
+      "type": "object"
+    },
     "CSRFConfig": {
       "additionalProperties": false,
       "description": "CSRF protection configuration.\n\nSee <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.",
@@ -988,6 +1007,101 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "CircuitBreakerConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for circuit breaking.\n\nControls when the circuit trips open, how long it stays open, and how many consecutive\nfailures trigger an immediate trip regardless of the overall failure rate.\n\nAll fields have sensible defaults, so an empty config is valid.\n\n# Example\n```yaml\nfailure_rate_threshold: 0.5\nwindow_size: 100\nmin_requests: 10\nopen_duration: 30s\nconsecutive_failures: 5\n```",
+      "properties": {
+        "consecutive_failures": {
+          "default": 5,
+          "description": "Number of consecutive failures that immediately trip the circuit.\n\nTrips the circuit before a full rate window fills — useful for catching hard failures\nfast. Must be ≥ 1. Defaults to `5`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "failure_rate_threshold": {
+          "default": 0.5,
+          "description": "Fraction of requests that must fail before the circuit opens.\n\nEvaluated only once the window holds at least `min_requests`. Must be in the range\n(0.0, 1.0]: a value of `1.0` trips on 100% failure; a value of `0.5` trips on 50%.\nDefaults to `0.5`.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_requests": {
+          "default": 10,
+          "description": "Minimum requests in the window before the failure rate is evaluated.\n\nPrevents the circuit from tripping on a handful of early failures. Must be ≥ 1 and\n≤ `window_size`. Defaults to `10`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "open_duration": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Duration"
+            }
+          ],
+          "default": "30s",
+          "description": "How long the circuit stays open before allowing a single probe request through.\n\nAlso bounds the probe: one still in flight this long after dispatch reopens the\ncircuit, so the next probe follows one `open_duration` later. A probe dropped before\nit reports hands the probe to the next request instead. Must be greater than zero.\nDefaults to `30s`."
+        },
+        "window_size": {
+          "default": 100,
+          "description": "Number of most recent requests the failure rate is measured over.\n\nOlder outcomes drop out of the window as new ones arrive, so the rate always reflects\ncurrent behaviour rather than the lifetime of the process. Must be ≥ `min_requests` and\nat most `1000000`. Defaults to `100`.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerConnectorConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for circuit breaking on Apollo Connectors requests.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConfig"
+            }
+          ],
+          "description": "Applied to every connector source that has no entry of its own under `sources`."
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerConfig"
+          },
+          "description": "Applied to specific connector sources, keyed by `<subgraph name>.<source name>`, in place\nof `all` rather than on top of it: a source listed here takes its options from its own\nblock alone, and the default for every option that block leaves out.\n\nA `@connect` with no `@source` has no source name to be keyed by, so it takes the name\nthe router synthesizes from the directive's position instead — `products.products_Query_products_0`\nfor a `@connect` on `Query.products` in the `products` subgraph. Those names are not\nmeant to be written here: configure sourceless connectors through `all`.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "CircuitBreakerPluginConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for the circuit breaker plugin.",
+      "properties": {
+        "all": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConfig"
+            }
+          ],
+          "description": "Applied to every subgraph that has no entry of its own under `subgraphs`."
+        },
+        "connector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakerConnectorConfig"
+            }
+          ],
+          "description": "Applied to Apollo Connectors requests."
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/CircuitBreakerConfig"
+          },
+          "description": "Applied to specific subgraphs, in place of `all` rather than on top of it: a subgraph\nlisted here takes its options from its own block alone, and the default for every option\nthat block leaves out.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "Client": {
       "additionalProperties": false,
       "description": "HTTP client configuration",
@@ -1002,17 +1116,6 @@ expression: "&schema"
             }
           ],
           "description": "Specify a DNS resolution strategy to use when resolving the coprocessor URL."
-        },
-        "experimental_http2": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Use HTTP/2 to communicate with the coprocessor."
         },
         "experimental_http2_keep_alive_interval": {
           "default": null,
@@ -1029,6 +1132,17 @@ expression: "&schema"
             "string",
             "null"
           ]
+        },
+        "http2": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Http2Config"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Use HTTP/2 to communicate with the coprocessor."
         },
         "pool_idle_timeout": {
           "default": {
@@ -1918,6 +2032,7 @@ expression: "&schema"
       ]
     },
     "Conf": {
+      "additionalProperties": false,
       "description": "Configuration for the test plugin",
       "properties": {
         "name": {
@@ -1931,6 +2046,7 @@ expression: "&schema"
       "type": "object"
     },
     "Conf2": {
+      "additionalProperties": false,
       "description": "The fleet detector plugin has no configuration.",
       "type": "object"
     },
@@ -1948,28 +2064,6 @@ expression: "&schema"
     },
     "Config": {
       "additionalProperties": false,
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don't want this in production!\n\n## How Chaos Reloading Works\n\nThe chaos system automatically captures and replays the last known schema and configuration\nevents to force hot reloads even when the underlying content hasn't actually changed. This\nis particularly useful for memory leak detection during hot reload scenarios.\nIf configured, it will activate upon the first config event that is encountered.\n\n### Schema Reloading (`force_schema_reload`)\nWhen enabled, the router will periodically replay the last schema event with a timestamp\ncomment injected into the SDL (e.g., `# Chaos reload timestamp: 1234567890`). This ensures\nthe schema is seen as \"different\" and triggers a full hot reload, even though the functional\nschema content is identical.\n\n### Configuration Reloading (`force_config_reload`)\nWhen enabled, the router will periodically replay the last configuration event. The\nconfiguration is cloned and re-emitted, which triggers the router's configuration change\ndetection and reload logic.\n\n### Example Usage\n```yaml\nexperimental_chaos:\n  force_schema_reload: \"30s\"    # Trigger schema reload every 30 seconds\n  force_config_reload: \"2m\"     # Trigger config reload every 2 minutes\n```",
-      "properties": {
-        "force_config_reload": {
-          "default": null,
-          "description": "Force a hot reload of the configuration at regular intervals by replaying the last\nconfiguration event. This triggers the router's configuration change detection even\nwhen the configuration content hasn't actually changed.\n\nThe system automatically captures the last configuration event and replays it to\nforce configuration reload processing.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "force_schema_reload": {
-          "default": null,
-          "description": "Force a hot reload of the schema at regular intervals by injecting a timestamp comment\ninto the SDL. This ensures schema reloads occur even when the functional schema content\nhasn't changed, which is useful for testing memory leaks during schema hot reloads.\n\nThe system automatically captures the last schema event and replays it with a timestamp\ncomment added to make it appear \"different\" to the reload detection logic.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
-    "Config2": {
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1982,7 +2076,8 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config2": {
+      "additionalProperties": false,
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1995,11 +2090,12 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config4": {
+    "Config3": {
+      "additionalProperties": false,
       "description": "The enhanced client-awareness plugin has no configuration.",
       "type": "object"
     },
-    "Config5": {
+    "Config4": {
       "additionalProperties": false,
       "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
       "properties": {
@@ -2025,58 +2121,12 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config6": {
+    "Config5": {
       "additionalProperties": false,
-      "description": "Configuration for entity caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable or disable the entity caching feature",
-          "type": "boolean"
-        },
-        "expose_keys_in_context": {
-          "default": false,
-          "description": "Expose cache keys in context",
-          "type": "boolean"
-        },
-        "invalidation": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InvalidationEndpointConfig"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Global invalidation configuration"
-        },
-        "metrics": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Metrics"
-            }
-          ],
-          "description": "Entity caching evaluation metrics"
-        },
-        "subgraph": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SubgraphSubgraphConfiguration"
-            }
-          ],
-          "description": "Configure invalidation per subgraph"
-        }
-      },
-      "required": [
-        "subgraph"
-      ],
-      "type": "object"
-    },
-    "Config7": {
       "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
-    "Config8": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for response caching",
       "properties": {
@@ -2113,12 +2163,13 @@ expression: "&schema"
         "invalidation": {
           "anyOf": [
             {
-              "$ref": "#/definitions/InvalidationEndpointConfig2"
+              "$ref": "#/definitions/InvalidationEndpointConfig"
             },
             {
               "type": "null"
             }
           ],
+          "default": null,
           "description": "Global invalidation configuration"
         },
         "private_queries_buffer_size": {
@@ -2131,7 +2182,7 @@ expression: "&schema"
         "subgraph": {
           "allOf": [
             {
-              "$ref": "#/definitions/SubgraphSubgraphConfiguration2"
+              "$ref": "#/definitions/SubgraphSubgraphConfiguration"
             }
           ],
           "description": "Configure invalidation per subgraph"
@@ -2142,7 +2193,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config9": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Redis cache configuration",
       "properties": {
@@ -2213,7 +2264,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 5,
@@ -2252,7 +2304,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -3018,21 +3071,20 @@ expression: "&schema"
             "null"
           ]
         },
+        "preview_connect_v0_5": {
+          "default": null,
+          "description": "Feature gate for Connect spec v0.5. Set to `true` to enable using\nthe v0.5 spec during the preview phase.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "sources": {
           "additionalProperties": {
             "$ref": "#/definitions/SourceConfiguration"
           },
           "default": {},
           "description": "Map of subgraph_name.connector_source_name to source configuration",
-          "type": "object"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphConnectorConfiguration"
-          },
-          "default": {},
-          "deprecated": true,
-          "description": "A map of subgraph name to connectors config for that subgraph",
           "type": "object"
         }
       },
@@ -3063,16 +3115,36 @@ expression: "&schema"
       "type": "object"
     },
     "ContextConf": {
-      "anyOf": [
+      "description": "Configures the context",
+      "oneOf": [
         {
-          "description": "Deprecated configuration using a boolean",
-          "type": "boolean"
+          "const": "none",
+          "description": "Do not send context to the coprocessor (the default)",
+          "type": "string"
         },
         {
-          "$ref": "#/definitions/NewContextConf"
+          "const": "all",
+          "description": "Send all context keys to coprocessor",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
         }
-      ],
-      "description": "Configures the context"
+      ]
     },
     "CooperativeCancellation": {
       "additionalProperties": false,
@@ -3529,6 +3601,9 @@ expression: "&schema"
         }
       ]
     },
+    "Duration": {
+      "type": "string"
+    },
     "DurationUnit": {
       "oneOf": [
         {
@@ -3684,7 +3759,7 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "preview_extended_error_metrics": {
+        "extended_error_metrics": {
           "allOf": [
             {
               "$ref": "#/definitions/ExtendedErrorMetricsMode"
@@ -4117,7 +4192,7 @@ expression: "&schema"
         "metrics": {
           "allOf": [
             {
-              "$ref": "#/definitions/Metrics2"
+              "$ref": "#/definitions/Metrics"
             }
           ],
           "description": "Metrics configuration"
@@ -4132,10 +4207,6 @@ expression: "&schema"
         }
       },
       "type": "object"
-    },
-    "ExposeQueryPlanConfig": {
-      "description": "Expose query plan",
-      "type": "boolean"
     },
     "ExposeTraceId": {
       "additionalProperties": false,
@@ -4187,14 +4258,6 @@ expression: "&schema"
         "$ref": "#/definitions/Instrument6"
       },
       "properties": {
-        "apollo.router.operations.entity.cache": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/StandardInstrumentExtendedCacheAttributesWithSubgraphSelector"
-            }
-          ],
-          "description": "A counter of times we have a cache hit or cache miss (deprecated)"
-        },
         "apollo.router.response.cache": {
           "allOf": [
             {
@@ -5689,10 +5752,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "ForbidMutationsConfig": {
-      "description": "Forbid mutations configuration",
-      "type": "boolean"
-    },
     "ForwardHeaders": {
       "description": "Forward headers",
       "oneOf": [
@@ -5984,7 +6043,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "metadata": {
           "additionalProperties": true,
@@ -6366,6 +6426,40 @@ expression: "&schema"
           "default": {},
           "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "IncrementalPlanner": {
+      "additionalProperties": false,
+      "description": "Configuration for the incremental (BULB) query planner.",
+      "properties": {
+        "beam_width": {
+          "default": 16,
+          "description": "Beam width: how many states advance together per depth in the beam.\nWider beams capture more diversity, reducing expensive backtracking.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether the incremental planner is enabled.",
+          "type": "boolean"
+        },
+        "fuel": {
+          "default": 5000,
+          "description": "Cap on optimization effort beyond the first draft of the plan, measured in\npending-selection visits. `fuel: 0` returns the first complete plan found.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "timeout": {
+          "default": null,
+          "description": "Optional wall-clock time limit for the search. When set, the search\nreturns the best complete plan found so far once the limit is reached.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -6885,42 +6979,6 @@ expression: "&schema"
     "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "concurrent_requests": {
-          "default": 10,
-          "description": "Number of concurrent invalidation requests",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "listen": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ListenAddr"
-            }
-          ],
-          "description": "Listen address on which the invalidation endpoint must listen."
-        },
-        "path": {
-          "description": "Specify on which path you want to listen for invalidation endpoint.",
-          "type": "string"
-        },
-        "scan_count": {
-          "default": 1000,
-          "description": "Number of keys to return at once from a redis SCAN command",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "path",
-        "listen"
-      ],
-      "type": "object"
-    },
-    "InvalidationEndpointConfig2": {
-      "additionalProperties": false,
-      "properties": {
         "listen": {
           "allOf": [
             {
@@ -6993,7 +7051,7 @@ expression: "&schema"
               "$ref": "#/definitions/OnError"
             }
           ],
-          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `Error`. When set to `Continue`, requests that fail JWT authentication will\ncontinue to be processed by the router, but without the JWT claims in the context. When set\nto `Error`, requests that fail JWT authentication will be rejected with a HTTP 403 error."
+          "description": "Control the behavior when an error occurs during the authentication process.\n\nDefaults to `redacted_error`.\n\n* When set to `redacted_error`, requests that fail JWT authentication are rejected with a\n  generic error message instead of the details of the validation failure. The details\n  remain available in the `apollo::authentication::jwt_status` context value and in the\n  `apollo.router.operations.authentication.jwt` metric.\n* When set to `error`, requests that fail JWT authentication will be rejected with a\n  HTTP 403 error, and the response contains the details of the validation failure.\n* When set to `continue`, requests that fail JWT authentication will continue to be\n  processed by the router, but without the JWT claims in the context."
         },
         "sources": {
           "description": "Alternative sources to extract the JWT",
@@ -7072,10 +7130,6 @@ expression: "&schema"
       "required": [
         "url"
       ],
-      "type": "object"
-    },
-    "LicenseEnforcementConfig": {
-      "description": "The license enforcement plugin has no configuration.",
       "type": "object"
     },
     "LimitsConfig": {
@@ -7332,34 +7386,6 @@ expression: "&schema"
     },
     "Metrics": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "enables metrics evaluating the benefits of entity caching",
-          "type": "boolean"
-        },
-        "separate_per_type": {
-          "default": false,
-          "description": "Adds the entity type name to attributes. This can greatly increase the cardinality",
-          "type": "boolean"
-        },
-        "ttl": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Ttl"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Metrics counter TTL"
-        }
-      },
-      "type": "object"
-    },
-    "Metrics2": {
-      "additionalProperties": false,
       "description": "Metrics configuration",
       "properties": {
         "common": {
@@ -7527,14 +7553,19 @@ expression: "&schema"
       "description": "Request limits for a multipart request",
       "properties": {
         "max_file_size": {
-          "description": "The maximum size of each file, in bytes (default: 5MB)",
+          "description": "The maximum size of each file (default: 1MB)",
           "type": "string"
         },
         "max_files": {
-          "description": "The maximum amount of files allowed for a single query (default: 4)",
+          "description": "The maximum amount of files allowed for a single query (default: 5)",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
+        },
+        "max_overhead_size": {
+          "default": "2.0 MB",
+          "description": "The maximum amount of multipart framing — the preamble, part headers, boundary delimiters,\nand transport padding — permitted in a single upload request.\n\nThe parser cannot tell a framing byte from a content byte. The router therefore adds this\nallowance to the content the other limits already permit. It enforces the sum as a limit on\nthe whole request. A request over that sum gets a `413 Payload Too Large`. The sum grows\nwith `max_files` and `max_file_size`.",
+          "type": "string"
         },
         "operation_body_timeout": {
           "default": null,
@@ -7562,40 +7593,21 @@ expression: "&schema"
       ]
     },
     "MyTestPluginConfig": {
+      "additionalProperties": false,
       "description": "Config for the test plugin",
       "type": "object"
     },
-    "NewContextConf": {
-      "description": "Configures the context",
-      "oneOf": [
-        {
-          "const": "all",
-          "description": "Send all context keys to coprocessor",
+    "NestedName": {
+      "additionalProperties": false,
+      "description": "A nested setting with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
           "type": "string"
-        },
-        {
-          "const": "deprecated",
-          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Only send the list of context keys to coprocessor",
-          "properties": {
-            "selective": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array",
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "selective"
-          ],
-          "type": "object"
         }
-      ]
+      },
+      "type": "object"
     },
     "OTLPConfig": {
       "additionalProperties": false,
@@ -7683,8 +7695,9 @@ expression: "&schema"
     },
     "OnError": {
       "enum": [
-        "Continue",
-        "Error"
+        "continue",
+        "error",
+        "redacted_error"
       ],
       "type": "string"
     },
@@ -7900,25 +7913,31 @@ expression: "&schema"
           "$ref": "#/definitions/MyTestPluginConfig"
         },
         "experimental.broken": {
-          "$ref": "#/definitions/Config2"
-        },
-        "experimental.expose_query_plan": {
-          "$ref": "#/definitions/ExposeQueryPlanConfig"
+          "$ref": "#/definitions/Config"
         },
         "experimental.record": {
           "$ref": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config3"
+          "$ref": "#/definitions/Config2"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf"
         },
         "test.always_starts_and_stops": {
           "$ref": "#/definitions/Conf"
+        },
+        "test.records_previous_config": {
+          "$ref": "#/definitions/Conf"
+        },
+        "test.validated": {
+          "$ref": "#/definitions/ValidatedConfig"
         }
       },
-      "type": "object"
+      "type": [
+        "object",
+        "null"
+      ]
     },
     "Policy": {
       "additionalProperties": false,
@@ -8123,11 +8142,6 @@ expression: "&schema"
             "null"
           ]
         },
-        "jaeger": {
-          "default": false,
-          "description": "Propagate Jaeger",
-          "type": "boolean"
-        },
         "request": {
           "allOf": [
             {
@@ -8139,11 +8153,6 @@ expression: "&schema"
         "trace_context": {
           "default": false,
           "description": "Propagate trace context https://www.w3.org/TR/trace-context/",
-          "type": "boolean"
-        },
-        "zipkin": {
-          "default": false,
-          "description": "Propagate Zipkin",
           "type": "boolean"
         }
       },
@@ -8231,7 +8240,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8297,7 +8307,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -8357,10 +8368,19 @@ expression: "&schema"
             "null"
           ]
         },
-        "experimental_reuse_query_plans": {
-          "default": false,
-          "description": "If cache warm up is configured, this will allow the router to keep a query plan created with\nthe old schema, if it determines that the schema update does not affect the corresponding query",
-          "type": "boolean"
+        "incremental_planner": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/IncrementalPlanner"
+            }
+          ],
+          "default": {
+            "beam_width": 16,
+            "enabled": false,
+            "fuel": 5000,
+            "timeout": null
+          },
+          "description": "Configuration for the incremental (BULB) query planner, which\nbuilds plans field-by-field with bounded backtracking instead of\nexhaustively enumerating plan candidates."
         },
         "warmed_up_queries": {
           "default": null,
@@ -8479,6 +8499,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "storage_path": {
+          "default": null,
           "description": "The path to the directory where recordings will be stored. Defaults to\nthe current working directory.",
           "type": [
             "string",
@@ -8533,7 +8554,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         },
         "pool_size": {
           "default": 1,
@@ -8596,7 +8618,8 @@ expression: "&schema"
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -8742,6 +8765,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "main": {
+          "default": null,
           "description": "The main entry point for Rhai script evaluation",
           "type": [
             "string",
@@ -8749,6 +8773,7 @@ expression: "&schema"
           ]
         },
         "scripts": {
+          "default": null,
           "description": "The directory where Rhai scripts can be found",
           "type": [
             "string",
@@ -8832,7 +8857,7 @@ expression: "&schema"
         },
         "max_depth": {
           "default": null,
-          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
+          "description": "If set, requests with operations deeper than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,\nincluding fields in fragments and inline fragments. The following\nexample has a depth of 3.\n\n```graphql\nquery getProduct {\n  book { # 1\n    ...bookDetails\n  }\n}\n\nfragment bookDetails on Book {\n  details { # 2\n    ... on ProductDetailsBook {\n      country # 3\n    }\n  }\n}\n```",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -8842,7 +8867,7 @@ expression: "&schema"
         },
         "max_height": {
           "default": null,
-          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```\n\nThis may change in a future version of Apollo Router to do\n[full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "description": "If set, requests with operations higher than this maximum\nare rejected with a HTTP 400 Bad Request response and GraphQL error with\n`\"extensions\": {\"code\": \"MAX_HEIGHT_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias,\nbut only within the same selection set.\nFor example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql\nquery {\n    name { first }\n    name { last }\n}\n```",
           "format": "uint32",
           "minimum": 0,
           "type": [
@@ -9373,10 +9398,6 @@ expression: "&schema"
           "type": "object"
         },
         {
-          "description": "Deprecated, should not be used anymore, use static field instead",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
           "properties": {
             "static": {
@@ -9699,21 +9720,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "SpanMode": {
-      "description": "Span mode to create new or deprecated spans",
-      "oneOf": [
-        {
-          "const": "deprecated",
-          "description": "Keep the request span as root span and deprecated attributes. This option will eventually removed.",
-          "type": "string"
-        },
-        {
-          "const": "spec_compliant",
-          "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.",
-          "type": "string"
-        }
-      ]
-    },
     "Spans": {
       "additionalProperties": false,
       "properties": {
@@ -9740,14 +9746,6 @@ expression: "&schema"
             }
           ],
           "description": "Attributes to include on the HTTP client span.\nHTTP client spans contain information about HTTP requests made to subgraphs, including any changes made by Rhai scripts."
-        },
-        "mode": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/SpanMode"
-            }
-          ],
-          "description": "Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be defaulted in future to `spec_compliant`, eventually removed in future."
         },
         "router": {
           "allOf": [
@@ -10148,7 +10146,7 @@ expression: "&schema"
                       "$ref": "#/definitions/ActualCostMode"
                     }
                   ],
-                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost.\n* `by_response_shape` computes the cost based on the final structure of the composed\n  response, not including any interim structures from subgraph responses that did not\n  make it to the composed response."
+                  "description": "The strategy used to calculate the actual cost incurred by an operation.\n\n* `by_subgraph` (default) computes the cost of each subgraph response and sums them\n  to get the total query cost."
                 },
                 "list_size": {
                   "description": "The assumed length of lists returned by the operation.",
@@ -10218,7 +10216,7 @@ expression: "&schema"
     },
     "Subgraph": {
       "additionalProperties": false,
-      "description": "Per subgraph configuration for entity caching",
+      "description": "Per subgraph configuration for response caching",
       "properties": {
         "enabled": {
           "default": true,
@@ -10251,7 +10249,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/RedisCache"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -10264,65 +10262,6 @@ expression: "&schema"
           "anyOf": [
             {
               "$ref": "#/definitions/Ttl"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses"
-        }
-      },
-      "type": "object"
-    },
-    "Subgraph2": {
-      "additionalProperties": false,
-      "description": "Per subgraph configuration for response caching",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "activates caching for this subgraph, overrides the global configuration",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "invalidation": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SubgraphInvalidationConfig2"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Invalidation configuration"
-        },
-        "private_id": {
-          "default": null,
-          "description": "Context key used to separate cache sections per user",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "redis": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Config9"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Redis configuration"
-        },
-        "ttl": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Ttl2"
             },
             {
               "type": "null"
@@ -10499,27 +10438,6 @@ expression: "&schema"
         }
       ]
     },
-    "SubgraphConnectorConfiguration": {
-      "additionalProperties": false,
-      "description": "Configuration for a connector subgraph",
-      "properties": {
-        "$config": {
-          "additionalProperties": true,
-          "default": {},
-          "description": "Other values that can be used by connectors via `{$config.<key>}`",
-          "type": "object"
-        },
-        "sources": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SourceConfiguration"
-          },
-          "default": {},
-          "description": "A map of `@source(name:)` to configuration for that source",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
     "SubgraphDeduplicationConfigConfiguration": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -10601,22 +10519,6 @@ expression: "&schema"
           "description": "Enable the invalidation",
           "type": "boolean"
         },
-        "shared_key": {
-          "default": "",
-          "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphInvalidationConfig2": {
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable the invalidation",
-          "type": "boolean"
-        },
         "indexes": {
           "allOf": [
             {
@@ -10633,7 +10535,8 @@ expression: "&schema"
         "shared_key": {
           "default": "",
           "description": "Shared key needed to request the invalidation endpoint",
-          "type": "string"
+          "type": "string",
+          "x-apollo-secret": true
         }
       },
       "type": "object"
@@ -10861,6 +10764,19 @@ expression: "&schema"
           },
           "required": [
             "subgraph_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "is_deferred": {
+              "description": "Set to `true` to emit whether this subgraph fetch is part of the deferred portion of an `@defer` query plan.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_deferred"
           ],
           "type": "object"
         },
@@ -11315,10 +11231,6 @@ expression: "&schema"
           "type": "object"
         },
         {
-          "description": "Deprecated, should not be used anymore, use static field instead",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
           "properties": {
             "static": {
@@ -11349,34 +11261,6 @@ expression: "&schema"
           },
           "required": [
             "error"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "cache": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/CacheKind"
-                }
-              ],
-              "description": "Select if you want to get cache hit or cache miss"
-            },
-            "entity_type": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/EntityType"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Specify the entity type on which you want the cache data. (default: all)"
-            }
-          },
-          "required": [
-            "cache"
           ],
           "type": "object"
         },
@@ -11522,17 +11406,6 @@ expression: "&schema"
           ],
           "description": "DNS resolution strategy for subgraphs"
         },
-        "experimental_http2": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Http2Config"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Enable HTTP2 for subgraphs"
-        },
         "experimental_http2_keep_alive_interval": {
           "default": null,
           "description": "Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If\nunset (the default), keep-alive pings are disabled.",
@@ -11559,6 +11432,17 @@ expression: "&schema"
             }
           ],
           "description": "Enable global rate limiting"
+        },
+        "http2": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Http2Config"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Enable HTTP2 for subgraphs"
         },
         "pool_idle_timeout": {
           "default": {
@@ -11684,35 +11568,6 @@ expression: "&schema"
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/Subgraph"
-          },
-          "default": {},
-          "description": "per subgraph options",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "SubgraphSubgraphConfiguration2": {
-      "description": "Configuration options pertaining to the subgraph server component.",
-      "properties": {
-        "all": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Subgraph2"
-            }
-          ],
-          "default": {
-            "enabled": true,
-            "invalidation": null,
-            "private_id": null,
-            "redis": null,
-            "ttl": null
-          },
-          "description": "options applying to all subgraphs"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/Subgraph2"
           },
           "default": {},
           "description": "per subgraph options",
@@ -11922,18 +11777,13 @@ expression: "&schema"
           "type": "boolean"
         },
         "early_cancel": {
-          "default": false,
-          "description": "abort request handling when the client drops the connection.\nDefault: false.\nWhen set to true, some parts of the request pipeline like telemetry will not work properly,\nbut request handling will stop immediately when the client connection is closed.",
+          "default": true,
+          "description": "Abort request handling when the client drops the connection.\nDefault: true.\nWhen set to false, telemetry will be recorded for canceled requests, but request\nhandling will continue running until completion even after the client disconnects.",
           "type": "boolean"
         },
         "enable_result_coercion_errors": {
           "default": false,
           "description": "Enable errors generated during response reformatting and result coercion to be returned in\nresponses.\nDefault: false\nAll subgraph responses are checked and corrected to ensure alignment with the schema and\nquery. When enabled, misaligned values will generate errors which are included in errors\narray in the response.",
-          "type": "boolean"
-        },
-        "experimental_log_on_broken_pipe": {
-          "default": false,
-          "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
           "type": "boolean"
         },
         "generate_query_fragments": {
@@ -11954,6 +11804,11 @@ expression: "&schema"
           ],
           "default": "127.0.0.1:4000",
           "description": "The socket address and port to listen on\nDefaults to 127.0.0.1:4000"
+        },
+        "log_on_broken_pipe": {
+          "default": false,
+          "description": "Log a message if the client closes the connection before the response is sent.\nDefault: false.",
+          "type": "boolean"
         },
         "path": {
           "default": "/",
@@ -11981,7 +11836,12 @@ expression: "&schema"
             },
             "experimental_paths_limit": null,
             "experimental_plans_limit": null,
-            "experimental_reuse_query_plans": false,
+            "incremental_planner": {
+              "beam_width": 16,
+              "enabled": false,
+              "fuel": 5000,
+              "timeout": null
+            },
             "warmed_up_queries": null
           },
           "description": "Query planning options"
@@ -11999,6 +11859,11 @@ expression: "&schema"
           ],
           "default": "enforce",
           "description": "Determines how to handle queries which include additional fields of an input object.\n- `enforce` (default): rejects query\n- `measure`: permits query and the logs unknown fields"
+        },
+        "validate_default_values": {
+          "default": true,
+          "description": "Whether to validate default values in the supergraph schema.\nDefault: true",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -12420,10 +12285,6 @@ expression: "&schema"
           "type": "object"
         },
         {
-          "description": "Deprecated, should not be used anymore, use static field instead",
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
           "properties": {
             "static": {
@@ -12730,7 +12591,8 @@ expression: "&schema"
         "key": {
           "description": "key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -12756,7 +12618,8 @@ expression: "&schema"
         "key": {
           "description": "server key in PEM format",
           "type": "string",
-          "writeOnly": true
+          "writeOnly": true,
+          "x-apollo-secret": true
         }
       },
       "required": [
@@ -12815,14 +12678,6 @@ expression: "&schema"
           ],
           "description": "Datadog exporter configuration"
         },
-        "experimental_response_trace_id": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ExposeTraceId"
-            }
-          ],
-          "description": "A way to expose trace id in response headers"
-        },
         "otlp": {
           "allOf": [
             {
@@ -12839,13 +12694,13 @@ expression: "&schema"
           ],
           "description": "Propagation configuration"
         },
-        "zipkin": {
+        "response_trace_id": {
           "allOf": [
             {
-              "$ref": "#/definitions/ZipkinConfig"
+              "$ref": "#/definitions/ExposeTraceId"
             }
           ],
-          "description": "Zipkin exporter configuration"
+          "description": "A way to expose trace id in response headers"
         }
       },
       "type": "object"
@@ -12946,6 +12801,14 @@ expression: "&schema"
             }
           ],
           "description": "Configuration for tracing batch processor."
+        },
+        "throttle": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApolloTraceThrottleConfig"
+            }
+          ],
+          "description": "Back-stop that throttles the volume of traces sent to Apollo Studio, applied *after* the\n`telemetry.apollo.sampler` and `telemetry.exporters.tracing.common.sampler` head samplers."
         }
       },
       "type": "object"
@@ -12973,14 +12836,6 @@ expression: "&schema"
           ],
           "description": "Applied on specific subgraphs"
         },
-        "deduplicate_variables": {
-          "default": null,
-          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "router": {
           "anyOf": [
             {
@@ -13003,10 +12858,6 @@ expression: "&schema"
       "type": "object"
     },
     "Ttl": {
-      "description": "Per subgraph configuration for entity caching",
-      "type": "string"
-    },
-    "Ttl2": {
       "description": "Per subgraph configuration for response caching",
       "type": "string"
     },
@@ -13036,6 +12887,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ValidatedConfig": {
+      "additionalProperties": false,
+      "description": "A test plugin with a custom validation rule.",
+      "properties": {
+        "name": {
+          "default": "",
+          "description": "Any name except `reserved`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "WebSocketConfiguration": {
       "additionalProperties": false,
       "description": "WebSocket configuration for a specific subgraph",
@@ -13048,6 +12911,13 @@ expression: "&schema"
           ],
           "default": "disabled",
           "description": "Heartbeat interval for graphql-ws protocol (default: disabled)"
+        },
+        "max_reconnect_attempts": {
+          "default": 0,
+          "description": "Maximum number of times to attempt to reconnect a dropped WebSocket subscription connection.\nThe default is 0 (no reconnection attempts).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "path": {
           "default": null,
@@ -13065,6 +12935,14 @@ expression: "&schema"
           ],
           "default": "graphql_ws",
           "description": "Which WebSocket GraphQL protocol to use for this subgraph possible values are: 'graphql_ws' | 'graphql_transport_ws' (default: graphql_ws)"
+        },
+        "reconnect_delay": {
+          "default": null,
+          "description": "Delay before each WebSocket reconnection attempt. Accepts durations like '1s', '500ms'. When unset (null) the default is 1 second; use '0s' for no delay.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -13082,46 +12960,6 @@ expression: "&schema"
           "type": "string"
         }
       ]
-    },
-    "ZipkinConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/BatchProcessorConfig"
-            }
-          ],
-          "description": "Batch processor configuration"
-        },
-        "enabled": {
-          "description": "Enable zipkin",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/UriEndpoint"
-            }
-          ],
-          "description": "The endpoint to send to"
-        },
-        "sampler": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/SamplerOption"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Per-exporter sampler.\n\nUses the same trace-ID-based algorithm as `telemetry.exporters.tracing.common.sampler`.\nAccepts a decimal between 0.0 and 1.0, `always_on`, or `always_off`.\nShould be ≤ the common sampler; setting it higher has no effect.\n\nWhen `parent_based_sampler` is enabled (the default), traces arriving with a `traceparent`\nheader already marked as sampled by the calling service will be passed through to this\nexporter regardless of this sampler's value — including when set to `always_off`."
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
     },
     "logging_format": {
       "oneOf": [
@@ -13335,10 +13173,11 @@ expression: "&schema"
       "additionalProperties": {
         "$ref": "#/definitions/SubgraphConfig"
       },
+      "description": "Configuration for the `mock_subgraphs` plugin\n\n\nExample `router.yaml`:\n\n```yaml\nexperimental_mock_subgraphs:\n  subgraph1_name:\n    headers:\n      cache-control: public\n    query:\n      rootField:\n        subField: \"value\"\n        __cacheTags: [\"rootField\"]\n    entities:\n      - __typename: Something\n        id: 4\n        field: [42, 7]\n        __cacheTags: [\"something-4\"]\n```",
       "type": "object"
     },
     "^response_cache$": {
-      "$ref": "#/definitions/Config8"
+      "$ref": "#/definitions/Config6"
     }
   },
   "properties": {
@@ -13386,6 +13225,9 @@ expression: "&schema"
         "subgraph": null
       },
       "description": "Batching configuration."
+    },
+    "circuit_breaker": {
+      "$ref": "#/definitions/CircuitBreakerPluginConfig"
     },
     "connectors": {
       "$ref": "#/definitions/ConnectorsConfig"
@@ -13438,22 +13280,10 @@ expression: "&schema"
       "$ref": "#/definitions/DemandControlConfig"
     },
     "enhanced_client_awareness": {
-      "$ref": "#/definitions/Config4"
-    },
-    "experimental_chaos": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Config"
-        }
-      ],
-      "default": {
-        "force_config_reload": null,
-        "force_schema_reload": null
-      },
-      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+      "$ref": "#/definitions/Config3"
     },
     "experimental_diagnostics": {
-      "$ref": "#/definitions/Config5"
+      "$ref": "#/definitions/Config4"
     },
     "experimental_hoist_orphan_errors": {
       "allOf": [
@@ -13474,11 +13304,16 @@ expression: "&schema"
       "description": "Type conditioned fetching configuration.",
       "type": "boolean"
     },
+    "expose_query_plan": {
+      "description": "Set to `true` to enable, or `false` to disable.",
+      "type": "boolean"
+    },
     "fleet_detector": {
       "$ref": "#/definitions/Conf2"
     },
     "forbid_mutations": {
-      "$ref": "#/definitions/ForbidMutationsConfig"
+      "description": "Set to `true` to enable, or `false` to disable.",
+      "type": "boolean"
     },
     "headers": {
       "$ref": "#/definitions/HeadersConfig"
@@ -13500,9 +13335,6 @@ expression: "&schema"
     },
     "include_subgraph_errors": {
       "$ref": "#/definitions/IncludeSubgraphErrorsConfig"
-    },
-    "license_enforcement": {
-      "$ref": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
       "$ref": "#/definitions/LimitsConfig"
@@ -13541,14 +13373,11 @@ expression: "&schema"
       "default": null,
       "description": "Plugin configuration"
     },
-    "preview_entity_cache": {
-      "$ref": "#/definitions/Config6"
-    },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config7"
+      "$ref": "#/definitions/Config5"
     },
     "reload": {
       "allOf": [
@@ -13614,12 +13443,12 @@ expression: "&schema"
           "secs": 60
         },
         "defer_support": true,
-        "early_cancel": false,
+        "early_cancel": true,
         "enable_result_coercion_errors": false,
-        "experimental_log_on_broken_pipe": false,
         "generate_query_fragments": true,
         "introspection": false,
         "listen": "127.0.0.1:4000",
+        "log_on_broken_pipe": false,
         "path": "/",
         "query_planning": {
           "cache": {
@@ -13636,16 +13465,25 @@ expression: "&schema"
           },
           "experimental_paths_limit": null,
           "experimental_plans_limit": null,
-          "experimental_reuse_query_plans": false,
+          "incremental_planner": {
+            "beam_width": 16,
+            "enabled": false,
+            "fuel": 5000,
+            "timeout": null
+          },
           "warmed_up_queries": null
         },
         "redact_query_validation_errors": false,
-        "strict_variable_validation": "enforce"
+        "strict_variable_validation": "enforce",
+        "validate_default_values": true
       },
       "description": "Configuration for the supergraph"
     },
     "telemetry": {
       "$ref": "#/definitions/TelemetryConfig"
+    },
+    "test_validated": {
+      "$ref": "#/definitions/BuiltInValidatedConfig"
     },
     "tls": {
       "allOf": [

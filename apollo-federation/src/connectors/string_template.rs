@@ -195,8 +195,19 @@ impl StringTemplate {
         let uri = if result.contains("://") {
             Uri::from_str(result.as_ref())
         } else {
-            // Explicitly set this as a relative URI so it doesn't get confused for a domain name
-            PathAndQuery::from_str(result.as_ref()).map(Uri::from)
+            // Explicitly set this as a relative URI so it doesn't get confused for a domain name.
+            // `PathAndQuery` rejects an empty string and requires a leading `/` (or `?` for a
+            // query-only value); normalize here rather than relying on the caller to have
+            // written a template that already starts with `/`.
+            let relative = result.as_ref();
+            let relative = if relative.is_empty() {
+                "/".to_string()
+            } else if relative.starts_with('/') || relative.starts_with('?') {
+                relative.to_string()
+            } else {
+                format!("/{relative}")
+            };
+            PathAndQuery::from_str(&relative).map(Uri::from)
         }
         .map_err(|err| Error {
             message: format!("Invalid URI: {err}"),

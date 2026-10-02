@@ -89,17 +89,13 @@ mod test {
     use tower::ServiceExt;
 
     use crate::layers::ServiceBuilderExt;
-    use crate::plugin::test::MockSupergraphService;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
 
     #[tokio::test]
     async fn test_layer() -> Result<(), BoxError> {
-        let mut mock_service = MockSupergraphService::new();
-        mock_service
-            .expect_call()
-            .once()
-            .returning(|_| Ok(SupergraphResponse::fake_builder().build().unwrap()));
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
 
         let mut service = ServiceBuilder::new()
             .map_future_with_request_data(
@@ -123,17 +119,15 @@ mod test {
             )
             .service(mock_service);
 
-        let result = service
-            .ready()
-            .await
-            .unwrap()
-            .call(
-                SupergraphRequest::fake_builder()
-                    .header("hello", "world")
-                    .build()
-                    .unwrap(),
-            )
-            .await?;
+        let call = service.ready().await.unwrap().call(
+            SupergraphRequest::fake_builder()
+                .header("hello", "world")
+                .build()
+                .unwrap(),
+        );
+        let (_req, responder) = handle.next_request().await.unwrap();
+        responder.send_response(SupergraphResponse::fake_builder().build().unwrap());
+        let result = call.await?;
         assert_eq!(
             result.response.headers().get("hello"),
             Some(&HeaderValue::from_static("world"))

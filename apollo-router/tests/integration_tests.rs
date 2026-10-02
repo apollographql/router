@@ -804,8 +804,10 @@ const PARSER_LIMITS_TEST_QUERY_RECURSION: usize = 6;
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION
-        }
+            "router": {
+                "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -827,8 +829,10 @@ async fn query_just_under_recursion_limit() {
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION - 1
-        }
+            "router": {
+                "parser_max_recursion": PARSER_LIMITS_TEST_QUERY_RECURSION - 1,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -862,8 +866,10 @@ async fn query_just_at_recursion_limit() {
 async fn query_just_under_token_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT,
-        }
+            "router": {
+                "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -885,8 +891,10 @@ async fn query_just_under_token_limit() {
 async fn query_just_at_token_limit() {
     let config = serde_json::json!({
         "limits": {
-            "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT - 1,
-        }
+            "router": {
+                "parser_max_tokens": PARSER_LIMITS_TEST_QUERY_TOKEN_COUNT - 1,
+            },
+        },
     });
     let request = supergraph::Request::fake_builder()
         .query(PARSER_LIMITS_TEST_QUERY)
@@ -1621,7 +1629,7 @@ async fn setup_sandboxed_router_and_registry(
     mocks: MockedSubgraphs,
 ) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
-    // Plugin order matters here. `SubgraphServiceFactory::new` folds
+    // Plugin order matters here. `SubgraphServices::new` folds
     // `plugins.iter().rev()` over the inner service, so the plugin added
     // EARLIER becomes the OUTER layer of the resulting service. We want
     // counting to run on every request *before* dispatching to the mock
@@ -1741,8 +1749,8 @@ impl Plugin for CountingServiceRegistry {
     fn subgraph_service(
         &self,
         subgraph_name: &str,
-        service: subgraph::BoxService,
-    ) -> subgraph::BoxService {
+        service: subgraph::BoxCloneService,
+    ) -> subgraph::BoxCloneService {
         let name = subgraph_name.to_owned();
         let counters = self.clone();
         service
@@ -1750,7 +1758,7 @@ impl Plugin for CountingServiceRegistry {
                 counters.increment(&name);
                 request
             })
-            .boxed()
+            .boxed_clone()
     }
 }
 
