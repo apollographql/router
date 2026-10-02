@@ -1293,11 +1293,27 @@ impl FieldRoutingSearchSpace {
         });
     }
 
+    /// Runs `evaluate` and reports whether its result is independent of the
+    /// key-hop enumerations opened before `depth`. A guard hit at `depth` or
+    /// deeper closed a cycle inside the evaluation, which a fresh evaluation
+    /// would close the same way. Shallower hits pass up to the enclosing one.
+    pub(super) fn with_guard_floor<T>(
+        &self,
+        depth: usize,
+        evaluate: impl FnOnce() -> T,
+    ) -> (T, bool) {
+        let outer = self.caches.guard_floor.replace(usize::MAX);
+        let result = evaluate();
+        let inner = self.caches.guard_floor.get();
+        self.caches.guard_floor.set(outer.min(inner));
+        (result, inner >= depth)
+    }
+
     /// Cached key hop enumeration with integrated cycle guard. The guard
     /// breaks mutual recursion with `conditions_routable`: re-entering a
     /// (node, key) already on the call stack returns empty (circular).
-    /// Results are cached only when the guard did not fire (or this is
-    /// the outermost call, whose result is the stable fixpoint). The
+    /// Results are cached when every guard hit inside the enumeration
+    /// closed a cycle within it (see [`Self::with_guard_floor`]). The
     /// provides_anchor path bypasses the cache because the same (node,
     /// key) pair yields different hops under different ancestors.
     pub(super) fn cached_key_hops(
@@ -1312,14 +1328,16 @@ impl FieldRoutingSearchSpace {
         {
             return Ok(cached.clone());
         }
-        let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
-        if !self
+        let depth = self.caches.key_hops_in_flight.borrow().len();
+        let in_flight_at = self
             .caches
             .key_hops_in_flight
-            .borrow_mut()
-            .insert((node, key.clone()))
-        {
-            self.caches.guard_hits.set(self.caches.guard_hits.get() + 1);
+            .borrow()
+            .get(&(node, key.clone()))
+            .copied();
+        if let Some(cycle_depth) = in_flight_at {
+            let floor = self.caches.guard_floor.get().min(cycle_depth);
+            self.caches.guard_floor.set(floor);
             trace!(
                 ?node,
                 ?key,
@@ -1327,17 +1345,21 @@ impl FieldRoutingSearchSpace {
             );
             return Ok(Arc::new(Vec::new()));
         }
-        let hits_before = self.caches.guard_hits.get();
+        self.caches
+            .key_hops_in_flight
+            .borrow_mut()
+            .insert((node, key.clone()), depth);
         let mut hops = Vec::new();
-        let result =
-            self.append_key_hop_options_inner(node, provides_anchor, &mut hops, &edge_finder);
+        let (result, self_contained) = self.with_guard_floor(depth, || {
+            self.append_key_hop_options_inner(node, provides_anchor, &mut hops, &edge_finder)
+        });
         self.caches
             .key_hops_in_flight
             .borrow_mut()
             .remove(&(node, key.clone()));
         result?;
         let hops = Arc::new(hops);
-        if provides_anchor.is_none() && (outermost || self.caches.guard_hits.get() == hits_before) {
+        if provides_anchor.is_none() && self_contained {
             self.caches
                 .key_hops
                 .borrow_mut()
@@ -1378,26 +1400,28 @@ impl FieldRoutingSearchSpace {
         if let Some(&cached) = self.caches.conditions_routable.borrow().get(&cache_key) {
             return Ok(cached);
         }
-        let outermost = self.caches.key_hops_in_flight.borrow().is_empty();
-        let hits_before = self.caches.guard_hits.get();
-        let mut result = true;
-        for sel in conditions.selections.values() {
-            let routable = match sel {
-                Selection::Field(field_sel) => self.condition_field_routable(node, field_sel)?,
-                Selection::InlineFragment(frag_sel) => {
-                    self.condition_fragment_routable(node, frag_sel)?
+        let depth = self.caches.key_hops_in_flight.borrow().len();
+        let (result, self_contained) = self.with_guard_floor(depth, || {
+            for sel in conditions.selections.values() {
+                let routable = match sel {
+                    Selection::Field(field_sel) => {
+                        self.condition_field_routable(node, field_sel)?
+                    }
+                    Selection::InlineFragment(frag_sel) => {
+                        self.condition_fragment_routable(node, frag_sel)?
+                    }
+                };
+                if !routable {
+                    return Ok(false);
                 }
-            };
-            if !routable {
-                result = false;
-                break;
             }
-        }
-        // Cache when no guard fired during this evaluation, or when this
-        // is the outermost call (no key hop enumeration in progress). The
-        // outermost result is the deterministic fixpoint a fresh call would
-        // recompute, so it is safe to memoize even if guards fired inside.
-        if outermost || self.caches.guard_hits.get() == hits_before {
+            Ok::<bool, FederationError>(true)
+        });
+        let result = result?;
+        // The guard only removes routes, so a routable result holds in any
+        // context. An unroutable one holds wherever the evaluation was
+        // self-contained.
+        if result || self_contained {
             self.caches
                 .conditions_routable
                 .borrow_mut()
@@ -1752,6 +1776,50 @@ mod tests {
             options[3].target_subgraph().as_ref(),
             "S4",
             "unsatisfiable large key last"
+        );
+    }
+
+    /// A nested key-hop enumeration whose cycles all close inside it does
+    /// not depend on the enumerations that called it, so its result is
+    /// cached even though the cycle guard fired. Routing `vx` from `s0`
+    /// needs `kx`, which `m` provides through `k0` and `y` offers only
+    /// through `ky`, a key nothing else provides. The enumeration for `kx`
+    /// at `s0` runs inside the one for `vx`, and its search through `y`
+    /// trips the guard only on enumerations it opened itself. Caching only
+    /// guard-free or outermost results left it, and every evaluation like
+    /// it on large graphs, recomputed on each visit.
+    #[test]
+    fn self_contained_key_hop_cycles_are_cached() {
+        use crate::operation::SelectionSet;
+        use crate::schema::position::CompositeTypeDefinitionPosition;
+
+        const LINK: &str = r#"extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@inaccessible"])"#;
+        let s0 =
+            format!("{LINK}\ntype Query {{ t: T }}\ntype T @key(fields: \"k0\") {{ k0: ID! }}");
+        let m = format!("{LINK}\ntype T @key(fields: \"k0\") {{ k0: ID! kx: ID! @shareable }}");
+        let y = format!(
+            "{LINK}\ntype T @key(fields: \"ky\") {{ ky: ID! @inaccessible kx: ID! @shareable }}"
+        );
+        let x = format!("{LINK}\ntype T @key(fields: \"kx\") {{ kx: ID! @shareable vx: Int }}");
+        let space = test_support::search_space(&[("s0", &s0), ("m", &m), ("y", &y), ("x", &x)]);
+        let x_schema = space.qg().schema_by_source("x").expect("x schema").clone();
+        let t: CompositeTypeDefinitionPosition = x_schema
+            .get_type(&name!("T"))
+            .expect("T exists")
+            .try_into()
+            .expect("T is composite");
+        let conditions = SelectionSet::parse(x_schema, t, "vx").expect("conditions parse");
+        let s0_t = test_support::node_for(&space, "s0", "T");
+
+        let routable = space
+            .conditions_routable(s0_t, &conditions)
+            .expect("routability check runs");
+
+        assert!(routable, "vx is reachable through m's kx");
+        let nested = (s0_t, RoutingSiteKey::Field(name!("kx")));
+        assert!(
+            space.caches.key_hops.borrow().contains_key(&nested),
+            "the nested enumeration for kx at s0 should be cached"
         );
     }
 }
