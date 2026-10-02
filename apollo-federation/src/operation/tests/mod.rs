@@ -1976,3 +1976,95 @@ fn fragments_with_non_intersecting_types() {
         }
     "###);
 }
+
+/// Runs `add_aliases_for_non_merging_fields` on `query` and renders the aliased selection set
+/// followed by one `path -> rename_key_to` line per emitted key rewrite.
+fn aliases_for_non_merging_fields(schema_doc: &str, query: &str) -> String {
+    let schema = parse_schema(schema_doc);
+    let operation = Operation::parse(schema, query, "query.graphql").unwrap();
+    let (aliased, rewrites) = operation
+        .selection_set
+        .add_aliases_for_non_merging_fields()
+        .unwrap();
+    let mut rendered = aliased.to_string();
+    for rewrite in rewrites {
+        let crate::query_plan::FetchDataRewrite::KeyRenamer(renamer) = rewrite.as_ref() else {
+            panic!("unexpected rewrite: {rewrite:?}");
+        };
+        let path: Vec<_> = renamer.path.iter().map(|elem| elem.to_string()).collect();
+        rendered.push_str(&format!(
+            "\n{} -> {}",
+            path.join("/"),
+            renamer.rename_key_to
+        ));
+    }
+    rendered
+}
+
+const NON_MERGING_UNION_SCHEMA: &str = r#"
+  type Query { node: U }
+  union U = A | B
+  type A { a: String o: U }
+  type B { b: String o: U }
+"#;
+
+#[test]
+fn generated_alias_does_not_collapse_later_client_alias() {
+    // `x: b` conflicts with `x: a` and must be aliased. The alias must not be `x__alias_0`, which
+    // the client also requests (after the conflicting field) as a separate response key.
+    insta::assert_snapshot!(
+        aliases_for_non_merging_fields(
+            NON_MERGING_UNION_SCHEMA,
+            "{ node { ... on A { x: a } ... on B { x: b x__alias_0: b } } }",
+        ),
+        @r###"
+    { node { ... on A { x: a } ... on B { x__alias_1: b x__alias_0: b } } }
+    node/... on B/x__alias_1 -> x
+    "###
+    );
+}
+
+#[test]
+fn generated_alias_skips_earlier_client_alias() {
+    insta::assert_snapshot!(
+        aliases_for_non_merging_fields(
+            NON_MERGING_UNION_SCHEMA,
+            "{ node { ... on A { x: a } ... on B { x__alias_0: b x: b } } }",
+        ),
+        @r###"
+    { node { ... on A { x: a } ... on B { x__alias_0: b x__alias_1: b } } }
+    node/... on B/x__alias_1 -> x
+    "###
+    );
+}
+
+#[test]
+fn generated_alias_skips_every_reserved_client_alias() {
+    // Reserved names both before and after the conflicting field, and in a sibling fragment.
+    insta::assert_snapshot!(
+        aliases_for_non_merging_fields(
+            NON_MERGING_UNION_SCHEMA,
+            "{ node { ... on A { x: a x__alias_2: a } ... on B { x__alias_1: b x: b x__alias_0: b } } }",
+        ),
+        @r###"
+    { node { ... on A { x: a x__alias_2: a } ... on B { x__alias_1: b x__alias_3: b x__alias_0: b } } }
+    node/... on B/x__alias_3 -> x
+    "###
+    );
+}
+
+#[test]
+fn generated_alias_skips_client_alias_in_merged_sub_selection() {
+    // The two `o` selections are merged before aliasing their sub-selections, so `x__alias_0`
+    // requested under `... on B { o }` is reserved when aliasing `x: b` under the same `o`.
+    insta::assert_snapshot!(
+        aliases_for_non_merging_fields(
+            NON_MERGING_UNION_SCHEMA,
+            "{ node { ... on A { o { ... on A { x: a } } } ... on B { o { ... on B { x: b x__alias_0: b } } } } }",
+        ),
+        @r###"
+    { node { ... on A { o { ... on A { x: a } } } ... on B { o { ... on B { x__alias_1: b x__alias_0: b } } } } }
+    node/... on B/o/... on B/x__alias_1 -> x
+    "###
+    );
+}
