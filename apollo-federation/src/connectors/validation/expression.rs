@@ -339,8 +339,12 @@ pub(crate) fn validate(
                 "expected {} but received incompatible {}\nDetails: `{}` does not accept `{}`",
                 short_shape_name(&mismatch.expected),
                 short_shape_name(&mismatch.received),
-                mismatch.expected.pretty_print_bounded(PrintLimits::default()),
-                mismatch.received.pretty_print_bounded(PrintLimits::default()),
+                mismatch
+                    .expected
+                    .pretty_print_bounded(PrintLimits::default()),
+                mismatch
+                    .received
+                    .pretty_print_bounded(PrintLimits::default()),
             ),
             locations: transform_locations(mismatch.received.locations(), context, expression),
         })
