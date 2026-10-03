@@ -887,7 +887,7 @@ jobs:
   publish_github_release:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
-    resource_class: small
+    resource_class: xlarge
     environment:
       <<: *common_job_environment
       VERSION: << pipeline.git.tag >>
