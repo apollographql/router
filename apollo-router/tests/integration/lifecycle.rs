@@ -69,7 +69,6 @@ async fn test_reload_config_valid() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_migrated_reload_and_invalid_replacement_preserves_introspection()
 -> Result<(), BoxError> {

@@ -225,7 +225,6 @@ fn changed_settings_name_each_setting() {
 
 /// Each fixture, loaded as an operator would load it, keeps the effective settings recorded in
 /// its snapshot.
-#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[test]
 fn corpus_effective_settings() {
     for case in CASES {
@@ -324,7 +323,6 @@ fn validated_yaml_carries_expansion_and_overrides_for_usage_selectors() {
     assert_eq!(config.raw_yaml.as_deref(), Some(text));
 }
 
-#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[test]
 fn migrated_documents_keep_the_original_text_as_raw_yaml() {
     let text = include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml");
@@ -418,7 +416,6 @@ async fn typed_plugin_configs_are_retained_and_construct_plugins() {
 /// The flat deduplication shape passes schema validation but fails typed deserialization.
 /// Startup migrates it under `deduplication.all`; without migration, parsing rejects it before
 /// any plugin is constructed.
-#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[test]
 fn unmigrated_flat_subscription_dedup_is_rejected_while_parsing() {
     let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
@@ -449,7 +446,6 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 /// when the migrated one failed the schema check. Once migration succeeds, the migrated copy is
 /// loaded and its errors are reported. Startup migration 2045 fixes the flat deduplication
 /// settings, so the error is the traffic shaping timeout, not the settings migration fixed.
-#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[test]
 fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
     let error = assert_logs(
@@ -470,7 +466,6 @@ fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
 
 /// The sandbox checks run once the document has been parsed, so a migrated document that
 /// enables both sandbox and homepage is still rejected, without falling back.
-#[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
 #[test]
 fn sandbox_conflicts_are_rejected_after_migration() {
     let error = parse(

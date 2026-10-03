@@ -612,7 +612,6 @@ mod test {
         })
     }
 
-    #[ignore = "TODO(fnichol): remove immediately after build of v3.x pre-releases"]
     #[test]
     fn detects_settings_that_startup_migrates() {
         assert!(super::uses_migrated_settings(indoc::indoc! {"
