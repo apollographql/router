@@ -75,8 +75,40 @@ const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 pub(crate) enum UpgradeMode {
     /// Upgrade using migrations for major version (eg: from router 1.x to router 2.x)
     Major,
-    /// Upgrade using migrations for minor version (eg: from router 2.x to router 2.y)
-    Minor,
+    /// Upgrade using migrations for a given minor version (eg: from router 2.x to router 2.y)
+    Minor(i64),
+}
+
+impl UpgradeMode {
+    /// The within-major migrations for this router's own major version (for a nightly, the
+    /// major of its base version), which startup and reload apply automatically.
+    pub(crate) fn current_minor() -> Self {
+        Self::Minor(
+            migration_major(
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                env!("CARGO_PKG_VERSION_PRE"),
+            )
+            .expect("0.x router versions should be nightlies: `0.0.0-nightly-{base_version}…`"),
+        )
+    }
+}
+
+/// The major version whose migrations a build applies at startup.
+///
+/// Nightlies are versioned `0.0.0-nightly-{base_version}.{date}+{sha}` (see `cargo xtask release
+/// prepare nightly`), so their real major is the one in `base_version`.  Taking `0` at face value
+/// would apply the 1.x (`0xxx`) migrations.
+fn migration_major(major: &str, pre: &str) -> Option<i64> {
+    let major: i64 = major.parse().ok()?;
+    if major != 0 {
+        return Some(major);
+    }
+    pre.strip_prefix("nightly-")?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()
+        .filter(|&major| major > 0)
 }
 
 pub(crate) fn upgrade_configuration(
@@ -84,14 +116,13 @@ pub(crate) fn upgrade_configuration(
     log_warnings: bool,
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
-    const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
-    let files = Asset::iter().sorted().filter(|f| {
-        if matches!(upgrade_mode, UpgradeMode::Major) {
-            f.ends_with(".yaml")
-        } else {
-            f.ends_with(".yaml") && f.starts_with(CURRENT_MAJOR_VERSION)
+    let files = Asset::iter().sorted().filter(|f| match upgrade_mode {
+        UpgradeMode::Major => f.ends_with(".yaml"),
+        UpgradeMode::Minor(major_version) => {
+            let major_version = major_version.to_string();
+            f.ends_with(".yaml") && f.starts_with(&major_version)
         }
     });
     for filename in files {
@@ -389,8 +420,11 @@ mod test {
 
     use crate::configuration::upgrade::Action;
     use crate::configuration::upgrade::Migration;
+    use crate::configuration::upgrade::UpgradeMode;
     use crate::configuration::upgrade::apply_migration;
     use crate::configuration::upgrade::generate_upgrade_output;
+    use crate::configuration::upgrade::migration_major;
+    use crate::configuration::upgrade::upgrade_configuration;
 
     fn source_doc() -> Value {
         json!( {
@@ -403,6 +437,28 @@ mod test {
                 "v2"
             ]
         })
+    }
+
+    #[test]
+    fn migration_major_uses_the_nightly_base_version() {
+        assert_eq!(migration_major("2", ""), Some(2));
+        assert_eq!(migration_major("3", "rc.0"), Some(3));
+        assert_eq!(migration_major("0", "nightly-2.17.0.20260924"), Some(2));
+        assert_eq!(
+            migration_major("0", "nightly-3.0.0-alpha.0.20260924"),
+            Some(3)
+        );
+        assert_eq!(migration_major("0", ""), None);
+        assert_eq!(migration_major("0", "dev"), None);
+        assert_eq!(migration_major("0", "nightly-0.1.0.20260924"), None);
+    }
+
+    #[test]
+    fn current_minor_keeps_server_section() {
+        let config = json!({ "server": { "http": { "header_read_timeout": "30s" } } });
+        let upgraded = upgrade_configuration(&config, false, UpgradeMode::current_minor())
+            .expect("expected successful migration");
+        assert_eq!(upgraded, config);
     }
 
     #[test]
