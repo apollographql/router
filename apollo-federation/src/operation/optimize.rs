@@ -782,6 +782,65 @@ mod tests {
         }
 
         #[test]
+        fn extracts_common_selections_with_same_response_name_in_any_order() {
+            // `a @include(if: $v)` and `a @skip(if: $v)` share a response name but are distinct
+            // selections, so the two sub-selections are equal despite their different order.
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let query = parse_operation(
+                &schema,
+                r#"
+                query($v: Boolean!) {
+                  t1 {
+                    a @include(if: $v)
+                    a @skip(if: $v)
+                    b
+                  }
+                  t2 {
+                    b
+                    a @skip(if: $v)
+                    a @include(if: $v)
+                  }
+                }
+                "#,
+            );
+
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(minified, @r###"
+            query($v: Boolean!) {
+              t1 {
+                ...a
+              }
+              t2 {
+                ...a
+              }
+            }
+
+            fragment a on T {
+              a @include(if: $v)
+              a @skip(if: $v)
+              b
+            }
+            "###);
+
+            assert_equal_ops!(&schema, &original, &minified);
+        }
+
+        #[test]
         fn does_not_extract_different_sub_selections() {
             let schema_doc = r#"
               type Query {
