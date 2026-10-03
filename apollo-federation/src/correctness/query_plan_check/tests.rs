@@ -386,9 +386,10 @@ fn interface_object_planner() -> QueryPlanner {
 // the demand derived from it reaches `P` and `Q` both, where a `requires` entry is written at one
 // of them. Coverage for that shape, which nothing else here has.
 //
-// This does not discriminate the fix that asks an entry's inputs only at its own type: on this
-// plan the subgraph oracle, which the model has no counterpart for, already drops the obligation
-// under `start`. See the note on `check_entry_agrees_with_rewrites`'s caller.
+// This does not discriminate the fix that asks an entry's inputs only at its own type: the
+// planner writes this plan's entry at `I` itself, so restricting the demand to the entry's type
+// is the identity. Reaching it needs an entry at an implementation, which is a plan written by
+// hand.
 #[test]
 fn an_interface_object_plan_is_accepted() {
     let planner = interface_object_planner();
@@ -409,4 +410,44 @@ fn an_interface_object_plan_is_accepted() {
         &plan,
     )
     .unwrap();
+}
+
+// The subgraph oracle answers in the subgraph's own terms, and `A` declares `I` as an interface
+// object — an *object* there, naming itself and nothing else. Ungrounded, that name intersects
+// the supergraph's `{P, Q}` to nothing, so every obligation under `start` was dropped and a plan
+// that fetches nothing for `data` was accepted. Both checkers share the oracle, so both were
+// blind; `SubgraphConstraint` grounds the name back now.
+//
+// `data` requires `required`, so a plan for `data` fetches both: the operation planned here is
+// the smaller one, and `data` is what the plan genuinely lacks.
+#[test]
+fn a_field_returning_an_interface_object_is_still_checked() {
+    let planner = interface_object_planner();
+    let planned = ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ start { ... on P { required } } }",
+        "planned.graphql",
+    )
+    .expect("valid operation");
+    let plan = planner
+        .build_query_plan(&planned, None, Default::default())
+        .expect("query plan");
+    let checked = ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ start { ... on P { required data } } }",
+        "checked.graphql",
+    )
+    .expect("valid operation");
+    let error = crate::correctness::check_plan(
+        planner.api_schema(),
+        planner.supergraph_schema(),
+        planner.subgraph_schemas(),
+        &checked,
+        &plan,
+    )
+    .expect_err("the plan never fetches `data`");
+    assert!(
+        error.to_string().contains("does not select `data`"),
+        "{error}"
+    );
 }

@@ -87,7 +87,7 @@ pub fn compare_response_shapes_in_supergraph(
 ) -> Result<(), ComparisonError> {
     let path_constraint = (
         schema_constraint::SchemaConstraint::new(supergraph_schema),
-        subgraph_constraint::SubgraphConstraint::new(subgraphs_by_name),
+        subgraph_constraint::SubgraphConstraint::new(supergraph_schema, subgraphs_by_name),
     );
     let possible_types = PossibleTypes::All; // unconstrained at the top level
     let assumption = response_shape::Clause::default(); // empty assumption at the top level

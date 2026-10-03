@@ -21,6 +21,10 @@ use crate::utils::FallibleIterator;
 /// are possible under the current context and derives a field's possible response types from
 /// the subgraph schemas' own field definitions.
 pub(crate) struct SubgraphConstraint<'a> {
+    /// The schema a response shape is written against, which is what a subgraph's answer has to
+    /// be grounded back into; see [`SubgraphConstraint::runtime_types_in_supergraph`].
+    supergraph_schema: &'a ValidFederationSchema,
+
     /// Reference to the all subgraph schemas in the supergraph.
     subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
 
@@ -46,12 +50,37 @@ fn is_resolvable(
 
 impl<'a> SubgraphConstraint<'a> {
     /// A constraint with no subgraph information: all subgraphs are possible.
-    pub(crate) fn new(subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>) -> Self {
+    pub(crate) fn new(
+        supergraph_schema: &'a ValidFederationSchema,
+        subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
+    ) -> Self {
         let all_subgraphs = subgraphs_by_name.keys().cloned().collect();
         SubgraphConstraint {
+            supergraph_schema,
             subgraphs_by_name,
             possible_subgraphs: all_subgraphs,
         }
+    }
+
+    /// The object types a name the subgraphs gave stands for in the supergraph.
+    ///
+    /// A subgraph answers in its own terms. Where it declares an entity as an interface object
+    /// the type is an *object* there, so it names itself and nothing else — but that name is not
+    /// a runtime type of any supergraph response, and intersecting it with the supergraph's own
+    /// possible types leaves nothing, which drops every obligation under the field. Grounding the
+    /// name here puts the implementations back. An ordinary object type grounds to itself, so
+    /// this changes nothing else; a name the supergraph does not declare is kept as given.
+    fn runtime_types_in_supergraph(
+        &self,
+        object_type: ObjectTypeDefinitionPosition,
+    ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
+        let Ok(position) = self.supergraph_schema.get_type(&object_type.type_name) else {
+            return Ok(std::iter::once(object_type).collect());
+        };
+        let Ok(composite) = CompositeTypeDefinitionPosition::try_from(position) else {
+            return Ok(std::iter::once(object_type).collect());
+        };
+        self.supergraph_schema.possible_runtime_types(composite)
     }
 
     // Current subgraphs + entity subgraphs
@@ -103,7 +132,9 @@ impl<'a> SubgraphConstraint<'a> {
                 {
                     let ground_set = subgraph_schema.possible_runtime_types(composite_type)?;
                     possible_subgraphs.insert(subgraph_name.clone());
-                    subgraph_types.extend(ground_set);
+                    for object_type in ground_set {
+                        subgraph_types.extend(self.runtime_types_in_supergraph(object_type)?);
+                    }
                 }
             }
         }
@@ -116,6 +147,7 @@ impl<'a> SubgraphConstraint<'a> {
         };
         Ok((
             SubgraphConstraint {
+                supergraph_schema: self.supergraph_schema,
                 subgraphs_by_name: self.subgraphs_by_name,
                 possible_subgraphs,
             },
@@ -133,7 +165,7 @@ impl PathConstraint for SubgraphConstraint<'_> {
         let PossibleTypes::Restricted(parent_types) = parent_types else {
             // Unconstrained parent types: remain unconstrained.
             return Ok((
-                SubgraphConstraint::new(self.subgraphs_by_name),
+                SubgraphConstraint::new(self.supergraph_schema, self.subgraphs_by_name),
                 PossibleTypes::All,
             ));
         };

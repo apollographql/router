@@ -527,7 +527,10 @@ fn includes_in_supergraph(left: &str, right: &str) -> Result<(), ComparisonError
         )
         .expect("valid operation")
     };
-    let constraint = crate::correctness::subgraph_constraint::SubgraphConstraint::new(&subgraphs);
+    let constraint = crate::correctness::subgraph_constraint::SubgraphConstraint::new(
+        &supergraph_schema,
+        &subgraphs,
+    );
     includes_with_constraint(&supergraph_schema, &constraint, &parse(left), &parse(right))
 }
 

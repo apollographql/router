@@ -198,7 +198,7 @@ impl<'a> Checker<'a> {
                 .map_err(|e| ComparisonError::new(e.to_string()))?,
             subgraphs_by_name,
             operation,
-            constraint: SubgraphConstraint::new(subgraphs_by_name),
+            constraint: SubgraphConstraint::new(supergraph_schema, subgraphs_by_name),
             condition_variables: condition_variables(plan),
             root_type,
             options,

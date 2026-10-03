@@ -307,6 +307,27 @@ one key and sends another.
 `UnscopedRenamerAcrossTypes` is the one whose verdict depends on the operation rather than the
 perturbation alone, which is the point of leaving that judgement to the model.
 
+### Not reached yet
+
+Two shapes the model has tests for and this lane still cannot build.
+
+**A `@requires` whose field set carries an argument.** The demand would be `f(x: 1)` while the
+entry, whose arguments `trim_requires_selection_set` drops, reads `f`. Writing it against a field
+the client can also select puts `f` and `f(x: 1)` in one buffer under one response key with
+different resolver calls, and `includes` asks for one call across the slice — so it would reject
+correct plans wholesale rather than test anything. The real answer depends on the planner: the new
+one is expected to alias every `@requires` selection, which keeps the two apart and makes this the
+aliased shapes above with an argument attached; the old one does not, and the collision is its bug
+rather than the checker's. Deferred until the planner's aliasing settles — at which point this is
+a fixture change, not a new field.
+
+**Interface objects.** An entity fetch whose `requires` entries cover only some implementations,
+which is what `FetchNode::selected_selection_set` restricts and what the demand is restricted to.
+The checker's own tests cover the shape; reaching it here needs a subgraph that declares an
+interface as an interface object, the largest of the fixture changes.
+
+### The field set
+
 The `@requires` field set is `f cs { ... on C { a } }`: a scalar beside a list of objects, so an
 entry can nest, a rewrite path can run through `@`, and the type condition — vacuous at `cs`, the
 shape FlyBy's schema writes — has to be grounded against its position before the entry matches.
