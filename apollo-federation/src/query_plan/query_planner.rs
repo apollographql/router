@@ -1185,6 +1185,47 @@ type User
     }
 
     #[test]
+    fn plan_keeps_literal_exclusion_under_handled_condition() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+            query($x: Boolean!) {
+                userById(id: 1) @include(if: $x) {
+                    name
+                    email @include(if: false)
+                    password @skip(if: true)
+                }
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner
+            .build_query_plan(&document, None, Default::default())
+            .unwrap();
+        // `@include(if: $x)` is handled by the condition node and dropped from the fetch, but the
+        // constant exclusions are not handled by anything and must still reach the subgraph.
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Include(if: $x) {
+            Fetch(service: "accounts") {
+              {
+                userById(id: 1) {
+                  name
+                  email @include(if: false)
+                  password @skip(if: true)
+                }
+              }
+            },
+          },
+        }
+        "###);
+    }
+
+    #[test]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
