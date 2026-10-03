@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/plugins/rhai/tests.rs
+expression: yaml
+---
+- fields:
+    rhai.stage: SupergraphResponse
+  level: ERROR
+  message: "map_response was not called: ErrorDetails {\n    status: 500,\n    message: Some(\n        \"Internal Server Error\",\n    ),\n    position: None,\n    body: None,\n    internal_detail: Some(\n        \"rhai execution error: the response stream ended before a primary response was available\",\n    ),\n}"
