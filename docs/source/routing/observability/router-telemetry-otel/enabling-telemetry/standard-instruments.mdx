@@ -313,6 +313,24 @@ telemetry:
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
 
+## Query deduplication
+
+<Tip>
+
+[Learn more about query deduplication.](/graphos/routing/performance/traffic-shaping#query-deduplication)
+
+</Tip>
+
+- `apollo.router.subgraph_deduplication.requests` - A counter of subgraph requests that reached [query deduplication](/graphos/routing/performance/traffic-shaping#query-deduplication). Each request is counted once, when it completes or is cancelled. Only subgraphs with `deduplicate_query` enabled report it. Attributes:
+  - `subgraph.name`: The name of the subgraph.
+  - `apollo.router.subgraph_deduplication.outcome`: How deduplication handled the request:
+    - `leader`: The request was forwarded to the rest of the subgraph pipeline, and identical requests arriving while it was in flight shared its response. Because the router's later subgraph plugins (such as response caching and coprocessors) run after deduplication, a `leader` request isn't necessarily sent to the subgraph over HTTP.
+    - `follower`: The request reused the response of an identical in-flight request instead of being sent.
+    - `bypassed_batch`: The request is a query that is part of a query batch, so it wasn't considered.
+    - `bypassed_operation`: The request is a mutation or subscription, so it wasn't considered, whether or not it is part of a batch.
+
+  If a `leader` request is cancelled (for example, by a timeout), a `follower` waiting on it retries and is counted under its final outcome.
+
 ## Limits
 
 - `apollo.router.limits.subgraph_response_size.exceeded`: A counter of subgraph responses aborted because their body exceeded the configured `http_max_response_size` limit under `limits.subgraph`.

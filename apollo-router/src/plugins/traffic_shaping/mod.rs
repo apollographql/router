@@ -481,7 +481,7 @@ impl PluginPrivate for TrafficShaping {
                         .shaping
                         .deduplicate_query
                         .unwrap_or_default()
-                        .then(QueryDeduplicationLayer::default),
+                        .then(|| QueryDeduplicationLayer::new(name)),
                 )
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.shaping.compression {
@@ -687,6 +687,7 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
@@ -1184,6 +1185,52 @@ mod test {
                 .errors
                 .is_empty()
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deduplication_requests_are_only_counted_where_enabled() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+        subgraphs:
+            deduplicated:
+                deduplicate_query: true
+            not_deduplicated:
+                deduplicate_query: false
+        "#,
+            )
+            .unwrap();
+            let plugin = get_traffic_shaping_plugin(&config).await;
+
+            for subgraph in ["deduplicated", "not_deduplicated"] {
+                let test_service = MockSubgraph::new(hashmap! {
+                    graphql::Request::default() => graphql::Response::default()
+                });
+                plugin
+                    .subgraph_service(subgraph, test_service.boxed())
+                    .ready()
+                    .await
+                    .expect("it is ready")
+                    .call(SubgraphRequest::fake_builder().build())
+                    .await
+                    .expect("it responded");
+            }
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = "deduplicated",
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+            assert_counter_not_exists!(
+                "apollo.router.subgraph_deduplication.requests",
+                u64,
+                "subgraph.name" = "not_deduplicated",
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
