@@ -47,6 +47,14 @@ impl<'a, 'b> State<'a, 'b> {
         self.indent_level -= 1;
         self.new_line()
     }
+
+    /// Leaves the cursor where it is. Use when the next write starts its own line, so that
+    /// dedenting does not emit a trailing line of indentation.
+    // Only the correctness checker's error rendering nests blocks this way.
+    #[cfg(feature = "correctness")]
+    pub(crate) fn dedent_no_new_line(&mut self) {
+        self.indent_level -= 1;
+    }
 }
 
 pub(crate) fn write_indented_lines<T>(
