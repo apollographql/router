@@ -281,7 +281,39 @@ perturbation of that plan. The unperturbed plan is correct by construction.
 Whether a *perturbed* plan is wrong is deliberately not decided by the generator: `DropKeyField`
 breaks nothing when the operation selects `id` itself, and working that out is the checker's job.
 `plan_model::must_be_accepted` therefore claims only that an unperturbed plan must be accepted;
-the model is the oracle for the rest.
+the model is the oracle for the rest. `AliasRequiredInput` is a perturbation that produces a
+*correct* plan, which is the point of it: it reaches the alias-and-rewrite machinery through the
+accepting path rather than only the rejecting one.
+
+Ten of the perturbations are about a fetch's input rewrites, which rename each representation
+before it is sent. A planner aliases a `@requires` input when it has to fetch that field apart
+from the client's own selection of it, and names it back with a key renamer; the entry then reads
+one key and sends another.
+
+| perturbation | what the plan does | correct |
+| --- | --- | --- |
+| `AliasRequiredInput` | alias and renamer, consistent | yes |
+| `AliasWithoutRenamer` | an alias nothing names back | no |
+| `RenamerWithoutAlias` | a renamer no entry reads under | no |
+| `RenameRequiredFieldAway` | a demanded field renamed to a key nothing sends | no |
+| `RenamerScopedToItsType` | one type aliases, its renamer scoped to it | yes |
+| `RenamersForDisjointTypes` | each type aliases differently, each renamer scoped | yes |
+| `UnscopedRenamerAcrossTypes` | one type aliases, the renamer reaches both | no, when both types are in the case |
+| `OneFieldSentUnderTwoKeys` | the entry reads one field under two keys, both sent as one | no |
+| `AliasCompositeInput` | the composite half read under an alias on the list | yes |
+| `AliasInsideTheList` | the alias inside the list, the renamer's path through `@` | yes |
+
+
+`UnscopedRenamerAcrossTypes` is the one whose verdict depends on the operation rather than the
+perturbation alone, which is the point of leaving that judgement to the model.
+
+The `@requires` field set is `f cs { ... on C { a } }`: a scalar beside a list of objects, so an
+entry can nest, a rewrite path can run through `@`, and the type condition — vacuous at `cs`, the
+shape FlyBy's schema writes — has to be grounded against its position before the entry matches.
+
+The `legacy` lane diverges on every case carrying an input rewrite — `check_input_rewrite` rejects
+a key renamer outright and `rename_at_path` rejects an `AnyIndex` path element — which is why its
+divergence count is non-zero and advisory.
 
 ## Lanes that need no Lean
 

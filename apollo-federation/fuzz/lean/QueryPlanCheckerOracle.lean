@@ -51,6 +51,7 @@ def entityFields : List FieldDefinition :=
   [
     { name := "id", outputType := .named "ID" },
     { name := "f", outputType := .named "Int" },
+    { name := "cs", outputType := .nonNull (.list (.named "C")) },
     { name := "g", outputType := .named "Int" },
     typenameField
   ]
@@ -64,6 +65,11 @@ def schema : Schema :=
           {
             name := "Query"
             fields := [{ name := "is", outputType := .list (.named "I") }, typenameField]
+          },
+        .object
+          {
+            name := "C"
+            fields := [{ name := "a", outputType := .named "Int" }, typenameField]
           },
         .interface { name := "I", fields := entityFields },
         .object { name := "T1", fields := entityFields, interfaces := ["I"] },
@@ -81,10 +87,22 @@ def keyFields : Name := "id"
 
 def requiresFields : Name := "f"
 
+/-- The composite half of the `@requires` field set: a list of objects, so that a field set can
+nest and a rewrite path can run through `@`. -/
+def compositeField : Name := "cs"
+
+def elementField : Name := "a"
+
+/-- The aliases the composite half is read under: one on the list itself, one inside its
+elements. -/
+def compositeAlias : Name := "__require_0_cs"
+
+def elementAlias : Name := "__require_0_a"
+
 def variables : List Name := ["v0", "v1"]
 
 /-- A field set of one leaf field, which is all `@key` and `@requires` are here. -/
-def fieldSetOf (name : Name) : FieldSet := [.field name [] []]
+def fieldSetOf (name : Name) : FieldSet := [.field none name [] []]
 
 def subgraph2 : Subgraph :=
   {
@@ -93,7 +111,13 @@ def subgraph2 : Subgraph :=
       if entityTypes.contains typeName then [{ fields := fieldSetOf keyFields }] else []
     requires := fun typeName fieldName =>
       if entityTypes.contains typeName && fieldName == "g" then
-        Option.some (fieldSetOf requiresFields)
+        Option.some
+          -- `... on C` admits everything `cs` can hold, so it narrows nothing; the entry the
+          -- planner flattens matches it only because the condition is grounded against its
+          -- position.
+          (fieldSetOf requiresFields
+            ++ [.field none compositeField []
+                 [.inlineFragment (Option.some "C") [.field none elementField [] []]]])
       else
         Option.none
   }
@@ -154,6 +178,16 @@ inductive Perturbation where
   | flattenWrongKey
   | dropKeyField
   | guardEntityFetch
+  | aliasRequiredInput
+  | aliasWithoutRenamer
+  | renamerWithoutAlias
+  | renameRequiredFieldAway
+  | unscopedRenamerAcrossTypes
+  | renamerScopedToItsType
+  | renamersForDisjointTypes
+  | oneFieldSentUnderTwoKeys
+  | aliasCompositeInput
+  | aliasInsideTheList
 deriving Repr, DecidableEq
 
 def perturbations : List Perturbation :=
@@ -165,8 +199,89 @@ def perturbations : List Perturbation :=
     .wrongKeyField,
     .flattenWrongKey,
     .dropKeyField,
-    .guardEntityFetch
+    .guardEntityFetch,
+    .aliasRequiredInput,
+    .aliasWithoutRenamer,
+    .renamerWithoutAlias,
+    .renameRequiredFieldAway,
+    .unscopedRenamerAcrossTypes,
+    .renamerScopedToItsType,
+    .renamersForDisjointTypes,
+    .oneFieldSentUnderTwoKeys,
+    .aliasCompositeInput,
+    .aliasInsideTheList
   ]
+
+/-- The aliases, if any, the composite half of the demand is read under: on the list itself, and
+on the field inside its elements. -/
+def compositeAliasesOf : Perturbation -> Option Name × Option Name
+  | .aliasCompositeInput => (Option.some compositeAlias, Option.none)
+  | .aliasInsideTheList => (Option.none, Option.some elementAlias)
+  | _perturbation => (Option.none, Option.none)
+
+/-- The composite half as the plan fetches it and the entry reads it. -/
+def compositeSelection (perturbation : Perturbation) : Selection :=
+  let (listAlias, elementAliasOf) := compositeAliasesOf perturbation
+  .field (listAlias.getD compositeField) compositeField [] []
+    [.field (elementAliasOf.getD elementField) elementField [] [] []]
+
+/-- The same, as a `requires` entry declares it. -/
+def compositeEntry (perturbation : Perturbation) : RequiresSelection :=
+  let (listAlias, elementAliasOf) := compositeAliasesOf perturbation
+  .field listAlias compositeField [] [.field elementAliasOf elementField [] []]
+
+/-- The alias a planner gives a `@requires` input it fetches apart from the client's own selection
+of the same field, and the key a renamer names the demanded field away to. -/
+def inputAlias : Name := "__require_0_f"
+
+def renamedAway : Name := "__sent_nowhere"
+
+/-- The alias the second entity type uses where the two differ, so that one key is renamed to from
+two places. -/
+def secondAlias : Name := "__require_1_f"
+
+/-- The entity type that aliases its input where only one of them does. -/
+def aliasedType : Name := "T2"
+
+/-- The alias, if any, that `entityType`'s `@requires` input is fetched and read under. -/
+def inputAliasOf (perturbation : Perturbation) (entityType : Name) : Option Name :=
+  match perturbation with
+  | .aliasRequiredInput | .aliasWithoutRenamer | .oneFieldSentUnderTwoKeys =>
+      Option.some inputAlias
+  | .unscopedRenamerAcrossTypes | .renamerScopedToItsType =>
+      if entityType == aliasedType then Option.some inputAlias else Option.none
+  | .renamersForDisjointTypes =>
+      Option.some (if entityType == aliasedType then inputAlias else secondAlias)
+  | _perturbation => Option.none
+
+/-- One key renamer, optionally scoped to a runtime type by a `typenameEquals` filter. -/
+def renamerOf (scope : Option Name) (readKey renameTo : Name) : FetchDataRewrite :=
+  let path :=
+    match scope with
+    | Option.none => [FetchDataPathElement.key readKey Option.none]
+    | Option.some typeName =>
+        [FetchDataPathElement.typenameEquals typeName, .key readKey Option.none]
+  .keyRenamer path renameTo
+
+/-- The entity fetch's input rewrites: the key renamers applied to each representation before it is
+sent. A root fetch sends none. -/
+def inputRewritesOf : Perturbation -> List FetchDataRewrite
+  | .aliasRequiredInput | .renamerWithoutAlias | .unscopedRenamerAcrossTypes
+  | .oneFieldSentUnderTwoKeys =>
+      [renamerOf Option.none inputAlias requiresFields]
+  | .renamerScopedToItsType => [renamerOf (Option.some aliasedType) inputAlias requiresFields]
+  | .renamersForDisjointTypes =>
+      entityTypes.map fun entityType =>
+        renamerOf (Option.some entityType)
+          (if entityType == aliasedType then inputAlias else secondAlias) requiresFields
+  | .renameRequiredFieldAway => [renamerOf Option.none requiresFields renamedAway]
+  | .aliasCompositeInput => [renamerOf Option.none compositeAlias compositeField]
+  -- Through `@`: the alias is on a field inside each element of the list.
+  | .aliasInsideTheList =>
+      [.keyRenamer
+        [.key compositeField Option.none, .anyIndex Option.none, .key elementAlias Option.none]
+        elementField]
+  | _perturbation => []
 
 structure Case where
   slots : List Nat
@@ -228,12 +343,13 @@ end Case
 -----------------------------------------------------------------------------------------
 
 def fetchOf (subgraphName : Name) (requiresItems : List RequiresSelection)
-    (selectionSet : SelectionSet)
+    (selectionSet : SelectionSet) (inputRewrites : List FetchDataRewrite := [])
     : FetchNode :=
   {
     subgraphName := subgraphName
     requires := requiresItems
     operationDocument := { selectionSet := selectionSet }
+    inputRewrites := inputRewrites
   }
 
 /-- What the base fetch selects under `is`: everything Subgraph1 resolves without an entity
@@ -248,7 +364,16 @@ def entityInputBody (case : Case) (entityType : Name) : SelectionSet :=
   let inner :=
     [leaf "__typename"]
     ++ (if case.perturbation == .dropKeyField then [] else [leaf keyFields])
-    ++ (if case.perturbation == .dropRequiredField then [] else [leaf requiresFields])
+    ++ (if case.perturbation == .dropRequiredField then
+          []
+        else
+          (match inputAliasOf case.perturbation entityType with
+            | Option.some alias => [Selection.field alias requiresFields [] [] []]
+            | Option.none => [leaf requiresFields])
+          -- The entry reads the field under both keys, so the plan has to have fetched both.
+          ++ (if case.perturbation == .oneFieldSentUnderTwoKeys then [leaf requiresFields]
+              else [])
+          ++ [compositeSelection case.perturbation])
   [leaf "__typename", under entityType [] inner]
 
 def requiresEntries (case : Case) : List RequiresSelection :=
@@ -256,7 +381,15 @@ def requiresEntries (case : Case) : List RequiresSelection :=
   let entries :=
     (Case.entityCasesOf case).map fun entityType =>
       RequiresSelection.inlineFragment (Option.some entityType)
-        [.field "__typename" [] [], .field keyField [] [], .field requiresFields [] []]
+        -- The entry reads a field under its alias, which is where the plan fetched it; the
+        -- renamer names it back to what the subgraph demands.
+        ([.field none "__typename" [] [], .field none keyField [] [],
+          .field (inputAliasOf case.perturbation entityType) requiresFields [] []]
+         ++ (if case.perturbation == .oneFieldSentUnderTwoKeys then
+               [.field none requiresFields [] []]
+             else
+               [])
+         ++ [compositeEntry case.perturbation])
   if case.perturbation == .dropRequiresEntry && entries.length > 1 then
     entries.dropLast
   else
@@ -288,6 +421,7 @@ def buildPlan (case : Case) : QueryPlan :=
       fetchOf "Subgraph2" (requiresEntries case)
         [.field entitiesFieldName entitiesFieldName [] []
           (cases.map fun entityType => under entityType [] [leaf "g"])]
+        (inputRewritesOf case.perturbation)
     let mounted := PlanNode.flatten (flattenPath case) (.fetch entityFetch)
     let condition :=
       if case.perturbation == .guardEntityFetch then
@@ -336,7 +470,7 @@ mutual
 end
 
 /-- The types the digest reports field declarations for, in a fixed order. -/
-def digestTypes : List Name := ["Query", "I", "T1", "T2", "T3"]
+def digestTypes : List Name := ["Query", "C", "I", "T1", "T2", "T3"]
 
 /-- One type's fields as `name:NamedType`, sorted, so the two copies of the fixture can be
 compared on what each type actually declares. Wrappers are dropped: the Rust side reads the
@@ -425,8 +559,9 @@ partial def loop : IO Unit := do
     loop
   else if command == "fetchcheck" then
     -- Diagnostic: the soundness half of one entity fetch, taken apart. Reports what `available`
-    -- the walk reaches it with, then the two conjuncts of `checkRequirementMatchesCase` -- the
-    -- syntactic match and the inclusion test -- with the fetch's own condition and without it.
+    -- the walk reaches it with, then the three conjuncts of `checkRequirementMatchesCase` -- the
+    -- entry's shape by field name, its agreement with the input rewrites, and the inclusion test
+    -- -- with the fetch's own condition and without it.
     match decodeCase (parseHex argument) with
     | Option.none => IO.println "ok=skip"
     | Option.some testCase =>
@@ -506,8 +641,17 @@ partial def loop : IO Unit := do
             | Option.some key =>
                 let computed :=
                   entityFetchRequirement subgraph2 entityType requireType [leaf "g"] key
+                -- The test is decided on the demand restricted to the entry's type and taken
+                -- back through the fetch's input rewrites, not on the raw demand; building the
+                -- fetch is how this diagnostic gets at the rewrites.
+                let entityFetch :=
+                  fetchOf "Subgraph2" (requiresEntries testCase)
+                    [.field entitiesFieldName entitiesFieldName [] []
+                      ((entityCaseTypes testCase).map fun ty => under ty [] [leaf "g"])]
+                    (inputRewritesOf testCase.perturbation)
                 let required :=
-                  requiredAt schema (flattenPath testCase) guarded available computed
+                  requiredAt schema (flattenPath testCase) guarded available
+                    (entityFetch.requiredSelections schema requireType computed)
                 IO.println s!"ok={renderSelections available} ||| {renderSelections required}"
         | _, _ => IO.println "ok=nocase"
     (<- IO.getStdout).flush

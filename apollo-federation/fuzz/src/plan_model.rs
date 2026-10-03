@@ -25,7 +25,9 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_federation::query_plan::FetchDataKeyRenamer;
 use apollo_federation::query_plan::FetchDataPathElement;
+use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::FlattenNode;
 use apollo_federation::query_plan::ParallelNode;
@@ -58,7 +60,7 @@ pub const VARIABLES: [&str; 2] = ["v0", "v1"];
 /// A canonical rendering of everything the two sides must agree on, so the oracle can prove it
 /// holds the same fixture. Compared before any case runs.
 /// The types the digest reports field declarations for, in a fixed order.
-pub const DIGEST_TYPES: [&str; 5] = ["Query", "I", "T1", "T2", "T3"];
+pub const DIGEST_TYPES: [&str; 6] = ["Query", "C", "I", "T1", "T2", "T3"];
 
 /// A canonical rendering of everything the two sides must agree on, so the oracle can prove it
 /// holds the same fixture. Compared before any case runs.
@@ -174,9 +176,39 @@ pub enum Perturbation {
     DropKeyField,
     /// The entity fetch is put under a condition node the operation does not share.
     GuardEntityFetch,
+    /// The input is fetched and read under an alias, which an input key renamer names back to the
+    /// field the subgraph demands. This is what a planner does when two fetches need one field
+    /// with different subselections, and the plan is correct.
+    AliasRequiredInput,
+    /// The same alias, with no renamer to name it back: the subgraph is sent `__require_0_f`.
+    AliasWithoutRenamer,
+    /// A renamer naming an alias back that no entry reads under. The plan fetches and reads the
+    /// plain field, so the rename has nothing to carry; rejected by design, since the checker
+    /// cannot tell it apart from one the entry should have used.
+    RenamerWithoutAlias,
+    /// A renamer naming the demanded field away, so the subgraph is sent a key it never asked for.
+    RenameRequiredFieldAway,
+    /// Only one entity type aliases its input, under a renamer scoped to nothing. The other type's
+    /// entry sends the field under its own name, which the renamer inverted looks for elsewhere.
+    UnscopedRenamerAcrossTypes,
+    /// The same, with the renamer scoped to the type that aliases: it reaches the other type's
+    /// entry neither forwards nor inverted, and both are correct.
+    RenamerScopedToItsType,
+    /// Each entity type aliases its input differently, under its own renamer scoped to it. Two
+    /// renamers onto one key, which is what a planner writes for two types needing the same field.
+    RenamersForDisjointTypes,
+    /// The entry reads the demanded field twice, under its alias and under its own name, so two
+    /// keys are sent as one and the subgraph gets whichever the rewrites leave.
+    OneFieldSentUnderTwoKeys,
+    /// The composite half of the demand is read under an alias on the list itself, named back by
+    /// a renamer at that key.
+    AliasCompositeInput,
+    /// The alias is inside the list instead, and the renamer's path reaches it through `@`. The
+    /// router renames in every element of the array.
+    AliasInsideTheList,
 }
 
-pub const PERTURBATIONS: [Perturbation; 8] = [
+pub const PERTURBATIONS: [Perturbation; 18] = [
     Perturbation::None,
     Perturbation::DropRequiredField,
     Perturbation::DropRequiresEntry,
@@ -185,7 +217,78 @@ pub const PERTURBATIONS: [Perturbation; 8] = [
     Perturbation::FlattenWrongKey,
     Perturbation::DropKeyField,
     Perturbation::GuardEntityFetch,
+    Perturbation::AliasRequiredInput,
+    Perturbation::AliasWithoutRenamer,
+    Perturbation::RenamerWithoutAlias,
+    Perturbation::RenameRequiredFieldAway,
+    Perturbation::UnscopedRenamerAcrossTypes,
+    Perturbation::RenamerScopedToItsType,
+    Perturbation::RenamersForDisjointTypes,
+    Perturbation::OneFieldSentUnderTwoKeys,
+    Perturbation::AliasCompositeInput,
+    Perturbation::AliasInsideTheList,
 ];
+
+/// The alias a planner gives a `@requires` input it has to fetch apart from the client's own
+/// selection of the same field.
+pub const INPUT_ALIAS: &str = "__require_0_f";
+
+/// The composite half of the `@requires` field set: a list of objects, so that a field set can
+/// nest and a rewrite path can run through `@`.
+pub const COMPOSITE_FIELD: &str = "cs";
+
+/// The one field of the objects in that list.
+pub const ELEMENT_FIELD: &str = "a";
+
+/// The aliases the composite half is read under: one on the list itself, one inside its elements.
+pub const COMPOSITE_ALIAS: &str = "__require_0_cs";
+pub const ELEMENT_ALIAS: &str = "__require_0_a";
+
+/// The alias the second entity type uses where the two differ, so that one key is renamed to from
+/// two places.
+pub const SECOND_ALIAS: &str = "__require_1_f";
+
+/// The key a renamer names the demanded field away to, which no entry sends.
+pub const RENAMED_AWAY: &str = "__sent_nowhere";
+
+/// The entity type that aliases its input where only one of them does.
+const ALIASED_TYPE: &str = "T2";
+
+/// The aliases, if any, the composite half of the demand is read under: on the list itself, and
+/// on the field inside its elements.
+fn composite_aliases(case: &Case) -> (Option<&'static str>, Option<&'static str>) {
+    match case.perturbation {
+        Perturbation::AliasCompositeInput => (Some(COMPOSITE_ALIAS), None),
+        Perturbation::AliasInsideTheList => (None, Some(ELEMENT_ALIAS)),
+        _ => (None, None),
+    }
+}
+
+/// The composite half as the plan fetches it and the entry reads it, in selection syntax.
+fn composite_body(case: &Case) -> String {
+    let (list_alias, element_alias) = composite_aliases(case);
+    let list = list_alias.map_or(String::new(), |alias| format!("{alias}: "));
+    let element = element_alias.map_or(String::new(), |alias| format!("{alias}: "));
+    format!("{list}{COMPOSITE_FIELD} {{ {element}{ELEMENT_FIELD} }}")
+}
+
+/// The alias, if any, that `entity_type`'s `@requires` input is fetched and read under.
+fn input_alias(case: &Case, entity_type: &str) -> Option<&'static str> {
+    match case.perturbation {
+        Perturbation::AliasRequiredInput
+        | Perturbation::AliasWithoutRenamer
+        | Perturbation::OneFieldSentUnderTwoKeys => Some(INPUT_ALIAS),
+        Perturbation::UnscopedRenamerAcrossTypes | Perturbation::RenamerScopedToItsType => {
+            (entity_type == ALIASED_TYPE).then_some(INPUT_ALIAS)
+        }
+        Perturbation::RenamersForDisjointTypes => Some(if entity_type == ALIASED_TYPE {
+            INPUT_ALIAS
+        } else {
+            SECOND_ALIAS
+        }),
+        _ => None,
+    }
+}
 
 /// Decodes one case. `None` when the bytes run out, which is how libFuzzer's short inputs are
 /// discarded rather than silently padded.
@@ -287,7 +390,17 @@ fn entity_input_body(case: &Case, entity_type: &str) -> String {
     }
     if case.perturbation != Perturbation::DropRequiredField {
         inner.push(' ');
-        inner.push_str(REQUIRES_FIELDS);
+        match input_alias(case, entity_type) {
+            Some(alias) => inner.push_str(&format!("{alias}: {REQUIRES_FIELDS}")),
+            None => inner.push_str(REQUIRES_FIELDS),
+        }
+        // The entry reads the field under both keys, so the plan has to have fetched both.
+        if case.perturbation == Perturbation::OneFieldSentUnderTwoKeys {
+            inner.push(' ');
+            inner.push_str(REQUIRES_FIELDS);
+        }
+        inner.push(' ');
+        inner.push_str(&composite_body(case));
     }
     format!("__typename ... on {entity_type} {{ {inner} }} ")
 }
@@ -305,16 +418,34 @@ fn requires_entries(case: &Case) -> Vec<requires_selection::Selection> {
         .map(|entity_type| {
             requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
                 type_condition: Some(Name::new(entity_type).expect("type name")),
-                selections: ["__typename", key_field, REQUIRES_FIELDS]
-                    .into_iter()
-                    .map(|name| {
+                selections: {
+                    let field = |alias: Option<&str>, name: &str| {
                         requires_selection::Selection::Field(requires_selection::Field {
-                            alias: None,
+                            alias: alias.map(|alias| Name::new(alias).expect("alias")),
                             name: Name::new(name).expect("field name"),
                             selections: Vec::new(),
                         })
-                    })
-                    .collect(),
+                    };
+                    // The entry reads a field under its alias, which is where the plan fetched
+                    // it; the renamer names it back to what the subgraph demands.
+                    let mut selections = vec![
+                        field(None, "__typename"),
+                        field(None, key_field),
+                        field(input_alias(case, entity_type), REQUIRES_FIELDS),
+                    ];
+                    if case.perturbation == Perturbation::OneFieldSentUnderTwoKeys {
+                        selections.push(field(None, REQUIRES_FIELDS));
+                    }
+                    let (list_alias, element_alias) = composite_aliases(case);
+                    selections.push(requires_selection::Selection::Field(
+                        requires_selection::Field {
+                            alias: list_alias.map(|alias| Name::new(alias).expect("alias")),
+                            name: Name::new(COMPOSITE_FIELD).expect("field name"),
+                            selections: vec![field(element_alias, ELEMENT_FIELD)],
+                        },
+                    ));
+                    selections
+                },
             })
         })
         .collect();
@@ -349,11 +480,78 @@ fn flatten_path(case: &Case) -> Vec<FetchDataPathElement> {
     ]
 }
 
+/// The entity fetch's input rewrites: the key renamers applied to each representation before it is
+/// sent. Only an entity fetch has them, a root fetch sending no representation.
+fn input_rewrites(case: &Case) -> Vec<Arc<FetchDataRewrite>> {
+    // `scope` is the `typenameEquals` filter that restricts a renamer to one runtime type, which
+    // is how a planner keeps one type's alias from reaching another type's representation.
+    let renamer = |scope: Option<&str>, from: &str, to: &str| {
+        let mut path = Vec::new();
+        if let Some(type_name) = scope {
+            path.push(FetchDataPathElement::TypenameEquals(
+                Name::new(type_name).expect("type name"),
+            ));
+        }
+        path.push(FetchDataPathElement::Key(
+            Name::new(from).expect("key"),
+            None,
+        ));
+        Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+            path,
+            rename_key_to: Name::new(to).expect("key"),
+        }))
+    };
+    match case.perturbation {
+        Perturbation::AliasRequiredInput
+        | Perturbation::RenamerWithoutAlias
+        | Perturbation::UnscopedRenamerAcrossTypes
+        | Perturbation::OneFieldSentUnderTwoKeys => {
+            vec![renamer(None, INPUT_ALIAS, REQUIRES_FIELDS)]
+        }
+        Perturbation::RenamerScopedToItsType => {
+            vec![renamer(Some(ALIASED_TYPE), INPUT_ALIAS, REQUIRES_FIELDS)]
+        }
+        Perturbation::RenamersForDisjointTypes => ENTITY_TYPES
+            .iter()
+            .map(|entity_type| {
+                let alias = if *entity_type == ALIASED_TYPE {
+                    INPUT_ALIAS
+                } else {
+                    SECOND_ALIAS
+                };
+                renamer(Some(entity_type), alias, REQUIRES_FIELDS)
+            })
+            .collect(),
+        Perturbation::RenameRequiredFieldAway => {
+            vec![renamer(None, REQUIRES_FIELDS, RENAMED_AWAY)]
+        }
+        Perturbation::AliasCompositeInput => {
+            vec![renamer(None, COMPOSITE_ALIAS, COMPOSITE_FIELD)]
+        }
+        // Through `@`: the alias is on a field inside each element of the list.
+        Perturbation::AliasInsideTheList => {
+            vec![Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
+                path: vec![
+                    FetchDataPathElement::Key(
+                        Name::new(COMPOSITE_FIELD).expect("key"),
+                        None,
+                    ),
+                    FetchDataPathElement::AnyIndex(None),
+                    FetchDataPathElement::Key(Name::new(ELEMENT_ALIAS).expect("key"), None),
+                ],
+                rename_key_to: Name::new(ELEMENT_FIELD).expect("key"),
+            }))]
+        }
+        _ => Vec::new(),
+    }
+}
+
 fn fetch_node(
     schema: &ValidFederationSchema,
     subgraph_name: &str,
     operation: &str,
     requires: Vec<requires_selection::Selection>,
+    input_rewrites: Vec<Arc<FetchDataRewrite>>,
 ) -> FetchNode {
     let document =
         ExecutableDocument::parse_and_validate(schema.schema(), operation, "fetch.graphql")
@@ -366,7 +564,7 @@ fn fetch_node(
         operation_document: SerializableDocument::from_parsed(Arc::new(document)),
         operation_name: None,
         operation_kind: apollo_compiler::executable::OperationType::Query,
-        input_rewrites: Default::default(),
+        input_rewrites: Arc::new(input_rewrites),
         output_rewrites: Vec::new(),
         context_rewrites: Vec::new(),
     }
@@ -387,12 +585,14 @@ pub fn build_plan(
         "Subgraph1",
         &format!("{{ is {{ {} }} }}", base_fetch_body(case)),
         Vec::new(),
+        Vec::new(),
     )))];
     for entity_type in &cases {
         inputs.push(PlanNode::Fetch(Box::new(fetch_node(
             subgraph1,
             "Subgraph1",
             &format!("{{ is {{ {} }} }}", entity_input_body(case, entity_type)),
+            Vec::new(),
             Vec::new(),
         ))));
     }
@@ -414,6 +614,7 @@ pub fn build_plan(
         "Subgraph2",
         &format!("query($representations: [_Any!]!) {{ _entities(representations: $representations) {{ {body}}} }}"),
         requires_entries(case),
+        input_rewrites(case),
     );
 
     let mut mounted = PlanNode::Flatten(FlattenNode {

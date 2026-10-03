@@ -22,11 +22,19 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
+type C
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+{
+  a: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+}
+
 interface I
   @join__type(graph: SUBGRAPH1)
 {
   id: ID!
   f: Int
+  cs: [C!]!
   g: Int
 }
 
@@ -75,6 +83,7 @@ type T1 implements I
 {
   id: ID!
   f: Int
+  cs: [C!]!
   g: Int
 }
 
@@ -85,7 +94,8 @@ type T2 implements I
 {
   id: ID!
   f: Int! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
-  g: Int @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2, requires: "f")
+  cs: [C!]! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  g: Int @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2, requires: "f cs { ... on C { a } }")
 }
 
 type T3 implements I
@@ -95,5 +105,6 @@ type T3 implements I
 {
   id: ID!
   f: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
-  g: Int @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2, requires: "f")
+  cs: [C!]! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  g: Int @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2, requires: "f cs { ... on C { a } }")
 }
