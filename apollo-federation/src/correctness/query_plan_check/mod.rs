@@ -206,6 +206,34 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// Restricts every selection in `body` to `require_types`, the union of the type conditions this
+/// fetch's `requires` entries are written at. What that union does not cover reaches nothing and
+/// so contributes nothing, which is how a fetch covering only some of an interface object's
+/// implementations resolves nothing for the rest.
+///
+/// Conditions are compared by name, not by the object types they include, which is a shortcut: a
+/// `body` whose selections are all fragments on those conditions is already restricted and is
+/// returned unchanged. That is the common case and the one worth recognizing, the alternative
+/// leaving the rest of the checker a copy of `body` per condition to walk. Anything else is
+/// restricted by adding one sibling inline fragment per condition, each carrying a copy of
+/// `body`.
+fn restrict_to_entry_types(require_types: &[&Name], body: Vec<Selection>) -> Vec<Selection> {
+    let body_already_restricted = body.iter().all(|selection| match selection {
+        Selection::InlineFragment(fragment) => fragment
+            .type_condition
+            .as_ref()
+            .is_some_and(|type_condition| require_types.contains(&type_condition)),
+        _ => false,
+    });
+    if body_already_restricted {
+        return body;
+    }
+    require_types
+        .iter()
+        .map(|require_type| inline_fragment((*require_type).clone(), body.clone()))
+        .collect()
+}
+
 /// Reports a flatten path element narrowed to no runtime type at all.
 ///
 /// The planner writes an empty type condition — `…@|[]` — when it has worked out that the
@@ -459,14 +487,7 @@ impl<'a> Checker<'a> {
         } else {
             let entity_body = entity_body(fetch, &body)?;
             self.check_fetch(fetch, &entity_body, reached, available)?;
-            if entity_body.is_empty() {
-                entity_body
-            } else {
-                require_types(fetch)?
-                    .into_iter()
-                    .map(|require_type| inline_fragment(require_type.clone(), entity_body.clone()))
-                    .collect()
-            }
+            restrict_to_entry_types(&require_types(fetch)?, entity_body)
         };
         // The entity cases were read off the fetch's own operation above; what it *contributes*
         // is that selection set under the key renames its output rewrites apply and without the
