@@ -2303,6 +2303,15 @@ mod tests {
     }
 
     async fn get_prometheus_metrics(plugin: &dyn DynPlugin) -> String {
+        scrape_prometheus(plugin)
+            .await
+            .split('\n')
+            .filter(|l| l.contains("bucket"))
+            .sorted()
+            .join("\n")
+    }
+
+    async fn scrape_prometheus(plugin: &dyn DynPlugin) -> String {
         let web_endpoint = plugin
             .web_endpoints()
             .into_iter()
@@ -2320,11 +2329,14 @@ mod tests {
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
-        String::from_utf8_lossy(&body)
-            .split('\n')
-            .filter(|l| l.contains("bucket"))
-            .sorted()
-            .join("\n")
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    fn cardinality_overflow_lines(scrape: &str) -> Vec<&str> {
+        scrape
+            .lines()
+            .filter(|l| l.starts_with("apollo_router_telemetry_metrics_cardinality_overflow"))
+            .collect()
     }
 
     async fn make_supergraph_request(plugin: &dyn DynPlugin) {
@@ -3389,6 +3401,147 @@ mod tests {
 
             make_supergraph_request(plugin.as_ref()).await;
             assert_prometheus_metrics!(plugin);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    fn assert_single_cardinality_overflow_series(scrape: &str, metric_name: &str, value: u64) {
+        let counter = cardinality_overflow_lines(scrape);
+        assert_eq!(
+            counter.len(),
+            1,
+            "expected one counter series in:\n{scrape}"
+        );
+        assert!(
+            counter[0].contains(&format!(r#"metric_name="{metric_name}""#)),
+            "{counter:?}"
+        );
+        assert!(counter[0].ends_with(&format!(" {value}")), "{counter:?}");
+    }
+
+    /// With Prometheus as the only exporter, a scrape of an instrument past its cardinality limit
+    /// reports `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with the scraped
+    /// Prometheus family name. The counter is recorded after the scrape is gathered, so it first
+    /// appears on the following scrape. It counts the start of the overflow once, however many
+    /// scrapes follow.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_overflow_counter() {
+        let _guard = TEST.lock().await;
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_cardinality_limit.router.yaml"
+            ))
+            .await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+
+            let first = scrape_prometheus(plugin.as_ref()).await;
+            assert!(
+                first.lines().any(|l| l.starts_with("apollo_test_histo")
+                    && l.contains(r#"otel_metric_overflow="true""#)),
+                "expected an overflow series in:\n{first}"
+            );
+            assert_eq!(cardinality_overflow_lines(&first), Vec::<&str>::new());
+
+            for _ in 0..3 {
+                let scrape = scrape_prometheus(plugin.as_ref()).await;
+                assert_single_cardinality_overflow_series(&scrape, "apollo_test_histo", 1);
+            }
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_no_cardinality_overflow_counter_without_overflow() {
+        let _guard = TEST.lock().await;
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_cardinality_limit.router.yaml"
+            ))
+            .await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+
+            for _ in 0..2 {
+                let scrape = scrape_prometheus(plugin.as_ref()).await;
+                assert!(scrape.contains("apollo_test_histo"), "{scrape}");
+                assert!(!scrape.contains("otel_metric_overflow"), "{scrape}");
+                assert_eq!(cardinality_overflow_lines(&scrape), Vec::<&str>::new());
+            }
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// A reload that changes the metrics configuration builds a new Prometheus registry and meter
+    /// provider; the counter must still be reported through the new endpoint.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_overflow_counter_after_reload() {
+        let _guard = TEST.lock().await;
+        async {
+            let config = include_str!("testdata/prometheus_cardinality_limit.router.yaml");
+            let plugin = create_plugin_with_config(config).await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+            scrape_prometheus(plugin.as_ref()).await;
+            let before = scrape_prometheus(plugin.as_ref()).await;
+            assert_single_cardinality_overflow_series(&before, "apollo_test_histo", 1);
+
+            let reloaded = create_plugin_with_config(
+                &config.replace("service_name: apollo-router", "service_name: reloaded"),
+            )
+            .await;
+            reloaded.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "d");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "e");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "f");
+            scrape_prometheus(reloaded.as_ref()).await;
+            let after = scrape_prometheus(reloaded.as_ref()).await;
+            assert!(after.contains(r#"service_name="reloaded""#), "{after}");
+            assert_single_cardinality_overflow_series(&after, "apollo_test_histo", 1);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// When OTLP is also configured, its exporter counts overflow on the public meter provider, so
+    /// Prometheus scrapes don't. OTLP's count is checked by value in the integration tests, since
+    /// its exports run outside this test's task-local meter provider.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_cardinality_overflow_not_counted_by_scrape_with_otlp() {
+        let _guard = TEST.lock().await;
+        async {
+            let collector = wiremock::MockServer::start().await;
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .respond_with(wiremock::ResponseTemplate::new(200))
+                .mount(&collector)
+                .await;
+            let config = format!(
+                "{}      otlp:\n        enabled: true\n        protocol: http\n        endpoint: {}/v1/metrics\n        batch_processor:\n          scheduled_delay: 1h\n",
+                include_str!("testdata/prometheus_cardinality_limit.router.yaml"),
+                collector.uri()
+            );
+            let plugin = create_plugin_with_config(&config).await;
+            plugin.activate();
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "a");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "b");
+            u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
+
+            for _ in 0..2 {
+                let scrape = scrape_prometheus(plugin.as_ref()).await;
+                assert!(
+                    scrape.contains(r#"otel_metric_overflow="true""#),
+                    "expected an overflow series in:\n{scrape}"
+                );
+                assert_eq!(cardinality_overflow_lines(&scrape), Vec::<&str>::new());
+            }
         }
         .with_metrics()
         .await;

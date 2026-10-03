@@ -8,5 +8,7 @@ pub(crate) mod prometheus;
 mod retry;
 
 pub(crate) use named::NamedMetricExporter;
+pub(crate) use overflow::OverflowCounting;
 pub(crate) use overflow::OverflowMetricExporter;
+pub(crate) use overflow::OverflowTracker;
 pub(crate) use retry::RetryMetricExporter;
