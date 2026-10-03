@@ -308,6 +308,19 @@ telemetry:
 - `apollo.router.operations.subscriptions.reconnect` - Number of subgraph WebSocket reconnect attempts. Incremented once per attempt when `max_reconnect_attempts > 0` is configured and the connection drops unexpectedly. Counts only attempts that actually issue a handshake — a closing signal received during the reconnect delay or during the handshake itself short-circuits without incrementing. Attributes:
   - `subgraph.name`: The name of the subgraph being reconnected to.
 
+### Conventional GraphQL subscription metrics (opt-in, draft)
+
+The router can additionally emit two metrics under OpenTelemetry's own [GraphQL semantic convention](https://github.com/open-telemetry/semantic-conventions/pull/3515). That convention is an open pull request at `development` stability. Its names, and therefore these metrics, may still change before it's ratified.
+
+Set the `OTEL_SEMCONV_STABILITY_OPT_IN` environment variable to `graphql` or `graphql/dup` to turn the metrics on. The router treats both tokens the same way: it has no existing metric that either replaces or duplicates, so there is nothing for `/dup` to do differently. The variable is a comma-separated list, so it composes with the other domains OpenTelemetry defines for it, for example `OTEL_SEMCONV_STABILITY_OPT_IN=http,graphql`. The router recognizes only the `graphql` domain; other domains are ignored. Leaving the variable unset turns both metrics off; the router's existing subscription metrics are unaffected either way.
+
+- `graphql.server.subscription.event_count` - A counter of subscription events processed by the router, including events whose processing ended with an error. Attributes:
+  - `error.type`: The error code of the event's first GraphQL error. Absent when the event carried no error, and absent for the router's own termination notices (`SUBSCRIPTION_SCHEMA_RELOAD`, `SUBSCRIPTION_CONFIG_RELOAD`, `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED`, `SUBSCRIPTION_JWT_EXPIRED`): those reach the client as GraphQL errors, but the router ended the subscription on purpose rather than failing to process an event. Use `apollo.router.operations.subscriptions.terminated.client` and its `reason` attribute to observe them.
+- `graphql.server.subscription.event.duration` - A histogram, in seconds, of the time from when the router received a subscription event from its source to when it wrote the corresponding response to the subscriber's stream. Recorded for events received from a subgraph or callback endpoint, including transport errors and the notice sent after reconnection attempts are exhausted. The router's own termination notices (JWT expiry, max subscription lifetime, schema reload, config reload) count toward `event_count` but carry no duration, because the router generates them itself rather than receiving them from a source. Attributes:
+  - `error.type`: The error code of the event's first GraphQL error. Absent when the event carried no error, and absent for the router's own termination notices (`SUBSCRIPTION_SCHEMA_RELOAD`, `SUBSCRIPTION_CONFIG_RELOAD`, `SUBSCRIPTION_MAX_LIFETIME_EXCEEDED`, `SUBSCRIPTION_JWT_EXPIRED`): those reach the client as GraphQL errors, but the router ended the subscription on purpose rather than failing to process an event. Use `apollo.router.operations.subscriptions.terminated.client` and its `reason` attribute to observe them.
+
+Both metrics omit `graphql.document.*` and `graphql.operation.name`, which the convention marks opt-in for cardinality reasons the router has no configuration to bound yet.
+
 ## Batching
 
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
