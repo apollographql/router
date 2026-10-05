@@ -2,6 +2,35 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.16.4] - 2026-09-22
+
+## 🐛 Fixes
+
+### Accept `@defer` labels reused via fragment spreads ([PR #10193](https://github.com/apollographql/router/pull/10193))
+
+The duplicate `@defer(label:)` check from the [GHSA-gr6h-4wpf-xp52](https://github.com/apollographql/router/security/advisories/GHSA-gr6h-4wpf-xp52) fix ran after fragment expansion, rejecting valid operations where a fragment containing a labeled `@defer` is spread more than once. The incremental delivery specification defines label uniqueness over the document as written, where such a label occurs only once; clients like Relay derive defer labels from fragment names and rely on this.
+
+Label uniqueness is now validated on the document, before fragment expansion, still rejecting the operations behind the original security advisory. Operations that reuse a labeled `@defer` via fragment spreads plan and execute correctly: one incremental response per spread position, each carrying the user-provided label and distinguished by its `path`.
+
+Example query that was rejected but now is correctly processed
+
+```graphql
+{
+    currentUser { ...UserFragment }
+    otherUser { ...UserFragment }
+}
+fragment UserFragment on User {
+    id
+    ... @defer(label: "UserFragmentLabel") {
+        name
+    }
+}
+```
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/10193/
+
+
+
 # [2.16.3] - 2026-08-27
 
 ## 🐛 Fixes
