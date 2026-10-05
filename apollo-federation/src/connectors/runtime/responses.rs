@@ -409,6 +409,28 @@ pub fn handle_mapping_only_response(
     map_response(connector, &data, key, inputs, Vec::new())
 }
 
+/// Returns a response for a connector whose `requires` precondition was not
+/// met: no request is made and no `selection` is applied, the field(s) simply
+/// resolve to `null` (or, for a batch entity, to `[]`, which the normal
+/// batch/key-matching logic in [`MappedResponse::add_to_data`] turns into a
+/// `null` per unmatched representation).
+///
+/// CNN-474 proof of concept.
+pub fn handle_requires_not_met(key: ResponseKey) -> MappedResponse {
+    let data = match key {
+        ResponseKey::BatchEntity { .. } => Value::Array(Vec::new()),
+        ResponseKey::RootField { .. }
+        | ResponseKey::Entity { .. }
+        | ResponseKey::EntityField { .. } => Value::Null,
+    };
+    MappedResponse::Data {
+        data,
+        key,
+        problems: Vec::new(),
+        declared_errors: Vec::new(),
+    }
+}
+
 /// The mapping-side path an error was declared at, as a dotted string, for the
 /// `connector.selectionPath` extension.
 ///
@@ -1299,6 +1321,7 @@ mod tests {
             response_variable_keys: Default::default(),
             batch_settings: None,
             error_settings: ConnectorErrorsSettings::default(),
+            requires: Vec::new(),
             output_type,
             label: "test".into(),
         }

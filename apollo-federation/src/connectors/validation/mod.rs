@@ -178,6 +178,8 @@ pub enum Code {
     InvalidErrorsMessage,
     /// The `isSuccess` mapping provided in `@connect` or `@source` was not valid.
     InvalidIsSuccess,
+    /// A `requires` entry provided in `@connect` was not valid. CNN-474 proof of concept.
+    InvalidRequires,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.

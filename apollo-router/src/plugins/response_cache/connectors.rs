@@ -1695,7 +1695,9 @@ impl ConnectorRequestCacheService {
                     TransportOutcome::Response(http_response) => {
                         Some(http_response.inner.status.as_u16())
                     }
-                    TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+                    TransportOutcome::MappingOnly
+                    | TransportOutcome::Skipped
+                    | TransportOutcome::Error(_) => None,
                 };
 
                 // Store in cache if appropriate
@@ -2165,6 +2167,7 @@ mod tests {
         let schema =
             apollo_compiler::Schema::parse_and_validate("type Query { b: String }", "./").unwrap();
         Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Connector::subtypes_map_from_schema(&schema),
             id: ConnectId::new(

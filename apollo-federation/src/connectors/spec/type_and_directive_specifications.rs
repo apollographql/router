@@ -20,6 +20,7 @@ use super::connect::CONNECT_ID_ARGUMENT_NAME;
 use super::connect::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use super::connect::IS_SUCCESS_ARGUMENT_NAME;
+use super::connect::REQUIRES_ARGUMENT_NAME;
 use super::errors::ERRORS_ARGUMENT_NAME;
 use super::errors::ERRORS_NAME_IN_SPEC;
 use super::http::HEADERS_ARGUMENT_NAME;
@@ -355,6 +356,10 @@ pub(crate) fn directive_specifications() -> Vec<Box<dyn TypeAndDirectiveSpecific
 //   selection: JSONSelection!
 //   entity: Boolean = false
 //   isSuccess: JSONSelection
+//   # CNN-474 proof of concept, not yet version-gated. Paths that must all
+//   # be non-null for this connector to run; skips the request (resolves
+//   # null/[]) otherwise.
+//   requires: [JSONSelection!]
 // ) repeatable on FIELD_DEFINITION | OBJECT
 fn connect_directive_spec() -> DirectiveSpecification {
     DirectiveSpecification::new(
@@ -447,6 +452,20 @@ fn connect_directive_spec() -> DirectiveSpecification {
                         Ok(Type::Named(json_selection_scalar))
                     },
                     default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: REQUIRES_ARGUMENT_NAME,
+                    get_type: |schema, link| {
+                        let json_selection_scalar =
+                            lookup_scalar_in_schema(&JSON_SELECTION_SCALAR_NAME, schema, link)?;
+                        Ok(Type::List(Box::new(Type::NonNullNamed(
+                            json_selection_scalar,
+                        ))))
+                    },
+                    default_value: Default::default(),
                 },
                 composition_strategy: None,
             },
@@ -632,7 +651,7 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, requires: [connect__JSONSelection!]) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
@@ -766,7 +785,7 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, requires: [connect__JSONSelection!]) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
@@ -876,7 +895,7 @@ mod tests {
 
         directive @extends on OBJECT | INTERFACE
 
-        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false, isSuccess: connect__JSONSelection, requires: [connect__JSONSelection!]) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP!, errors: connect__ConnectorErrors, isSuccess: connect__JSONSelection) repeatable on SCHEMA
 
@@ -1009,7 +1028,7 @@ mod tests {
 
         directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
-        directive @connect(source: String, id: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, selection: Mapping!, entity: Boolean = false, isSuccess: Mapping) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, id: String, http: ConnectHTTP, batch: connect__ConnectBatch, errors: ErrorMappings, selection: Mapping!, entity: Boolean = false, isSuccess: Mapping, requires: [Mapping!]) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @api(name: String!, http: connect__SourceHTTP!, errors: ErrorMappings, isSuccess: Mapping) repeatable on SCHEMA
 

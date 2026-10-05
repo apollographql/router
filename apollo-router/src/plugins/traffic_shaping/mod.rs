@@ -838,6 +838,7 @@ mod test {
     ) -> ConnectorRequest {
         let context = Context::default();
         let connector = Arc::new(Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
