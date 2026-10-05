@@ -36,7 +36,12 @@ Committing an option adds the field to a fetch in the plan under construction, t
 
 ### Scoring options
 
-At each decision, the planner applies every option in turn, measures the cost of the resulting partial plan, and undoes the option. It then sorts the options from cheapest to most expensive. When two options cost the same, the planner prefers `@provides` paths, then fields in the current subgraph, then entity hops, preferring keys with fewer fields. Any remaining tie goes to the subgraph that appears first in the supergraph schema.
+At each decision, the planner applies every option in turn, measures the cost of the resulting partial plan, and undoes the option. It then sorts the options from cheapest to most expensive. When two options cost the same, ties are broken in this order:
+
+1. `@provides` paths
+2. Fields resolvable in the current subgraph
+3. Entity hops, preferring keys with fewer fields
+4. The subgraph that appears first in the supergraph schema
 
 The cost of a plan depends on how many fetches it makes and how deep its chain of dependent fetches is. A fetch that has to wait on other fetches costs more than one that can run right away, so the planner favors plans with fewer, more parallel fetches. Because adding to a plan never makes it cheaper, any option that already costs as much as the best complete plan found so far is skipped, along with everything beneath it.
 
