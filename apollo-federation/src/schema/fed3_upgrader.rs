@@ -37,7 +37,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
 
     // Collect interface field deprecation status up front so we aren't
     // borrowing the schema while mutating it.
-    let iface_deprecated = collect_interface_deprecated_fields(schema);
+    let iface_non_deprecated = collect_interface_non_deprecated_fields(schema);
 
     for (type_name, ty) in &mut schema.types {
         match ty {
@@ -55,7 +55,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     &object.implements_interfaces,
                     &mut object.fields,
                     &object.name,
-                    &iface_deprecated,
+                    &iface_non_deprecated,
                     subgraph_name,
                     &sources,
                 );
@@ -74,7 +74,7 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     &interface.implements_interfaces,
                     &mut interface.fields,
                     &interface.name,
-                    &iface_deprecated,
+                    &iface_non_deprecated,
                     subgraph_name,
                     &sources,
                 );
@@ -156,15 +156,15 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
     implements_interfaces: &IndexSet<Node<Name>>,
     fields: &mut IndexMap<Name, Node<FieldDefinition>>,
     type_name: &Name,
-    iface_deprecated: &IndexMap<Name, IndexSet<Name>>,
+    iface_non_deprecated: &IndexMap<Name, IndexSet<Name>>,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {
     for iface_name in implements_interfaces {
-        if let Some(deprecated_fields) = iface_deprecated.get(&**iface_name) {
+        if let Some(non_deprecated_fields) = iface_non_deprecated.get(&**iface_name) {
             for field in fields.values_mut() {
                 let field_name = field.name.clone();
-                if !deprecated_fields.contains(&field_name) {
+                if non_deprecated_fields.contains(&field_name) {
                     let field_def = field.make_mut();
                     strip_deprecated_without_interface(
                         hints,
@@ -181,19 +181,20 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
     }
 }
 
-/// Returns a map from interface name to the set of deprecated field names
-/// for every interface type in the schema.
-fn collect_interface_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
+/// Returns a map from interface name to the set of non-deprecated field names
+/// for every interface type in the schema. Fields the interface does not declare
+/// are absent, so the 2025 rule never applies to them.
+fn collect_interface_non_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
     let mut result = IndexMap::default();
     for ty in schema.types.values() {
         if let ExtendedType::Interface(interface) = ty {
-            let deprecated_fields: IndexSet<_> = interface
+            let non_deprecated_fields: IndexSet<_> = interface
                 .fields
                 .iter()
-                .filter(|(_, field)| has_deprecated(&field.directives))
+                .filter(|(_, field)| !has_deprecated(&field.directives))
                 .map(|(name, _)| name.clone())
                 .collect();
-            result.insert(interface.name.clone(), deprecated_fields);
+            result.insert(interface.name.clone(), non_deprecated_fields);
         }
     }
     result
@@ -396,6 +397,43 @@ mod tests {
         assert!(
             !field.directives.has("deprecated"),
             "@deprecated should have been stripped from User.name"
+        );
+    }
+
+    #[test]
+    fn preserves_deprecated_on_field_not_declared_by_interface() {
+        let sdl = r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key", "@shareable"])
+
+            type Query {
+                node: Node
+            }
+
+            interface Node {
+                id: ID!
+            }
+
+            type User implements Node @key(fields: "id") {
+                id: ID!
+                name: String @deprecated(reason: "use displayName")
+                displayName: String
+            }
+        "#;
+        let (supergraph, hints) = compose_supergraph(sdl);
+        assert!(
+            !hints.contains(&"DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE".to_string()),
+            "Should not emit DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE, got: {hints:?}"
+        );
+
+        let schema = supergraph.schema().schema();
+        let c = coord!(User.name);
+        let field = schema
+            .type_field(&c.ty, &c.attribute)
+            .expect("User.name should exist in schema");
+        assert!(
+            field.directives.has("deprecated"),
+            "@deprecated should be preserved on a field the interface does not declare"
         );
     }
 
