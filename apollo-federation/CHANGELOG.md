@@ -38,9 +38,18 @@ By [@tninesling](https://github.com/tninesling) in <https://github.com/apollogra
 
 ## 🐛 Fixes
 
-<<<<<<< HEAD
-### Process renamed root operation types in deterministic order ([PR #10396](https://github.com/apollographql/router/pull/10396))
-=======
+### Fix `GROUP_SELECTION_IS_NOT_OBJECT` for union/interface fields in nested `@connect` selections ([PR #9990](https://github.com/apollographql/router/pull/9990))
+
+Connectors validation rejected `->match` results assigned to union- or
+interface-typed fields nested inside another object (e.g. `Stop.location:
+StopLocation` where `StopLocation` is a union). The top-level validation path
+already expanded abstract types to their concrete members, but the recursive
+`walk_selection_with_shape` did not, causing a spurious
+`GROUP_SELECTION_IS_NOT_OBJECT` error. The recursive path now mirrors the
+top-level expansion for both union and interface types.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9990>
+
 ### Upgrading federation 1 subgraphs no longer clones subgraph metadata once per type ([PR #9946](https://github.com/apollographql/router/pull/9946))
 
 Composition constructs a schema upgrader as soon as **one** input subgraph is a
@@ -69,8 +78,7 @@ over.
 
 By [@martijnwalraven](https://github.com/martijnwalraven) in <https://github.com/apollographql/router/pull/9946>
 
-### Reject `@external` fields on nested `@key` paths with cross-subgraph `@requires` ([PR #9832](https://github.com/apollographql/router/pull/9832))
->>>>>>> bb24f1c (perf(composition): index upgrader types without cloning subgraph metadata (#9946))
+### Process renamed root operation types in deterministic order ([PR #10396](https://github.com/apollographql/router/pull/10396))
 
 Renamed root operation types were processed using `HashMap` which lead to
 non-deterministic order. Re-generating same supergraph schemas could result in
