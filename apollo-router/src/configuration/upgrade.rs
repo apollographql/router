@@ -623,6 +623,28 @@ mod test {
         "}));
     }
 
+    /// Migrations are applied in filename order, so a shared prefix leaves their relative order to
+    /// the rest of the name. Earlier majors have shipped and keep their file names.
+    #[test]
+    fn current_major_migrations_have_unique_prefixes() {
+        let major = env!("CARGO_PKG_VERSION_MAJOR");
+        let mut by_prefix: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for filename in super::Asset::iter().filter(|f| f.ends_with(".yaml")) {
+            if filename.starts_with(major) {
+                let prefix = filename.split('-').next().unwrap_or_default().to_string();
+                by_prefix
+                    .entry(prefix)
+                    .or_default()
+                    .push(filename.to_string());
+            }
+        }
+        let duplicates: Vec<_> = by_prefix.values().filter(|files| files.len() > 1).collect();
+        assert!(
+            duplicates.is_empty(),
+            "migrations must not share a numeric prefix: {duplicates:?}"
+        );
+    }
+
     #[test]
     fn delete_field() {
         insta::assert_json_snapshot!(
