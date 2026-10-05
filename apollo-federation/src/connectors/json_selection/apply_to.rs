@@ -1427,32 +1427,28 @@ impl SubSelection {
         dollar_shape: Shape,
     ) -> Shape {
         let locations = self.shape_location(context.source_id());
-        let mut all_shape = Shape::unknown([]);
+        let mut selection_shapes = Vec::with_capacity(self.selections.len());
 
         for named_selection in self.selections.iter() {
-            // Simplifying as we go with Shape::all keeps all_shape relatively
-            // small in the common case when all named_selection items return an
-            // object shape, since those object shapes can all be merged
-            // together into one object.
-            all_shape = Shape::all(
-                [
-                    all_shape,
-                    named_selection.compute_output_shape(
-                        context,
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                    ),
-                ],
-                locations.clone(),
+            let shape = named_selection.compute_output_shape(
+                context,
+                input_shape.clone(),
+                dollar_shape.clone(),
             );
-
             // If any named_selection item returns null instead of an object,
             // that nullifies the whole object and allows shape computation to
             // bail out early.
-            if all_shape.is_null() {
+            let is_null = shape.is_null();
+            selection_shapes.push(shape);
+            if is_null {
                 break;
             }
         }
+
+        // Merge all the selection shapes at once: Shape::all merges every object shape into a
+        // single object in one pass, whereas folding them pairwise rebuilds (and rehashes) the
+        // accumulated object for every named selection, which is quadratic in the selection size.
+        let all_shape = Shape::all(selection_shapes, locations.clone());
 
         if all_shape.is_unknown() {
             Shape::empty_object(locations)
@@ -4082,6 +4078,22 @@ mod tests {
             selection!(input, ConnectSpec::V0_4).shape().pretty_print(),
             expected,
         );
+    }
+
+    #[test]
+    fn test_compute_output_shape_of_wide_selection_matches_pairwise_merge() {
+        let spec = ConnectSpec::V0_3;
+        let names = (0..300).map(|i| format!("field{i}")).collect::<Vec<_>>();
+
+        // Merging the shapes of all named selections at once must produce the
+        // same shape as merging them one at a time.
+        let pairwise = names.iter().fold(Shape::unknown([]), |acc, name| {
+            Shape::all([acc, selection!(name, spec).shape()], [])
+        });
+        let wide = selection!(&names.join(" "), spec).shape();
+
+        assert_eq!(wide.pretty_print(), pairwise.pretty_print());
+        assert!(wide.pretty_print().contains("field299: $root.*.field299"));
     }
 
     #[test]
