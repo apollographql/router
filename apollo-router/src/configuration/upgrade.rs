@@ -661,7 +661,8 @@ mod test {
         let duplicates: Vec<_> = by_prefix.values().filter(|files| files.len() > 1).collect();
         assert!(
             duplicates.is_empty(),
-            "migrations must not share a numeric prefix: {duplicates:?}"
+            "migrations must not share a numeric prefix: {duplicates:?}; give the newer migration \
+             the next unused number"
         );
     }
 
