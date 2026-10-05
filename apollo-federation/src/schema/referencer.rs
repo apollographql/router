@@ -410,6 +410,30 @@ impl Referencers {
     }
 
     pub(crate) fn rename_input_object_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_scalar_name, scalar_refs) in self.scalar_types.iter_mut() {
+            Self::update_input_object_field_positions(
+                &mut scalar_refs.input_object_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_enum_name, enum_refs) in self.enum_types.iter_mut() {
+            Self::update_input_object_field_positions(
+                &mut enum_refs.input_object_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_input_name, input_refs) in self.input_object_types.iter_mut() {
+            Self::update_input_object_field_positions(
+                &mut input_refs.input_object_fields,
+                old_name,
+                new_name,
+            );
+        }
+
         for (_directive_name, directive_refs) in self.directives.iter_mut() {
             Self::update_input_object_type_positions(
                 &mut directive_refs.input_object_types,
