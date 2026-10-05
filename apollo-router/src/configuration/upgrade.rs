@@ -614,15 +614,74 @@ mod test {
 
     #[test]
     fn detects_settings_that_startup_migrates() {
-        assert!(super::uses_migrated_settings(indoc::indoc! {"
-            subscription:
-              deduplication:
-                enabled: true
-        "}));
+        assert!(super::uses_migrated_settings(
+            crate::configuration::apollo_configuration_parse::STARTUP_MIGRATED_SETTING
+        ));
         assert!(!super::uses_migrated_settings(indoc::indoc! {"
             supergraph:
               listen: 127.0.0.1:4000
         "}));
+    }
+
+    /// Each migration file with its numeric prefix. Like `upgrade`, this only considers `.yaml`
+    /// files. A migration's major version is the first digit of its four-digit prefix.
+    fn numbered_migrations() -> Vec<(u32, String)> {
+        super::Asset::iter()
+            .filter(|f| f.ends_with(".yaml"))
+            .map(|filename| {
+                let prefix = filename.split('-').next().unwrap_or_default();
+                let number = prefix
+                    .parse()
+                    .ok()
+                    .filter(|_| prefix.len() == 4)
+                    .unwrap_or_else(|| {
+                        panic!("migration {filename} must start with a four-digit number")
+                    });
+                (number, filename.to_string())
+            })
+            .collect()
+    }
+
+    fn current_major() -> u32 {
+        env!("CARGO_PKG_VERSION_MAJOR")
+            .parse()
+            .expect("CARGO_PKG_VERSION_MAJOR should be an integer")
+    }
+
+    /// Migrations are applied in filename order, so a shared prefix leaves their relative order to
+    /// the rest of the name. Earlier majors have shipped and keep their file names.
+    #[test]
+    fn current_major_migrations_have_unique_prefixes() {
+        let mut by_prefix: std::collections::BTreeMap<u32, Vec<String>> = Default::default();
+        for (number, filename) in numbered_migrations() {
+            if number / 1000 == current_major() {
+                by_prefix.entry(number).or_default().push(filename);
+            }
+        }
+        let duplicates: Vec<_> = by_prefix.values().filter(|files| files.len() > 1).collect();
+        assert!(
+            duplicates.is_empty(),
+            "migrations must not share a numeric prefix: {duplicates:?}; give the newer migration \
+             the next unused number"
+        );
+    }
+
+    /// Startup only applies migrations for the router's own major version, so migrations numbered
+    /// for a later major are never exercised at startup until the crates are bumped. Requiring the
+    /// bump first keeps every test running against the version that will ship.
+    #[test]
+    fn no_migration_is_numbered_for_a_later_major_version() {
+        let later: Vec<_> = numbered_migrations()
+            .into_iter()
+            .filter(|(number, _)| number / 1000 > current_major())
+            .map(|(_, filename)| filename)
+            .collect();
+        assert!(
+            later.is_empty(),
+            "migrations {later:?} are numbered for a major version later than {}; bump the crate \
+             major version before adding them",
+            current_major()
+        );
     }
 
     #[test]

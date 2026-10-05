@@ -16,6 +16,8 @@ use serde_json::json;
 use super::Configuration;
 use super::ConfigurationError;
 use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::STARTUP_MIGRATED_PLUGIN;
+use super::apollo_configuration_parse::STARTUP_MIGRATED_SETTING;
 use super::apollo_configuration_parse::assert_logs;
 use super::apollo_configuration_parse::migrated_copy_warning;
 use super::apollo_configuration_parse::parse_configuration;
@@ -104,7 +106,7 @@ const CASES: &[Case] = &[
         name: "cors.origins migrates into cors.policies",
         snapshot: "needs_minor_migration_cors_origins",
         text: include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
-        upgrade: Upgrade::Startup,
+        upgrade: Upgrade::Command,
     },
     Case {
         name: "flat headers.all.request migrates under an operations key",
@@ -116,6 +118,18 @@ const CASES: &[Case] = &[
         name: "flat subscription.deduplication migrates under deduplication.all",
         snapshot: "subscription_dedup_subgraph",
         text: include_str!("testdata/migrations/subscription_dedup_subgraph.yaml"),
+        upgrade: Upgrade::Command,
+    },
+    Case {
+        name: "experimental flags promoted to their stable names",
+        snapshot: "promote_experimental_flags",
+        text: include_str!("testdata/migrations/promote-experimental-flags.router.yaml"),
+        upgrade: Upgrade::Startup,
+    },
+    Case {
+        name: "experimental.expose_query_plan plugin moves to the top-level expose_query_plan",
+        snapshot: "promote_expose_query_plan",
+        text: include_str!("testdata/migrations/promote-expose-query-plan.router.yaml"),
         upgrade: Upgrade::Startup,
     },
     Case {
@@ -325,18 +339,22 @@ fn validated_yaml_carries_expansion_and_overrides_for_usage_selectors() {
 
 #[test]
 fn migrated_documents_keep_the_original_text_as_raw_yaml() {
-    let text = include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml");
-    let config = parse(text).expect("the router migrates legacy CORS settings");
+    let text = STARTUP_MIGRATED_PLUGIN;
+    let config = parse(text).expect("the router migrates the legacy plugin section");
     let document = config.validated_yaml.as_ref().unwrap();
-    assert!(document["cors"].get("origins").is_none());
-    assert!(document["cors"].get("policies").is_some());
+    assert!(
+        document["plugins"]
+            .get("experimental.expose_query_plan")
+            .is_none()
+    );
+    assert_eq!(document["expose_query_plan"], json!(true));
     assert_eq!(config.raw_yaml.as_deref(), Some(text));
 }
 
 #[test]
 fn unknown_key_is_rejected_before_and_after_migration() {
-    let text = "cors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
-    let error = parse(text).expect_err("the key is unknown in either form");
+    let text = format!("{STARTUP_MIGRATED_SETTING}this_key_does_not_exist_anywhere: true\n");
+    let error = parse(&text).expect_err("the key is unknown in either form");
     assert!(
         error
             .to_string()
@@ -413,14 +431,12 @@ async fn typed_plugin_configs_are_retained_and_construct_plugins() {
     }
 }
 
-/// The flat deduplication shape passes schema validation but fails typed deserialization.
-/// Startup migrates it under `deduplication.all`; without migration, parsing rejects it before
-/// any plugin is constructed.
+/// The flat deduplication shape passes schema validation but fails typed deserialization, so
+/// parsing rejects it before any plugin is constructed.
 #[test]
 fn unmigrated_flat_subscription_dedup_is_rejected_while_parsing() {
     let text = include_str!("testdata/migrations/subscription_dedup_subgraph.yaml");
 
-    parse(text).expect("startup migrates the flat shape");
     let error = parse_without_inputs(text, Migration::None)
         .expect_err("typed deserialization rejects the unmigrated flat shape")
         .to_string();
@@ -444,8 +460,8 @@ fn cross_field_validation_rejects_sandbox_with_homepage() {
 
 /// Intentional difference from the previous loader, which fell back to the original document
 /// when the migrated one failed the schema check. Once migration succeeds, the migrated copy is
-/// loaded and its errors are reported. Startup migration 2045 fixes the flat deduplication
-/// settings, so the error is the traffic shaping timeout, not the settings migration fixed.
+/// loaded and its errors are reported. Startup migration moves the legacy plugin section, so the
+/// error is the traffic shaping timeout, not the section migration fixed.
 #[test]
 fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
     let error = assert_logs(
@@ -461,16 +477,16 @@ fn migrated_document_failing_plugin_config_reports_the_migrated_copy() {
 
     assert!(error.contains("apollo.traffic_shaping"), "{error}");
     assert!(error.contains("timeout: not-a-duration"), "{error}");
-    assert!(!error.contains("apollo.subscription"), "{error}");
+    assert!(!error.contains("experimental.expose_query_plan"), "{error}");
 }
 
 /// The sandbox checks run once the document has been parsed, so a migrated document that
 /// enables both sandbox and homepage is still rejected, without falling back.
 #[test]
 fn sandbox_conflicts_are_rejected_after_migration() {
-    let error = parse(
-        "subscription:\n  deduplication:\n    enabled: true\nsandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n",
-    )
+    let error = parse(&format!(
+        "{STARTUP_MIGRATED_PLUGIN}sandbox:\n  enabled: true\nhomepage:\n  enabled: true\nsupergraph:\n  introspection: true\n",
+    ))
     .expect_err("sandbox and homepage cannot both be enabled");
     assert!(
         error
