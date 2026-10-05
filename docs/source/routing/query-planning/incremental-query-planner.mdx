@@ -1,11 +1,11 @@
 ---
 title: Incremental Query Planner
 subtitle: Plan operations faster with bounded search
-description: Learn how to enable and tune the incremental query planner in GraphOS Router, which quickly finds a draft query plan and then optimizes it within an effort budget.
+description: Learn how to enable and tune the incremental query planner in GraphOS Router, which quickly finds a draft query plan and then optimizes it within a fuel budget.
 minVersion: Router v3.0.0
 ---
 
-The incremental query planner is an alternative query planner for GraphOS Router. It quickly finds a draft of a query plan, then spends a bounded effort budget optimizing it. On large or highly connected graphs, this keeps query planning fast and predictable.
+The incremental query planner is an alternative query planner for GraphOS Router. It quickly finds a draft of a query plan, then spends a bounded fuel budget optimizing it. On large or highly connected graphs, this keeps query planning fast and predictable.
 
 ## How it differs from the default planner
 
@@ -14,8 +14,8 @@ The default query planner considers many complete candidate plans for an operati
 The incremental planner works differently:
 
 1. It drafts a plan by taking the cheapest option for each field. Fields that only one subgraph can resolve are planned immediately.
-2. If a choice leads to a dead end, the planner backtracks and tries other options until it reaches a complete plan. Finding this draft does not use the effort budget.
-3. It then spends the effort budget revisiting earlier choices, keeping any plan that is cheaper than the best one found so far.
+2. If a choice leads to a dead end, the planner backtracks and tries other options until it reaches a complete plan. Finding this draft does not use the fuel budget.
+3. It then spends the fuel budget revisiting earlier choices, keeping any plan that is cheaper than the best one found so far.
 
 Because the search is bounded, planning time depends mostly on the size of the operation rather than the number of possible plans. The trade-off is that when the budget runs out, the planner might return a plan that is not the cheapest one possible.
 
