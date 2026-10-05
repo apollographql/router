@@ -1,0 +1,35 @@
+---
+source: apollo-router/src/configuration/compatibility.rs
+description: experimental flags promoted to their stable names
+expression: changed_settings(&config)
+---
+{
+  "/coprocessor": {
+    "url": "http://example.com",
+    "client": {
+      "http2": "enable"
+    }
+  },
+  "/supergraph/log_on_broken_pipe": true,
+  "/supergraph/query_planning/experimental_paths_limit": 50,
+  "/supergraph/query_planning/experimental_plans_limit": 100,
+  "/telemetry": {
+    "exporters": {
+      "tracing": {
+        "response_trace_id": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "/traffic_shaping": {
+    "all": {
+      "http2": "enable"
+    },
+    "subgraphs": {
+      "accounts": {
+        "http2": "enable"
+      }
+    }
+  }
+}

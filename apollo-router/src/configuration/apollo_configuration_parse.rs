@@ -194,6 +194,10 @@ pub(crate) enum Migration {
     /// Rust-side migration logs, for callers that report migrations themselves. Each migration's
     /// own notices (`Action::Log`) still print, as they do at startup.
     WithinMajorQuietly,
+    /// Applies another major version's within-major migrations, for tests of outcomes that none
+    /// of the current major version's migrations produce.
+    #[cfg(test)]
+    WithinMajorOf(i64),
     /// Parses the document as written, for configurations built in code.
     None,
 }
@@ -427,6 +431,10 @@ fn migrate(file: &Value, migration: Migration) -> Result<Option<String>, Configu
         Migration::WithinMajorQuietly => {
             upgrade_configuration(file, false, UpgradeMode::current_minor())?
         }
+        #[cfg(test)]
+        Migration::WithinMajorOf(major) => {
+            upgrade_configuration(file, true, UpgradeMode::Minor(major))?
+        }
         Migration::None => return Ok(None),
     };
     if migrated == *file {
@@ -614,6 +622,21 @@ pub(crate) fn migrated_copy_warning(lines: &[&str]) -> Result<(), String> {
         .then_some(())
         .ok_or_else(|| "the warning must say which document the errors refer to".into())
 }
+
+/// A removed setting that startup migration deletes, with a notice, so a document containing it
+/// is migrated.
+#[cfg(test)]
+pub(crate) const STARTUP_MIGRATED_SETTING: &str =
+    "telemetry:\n  apollo:\n    otlp_tracing_sampler: 0.5\n";
+
+/// The notice that migrating [`STARTUP_MIGRATED_SETTING`] logs.
+#[cfg(test)]
+pub(crate) const STARTUP_MIGRATION_NOTICE: &str = "otlp_tracing_sampler has been removed";
+
+/// A plugin section that startup migration moves to the top-level `expose_query_plan` key.
+#[cfg(test)]
+pub(crate) const STARTUP_MIGRATED_PLUGIN: &str =
+    "plugins:\n  experimental.expose_query_plan: true\n";
 
 #[cfg(test)]
 mod tests {
@@ -908,7 +931,7 @@ mod tests {
     /// secret field itself stays redacted. Migrating without losing anchors removes this.
     #[test]
     fn migrated_documents_lose_anchor_redaction() {
-        let text = format!("cors:\n  origins:\n    - https://example.com\n{ANCHORED_SECRET}");
+        let text = format!("{STARTUP_MIGRATED_SETTING}{ANCHORED_SECRET}");
 
         let rendered = parse(&text)
             .expect_err("the Redis configuration contains an unknown field")
@@ -921,14 +944,26 @@ mod tests {
         );
     }
 
+    /// Startup applies only the current major version's migrations, so after a major version bump
+    /// these test inputs must be replaced with settings that the new version's migrations change.
+    #[test]
+    fn startup_migration_test_inputs_are_migrated_by_the_current_major_version() {
+        for text in [
+            STARTUP_MIGRATED_SETTING,
+            STARTUP_MIGRATED_PLUGIN,
+            include_str!("testdata/compat/plugin_config_error_after_migration.yaml"),
+        ] {
+            let file: Value = serde_yaml::from_str(text).expect("test inputs are YAML");
+            let migrated = upgrade_configuration_silently(&file, UpgradeMode::current_minor())
+                .expect("test inputs migrate");
+            assert_ne!(migrated, file, "startup no longer migrates:\n{text}");
+        }
+    }
+
     #[test]
     fn migration_reports_what_it_changed() {
         assert_logs(
-            || {
-                parse(include_str!(
-                    "testdata/compat/needs_minor_migration_cors_origins.yaml"
-                ))
-            },
+            || parse(STARTUP_MIGRATED_SETTING),
             |lines| {
                 lines
                     .iter()
@@ -940,7 +975,7 @@ mod tests {
                     })
             },
         )
-        .expect("the adapter migrates legacy CORS settings");
+        .expect("the adapter migrates the removed setting");
     }
 
     /// `router config validate` reports migrations itself, so its parse omits the summary error.
@@ -950,7 +985,7 @@ mod tests {
         assert_logs(
             || {
                 parse_configuration(
-                    include_str!("testdata/compat/needs_minor_migration_cors_origins.yaml"),
+                    STARTUP_MIGRATED_SETTING,
                     ExternalValues::default(),
                     Migration::WithinMajorQuietly,
                 )
@@ -964,12 +999,12 @@ mod tests {
                 }
                 lines
                     .iter()
-                    .any(|line| line.contains("CORS configuration has been migrated"))
+                    .any(|line| line.contains(STARTUP_MIGRATION_NOTICE))
                     .then_some(())
-                    .ok_or_else(|| "the CORS migration's own notice must still print".to_string())
+                    .ok_or_else(|| "the migration's own notice must still print".to_string())
             },
         )
-        .expect("the adapter migrates legacy CORS settings");
+        .expect("the adapter migrates the removed setting");
     }
 
     #[test]
@@ -989,18 +1024,18 @@ mod tests {
     /// run it.
     #[test]
     fn validation_errors_suggest_router_config_upgrade_when_it_would_change_the_file() {
-        let text = "cors:\n  origins:\n    - https://example.com\nthis_key_does_not_exist_anywhere: true\n";
+        let text = format!("{STARTUP_MIGRATED_SETTING}this_key_does_not_exist_anywhere: true\n");
 
         assert_logs(
-            || parse(text),
+            || parse(&text),
             |lines| {
                 // Startup's migration notice, once: checking for the hint logs no notices.
                 let notices = lines
                     .iter()
-                    .filter(|line| line.contains("CORS configuration has been migrated"))
+                    .filter(|line| line.contains(STARTUP_MIGRATION_NOTICE))
                     .count();
                 if notices != 1 {
-                    return Err(format!("expected one CORS migration notice, got {notices}"));
+                    return Err(format!("expected one migration notice, got {notices}"));
                 }
                 lines
                     .iter()
@@ -1249,9 +1284,10 @@ mod tests {
     /// would fail on the settings migration fixed and hide the rule's error.
     #[test]
     fn migrated_documents_failing_plugin_rules_report_the_rule() {
-        let text = "cors:\n  origins:\n    - https://example.com\nplugins:\n  test.validated:\n    name: reserved\n";
+        let text =
+            format!("{STARTUP_MIGRATED_SETTING}plugins:\n  test.validated:\n    name: reserved\n");
 
-        let error = assert_logs(|| parse(text), migrated_copy_warning)
+        let error = assert_logs(|| parse(&text), migrated_copy_warning)
             .expect_err("the plugin's rule rejects the name")
             .to_string();
 
@@ -1259,7 +1295,7 @@ mod tests {
             error.contains("the name `reserved` is not allowed"),
             "{error}"
         );
-        assert!(!error.contains("origins"), "{error}");
+        assert!(!error.contains("otlp_tracing_sampler"), "{error}");
     }
 
     /// A file that fails only a plugin's rule, which `router config upgrade` would not change,
@@ -1278,9 +1314,11 @@ mod tests {
     /// written is not parsed again.
     #[test]
     fn schema_errors_after_migration_are_reported_from_the_migrated_copy() {
-        let text = "# operator comment\ncors:\n  origins:\n    - \"https://example.com\"\nthis_key_does_not_exist_anywhere: true\n";
+        let text = format!(
+            "# operator comment\n{STARTUP_MIGRATED_SETTING}this_key_does_not_exist_anywhere: true\n"
+        );
 
-        let error = assert_logs(|| parse(text), migrated_copy_warning)
+        let error = assert_logs(|| parse(&text), migrated_copy_warning)
             .expect_err("the unknown key is invalid in the migrated copy")
             .to_string();
 
@@ -1288,18 +1326,17 @@ mod tests {
             error.contains("this_key_does_not_exist_anywhere"),
             "{error}"
         );
-        // The key is on line 6 of the migrated copy, which moves `origins` under `policies`, and
-        // on line 5 of the file.
-        assert!(error.contains("[6:1]"), "{error}");
+        // The key is on line 4 of the migrated copy and on line 5 of the file.
+        assert!(error.contains("[4:1]"), "{error}");
         assert!(!error.contains("[5:1]"), "{error}");
     }
 
     /// Expansion errors after a successful migration are reported from the migrated copy too.
     #[test]
     fn expansion_errors_after_migration_are_reported_from_the_migrated_copy() {
-        // Migration 2045 moves the unresolvable reference under `deduplication.all`.
+        // Startup migration renames the setting that holds the unresolvable reference.
         let text =
-            "# operator comment\nsubscription:\n  deduplication:\n    enabled: ${env.MISSING}\n";
+            "# operator comment\nsupergraph:\n  experimental_log_on_broken_pipe: ${env.MISSING}\n";
 
         let error = assert_logs(
             || parse_configuration(text, env("PRESENT", "1"), Migration::WithinMajor),
@@ -1309,20 +1346,25 @@ mod tests {
         .to_string();
 
         assert!(error.contains("expansion value not present"), "{error}");
-        assert!(error.contains("all:"), "{error}");
+        assert!(error.contains("log_on_broken_pipe:"), "{error}");
+        assert!(
+            !error.contains("experimental_log_on_broken_pipe"),
+            "{error}"
+        );
         assert!(!error.contains("# operator comment"), "{error}");
     }
 
     /// When migration itself fails, the file is loaded as written, so its diagnostics quote the
     /// file. Here the legacy `origins` cannot be moved into a `policies` that is not a list. The
-    /// `router config upgrade` dry run fails the same way, so there is no hint to run it.
+    /// `router config upgrade` dry run fails the same way, so there is no hint to run it. No 3.x
+    /// migration can fail, so this applies the 2.x migration that moves `origins`.
     #[test]
     fn failed_migrations_load_the_file_as_written() {
         let text =
             "# operator comment\ncors:\n  origins:\n    - \"https://example.com\"\n  policies: 3\n";
 
         let error = assert_logs(
-            || parse(text),
+            || parse_configuration(text, ExternalValues::default(), Migration::WithinMajorOf(2)),
             |lines| {
                 no_upgrade_hint(lines)?;
                 lines

@@ -614,11 +614,9 @@ mod test {
 
     #[test]
     fn detects_settings_that_startup_migrates() {
-        assert!(super::uses_migrated_settings(indoc::indoc! {"
-            subscription:
-              deduplication:
-                enabled: true
-        "}));
+        assert!(super::uses_migrated_settings(
+            crate::configuration::apollo_configuration_parse::STARTUP_MIGRATED_SETTING
+        ));
         assert!(!super::uses_migrated_settings(indoc::indoc! {"
             supergraph:
               listen: 127.0.0.1:4000
