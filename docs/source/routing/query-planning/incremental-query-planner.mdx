@@ -47,7 +47,9 @@ The cost of a plan depends on how many fetches it makes and how deep its chain o
 
 ### Discrepancies and passes
 
-The `beam_width` cheapest options at a decision are said to be in the beam. Choosing an option outside the beam is a discrepancy. The search runs in passes, and each pass allows one more discrepancy than the last:
+At each decision, the planner keeps a **beam**: the `beam_width` cheapest options, sorted after scoring. `beam_width` sets the size of that beam, so a wider beam carries more alternatives forward from each decision. Picking an option from inside the beam keeps the search on its default course. Picking any other option — one outside the beam — is a **discrepancy**: a deliberate departure from the cheapest-looking choice, taken on the chance that it leads to a cheaper plan overall.
+
+The search runs in passes, and each pass allows one more discrepancy than the last:
 
 1. The first pass always takes the cheapest option. This is the greedy draft. If the draft reaches a selection that no option can resolve, the planner backs up to an earlier decision and tries the next option, until it reaches a complete plan.
 2. Later passes explore the other options in the beam, and spend their discrepancies on options outside it. Discrepancies go to the earliest decisions first, because early decisions, such as which subgraph resolves a top-level field, shape the rest of the plan more than decisions near the leaves.
