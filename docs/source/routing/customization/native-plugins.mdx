@@ -242,7 +242,7 @@ plugins:
 
 If your supergraph uses [connectors](/graphos/schema-design/connectors/) to call REST APIs, a native plugin can wrap the service that makes individual connector HTTP requests. Define the `connector_request_service` hook to inspect or rewrite each outbound request, for example to attach authentication signatures, route conditionally on request arguments, or circuit break on an upstream the plugin knows to be unhealthy.
 
-One GraphQL operation can produce many connector requests, so this hook runs once per outbound HTTP request, not once per operation.
+The router calls this hook once per connector source when it builds the request pipeline, not once per request. The service your hook returns then handles every outbound HTTP request for that source, and one GraphQL operation can produce many of them.
 
 <Note>
 
