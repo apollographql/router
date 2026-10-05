@@ -60,6 +60,12 @@ executors:
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
+      # NOTE(fnichol): With full debuginfo each `apollo-router` test binary is
+      # ~4GB and needs ~11GiB to link with GNU ld, so concurrent links exceed
+      # this executor's 32GiB and get OOM-killed. Line tables keep file:line in
+      # backtraces while cutting link memory to ~3.7GiB.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -881,7 +887,7 @@ jobs:
   publish_github_release:
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
-    resource_class: small
+    resource_class: xlarge
     environment:
       <<: *common_job_environment
       VERSION: << pipeline.git.tag >>

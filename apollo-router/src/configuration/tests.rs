@@ -15,6 +15,7 @@ use walkdir::WalkDir;
 
 use super::apollo_configuration_parse::ExternalValues;
 use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::STARTUP_MIGRATED_SETTING;
 use super::apollo_configuration_parse::parse_configuration;
 use super::apollo_configuration_parse::parse_without_inputs;
 use super::subgraph::SubgraphConfiguration;
@@ -538,7 +539,7 @@ fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_fiel
     );
 }
 
-/// With legacy CORS settings, startup migrates the document first and loads the migrated copy,
+/// With a removed setting, startup migrates the document first and loads the migrated copy,
 /// which fails on the timeout. Pins the same known limitation as above: the copy has no YAML
 /// aliases, so the error quotes the value the anchored reference resolved to, whether the variable
 /// or the reference's default supplies it. The secret field itself stays redacted.
@@ -553,7 +554,9 @@ fn migrated_anchored_expansions_quote_the_value_aliased_into_a_secret_field() {
             expansion = expansion.mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", secret);
         }
         let error = parse_configuration(
-            "cors:\n  origins:\n    - https://example.com\napq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${env.TEST_CONFIG_REDIS_PASSWORD:-fallback-secret-value}\n        password: *pw\n",
+            &format!(
+                "{STARTUP_MIGRATED_SETTING}apq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${{env.TEST_CONFIG_REDIS_PASSWORD:-fallback-secret-value}}\n        password: *pw\n"
+            ),
             expansion.build(),
             Migration::WithinMajor,
         )
