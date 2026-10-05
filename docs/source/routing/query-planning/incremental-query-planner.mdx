@@ -47,7 +47,7 @@ The cost of a plan depends on how many fetches it makes and how deep its chain o
 
 ### Discrepancies and passes
 
-At each decision, the planner keeps a **beam**: the `beam_width` cheapest options, sorted after scoring. `beam_width` sets the size of that beam, so a wider beam carries more alternatives forward from each decision. Picking an option from inside the beam keeps the search on its default course. Picking any other option — one outside the beam — is a **discrepancy**: a deliberate departure from the cheapest-looking choice, taken on the chance that it leads to a cheaper plan overall.
+At each decision, the planner keeps a **beam**: the `beam_width` cheapest options, sorted after scoring. `beam_width` sets the size of that beam, so a wider beam carries more alternatives forward from each decision. Picking an option from the first beam keeps the search on its default course. Picking an option outside the first beam is a **discrepancy**: a deliberate departure from the cheapest-looking choice, taken on the chance that it leads to a cheaper plan overall.
 
 The search runs in passes, and each pass allows one more discrepancy than the last:
 
