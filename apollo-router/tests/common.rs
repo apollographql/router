@@ -1448,10 +1448,9 @@ impl IntegrationTest {
     /// Make a raw multipart request to the router.
     ///
     /// By default the form is streamed part by part. With `buffered`, it is collected first and
-    /// sent as a single body with a `Content-Length`, so the whole upload is written before the
-    /// router can respond. Use this when the router rejects the request without reading the rest
-    /// of the body: a streamed upload can then hit a connection reset before the client has read
-    /// the response.
+    /// sent as a single body with a `Content-Length`. Use this when the router rejects the request
+    /// after reading only the first parts: if the rest of a streamed body is still arriving, the
+    /// router closes the connection and the client can hit a reset before it reads the response.
     #[allow(dead_code)]
     pub fn execute_multipart_request(
         &self,
