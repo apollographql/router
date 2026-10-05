@@ -6492,6 +6492,7 @@ mod tests {
         use crate::plugins::telemetry::config_new::conditions::Condition;
         use crate::services::PipelineStep;
         use crate::services::connector::request_service;
+        use crate::services::connector::request_service::TransportOutcome;
         use crate::services::http::HttpRequest;
         use crate::services::http::HttpResponse;
         use crate::services::router;
@@ -6612,7 +6613,10 @@ mod tests {
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_ok());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Response(_)
+            ));
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -6672,7 +6676,10 @@ mod tests {
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_ok());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Response(_)
+            ));
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -6754,7 +6761,10 @@ mod tests {
 
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_ok());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Response(_)
+            ));
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -6803,7 +6813,10 @@ mod tests {
             let request = create_test_connector_request();
             let response = service.oneshot(request).await.unwrap();
 
-            assert!(response.transport_result.is_err());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Error(_)
+            ));
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
 
@@ -7099,7 +7112,10 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_ok());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Response(_)
+            ));
         }
 
         #[tokio::test]
@@ -7213,7 +7229,10 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_err());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Error(_)
+            ));
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
                     assert_eq!(error.message, "Not authenticated.");
@@ -7268,7 +7287,10 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_err());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Error(_)
+            ));
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
                     assert_eq!(error.message, "Request blocked");
@@ -7333,7 +7355,10 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_err());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Error(_)
+            ));
             match &response.mapped_response {
                 MappedResponse::Error { error, .. } => {
                     assert_eq!(error.message, "Rate limited");
@@ -7403,7 +7428,10 @@ mod tests {
             let response = service.oneshot(request).await.unwrap();
             crate::plugin::test::await_mock_driver(http_driver).await;
 
-            assert!(response.transport_result.is_ok());
+            assert!(matches!(
+                response.transport_outcome,
+                TransportOutcome::Response(_)
+            ));
         }
 
         #[tokio::test]
@@ -7526,7 +7554,7 @@ mod tests {
                 Ok(request_service::Response {
                     context: req.context,
                     subgraph_name,
-                    transport_result: Err(
+                    transport_outcome: TransportOutcome::Error(
                         apollo_federation::connectors::runtime::errors::Error::TransportFailure(
                             "original error".to_string(),
                         ),

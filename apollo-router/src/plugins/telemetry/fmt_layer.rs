@@ -274,7 +274,6 @@ mod tests {
     use apollo_federation::connectors::runtime::http_json_transport::HttpRequest;
     use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
     use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use apollo_federation::connectors::runtime::mapping::Problem;
     use apollo_federation::connectors::runtime::responses::MappedResponse;
@@ -305,6 +304,7 @@ mod tests {
     use crate::plugins::telemetry::otel;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -576,6 +576,146 @@ connector:
             !raw.contains(r#""message":"""#) && !raw.contains(r#""message": """#),
             "empty-string message should be dropped; got: {raw}"
         );
+    }
+
+    /// Fields recorded with `tracing::field::valuable` only exist in builds that set
+    /// `--cfg tracing_unstable`; the nightly CI run exercises these tests.
+    #[cfg(tracing_unstable)]
+    mod valuable_fields {
+        use super::*;
+
+        #[derive(valuable::Valuable)]
+        struct Entitlements {
+            bypass: Option<bool>,
+        }
+
+        #[derive(valuable::Valuable)]
+        struct AccessLog {
+            client_id: String,
+            entitlements: Entitlements,
+            persisted_query_id: Option<String>,
+        }
+
+        fn access_log() -> AccessLog {
+            AccessLog {
+                client_id: "test-client-id".to_string(),
+                entitlements: Entitlements { bypass: Some(true) },
+                persisted_query_id: None,
+            }
+        }
+
+        /// Formats the single event emitted by `emit` and returns the raw JSON line.
+        fn json_log_line(emit: impl FnOnce()) -> String {
+            let buff = LogBuffer::default();
+            let json_format = JsonFormat {
+                display_timestamp: false,
+                display_span_list: false,
+                display_current_span: false,
+                display_resource: false,
+                ..Default::default()
+            };
+            let format = Json::new(Resource::builder_empty().build(), json_format);
+            let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
+
+            ::tracing::subscriber::with_default(fmt::Subscriber::new().with(fmt_layer), emit);
+
+            buff.to_string().trim().to_string()
+        }
+
+        #[test]
+        fn test_json_logging_valuable_is_nested_json() {
+            let log = access_log();
+            let raw = json_log_line(|| {
+                info!(log = ::tracing::field::valuable(&log), "request finished");
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(
+                parsed["log"],
+                serde_json::json!({
+                    "client_id": "test-client-id",
+                    "entitlements": { "bypass": true },
+                    "persisted_query_id": null,
+                }),
+                "`log` should be a nested object, not a Debug string; got: {raw}"
+            );
+        }
+
+        #[test]
+        fn test_json_logging_valuable_keeps_empty_message_deduplication() {
+            // `otel_error!` style: an explicit `message` field plus a trailing empty format string.
+            let log = access_log();
+            let raw = json_log_line(|| {
+                error!(
+                    log = ::tracing::field::valuable(&log),
+                    message = "explicit error message",
+                    ""
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert!(parsed["log"].is_object(), "got: {raw}");
+            assert_eq!(parsed["message"], "explicit error message");
+            assert_eq!(
+                raw.matches(r#""message":"#).count(),
+                1,
+                "empty-string message should be dropped; got: {raw}"
+            );
+        }
+
+        #[test]
+        fn test_json_logging_valuable_unserializable_falls_back_to_debug() {
+            // JSON object keys must be strings, so a map keyed by a list cannot be converted.
+            let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
+            let raw = json_log_line(|| {
+                info!(
+                    keys = ::tracing::field::valuable(&keyed_by_list),
+                    code = 43,
+                    "still logged"
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(parsed["keys"], "{[1, 2]: true}");
+            // Only check that a reason is present: its wording belongs to serde_json.
+            let errors = parsed["serialization_errors"]
+                .as_object()
+                .unwrap_or_else(|| panic!("expected a serialization_errors object; got: {raw}"));
+            assert_eq!(errors.len(), 1, "got: {raw}");
+            assert!(
+                errors["keys"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.is_empty()),
+                "the fallback should record why conversion failed; got: {raw}"
+            );
+            assert_eq!(parsed["code"], 43);
+            assert_eq!(parsed["message"], "still logged");
+        }
+
+        #[test]
+        fn test_json_logging_valuable_own_serialization_errors_field_wins() {
+            let keyed_by_list = std::collections::BTreeMap::from([(vec![1, 2], true)]);
+            let raw = json_log_line(|| {
+                info!(
+                    keys = ::tracing::field::valuable(&keyed_by_list),
+                    serialization_errors = "from the plugin",
+                    "still logged"
+                );
+            });
+            let parsed: serde_json::Value =
+                serde_json::from_str(&raw).expect("output should be valid JSON");
+
+            assert_eq!(
+                raw.matches(r#""serialization_errors":"#).count(),
+                1,
+                "the key must not be duplicated; got: {raw}"
+            );
+            assert_eq!(parsed["serialization_errors"], "from the plugin");
+            assert_eq!(parsed["keys"], "{[1, 2]: true}");
+        }
     }
 
     #[tokio::test]
@@ -957,7 +1097,7 @@ connector:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    transport_outcome: TransportOutcome::Response(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -965,7 +1105,7 @@ connector:
                             .expect("expecting valid response")
                             .into_parts()
                             .0,
-                    })),
+                    }),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -991,6 +1131,7 @@ connector:
                                 location: ProblemLocation::Selection,
                             },
                         ],
+                        declared_errors: vec![],
                     },
                     break_status: None,
                 };
@@ -1400,7 +1541,7 @@ subgraph:
                 let connector_response = Response {
                     context: context.clone(),
                     subgraph_name: String::new(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    transport_outcome: TransportOutcome::Response(HttpResponse {
                         inner: http::Response::builder()
                             .status(200)
                             .header("x-log-response", HeaderValue::from_static("log"))
@@ -1408,7 +1549,7 @@ subgraph:
                             .expect("expecting valid response")
                             .into_parts()
                             .0,
-                    })),
+                    }),
                     mapped_response: MappedResponse::Data {
                         data: serde_json::json!({})
                             .try_into()
@@ -1434,6 +1575,7 @@ subgraph:
                                 location: ProblemLocation::Selection,
                             },
                         ],
+                        declared_errors: vec![],
                     },
                     break_status: None,
                 };

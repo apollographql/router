@@ -11,7 +11,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
+<<<<<<< HEAD
 use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
+=======
+use schemars::JsonSchema;
+use serde::Deserialize;
+>>>>>>> origin/dev
 use tower::BoxError;
 use tower::ServiceExt;
 use tower::util::BoxCloneService;
@@ -20,6 +25,7 @@ use super::*;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginUnstable;
 use crate::services::connector::request_service;
+use crate::services::connector::request_service::TransportOutcome;
 
 /// What the plugin under test observed, so assertions can be made on the router's
 /// side of the wire rather than only on what the mock API received.
@@ -220,7 +226,7 @@ async fn public_unstable_plugin_can_break_a_connector_request() {
 /// [`request_service::Response`] through its public accessors:
 /// [`Response::data`]/[`Response::set_data`] (the hit branch), the false-return
 /// no-op branch of [`Response::set_error_message`]/[`Response::set_error_code`],
-/// the newly-public `transport_result` field (read *and* written), and the
+/// the newly-public `transport_outcome` field (read *and* written), and the
 /// `context` read-write path shared between [`request_service::Request`] and
 /// [`request_service::Response`].
 ///
@@ -243,10 +249,10 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
         context_value_written_on_request: Option<String>,
         /// Written directly into `Response::context`, then read back immediately.
         context_value_written_on_response: Option<String>,
-        /// The status recorded on the (`Ok`) `Response::transport_result`, before
+        /// The status recorded on the (`Ok`) `Response::transport_outcome`, before
         /// the plugin rewrites it.
         transport_status_before: Option<u16>,
-        /// `transport_result`'s status and a header the plugin adds to it,
+        /// `transport_outcome`'s status and a header the plugin adds to it,
         /// read back immediately after the rewrite.
         transport_status_after: Option<u16>,
         transport_header_after: Option<String>,
@@ -299,17 +305,17 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
                         observed.context_value_written_on_response =
                             response.context.get::<_, String>("from-response").unwrap();
 
-                        observed.transport_status_before = match &response.transport_result {
-                            Ok(TransportResponse::Http(http_response)) => {
+                        observed.transport_status_before = match &response.transport_outcome {
+                            TransportOutcome::Response(http_response) => {
                                 Some(http_response.inner.status.as_u16())
                             }
                             _ => None,
                         };
 
-                        // `transport_result` is writable: rewrite the status and
+                        // `transport_outcome` is writable: rewrite the status and
                         // add a header to the raw transport outcome.
-                        if let Ok(TransportResponse::Http(http_response)) =
-                            &mut response.transport_result
+                        if let TransportOutcome::Response(http_response) =
+                            &mut response.transport_outcome
                         {
                             http_response.inner.status = http::StatusCode::IM_A_TEAPOT;
                             http_response.inner.headers.insert(
@@ -317,8 +323,8 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
                                 http::HeaderValue::from_static("yes"),
                             );
                         }
-                        if let Ok(TransportResponse::Http(http_response)) =
-                            &response.transport_result
+                        if let TransportOutcome::Response(http_response) =
+                            &response.transport_outcome
                         {
                             observed.transport_status_after =
                                 Some(http_response.inner.status.as_u16());
@@ -392,7 +398,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
         Some("hello-from-response".to_string())
     );
 
-    // `Response::transport_result` reports the raw transport outcome...
+    // `Response::transport_outcome` reports the raw transport outcome...
     assert_eq!(observed.transport_status_before, Some(200));
     // ...and is itself writable: the rewritten status and header stuck.
     assert_eq!(observed.transport_status_after, Some(418));
@@ -423,10 +429,10 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_data() {
 /// [`request_service::Response`] through its public accessors: the false-return
 /// no-op branch of [`Response::set_data`], the hit branch of
 /// [`Response::error`]/[`Response::set_error_message`]/[`Response::set_error_code`],
-/// and `transport_result` (read *and* written) for a call whose transport
+/// and `transport_outcome` (read *and* written) for a call whose transport
 /// succeeded (a real HTTP 404) even though the mapped response is an error.
 /// Also asserts the documented independence of the two: rewriting
-/// `transport_result`'s status does not change the `http.status` already baked
+/// `transport_outcome`'s status does not change the `http.status` already baked
 /// into the client-visible error's extensions, since the mapped response is not
 /// recomputed from it.
 ///
@@ -481,23 +487,23 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
                 move |mut response: request_service::Response| {
                     let mut observed = observed.lock().unwrap();
 
-                    observed.transport_status_before = match &response.transport_result {
-                        Ok(TransportResponse::Http(http_response)) => {
+                    observed.transport_status_before = match &response.transport_outcome {
+                        TransportOutcome::Response(http_response) => {
                             Some(http_response.inner.status.as_u16())
                         }
                         _ => None,
                     };
 
-                    // `transport_result` is writable here too. This does *not*
+                    // `transport_outcome` is writable here too. This does *not*
                     // change the client-visible error, which was already mapped
                     // from the original (404) status.
-                    if let Ok(TransportResponse::Http(http_response)) =
-                        &mut response.transport_result
+                    if let TransportOutcome::Response(http_response) =
+                        &mut response.transport_outcome
                     {
                         http_response.inner.status = http::StatusCode::IM_A_TEAPOT;
                     }
-                    observed.transport_status_after = match &response.transport_result {
-                        Ok(TransportResponse::Http(http_response)) => {
+                    observed.transport_status_after = match &response.transport_outcome {
+                        TransportOutcome::Response(http_response) => {
                             Some(http_response.inner.status.as_u16())
                         }
                         _ => None,
@@ -552,7 +558,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
     assert_eq!(errors[0]["message"], "rewritten by plugin");
     assert_eq!(errors[0]["extensions"]["code"], "REWRITTEN_CODE");
     // The client-visible error still reports the *original* transport status:
-    // rewriting `transport_result` after the fact doesn't reach it, because the
+    // rewriting `transport_outcome` after the fact doesn't reach it, because the
     // mapped response was already built from the real 404.
     assert_eq!(errors[0]["extensions"]["http"]["status"], 404);
 
@@ -561,7 +567,7 @@ async fn public_unstable_plugin_can_wrap_a_connector_response_with_error() {
     // The transport itself succeeded (a real HTTP 404 came back); only the
     // *mapped* response is an error.
     assert_eq!(observed.transport_status_before, Some(404));
-    // `transport_result` is writable: the rewritten status stuck...
+    // `transport_outcome` is writable: the rewritten status stuck...
     assert_eq!(observed.transport_status_after, Some(418));
     // ...independently of the mapped response asserted above.
 

@@ -627,12 +627,13 @@ pub trait PluginUnstable: Send + Sync + 'static {
     ///   `Control::Break`.
     ///
     /// On the response, a plugin can read and write [`Response::context`], read and
-    /// rewrite the raw transport outcome through [`Response::transport_result`], and
+    /// rewrite the raw transport outcome through [`Response::transport_outcome`], and
     /// read or replace what is returned to the client through [`Response::data`],
-    /// [`Response::error`] and their setters. Rewriting `transport_result` does not
+    /// [`Response::error`] and their setters. Rewriting `transport_outcome` does not
     /// recompute the mapped response, so changing one without the other makes
     /// telemetry disagree with what the client receives.
     ///
+<<<<<<< HEAD
     /// [`Request::transport_request`]: connector_request::Request::transport_request
     /// [`Request::supergraph_request`]: connector_request::Request::supergraph_request
     /// [`Request::context`]: connector_request::Request::context
@@ -641,6 +642,16 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// [`Response::transport_result`]: connector_request::Response::transport_result
     /// [`Response::data`]: connector_request::Response::data
     /// [`Response::error`]: connector_request::Response::error
+=======
+    /// [`Request::transport_request`]: crate::services::connector::request_service::Request::transport_request
+    /// [`Request::supergraph_request`]: crate::services::connector::request_service::Request::supergraph_request
+    /// [`Request::context`]: crate::services::connector::request_service::Request::context
+    /// [`Request::into_error_response`]: crate::services::connector::request_service::Request::into_error_response
+    /// [`Response::context`]: crate::services::connector::request_service::Response::context
+    /// [`Response::transport_outcome`]: crate::services::connector::request_service::Response::transport_outcome
+    /// [`Response::data`]: crate::services::connector::request_service::Response::data
+    /// [`Response::error`]: crate::services::connector::request_service::Response::error
+>>>>>>> origin/dev
     fn connector_request_service(
         &self,
         service: connector_request::BoxCloneService,
@@ -811,6 +822,14 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles connector execution (wrapping individual connector requests)
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -942,6 +961,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         source_name: String,
     ) -> connector_request::BoxCloneService;
 
+    /// This service handles connector execution (wrapping individual connector requests)
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -1004,6 +1029,13 @@ where
         source_name: String,
     ) -> connector_request::BoxCloneService {
         self.connector_request_service(service, source_name)
+    }
+
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxService,
+    ) -> crate::services::connect::BoxService {
+        self.connector_service(service)
     }
 
     fn name(&self) -> &'static str {

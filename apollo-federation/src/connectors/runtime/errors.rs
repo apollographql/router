@@ -165,6 +165,9 @@ pub enum Error {
 
     #[error("Connector error: {0}")]
     TransportFailure(String),
+
+    #[error("Invalid cache-control header: {0}")]
+    InvalidCacheControl(String),
 }
 
 impl Error {
@@ -191,6 +194,7 @@ impl Error {
             Self::GatewayTimeout => "GATEWAY_TIMEOUT",
             Self::CircuitBreakerOpen => "REQUEST_CIRCUIT_BREAKER_OPEN",
             Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
+            Self::InvalidCacheControl(_) => "INVALID_CACHE_CONTROL_HEADER",
         }
     }
 }

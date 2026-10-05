@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashSet;
+use apollo_federation::connectors::runtime::responses::MappedResponse;
 use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
@@ -50,6 +51,50 @@ pub(crate) async fn count_subgraph_errors(
         id: response.id,
         response: response.response,
     }
+}
+
+/// Count the errors a connector mapping declared with `->withError`.
+///
+/// Counted like any error in the `errors` array: by `graphql_error` always,
+/// and by `operations.error` under `preview_extended_error_metrics`.
+/// `graphql_error` takes these despite the field having resolved, because it
+/// already counts valueCompletion the same way, and because it is the only
+/// error counter nothing gates.
+///
+/// Counted at the connector, not off the reported extension, so
+/// `include_subgraph_errors` withholding an error from a client does not
+/// suppress its metric.
+///
+/// Counted once per declared error, not once per delivered copy. An entity
+/// fetch's errors are rebuilt one per client position by
+/// `FetchNode::response_at_path`, which reuses each error's `apollo_id` so the
+/// copies are not counted again. Declared errors inherit that existing rule.
+///
+/// Counted here and nowhere else, because the fetch service lifts them out of
+/// the `errors` array before a later layer can see them. That is what makes it
+/// safe not to write `COUNTED_ERRORS` back, and it is pinned by
+/// `declared_errors_are_protected_from_double_counting_by_the_lift_not_the_dedup_set`.
+pub(crate) fn count_connector_errors(
+    response: &crate::services::connector::request_service::Response,
+    errors_config: &ErrorsConfiguration,
+) {
+    let MappedResponse::Data {
+        declared_errors, ..
+    } = &response.mapped_response
+    else {
+        // A failed response reports one error explaining the failure, which is
+        // counted where every other connector error is: at the execution layer,
+        // once it reaches the `errors` array.
+        return;
+    };
+    if declared_errors.is_empty() {
+        return;
+    }
+
+    // `RuntimeError::extensions` stamps `service` and the connector's
+    // coordinate, so the counted attributes match what the client would see.
+    let errors: Vec<Error> = declared_errors.iter().cloned().map(Into::into).collect();
+    count_operation_errors(errors.iter(), &response.context, errors_config);
 }
 
 pub(crate) async fn count_supergraph_errors(

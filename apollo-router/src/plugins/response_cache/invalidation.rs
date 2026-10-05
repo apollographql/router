@@ -15,6 +15,7 @@ use tracing::Instrument;
 use super::plugin::StorageInterface;
 use crate::plugins::response_cache::ErrorCode;
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
+use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::storage;
 use crate::plugins::response_cache::storage::CacheStorage;
@@ -84,6 +85,7 @@ impl Invalidation {
 
     async fn handle_request(
         &self,
+        scope: CacheScope,
         storage: &Storage,
         request: &InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
@@ -95,7 +97,7 @@ impl Invalidation {
         let (count, subgraphs) = match request {
             InvalidationRequest::Subgraph { subgraph } => {
                 let count = storage
-                    .invalidate_by_subgraph(subgraph, request.kind())
+                    .invalidate_by_subgraph(scope, subgraph, request.kind())
                     .await
                     .inspect_err(|err| {
                         u64_counter_with_unit!(
@@ -124,6 +126,7 @@ impl Invalidation {
             } => {
                 let subgraph_counts = storage
                     .invalidate(
+                        scope,
                         vec![invalidation_key],
                         vec![subgraph.clone()],
                         request.kind(),
@@ -160,9 +163,11 @@ impl Invalidation {
             InvalidationRequest::CacheTag {
                 subgraphs,
                 cache_tag,
+                ..
             } => {
                 let subgraph_counts = storage
                     .invalidate(
+                        scope,
                         vec![cache_tag.clone()],
                         subgraphs.clone().into_iter().collect(),
                         request.kind(),
@@ -205,6 +210,71 @@ impl Invalidation {
                     subgraphs.clone().into_iter().collect::<Vec<String>>(),
                 )
             }
+            InvalidationRequest::ConnectorSource { source } => {
+                let count = storage
+                    .invalidate_by_subgraph(scope, source, request.kind())
+                    .await
+                    .inspect_err(|err| {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "connector",
+                            "connector.source" = source.clone()
+                        );
+                    })?;
+                u64_counter_with_unit!(
+                    "apollo.router.operations.response_cache.invalidation.entry",
+                    "Response cache counter for invalidated entries",
+                    "{entry}",
+                    count,
+                    "kind" = "connector",
+                    "connector.source" = source.clone()
+                );
+                (count, vec![source.clone()])
+            }
+            InvalidationRequest::ConnectorType {
+                source,
+                r#type: graphql_type,
+            } => {
+                let source_counts = storage
+                    .invalidate(
+                        scope,
+                        vec![invalidation_key],
+                        vec![source.clone()],
+                        request.kind(),
+                    )
+                    .await
+                    .inspect_err(|err| {
+                        u64_counter_with_unit!(
+                            "apollo.router.operations.response_cache.invalidation.error",
+                            "Errors when invalidating data in cache",
+                            "{error}",
+                            1,
+                            "code" = err.code(),
+                            "kind" = "type",
+                            "connector.source" = source.clone(),
+                            "graphql.type" = graphql_type.clone()
+                        );
+                    })?;
+                let mut total_count = 0;
+                for (source_name, count) in source_counts {
+                    total_count += count;
+                    u64_counter_with_unit!(
+                        "apollo.router.operations.response_cache.invalidation.entry",
+                        "Response cache counter for invalidated entries",
+                        "{entry}",
+                        count,
+                        "kind" = "type",
+                        "connector.source" = source_name,
+                        "graphql.type" = graphql_type.clone()
+                    );
+                }
+
+                (total_count, vec![source.clone()])
+            }
         };
 
         for subgraph in subgraphs {
@@ -228,22 +298,46 @@ impl Invalidation {
         let mut errors = Vec::new();
         let mut futures = Vec::new();
         for request in requests {
-            let storages = match &request {
+            // Each storage is paired with the scope whose index namespace should be resolved
+            // against it, so `handle_request` renders `subgraph-`/`connector-` correctly.
+            let storages: Vec<(CacheScope, &Storage)> = match &request {
                 InvalidationRequest::Subgraph { subgraph }
                 | InvalidationRequest::Type { subgraph, .. } => match self.storage.get(subgraph) {
-                    Some(s) => vec![s],
+                    Some(s) => vec![(CacheScope::Subgraph, s)],
                     None => continue,
                 },
-                InvalidationRequest::CacheTag { subgraphs, .. } => subgraphs
+                // The caller stated which scope it meant (`subgraphs` vs `sources`), recorded on
+                // the variant. Target only that scope's storage — a `sources` request purges
+                // connector tags, a `subgraphs` request purges subgraph tags, never the other.
+                // `get`/`get_connector` each fall back to their own `all` storage, so sources that
+                // rely entirely on `connector.all` (or subgraphs on `subgraph.all`) still resolve.
+                InvalidationRequest::CacheTag {
+                    scope, subgraphs, ..
+                } => subgraphs
                     .iter()
-                    .filter_map(|subgraph| self.storage.get(subgraph))
+                    .filter_map(|name| match scope {
+                        CacheScope::Subgraph => {
+                            self.storage.get(name).map(|s| (CacheScope::Subgraph, s))
+                        }
+                        CacheScope::Connector => self
+                            .storage
+                            .get_connector(name)
+                            .map(|s| (CacheScope::Connector, s)),
+                    })
                     .collect(),
+                InvalidationRequest::ConnectorSource { source }
+                | InvalidationRequest::ConnectorType { source, .. } => {
+                    match self.storage.get_connector(source) {
+                        Some(s) => vec![(CacheScope::Connector, s)],
+                        None => continue,
+                    }
+                }
             };
 
-            for storage in storages {
+            for (scope, storage) in storages {
                 let request = request.clone();
                 let f = async move {
-                    self.handle_request(storage, &request)
+                    self.handle_request(scope, storage, &request)
                         .instrument(tracing::info_span!("cache.invalidation.request"))
                         .await
                 };
@@ -270,8 +364,8 @@ impl Invalidation {
 
 pub(super) type InvalidationKind = &'static str;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum InvalidationRequest {
     Subgraph {
         subgraph: String,
@@ -281,9 +375,152 @@ pub(crate) enum InvalidationRequest {
         r#type: String,
     },
     CacheTag {
+        /// Which scope the caller addressed: `Subgraph` when the request used the `subgraphs`
+        /// field, `Connector` when it used `sources`. The deserializer records this so the request
+        /// can be authorized against — and targeted at — only that scope's storage. Without it, a
+        /// connector shared key could authorize purging subgraph cache tags (and vice versa), and
+        /// the delete would fan out across the trust boundary. `#[serde(skip)]`: the wire form is
+        /// still `subgraphs`/`sources`; scope is internal, so serialization is unchanged.
+        #[serde(skip)]
+        scope: CacheScope,
         subgraphs: HashSet<String>,
         cache_tag: String,
     },
+    /// Invalidate all cached entries for a connector source
+    #[serde(rename = "connector")]
+    ConnectorSource {
+        /// Connector source identifier in "subgraph_name.source_name" format
+        source: String,
+    },
+    /// Invalidate all cached entries of a specific type for a connector source
+    ConnectorType {
+        /// Connector source identifier in "subgraph_name.source_name" format
+        source: String,
+        r#type: String,
+    },
+}
+
+/// Intermediate struct for custom deserialization of `InvalidationRequest`.
+/// Allows `"kind": "type"` to dispatch to either `Type` or `ConnectorType`
+/// based on whether `"subgraph"` or `"source"` is present.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawInvalidationRequest {
+    kind: String,
+    #[serde(default)]
+    subgraph: Option<String>,
+    #[serde(default)]
+    subgraphs: Option<HashSet<String>>,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    r#type: Option<String>,
+    #[serde(default)]
+    cache_tag: Option<String>,
+    #[serde(default)]
+    sources: Option<HashSet<String>>,
+}
+
+impl<'de> Deserialize<'de> for InvalidationRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let raw = RawInvalidationRequest::deserialize(deserializer)?;
+
+        // Helper to reject unexpected fields
+        fn reject_field<E: serde::de::Error>(
+            field: &str,
+            present: bool,
+            kind: &str,
+        ) -> Result<(), E> {
+            if present {
+                Err(E::custom(format!(
+                    "unexpected field `{field}` for kind `{kind}`"
+                )))
+            } else {
+                Ok(())
+            }
+        }
+
+        let kind = raw.kind.as_str();
+
+        match kind {
+            "subgraph" => {
+                let subgraph = raw
+                    .subgraph
+                    .ok_or_else(|| D::Error::missing_field("subgraph"))?;
+                reject_field::<D::Error>("source", raw.source.is_some(), kind)?;
+                reject_field::<D::Error>("type", raw.r#type.is_some(), kind)?;
+                reject_field::<D::Error>("subgraphs", raw.subgraphs.is_some(), kind)?;
+                reject_field::<D::Error>("cache_tag", raw.cache_tag.is_some(), kind)?;
+                reject_field::<D::Error>("sources", raw.sources.is_some(), kind)?;
+                Ok(InvalidationRequest::Subgraph { subgraph })
+            }
+            "type" => {
+                let r#type = raw.r#type.ok_or_else(|| D::Error::missing_field("type"))?;
+                reject_field::<D::Error>("subgraphs", raw.subgraphs.is_some(), kind)?;
+                reject_field::<D::Error>("cache_tag", raw.cache_tag.is_some(), kind)?;
+                reject_field::<D::Error>("sources", raw.sources.is_some(), kind)?;
+                match (raw.subgraph, raw.source) {
+                    (Some(subgraph), None) => Ok(InvalidationRequest::Type { subgraph, r#type }),
+                    (None, Some(source)) => {
+                        Ok(InvalidationRequest::ConnectorType { source, r#type })
+                    }
+                    (Some(_), Some(_)) => Err(D::Error::custom(
+                        "cannot specify both `subgraph` and `source` for kind `type`",
+                    )),
+                    (None, None) => Err(D::Error::custom(
+                        "kind `type` requires either `subgraph` or `source` field",
+                    )),
+                }
+            }
+            "connector" => {
+                let source = raw
+                    .source
+                    .ok_or_else(|| D::Error::missing_field("source"))?;
+                reject_field::<D::Error>("subgraph", raw.subgraph.is_some(), kind)?;
+                reject_field::<D::Error>("type", raw.r#type.is_some(), kind)?;
+                reject_field::<D::Error>("subgraphs", raw.subgraphs.is_some(), kind)?;
+                reject_field::<D::Error>("cache_tag", raw.cache_tag.is_some(), kind)?;
+                reject_field::<D::Error>("sources", raw.sources.is_some(), kind)?;
+                Ok(InvalidationRequest::ConnectorSource { source })
+            }
+            "cache_tag" => {
+                let (scope, subgraphs) = match (raw.subgraphs, raw.sources) {
+                    (Some(subgraphs), None) => (CacheScope::Subgraph, subgraphs),
+                    (None, Some(sources)) => (CacheScope::Connector, sources),
+                    (Some(_), Some(_)) => {
+                        return Err(D::Error::custom(
+                            "cannot specify both `subgraphs` and `sources` for kind `cache_tag`",
+                        ));
+                    }
+                    (None, None) => {
+                        return Err(D::Error::custom(
+                            "kind `cache_tag` requires either `subgraphs` or `sources` field",
+                        ));
+                    }
+                };
+                let cache_tag = raw
+                    .cache_tag
+                    .ok_or_else(|| D::Error::missing_field("cache_tag"))?;
+                reject_field::<D::Error>("subgraph", raw.subgraph.is_some(), kind)?;
+                reject_field::<D::Error>("source", raw.source.is_some(), kind)?;
+                reject_field::<D::Error>("type", raw.r#type.is_some(), kind)?;
+                Ok(InvalidationRequest::CacheTag {
+                    scope,
+                    subgraphs,
+                    cache_tag,
+                })
+            }
+            other => Err(D::Error::unknown_variant(
+                other,
+                &["subgraph", "type", "connector", "cache_tag"],
+            )),
+        }
+    }
 }
 
 impl InvalidationRequest {
@@ -294,8 +531,11 @@ impl InvalidationRequest {
             InvalidationRequest::CacheTag { subgraphs, .. } => {
                 subgraphs.clone().into_iter().collect()
             }
+            InvalidationRequest::ConnectorSource { source }
+            | InvalidationRequest::ConnectorType { source, .. } => vec![source.clone()],
         }
     }
+
     fn invalidation_key(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
@@ -307,7 +547,28 @@ impl InvalidationRequest {
                 )
             }
             InvalidationRequest::CacheTag { cache_tag, .. } => cache_tag.clone(),
+            // Connector entries are indexed under the disjoint `connector` scope (see
+            // `CacheScope`), so connector invalidation keys must render with the `connector:`
+            // word to match the write path byte-for-byte. This is the write↔invalidate
+            // string-identity contract, now scoped so a `subgraph`-kind request can never
+            // resolve a connector source's index.
+            InvalidationRequest::ConnectorSource { source } => {
+                format!("version:{RESPONSE_CACHE_VERSION}:connector:{source}")
+            }
+            InvalidationRequest::ConnectorType { source, r#type } => {
+                format!(
+                    "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:{source}:type:{type}",
+                )
+            }
         }
+    }
+
+    /// Returns whether this request targets connector storage (vs subgraph storage)
+    pub(super) fn is_connector(&self) -> bool {
+        matches!(
+            self,
+            InvalidationRequest::ConnectorSource { .. } | InvalidationRequest::ConnectorType { .. }
+        )
     }
 
     pub(super) fn kind(&self) -> InvalidationKind {
@@ -315,6 +576,264 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { .. } => "subgraph",
             InvalidationRequest::Type { .. } => "type",
             InvalidationRequest::CacheTag { .. } => "cache_tag",
+            InvalidationRequest::ConnectorSource { .. } => "connector",
+            InvalidationRequest::ConnectorType { .. } => "type",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connector_source_invalidation_key_format() {
+        let req = InvalidationRequest::ConnectorSource {
+            source: "mysubgraph.my_api".to_string(),
+        };
+        let key = req.invalidation_key();
+        // Connector entries live in the disjoint `connector` scope, so the key uses the
+        // `connector:` word — must match `CacheTag::to_redis_key(CacheScope::Connector, source)`.
+        assert_eq!(
+            key,
+            format!("version:{RESPONSE_CACHE_VERSION}:connector:mysubgraph.my_api")
+        );
+    }
+
+    #[test]
+    fn connector_type_invalidation_key_format() {
+        let req = InvalidationRequest::ConnectorType {
+            source: "mysubgraph.my_api".to_string(),
+            r#type: "User".to_string(),
+        };
+        let key = req.invalidation_key();
+        // Matches the inner doc-key segment of
+        // `CacheTag::Type(..).to_redis_key(CacheScope::Connector, source)` byte-for-byte
+        // (write↔invalidate identity, connector-scoped).
+        assert_eq!(
+            key,
+            format!(
+                "{INTERNAL_CACHE_TAG_PREFIX}version:{RESPONSE_CACHE_VERSION}:connector:mysubgraph.my_api:type:User"
+            )
+        );
+    }
+
+    #[test]
+    fn connector_source_is_connector() {
+        assert!(
+            InvalidationRequest::ConnectorSource {
+                source: "s".to_string()
+            }
+            .is_connector()
+        );
+        assert!(
+            InvalidationRequest::ConnectorType {
+                source: "s".to_string(),
+                r#type: "T".to_string()
+            }
+            .is_connector()
+        );
+    }
+
+    #[test]
+    fn subgraph_requests_are_not_connector() {
+        assert!(
+            !InvalidationRequest::Subgraph {
+                subgraph: "s".to_string()
+            }
+            .is_connector()
+        );
+        assert!(
+            !InvalidationRequest::Type {
+                subgraph: "s".to_string(),
+                r#type: "T".to_string()
+            }
+            .is_connector()
+        );
+        assert!(
+            !InvalidationRequest::CacheTag {
+                scope: CacheScope::Subgraph,
+                subgraphs: HashSet::new(),
+                cache_tag: "tag".to_string()
+            }
+            .is_connector()
+        );
+    }
+
+    #[test]
+    fn connector_source_kind() {
+        assert_eq!(
+            InvalidationRequest::ConnectorSource {
+                source: "s".to_string()
+            }
+            .kind(),
+            "connector"
+        );
+    }
+
+    #[test]
+    fn connector_type_kind() {
+        assert_eq!(
+            InvalidationRequest::ConnectorType {
+                source: "s".to_string(),
+                r#type: "T".to_string()
+            }
+            .kind(),
+            "type"
+        );
+    }
+
+    #[test]
+    fn connector_source_subgraph_names() {
+        let req = InvalidationRequest::ConnectorSource {
+            source: "mysubgraph.my_api".to_string(),
+        };
+        assert_eq!(req.subgraph_names(), vec!["mysubgraph.my_api"]);
+    }
+
+    #[test]
+    fn connector_type_subgraph_names() {
+        let req = InvalidationRequest::ConnectorType {
+            source: "mysubgraph.my_api".to_string(),
+            r#type: "User".to_string(),
+        };
+        assert_eq!(req.subgraph_names(), vec!["mysubgraph.my_api"]);
+    }
+
+    #[test]
+    fn deserialize_type_with_source_gives_connector_type() {
+        let json = r#"{"kind":"type","source":"graph.api","type":"User"}"#;
+        let req: InvalidationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req,
+            InvalidationRequest::ConnectorType {
+                source: "graph.api".to_string(),
+                r#type: "User".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_type_with_subgraph_gives_type() {
+        let json = r#"{"kind":"type","subgraph":"products","type":"Product"}"#;
+        let req: InvalidationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req,
+            InvalidationRequest::Type {
+                subgraph: "products".to_string(),
+                r#type: "Product".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_connector_with_source_gives_connector_source() {
+        let json = r#"{"kind":"connector","source":"graph.api"}"#;
+        let req: InvalidationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req,
+            InvalidationRequest::ConnectorSource {
+                source: "graph.api".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_subgraph_gives_subgraph() {
+        let json = r#"{"kind":"subgraph","subgraph":"products"}"#;
+        let req: InvalidationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req,
+            InvalidationRequest::Subgraph {
+                subgraph: "products".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_type_with_both_subgraph_and_source_errors() {
+        let json = r#"{"kind":"type","subgraph":"x","source":"y","type":"T"}"#;
+        let result: Result<InvalidationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot specify both")
+        );
+    }
+
+    #[test]
+    fn deserialize_type_without_subgraph_or_source_errors() {
+        let json = r#"{"kind":"type","type":"T"}"#;
+        let result: Result<InvalidationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("requires either"));
+    }
+
+    #[test]
+    fn deserialize_unknown_field_rejected() {
+        let json = r#"{"kind":"type","subgraph":"x","type":"T","extra":"bad"}"#;
+        let result: Result<InvalidationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn deserialize_unknown_kind_rejected() {
+        let json = r#"{"kind":"bogus","subgraph":"x"}"#;
+        let result: Result<InvalidationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn deserialize_cache_tag_with_sources_field() {
+        let json = r#"{"kind":"cache_tag","sources":["connector-graph.random_person_api"],"cache_tag":"test-1"}"#;
+        let req: InvalidationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req,
+            InvalidationRequest::CacheTag {
+                scope: CacheScope::Connector,
+                subgraphs: HashSet::from(["connector-graph.random_person_api".to_string()]),
+                cache_tag: "test-1".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_cache_tag_with_subgraphs_field() {
+        let json = r#"{"kind":"cache_tag","subgraphs":["my-subgraph"],"cache_tag":"test-1"}"#;
+        let req: InvalidationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            req,
+            InvalidationRequest::CacheTag {
+                scope: CacheScope::Subgraph,
+                subgraphs: HashSet::from(["my-subgraph".to_string()]),
+                cache_tag: "test-1".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn deserialize_cache_tag_with_both_subgraphs_and_sources_rejected() {
+        let json =
+            r#"{"kind":"cache_tag","subgraphs":["foo"],"sources":["bar"],"cache_tag":"test-1"}"#;
+        let result: Result<InvalidationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("cannot specify both")
+        );
+    }
+
+    #[test]
+    fn deserialize_cache_tag_with_neither_subgraphs_nor_sources_rejected() {
+        let json = r#"{"kind":"cache_tag","cache_tag":"test-1"}"#;
+        let result: Result<InvalidationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("requires either"));
     }
 }

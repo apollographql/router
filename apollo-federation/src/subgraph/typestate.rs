@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::Name;
@@ -7,6 +6,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Directive;
@@ -503,7 +503,7 @@ impl Subgraph<Expanded> {
     }
 
     fn normalize_root_types_inner(self) -> Result<Self, FederationError> {
-        let mut operation_types_to_rename = HashMap::new();
+        let mut operation_types_to_rename = IndexMap::default();
         for (op_type, op_name) in self
             .schema()
             .schema()
@@ -642,7 +642,7 @@ fn normalize_root_types_in_subgraph_schema(
     schema: &mut FederationSchema,
     metadata: &mut SubgraphMetadata,
 ) -> Result<bool, FederationError> {
-    let mut operation_types_to_rename = HashMap::new();
+    let mut operation_types_to_rename = IndexMap::default();
     for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
         let default_name = default_operation_name(&op_type);
         if **op_name != default_name {

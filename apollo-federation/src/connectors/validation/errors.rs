@@ -383,7 +383,10 @@ impl<'schema> IsSuccessArgument<'schema> {
         }))
     }
 
-    /// Check that only available variables are used, and the expression results in a boolean
+    /// Check that only available variables are used, and the expression could
+    /// result in a boolean. At runtime, any other value (including no value)
+    /// counts as failure, so only an expression that is never a boolean is an
+    /// error here.
     pub(crate) fn type_check(self, schema: &SchemaInfo<'_>) -> Result<(), Message> {
         let context = match self.coordinate.coordinate {
             ErrorsCoordinate::Source { .. } => {
@@ -393,13 +396,15 @@ impl<'schema> IsSuccessArgument<'schema> {
                 &Context::for_connect_response(schema, connect, &self.node, Code::InvalidIsSuccess)
             }
         };
-        expression::validate(&self.expression, context, &Shape::bool([])).map_err(|mut message| {
-            message.message = format!(
-                "In {coordinate}: {message}",
-                coordinate = self.coordinate,
-                message = message.message
-            );
-            message
-        })
+        expression::validate_could_satisfy(&self.expression, context, &Shape::bool([])).map_err(
+            |mut message| {
+                message.message = format!(
+                    "In {coordinate}: {message}",
+                    coordinate = self.coordinate,
+                    message = message.message
+                );
+                message
+            },
+        )
     }
 }
