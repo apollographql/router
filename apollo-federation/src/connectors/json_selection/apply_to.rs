@@ -8,6 +8,7 @@ use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 use serde_json_bytes::json;
+use shape::PrintLimits;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Location;
@@ -895,7 +896,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         format!(
                             "Property {} not found in {}",
                             key.dotted(),
-                            input_shape.pretty_print()
+                            input_shape.pretty_print_bounded(PrintLimits::default())
                         ),
                         key.shape_location(context.source_id()),
                     );

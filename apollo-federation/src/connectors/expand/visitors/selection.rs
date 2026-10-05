@@ -13,6 +13,7 @@ use apollo_compiler::schema::UnionType;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use shape::PrintLimits;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -349,7 +350,7 @@ impl<'a> TypeShapeWalker<'a> {
                             _ => {
                                 return Err(FederationError::internal(format!(
                                     "expected __typename to be a string literal, found: {}",
-                                    field_shape.pretty_print(),
+                                    field_shape.pretty_print_bounded(PrintLimits::default()),
                                 )));
                             }
                         };
@@ -718,7 +719,7 @@ impl<'a> TypeShapeWalker<'a> {
                     } else {
                         return Err(FederationError::internal(format!(
                             "expected __typename to be a string literal, found: {}",
-                            type_name.pretty_print()
+                            type_name.pretty_print_bounded(PrintLimits::default())
                         )));
                     }
                 }

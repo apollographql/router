@@ -21,11 +21,35 @@ use shape::Shape;
 /// you can get an [`&ExtendedType`] by calling [`SchemaTypeRef::extended`], you
 /// can pretty much always safely use a [`SchemaTypeRef`] where you would have
 /// previously used an [`ExtendedType`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SchemaTypeRef<'schema> {
     schema: &'schema Schema,
     name: &'schema Name,
     ext: &'schema ExtendedType,
+}
+
+/// Two refs are equal when they name the same type in the same schema. A derived
+/// `PartialEq` would compare the referenced `Schema` and `ExtendedType` by value,
+/// making every comparison walk the whole schema.
+impl PartialEq for SchemaTypeRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.schema, other.schema) && self.name == other.name
+    }
+}
+
+impl Eq for SchemaTypeRef<'_> {}
+
+/// State for [`SchemaTypeRef::shape`]: the types on the current path, which
+/// become [`Shape::name`] references to break cycles, and every type's shape
+/// computed so far. Reusing a computed shape (shapes are reference-counted)
+/// keeps a type reachable through many fields from being rebuilt once per path,
+/// which is exponential in depth. A memoized shape may carry a cycle reference
+/// cut where it was first built rather than where it is reused; those
+/// references resolve through `shape_lookup` like any other.
+#[derive(Default)]
+struct ShapeWalk {
+    visited: IndexSet<String>,
+    memo: IndexMap<(String, bool), Shape>,
 }
 
 impl<'schema> SchemaTypeRef<'schema> {
@@ -45,16 +69,19 @@ impl<'schema> SchemaTypeRef<'schema> {
     }
 
     pub(super) fn shape(&self) -> Shape {
-        self.shape_with_visited(&mut IndexSet::default(), false)
+        self.shape_with_visited(&mut ShapeWalk::default(), false)
     }
 
     #[allow(dead_code)]
-    fn shape_with_visited(&self, visited: &mut IndexSet<String>, from_abstract: bool) -> Shape {
+    fn shape_with_visited(&self, walk: &mut ShapeWalk, from_abstract: bool) -> Shape {
         let type_name = self.name().to_string();
-        if visited.contains(&type_name) {
+        if let Some(shape) = walk.memo.get(&(type_name.clone(), from_abstract)) {
+            return shape.clone();
+        }
+        if walk.visited.contains(&type_name) {
             return Shape::name(&type_name, []);
         }
-        visited.insert(type_name.clone());
+        walk.visited.insert(type_name.clone());
 
         let result = match self.extended() {
             ExtendedType::Object(o) => {
@@ -78,7 +105,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                 for (name, field) in &o.fields {
                     fields.insert(
                         name.to_string(),
-                        self.shape_from_type_with_visited(&field.ty, visited),
+                        self.shape_from_type_with_visited(&field.ty, walk),
                     );
                 }
 
@@ -108,7 +135,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     if let ExtendedType::Object(object_type) = extended_type {
                         if object_type.implements_interfaces.contains(&i.name) {
                             SchemaTypeRef::new(self.schema, object_type.name.as_str())
-                                .map(|type_ref| type_ref.shape_with_visited(visited, true))
+                                .map(|type_ref| type_ref.shape_with_visited(walk, true))
                         } else {
                             None
                         }
@@ -121,7 +148,7 @@ impl<'schema> SchemaTypeRef<'schema> {
             ExtendedType::Union(u) => Shape::one(
                 u.members.iter().filter_map(|member_name| {
                     SchemaTypeRef::new(self.schema, member_name.as_str())
-                        .map(|type_ref| type_ref.shape_with_visited(visited, true))
+                        .map(|type_ref| type_ref.shape_with_visited(walk, true))
                 }),
                 [],
             ),
@@ -131,7 +158,7 @@ impl<'schema> SchemaTypeRef<'schema> {
                     .map(|(name, field)| {
                         (
                             name.to_string(),
-                            self.shape_from_type_with_visited(&field.ty, visited),
+                            self.shape_from_type_with_visited(&field.ty, walk),
                         )
                     })
                     .collect(),
@@ -139,7 +166,8 @@ impl<'schema> SchemaTypeRef<'schema> {
             ),
         };
 
-        visited.swap_remove(&type_name);
+        walk.visited.swap_remove(&type_name);
+        walk.memo.insert((type_name, from_abstract), result.clone());
         result
     }
 
@@ -148,13 +176,13 @@ impl<'schema> SchemaTypeRef<'schema> {
         Shape::one([shape, Shape::null([])], [])
     }
 
-    fn shape_from_type_with_visited(&self, ty: &Type, visited: &mut IndexSet<String>) -> Shape {
+    fn shape_from_type_with_visited(&self, ty: &Type, walk: &mut ShapeWalk) -> Shape {
         let inner_type_name = ty.inner_named_type();
-        let base_shape = if visited.contains(inner_type_name.as_str()) {
+        let base_shape = if walk.visited.contains(inner_type_name.as_str()) {
             // Avoid infinite recursion for circular references
             Shape::name(inner_type_name.as_str(), [])
         } else if let Some(named_type) = SchemaTypeRef::new(self.schema, inner_type_name.as_str()) {
-            named_type.shape_with_visited(visited, false)
+            named_type.shape_with_visited(walk, false)
         } else {
             Shape::name(inner_type_name.as_str(), [])
         };
@@ -163,11 +191,11 @@ impl<'schema> SchemaTypeRef<'schema> {
             Type::Named(_) => self.nullable(base_shape),
             Type::NonNullNamed(_) => base_shape,
             Type::List(inner) => self.nullable(Shape::list(
-                self.shape_from_type_with_visited(inner, visited),
+                self.shape_from_type_with_visited(inner, walk),
                 [],
             )),
             Type::NonNullList(inner) => {
-                Shape::list(self.shape_from_type_with_visited(inner, visited), [])
+                Shape::list(self.shape_from_type_with_visited(inner, walk), [])
             }
         }
     }
