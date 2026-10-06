@@ -55,6 +55,9 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::response_cache::plugin::attribute_errors_to_entities;
+use crate::plugins::response_cache::plugin::error_targets_entities;
+use crate::plugins::response_cache::plugin::errors_in_original_order;
 use crate::plugins::response_cache::plugin::find_matching_key_field_set;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -1333,13 +1336,16 @@ async fn cache_store_entities_from_response(
             None
         };
 
+        // Moved out rather than borrowed, since `new_errors` replaces this list below.
+        let errors = std::mem::take(&mut response.response.body_mut().errors);
+
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
                 .as_array_mut()
                 .ok_or_else(|| FetchError::MalformedResponse {
                     reason: "expected an array of entities".to_string(),
                 })?,
-            &response.response.body().errors,
+            errors,
             cache,
             subgraph_ttl,
             cache_control,
@@ -1731,7 +1737,7 @@ fn filter_representations(
 #[allow(clippy::too_many_arguments)]
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
-    errors: &[Error],
+    errors: Vec<Error>,
     cache: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     cache_control: CacheControl,
@@ -1746,10 +1752,25 @@ async fn insert_entities_in_result(
         .or(subgraph_ttl);
 
     let mut new_entities = Vec::new();
-    let mut new_errors = Vec::new();
+    // Each error keeps its position in the subgraph's list, so the original order can be restored.
+    let mut new_errors: Vec<(usize, Error)> = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
+    // Only the entities this reassembly consumes, one per cache miss, can have errors attributed
+    // to them.
+    let attributable_entity_count = result
+        .iter()
+        .filter(|r| r.cache_entry.is_none())
+        .count()
+        .min(entities.len());
+    let (mut errors_by_entity_idx, unattributed_errors) =
+        attribute_errors_to_entities(errors, attributable_entity_count);
+    // An unattributed error pointing into `_entities` may describe any entity of this fetch, so
+    // none of them is cached. Errors with no path or a path elsewhere don't affect caching.
+    let has_unattributable_entity_errors = unattributed_errors
+        .iter()
+        .any(|(_, error)| error_targets_entities(error));
     let mut entities_it = entities.drain(..).enumerate();
 
     // insert requested entities and cached entities in the same order as
@@ -1781,29 +1802,19 @@ async fn insert_entities_in_result(
                     key = format!("{key}:{id}");
                 }
 
-                let mut has_errors = false;
-                for error in errors.iter().filter(|e| {
-                    e.path
-                        .as_ref()
-                        .map(|path| {
-                            path.starts_with(&Path(vec![
-                                PathElement::Key(ENTITIES.to_string(), None),
-                                PathElement::Index(entity_idx),
-                            ]))
-                        })
-                        .unwrap_or(false)
-                }) {
+                let entity_errors = errors_by_entity_idx.remove(&entity_idx).unwrap_or_default();
+                let has_errors = !entity_errors.is_empty();
+                for (error_idx, mut error) in entity_errors {
                     // update the entity index, because it does not match with the original one
-                    let mut e = error.clone();
-                    if let Some(path) = e.path.as_mut() {
+                    if let Some(path) = error.path.as_mut() {
                         path.0[1] = PathElement::Index(new_entity_idx);
                     }
 
-                    new_errors.push(e);
-                    has_errors = true;
+                    new_errors.push((error_idx, error));
                 }
 
                 if !has_errors
+                    && !has_unattributable_entity_errors
                     && cache_control.should_store()
                     && should_cache_private
                     && request_cache_control.as_ref().is_none_or(|c| !c.no_store())
@@ -1821,6 +1832,14 @@ async fn insert_entities_in_result(
             }
         }
     }
+
+    // Errors that could not be tied to an entity are passed through rather than dropped.
+    new_errors.extend(unattributed_errors);
+    debug_assert!(
+        errors_by_entity_idx.is_empty(),
+        "every attributed entity index is consumed by the loop above"
+    );
+    let new_errors = errors_in_original_order(new_errors);
 
     if !to_insert.is_empty() {
         let span = tracing::info_span!("cache_store");
