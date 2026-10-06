@@ -415,8 +415,9 @@ mod tests {
     }
 
     // When the leader is dropped (for example by the timeout layer above), the waiting follower's
-    // broadcast closes and it retries. With no leader left it becomes the leader itself, so it is
-    // counted once, as a leader, and nothing is counted as a follower.
+    // broadcast closes and it retries. With no leader left it becomes the leader itself. Both the
+    // cancelled leader and the retried request are counted as leaders, and nothing is counted as a
+    // follower.
     #[tokio::test(flavor = "multi_thread")]
     async fn follower_of_a_cancelled_leader_is_counted_as_leader() {
         async {
