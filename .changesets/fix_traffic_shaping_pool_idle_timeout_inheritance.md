@@ -12,7 +12,7 @@ traffic_shaping:
     pool_idle_timeout: 5s
   subgraphs:
     products:
-      experimental_http2: disable # now uses 5s from `all`, instead of 15s
+      http2: disable # now uses 5s from `all`, instead of 15s
 ```
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/10315

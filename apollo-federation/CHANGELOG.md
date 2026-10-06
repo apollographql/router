@@ -20,7 +20,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 # [2.18.x](unreleased) - Unreleased
 
-<<<<<<< HEAD
 ## ❗ BREAKING CHANGES ❗
 
 ### Composition enforces default value validation per the GraphQL 2025 spec ([PR #10119](https://github.com/apollographql/router/pull/10119))
@@ -33,20 +32,6 @@ previously composed successfully will now produce composition errors.
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10119>
 
 ## 🚀 Features
-
-### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
-
-Composition now automatically upgrades federation 2 subgraph schemas for
-compatibility with the GraphQL September 2025 spec (federation 3). Two
-transformations are applied during the upgrade phase, with composition hints
-emitted for each:
-
-- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
-  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
-- `@deprecated` on an implementing field whose interface field is not
-  deprecated is removed, as this is disallowed by the 2025 spec.
-
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
 
 ### Support `@oneOf` input object composition ([PR #10124](https://github.com/apollographql/router/pull/10124))
 
@@ -67,8 +52,6 @@ defines it.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10124>
 
-=======
->>>>>>> origin/dev
 ## 🐛 Fixes
 
 ### Error on fields provided by multiple `@interfaceObject`s ([PR #10323](https://github.com/apollographql/router/pull/10323))
@@ -247,54 +230,6 @@ unchanged.
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
 
-# [2.16.4](https://crates.io/crates/apollo-federation/2.16.4) - 2026-09-24
-
-## 🚀 Features
-
-### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
-
-Composition now automatically upgrades federation 2 subgraph schemas for
-compatibility with the GraphQL September 2025 spec (federation 3). Two
-transformations are applied during the upgrade phase, with composition hints
-emitted for each:
-
-- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
-  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
-- `@deprecated` on an implementing field whose interface field is not
-  deprecated is removed, as this is disallowed by the 2025 spec.
-
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
-
-## 🐛 Fixes
-
-### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
-
-During satisfiability validation, advancing subgraph paths across a transition
-can produce multiple options that share the same tail node, subgraph-entry
-source, contexts, and runtime types. These equivalent options advance identically
-from that point on, so keeping more than one exemplar per equivalence class only
-multiplies work on every subsequent transition.
-
-This change deduplicates such options after each transition, keeping one exemplar
-per equivalence class. Trade-off: satisfiability error messages may omit some
-subgraph bullets that would have appeared without dedup. The set of schemas that
-pass or fail validation is unchanged.
-
-By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
-
-<<<<<<< HEAD
-## 🛠 Maintenance
-
-### Connectors are validated as part of subgraph validation ([PR #10035](https://github.com/apollographql/router/pull/10035))
-
-Connectors validation used to run outside this crate, in `federation-rs`, which
-wrapped the individual composition phases and interleaved connectors work between
-them. It now runs inside `Subgraph::validate`, so `compose` owns the whole
-pipeline and connectors validation cannot be skipped. Diagnostic codes are
-unchanged.
-
-By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
-
 ### Composition errors print shape types in the newer `shape` notation ([PR #10118](https://github.com/apollographql/router/pull/10118))
 
 Composition error messages that quote a shape now use the notation introduced by
@@ -344,8 +279,41 @@ strings, such as a test snapshot or a log query, needs updating.
 
 By [@benjamn](https://github.com/benjamn) and [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10233>
 
-=======
->>>>>>> origin/dev
+# [2.16.4](https://crates.io/crates/apollo-federation/2.16.4) - 2026-09-24
+
+## 🚀 Features
+
+### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
+
+Composition now automatically upgrades federation 2 subgraph schemas for
+compatibility with the GraphQL September 2025 spec (federation 3). Two
+transformations are applied during the upgrade phase, with composition hints
+emitted for each:
+
+- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
+  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
+- `@deprecated` on an implementing field whose interface field is not
+  deprecated is removed, as this is disallowed by the 2025 spec.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
+
+## 🐛 Fixes
+
+### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
+
+During satisfiability validation, advancing subgraph paths across a transition
+can produce multiple options that share the same tail node, subgraph-entry
+source, contexts, and runtime types. These equivalent options advance identically
+from that point on, so keeping more than one exemplar per equivalence class only
+multiplies work on every subsequent transition.
+
+This change deduplicates such options after each transition, keeping one exemplar
+per equivalence class. Trade-off: satisfiability error messages may omit some
+subgraph bullets that would have appeared without dedup. The set of schemas that
+pass or fail validation is unchanged.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
+
 # [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
 
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))

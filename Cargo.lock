@@ -441,7 +441,7 @@ dependencies = [
  "http-body 1.1.0",
  "opentelemetry",
  "pin-project-lite",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
  "tokio",
  "tower",
  "tower-http 0.6.11",
@@ -2817,11 +2817,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
-<<<<<<< HEAD
  "windows-sys 0.60.2",
-=======
- "windows-sys 0.59.0",
->>>>>>> origin/dev
 ]
 
 [[package]]
@@ -5166,13 +5162,8 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
-<<<<<<< HEAD
  "sha2 0.11.0",
- "thiserror 2.0.20",
-=======
- "sha2 0.10.9",
  "thiserror 2.0.21",
->>>>>>> origin/dev
  "tokio",
  "tracing",
  "unicase",
@@ -5395,27 +5386,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
-name = "opentelemetry-zipkin"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f27fcd074586dab55936b003c6a499acaabd6debbd539c3f36356bca2ef2fce2"
-dependencies = [
- "http 1.5.0",
- "once_cell",
- "opentelemetry",
- "opentelemetry-http",
- "opentelemetry_sdk",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "typed-builder",
-]
-
-[[package]]
->>>>>>> origin/dev
 name = "opentelemetry_sdk"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6809,11 +6779,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
-<<<<<<< HEAD
  "windows-sys 0.61.0",
-=======
- "windows-sys 0.59.0",
->>>>>>> origin/dev
 ]
 
 [[package]]
@@ -6941,7 +6907,7 @@ dependencies = [
  "hashlink",
  "ordered-float",
  "saphyr-parser",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6951,7 +6917,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0b1b76852c5643f558e7347e4de549474c3ecb7154295a189f4668428c1b453"
 dependencies = [
  "arraydeque",
- "thiserror 2.0.20",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -7728,7 +7694,6 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
-<<<<<<< HEAD
  "windows-sys 0.61.0",
 ]
 
@@ -7740,9 +7705,6 @@ checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
  "windows-sys 0.61.0",
-=======
- "windows-sys 0.59.0",
->>>>>>> origin/dev
 ]
 
 [[package]]
