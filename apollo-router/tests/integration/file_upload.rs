@@ -751,8 +751,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
             .collect::<Vec<_>>(),
     );
 
-    // Run the test. The router rejects this as soon as it reads the map, so buffer the
-    // upload: a streamed one can be reset before the response has been read.
+    // Run the test
     helper::FileUploadTestServer::builder()
         .config(FILE_CONFIG)
         .handler(make_handler!(helper::always_fail))
@@ -1779,8 +1778,7 @@ mod helper {
         ///
         /// See [make_handler] and [create_request].
         ///
-        /// Set `buffered` for requests that the router rejects before reading the whole body,
-        /// so that the upload is sent in full before the router responds. See
+        /// Set `buffered` for requests the router rejects before reading the files. See
         /// [IntegrationTest::execute_multipart_request].
         #[builder]
         pub fn new(
