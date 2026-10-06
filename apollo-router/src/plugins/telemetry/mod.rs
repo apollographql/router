@@ -3422,9 +3422,9 @@ mod tests {
 
     /// With Prometheus as the only exporter, a scrape of an instrument past its cardinality limit
     /// reports `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with the
-    /// instrument's OpenTelemetry name. The counter is recorded after the scrape is gathered, so it first
-    /// appears on the following scrape. It counts the start of the overflow once, however many
-    /// scrapes follow.
+    /// instrument's OpenTelemetry name. The counter is recorded after the scrape is gathered, so
+    /// it first appears on the following scrape. It counts the start of the overflow once, however
+    /// many scrapes follow.
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_cardinality_overflow_counter() {
         let _guard = TEST.lock().await;

@@ -148,10 +148,8 @@ pub(crate) struct PrometheusRegistry {
     /// The exporter that `registry` gathers from. Collecting from it directly gives the same
     /// metrics with their OpenTelemetry names.
     pub(crate) exporter: SharedPrometheusExporter,
-    /// The families that were overflowing in the last scrape, so that a scrape counts only those
-    /// that started overflowing since. Present when scrapes count cardinality overflow on the
-    /// public meter provider, which is when Prometheus is its only exporter. `None` when a push
-    /// exporter counts instead.
+    /// Counts cardinality overflow on each scrape. Present when Prometheus is the public meter
+    /// provider's only exporter; `None` when a push exporter counts instead.
     pub(crate) overflow_tracker: Option<OverflowTracker>,
 }
 

@@ -89,9 +89,14 @@ impl OverflowTracker {
     /// different OpenTelemetry names to one family. So when the set of overflowing families
     /// changes, `collect` reads the same pipeline once more, as the Prometheus exporter's own
     /// reader, for the OpenTelemetry names of the overflowing metrics. Scrapes that show no change
-    /// do no extra work. The one case this misses is two metrics that share a family: if the
-    /// second starts overflowing while the first already is, it counts only once the family set
-    /// next changes.
+    /// do no extra work.
+    ///
+    /// The scrape and the collect are separate readings. An observable gauge runs its callback for
+    /// each, so it can overflow in one and not the other. If the collect finds fewer overflowing
+    /// metrics than the scrape found families, the family set isn't saved, so the next scrape
+    /// collects again rather than treating those families as already counted. Two metrics that
+    /// share a family are still missed in one case: if the second starts overflowing while the
+    /// first already is, it counts only once the family set next changes.
     ///
     /// The lock is held across `gather` and `collect` so that concurrent scrapes are compared in
     /// the order they were taken. Otherwise an older snapshot recorded after a newer one would
@@ -128,8 +133,13 @@ impl OverflowTracker {
             tracing::debug!(%error, "could not collect metrics to name overflowing families");
             return (scrape, Vec::new());
         }
-        overflowing.families = families;
-        let started = track_starts(&mut overflowing.metrics, overflowing_otel_names(&metrics));
+        let named: HashSet<&str> = overflowing_otel_names(&metrics).collect();
+        // Only save the families once the collect has named at least as many metrics; otherwise
+        // the next scrape would see an unchanged set and never collect for the ones missing here.
+        if named.len() >= families.len() {
+            overflowing.families = families;
+        }
+        let started = track_starts(&mut overflowing.metrics, named);
         (scrape, started)
     }
 }
@@ -722,6 +732,46 @@ mod tests {
                     "metric.name" = metric_name
                 );
             }
+        }
+        .with_metrics()
+        .await
+    }
+
+    /// An observable gauge runs its callback for the scrape and again for the collect that names
+    /// it. When it overflows in the scrape but not in that collect, a later scrape must still name
+    /// and count it, rather than treat its family as already counted.
+    #[tokio::test]
+    async fn scrapes_count_a_gauge_that_the_naming_collect_missed() {
+        async {
+            let registry = prometheus::Registry::new();
+            let (provider, exporter) = prometheus_provider(&registry);
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let _gauge = provider
+                .meter("test")
+                .u64_observable_gauge("test.queue.size")
+                .with_callback({
+                    let calls = calls.clone();
+                    move |observer| {
+                        // Over the limit of two on every call except the second.
+                        let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                        let values = if call == 2 { 1 } else { 3 };
+                        for value in 0..values {
+                            observer.observe(1, &[KeyValue::new("key", value as i64)]);
+                        }
+                    }
+                })
+                .build();
+
+            let tracker = OverflowTracker::default();
+            for _ in 0..3 {
+                tracker
+                    .gather_and_record(|| registry.gather(), |metrics| exporter.collect(metrics));
+            }
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                1,
+                "metric.name" = "test.queue.size"
+            );
         }
         .with_metrics()
         .await
