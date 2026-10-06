@@ -264,7 +264,7 @@ mod tests {
             selection!(r#"items: $([])->map({ id: "x" })"#, spec)
                 .shape()
                 .pretty_print(),
-            r#"{ items: List<{ id: "x" }> }"#,
+            r#"{ items: [...{ id: "x" }] }"#,
         );
         assert_eq!(
             selection!(r#"items: $(["a"])->map(@)"#, spec)

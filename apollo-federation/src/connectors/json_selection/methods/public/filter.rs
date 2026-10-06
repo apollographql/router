@@ -349,7 +349,6 @@ mod method_tests {
 
 #[cfg(test)]
 mod shape_tests {
-    use shape::ShapeCase;
     use shape::location::Location;
     use shape::location::SourceId;
 

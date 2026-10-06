@@ -138,11 +138,7 @@ fn contains_shape(
     };
 
     // Ensure input is an array
-<<<<<<< HEAD
-    if !input_shape.is_array() && !input_shape.accepts(&Shape::unknown([])) {
-=======
-    if !could_satisfy(&Shape::tuple([], []), &input_shape) {
->>>>>>> origin/dev
+    if !could_satisfy(&Shape::any_array([]), &input_shape) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array input, but got: {input_shape}",

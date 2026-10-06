@@ -1,5 +1,6 @@
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
+use shape::ShapeCase;
 
 use crate::connectors::json_selection::ApplyToError;
 use crate::connectors::json_selection::ApplyToInternal;
@@ -17,30 +18,16 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// Returns its input unmodified, but declares an error about it, addressed to
 /// the client and reported under `extensions.connectorErrors`.
 ///
-<<<<<<< HEAD
-/// ```graphql
-/// status: type_code->match(
-///     ["2", $("VAN")],
-///     [@, @->withError("Unrecognized type code")]
-/// )
-/// ```
-=======
 /// The sibling of [`->withWarning`](super::WithWarningMethod), and the difference
 /// between them is only who reads the result. `->withWarning` records a
 /// diagnostic for the mapping author, visible in the debugger and in telemetry.
 /// `->withError` declares an error the schema author intends a client to
 /// see. Writing it is the statement that this text is fit to leave the router.
->>>>>>> origin/dev
 ///
 /// ```text
 /// balance: $response.balance ?? $(null)->withError("Balance unavailable")
 /// ```
 ///
-<<<<<<< HEAD
-/// ```graphql
-/// @->withError("Unrecognized type code:", @.type_code, "in", @.id)
-/// ```
-=======
 /// The field still resolves. That combination, a value in `data` and an error
 /// about it, is the whole point: the author chose a default and recorded why.
 /// It is also why these are not reported in `errors`. The GraphQL spec allows
@@ -50,21 +37,14 @@ impl_arrow_method!(WithErrorMethod, with_error_method, with_error_shape);
 /// `result.extensions.connectorErrors` instead, which is where this method's
 /// name comes from: what an author writes and what a client reads are the same
 /// word.
->>>>>>> origin/dev
 ///
 /// # The argument
 ///
 /// Exactly one, and what it means is fixed by this method's name rather than by
 /// its shape. Two spellings of the same thing are accepted:
 ///
-<<<<<<< HEAD
-/// ```graphql
-/// @->withError("Unrecognized type code:", @.type_code ?? "<absent>")
-/// ```
-=======
 /// * a **string**, which is the error's `message`, and
 /// * an **object**, `{ message, extensions? }`, taken as written.
->>>>>>> origin/dev
 ///
 /// ```text
 /// requiredField: $response.requiredField ?? $("<missing>")->withError({
@@ -320,21 +300,13 @@ fn with_error_shape(
     };
 
     let arg_shape = arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
-    if matches!(arg_shape.case(), ShapeCase::Error(_)) {
+    // Shape errors are carried as metadata rather than a dedicated
+    // `ShapeCase::Error` variant, so an argument that failed to compute is
+    // recognized by its own errors rather than by its case.
+    if arg_shape.has_own_errors() {
         return arg_shape;
     }
 
-<<<<<<< HEAD
-    for arg in args {
-        let arg_shape =
-            arg.compute_output_shape(context, input_shape.clone(), dollar_shape.clone());
-        // Shape errors are carried as metadata rather than a dedicated
-        // `ShapeCase::Error` variant, so an argument that failed to compute is
-        // recognized by its own errors rather than by its case.
-        if arg_shape.has_own_errors() {
-            return arg_shape;
-        }
-=======
     if let Some(got) = definitely_not_an_error(&arg_shape) {
         return Shape::error(
             format!(
@@ -346,7 +318,6 @@ fn with_error_shape(
             ),
             arg.shape_location(context.source_id()),
         );
->>>>>>> origin/dev
     }
 
     input_shape

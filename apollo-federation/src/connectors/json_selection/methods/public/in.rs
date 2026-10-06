@@ -131,17 +131,13 @@ fn in_shape(
 
     let arg_shape = first_arg.compute_output_shape(context, input_shape.clone(), dollar_shape);
 
-<<<<<<< HEAD
-    if !arg_shape.is_array() && !arg_shape.accepts(&Shape::unknown([])) {
-=======
     let maybe_missing = may_be_missing(&arg_shape);
     let Some(arg_shape) = present_arg(context, &arg_shape) else {
         // The method produces no value when its argument has none.
         return Shape::none();
     };
 
-    if !could_satisfy(&Shape::tuple([], []), &arg_shape) {
->>>>>>> origin/dev
+    if !could_satisfy(&Shape::any_array([]), &arg_shape) {
         return Shape::error(
             format!(
                 "Method ->{} requires an array argument, but got: {arg_shape}",

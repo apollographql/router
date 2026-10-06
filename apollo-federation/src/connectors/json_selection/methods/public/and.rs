@@ -410,14 +410,8 @@ mod shape_tests {
                 }),
                 Shape::bool([]),
                 Shape::none(),
-<<<<<<< HEAD
-            )
-            .pretty_print(),
-            r#"Unknown (err "Method ->and can only accept boolean arguments. Got None at position 0.")"#,
-=======
             ),
             expected
->>>>>>> origin/dev
         );
     }
 }
