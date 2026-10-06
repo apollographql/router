@@ -175,8 +175,6 @@ impl StorageInterface {
         let storage = self.subgraphs.get(subgraph).or(self.all.as_ref())?;
         storage.get()
     }
-<<<<<<< HEAD
-=======
 
     /// Get storage for a connector source, falling back to connector `all` storage.
     pub(crate) fn get_connector(&self, source_name: &str) -> Option<&Storage> {
@@ -192,31 +190,6 @@ impl StorageInterface {
     pub(crate) fn has_connector_storage(&self) -> bool {
         self.connector_all.is_some() || !self.connector_sources.is_empty()
     }
-
-    /// Activate all storages so they can start emitting metrics.
-    pub(crate) fn activate(&self) {
-        if let Some(all) = &self.all
-            && let Some(storage) = all.get()
-        {
-            storage.activate();
-        }
-        for storage in self.subgraphs.values() {
-            if let Some(storage) = storage.get() {
-                storage.activate();
-            }
-        }
-        if let Some(all) = &self.connector_all
-            && let Some(storage) = all.get()
-        {
-            storage.activate();
-        }
-        for storage in self.connector_sources.values() {
-            if let Some(storage) = storage.get() {
-                storage.activate();
-            }
-        }
-    }
->>>>>>> origin/dev
 }
 
 #[cfg(all(
@@ -266,15 +239,21 @@ pub(crate) struct Config {
     include_cache_control_header_on_router_response: bool,
 
     /// Configure invalidation per subgraph
-<<<<<<< HEAD
-    #[config(required, skip_validate)]
-=======
-    #[serde(default = "default_disabled_subgraph")]
->>>>>>> origin/dev
+    #[config(default = default_disabled_subgraph(), skip_validate)]
+    #[schemars(extend("default" = {
+        "all": {
+            "enabled": false,
+            "invalidation": null,
+            "private_id": null,
+            "redis": null,
+            "ttl": null
+        },
+        "subgraphs": {}
+    }))]
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Configure response caching per connector source
-    #[serde(default)]
+    #[config(skip_validate)]
     pub(crate) connector: ConnectorCacheConfiguration,
 
     /// Global invalidation configuration
@@ -558,7 +537,7 @@ impl PluginPrivate for ResponseCache {
             .all
             .invalidation
             .as_ref()
-            .map(|i| i.shared_key.is_empty())
+            .map(|i| i.shared_key.unredact().is_empty())
             .unwrap_or_default()
         {
             return Err(
@@ -864,11 +843,9 @@ impl PluginPrivate for ResponseCache {
         }
     }
 
-    fn connector_service(&self, service: connect::BoxService) -> connect::BoxService {
+    fn connector_service(&self, service: connect::BoxCloneService) -> connect::BoxCloneService {
         // Skip wrapping entirely when the plugin is off or no connector storage is configured:
-        // caching can never happen, and the wrapper's buffering would spawn a per-pipeline
-        // worker task that keeps the service chain (and the plugins it references) alive
-        // asynchronously after teardown.
+        // caching can never happen.
         if !self.enabled || !self.storage.has_connector_storage() {
             return service;
         }
@@ -883,10 +860,7 @@ impl PluginPrivate for ResponseCache {
 
         ServiceBuilder::new()
             .service(ConnectorCacheService {
-                service: ServiceBuilder::new()
-                    .buffered()
-                    .service(service)
-                    .boxed_clone(),
+                service,
                 storage,
                 connectors_config,
                 enabled: self.enabled,
@@ -896,14 +870,14 @@ impl PluginPrivate for ResponseCache {
                 subgraph_enums,
                 lru_size_instrument,
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn connector_request_service(
         &self,
-        service: crate::services::connector::request_service::BoxService,
+        service: crate::services::connector::request_service::BoxCloneService,
         source_name: String,
-    ) -> crate::services::connector::request_service::BoxService {
+    ) -> crate::services::connector::request_service::BoxCloneService {
         if !self
             .connectors
             .is_source_enabled(self.enabled, &source_name)
@@ -935,7 +909,7 @@ impl PluginPrivate for ResponseCache {
                     },
                 )
                 .service(service)
-                .boxed();
+                .boxed_clone();
         }
 
         let connector_ttl = self
@@ -960,10 +934,7 @@ impl PluginPrivate for ResponseCache {
 
         ServiceBuilder::new()
             .service(ConnectorRequestCacheService {
-                service: ServiceBuilder::new()
-                    .buffered()
-                    .service(service)
-                    .boxed_clone(),
+                service,
                 storage,
                 source_name: source_name_owned,
                 connector_ttl,
@@ -976,7 +947,7 @@ impl PluginPrivate for ResponseCache {
                 indexes,
                 cache_key_headers,
             })
-            .boxed()
+            .boxed_clone()
     }
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -1042,17 +1013,12 @@ impl PluginPrivate for ResponseCache {
                 Some(endpoint_config) => {
                     let endpoint = Endpoint::from_router_service(
                         endpoint_config.path.clone(),
-<<<<<<< HEAD
-                        InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
-                            .boxed_clone(),
-=======
                         InvalidationService::new(
                             self.subgraphs.clone(),
                             self.connectors.clone(),
                             self.invalidation.clone(),
                         )
-                        .boxed(),
->>>>>>> origin/dev
+                        .boxed_clone(),
                     );
                     tracing::info!(
                         "Response cache invalidation endpoint listening on: {}{}",

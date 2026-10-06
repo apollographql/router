@@ -55,14 +55,14 @@ impl Client {
     /// `pool_idle_timeout: None`.
     #[builder]
     pub(crate) fn new(
-        experimental_http2: Option<Http2Config>,
+        http2: Option<Http2Config>,
         dns_resolution_strategy: Option<DnsResolutionStrategy>,
         pool_idle_timeout: Option<Duration>,
         experimental_http2_keep_alive_interval: Option<Duration>,
         experimental_http2_keep_alive_timeout: Option<Duration>,
     ) -> Self {
         Self {
-            experimental_http2,
+            http2,
             dns_resolution_strategy,
             pool_idle_timeout: pool_idle_timeout.or_else(default_pool_idle_timeout),
             experimental_http2_keep_alive_interval,

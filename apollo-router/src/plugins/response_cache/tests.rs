@@ -46,9 +46,9 @@ use crate::plugins::response_cache::plugin::Subgraph;
 use crate::plugins::response_cache::storage::CacheStorage;
 use crate::plugins::response_cache::storage::redis::Config;
 use crate::plugins::response_cache::storage::redis::Storage;
-use crate::router_factory::RouterSuperServiceFactory;
-use crate::router_factory::YamlRouterFactory;
-use crate::services::new_service::ServiceFactory;
+use crate::router_factory::PipelineFactory;
+use crate::router_factory::RouterFactory;
+use crate::router_factory::RouterServiceFactory;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
@@ -5289,22 +5289,15 @@ async fn no_store_on_partial_subgraph_failure() {
 
 const CONNECTOR_SCHEMA: &str = include_str!("../../testdata/connector_response_cache.graphql");
 
-/// Helper to create a router service with connector caching enabled via YamlRouterFactory.
+/// Helper to create a router service with connector caching enabled via PipelineFactory.
 ///
-/// We cannot use TestHarness because connectors are extracted during YamlRouterFactory
-/// initialization, not during TestHarness construction.
+/// We cannot use TestHarness because connectors are extracted while the pipeline is built,
+/// not during TestHarness construction.
 async fn create_connector_cache_factory(
     connector_uri: &str,
     namespace: &str,
     extra_config: Option<serde_json_bytes::Value>,
-) -> impl crate::services::new_service::ServiceFactory<
-    crate::services::router::Request,
-    Service = impl tower::Service<
-        crate::services::router::Request,
-        Response = crate::services::router::Response,
-        Error = tower::BoxError,
-    >,
-> {
+) -> impl RouterFactory {
     create_connector_cache_factory_with_schema(
         CONNECTOR_SCHEMA,
         connector_uri,
@@ -5319,14 +5312,7 @@ async fn create_connector_cache_factory_with_schema(
     connector_uri: &str,
     namespace: &str,
     extra_config: Option<serde_json_bytes::Value>,
-) -> impl crate::services::new_service::ServiceFactory<
-    crate::services::router::Request,
-    Service = impl tower::Service<
-        crate::services::router::Request,
-        Response = crate::services::router::Response,
-        Error = tower::BoxError,
-    >,
-> {
+) -> impl RouterFactory {
     let connector_url = format!("{connector_uri}/");
 
     let mut config = serde_json_bytes::json!({
@@ -5364,9 +5350,8 @@ async fn create_connector_cache_factory_with_schema(
     }
 
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
-    let mut factory = YamlRouterFactory;
-    factory
-        .create(
+    PipelineFactory
+        .create_pipeline(
             false,
             Arc::new(config.clone()),
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),

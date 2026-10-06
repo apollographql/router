@@ -266,15 +266,17 @@ fn source_rate_limit_of_one_per_100ms() -> serde_json::Value {
 }
 
 async fn send_to_source(service: &mut request_service::BoxCloneService) -> Result<(), Error> {
-    service
+    let response = service
         .ready()
         .await
         .unwrap()
         .call(request_service::Request::test_new())
         .await
-        .expect("traffic shaping answers with a response, not an error")
-        .transport_result
-        .map(|_| ())
+        .expect("traffic shaping answers with a response, not an error");
+    match response.transport_outcome {
+        request_service::TransportOutcome::Error(error) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 #[tokio::test(start_paused = true)]

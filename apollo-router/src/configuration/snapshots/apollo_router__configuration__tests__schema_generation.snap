@@ -2381,7 +2381,7 @@ expression: "&schema"
         "invalidation": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SubgraphInvalidationConfig2"
+              "$ref": "#/definitions/SubgraphInvalidationConfig"
             },
             {
               "type": "null"
@@ -2401,7 +2401,7 @@ expression: "&schema"
         "redis": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Config9"
+              "$ref": "#/definitions/Config7"
             },
             {
               "type": "null"
@@ -2413,7 +2413,7 @@ expression: "&schema"
         "ttl": {
           "anyOf": [
             {
-              "$ref": "#/definitions/Ttl2"
+              "$ref": "#/definitions/Ttl"
             },
             {
               "type": "null"

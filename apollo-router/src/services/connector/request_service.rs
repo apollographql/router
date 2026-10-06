@@ -94,7 +94,6 @@ pub struct Request {
 }
 
 impl Request {
-<<<<<<< HEAD
     /// A request to a `Query.hello` connector on the `test_subgraph.test_sourcename` source.
     #[cfg(test)]
     pub(crate) fn test_new() -> Self {
@@ -152,12 +151,12 @@ impl Request {
             supergraph_request: Default::default(),
             operation: Default::default(),
         }
-=======
+    }
+
     pub(crate) fn is_part_of_batch(&self) -> bool {
         self.context
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
->>>>>>> origin/dev
     }
 
     /// The original request made to the router, which produced this connector request.

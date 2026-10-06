@@ -124,7 +124,7 @@ async fn test_count_supergraph_errors_with_no_previously_counted_errors() {
 async fn test_count_connector_errors_counts_declared_errors() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -162,6 +162,7 @@ async fn test_count_connector_errors_counts_declared_errors() {
                         .into_parts()
                         .0,
                 }),
+                break_status: None,
                 mapped_response: MappedResponse::Data {
                     data: json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
@@ -227,7 +228,7 @@ async fn test_count_connector_errors_counts_declared_errors() {
 async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_dedup_set() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -262,6 +263,7 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
                         .into_parts()
                         .0,
                 }),
+                break_status: None,
                 mapped_response: MappedResponse::Data {
                     data: json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
@@ -324,7 +326,7 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
 async fn test_count_connector_errors_ignores_failed_responses() {
     async {
         let config = ErrorsConfiguration {
-            preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+            extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
             ..Default::default()
         };
 
@@ -348,6 +350,7 @@ async fn test_count_connector_errors_ignores_failed_responses() {
                         .into_parts()
                         .0,
                 }),
+                break_status: None,
                 mapped_response: MappedResponse::Error {
                     error,
                     key,

@@ -33,13 +33,8 @@ use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::SubgraphSchemas;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
-<<<<<<< HEAD
 use crate::services::connect::ServiceResult;
 use crate::services::connector::request_service::BoxCloneService as ConnectorRequestBoxService;
-=======
-use crate::services::Plugins;
-use crate::services::connector::request_service::ConnectorRequestServiceFactory;
->>>>>>> origin/dev
 use crate::spec::Schema;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
@@ -240,7 +235,6 @@ async fn execute(
 /// The pre-built [`ConnectorService`] stack for each connector, keyed by the connector's
 /// service name. Stacks are built once; [`Self::get`] hands out cheap clones.
 #[derive(Clone)]
-<<<<<<< HEAD
 pub(crate) struct ConnectorServices {
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     pub(crate) _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
@@ -271,78 +265,5 @@ impl ConnectorServices {
         self.services
             .get(service_name)
             .map(|svc| svc.clone().boxed_clone())
-=======
-pub(crate) struct ConnectorServiceFactory {
-    pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-    _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
-    /// The plugin-wrapped connector service stack. The factory hands out clones of this.
-    service: crate::layers::unconstrained_buffer::UnconstrainedBuffer<
-        ConnectRequest,
-        BoxFuture<'static, Result<ConnectResponse, BoxError>>,
-    >,
-}
-
-impl ConnectorServiceFactory {
-    pub(crate) fn new(
-        schema: Arc<Schema>,
-        subgraph_schemas: Arc<SubgraphSchemas>,
-        subscription_config: Option<SubscriptionConfig>,
-        connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-        connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
-        plugins: Arc<Plugins>,
-    ) -> Self {
-        let base = ConnectorService {
-            _schema: schema.clone(),
-            _subgraph_schemas: subgraph_schemas,
-            _subscription_config: subscription_config,
-            connectors_by_service_name: connectors_by_service_name.clone(),
-            connector_request_service_factory,
-        }
-        .boxed();
-        let service = tower::ServiceBuilder::new()
-            .layer(
-                crate::layers::unconstrained_buffer::UnconstrainedBufferLayer::new(
-                    crate::layers::DEFAULT_BUFFER_SIZE,
-                ),
-            )
-            .service(
-                plugins
-                    .iter()
-                    .rev()
-                    .fold(base, |acc, (_, e)| e.connector_service(acc)),
-            );
-        Self {
-            connectors_by_service_name,
-            _connect_spec_version_instrument: connect_spec_version_instrument(
-                schema.connectors.as_ref(),
-            ),
-            service,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn empty(schema: Arc<Schema>) -> Self {
-        Self::new(
-            schema,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            Arc::new(ConnectorRequestServiceFactory::new(
-                Default::default(),
-                Default::default(),
-                Default::default(),
-            )),
-            Default::default(),
-        )
-    }
-}
-
-impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
-    type Service = BoxService;
-
-    fn create(&self) -> Self::Service {
-        // Note: We have to box our cloned service to erase the type of the Buffer.
-        self.service.clone().boxed()
->>>>>>> origin/dev
     }
 }

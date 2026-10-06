@@ -633,25 +633,14 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// recompute the mapped response, so changing one without the other makes
     /// telemetry disagree with what the client receives.
     ///
-<<<<<<< HEAD
     /// [`Request::transport_request`]: connector_request::Request::transport_request
     /// [`Request::supergraph_request`]: connector_request::Request::supergraph_request
     /// [`Request::context`]: connector_request::Request::context
     /// [`Request::into_error_response`]: connector_request::Request::into_error_response
     /// [`Response::context`]: connector_request::Response::context
-    /// [`Response::transport_result`]: connector_request::Response::transport_result
+    /// [`Response::transport_outcome`]: connector_request::Response::transport_outcome
     /// [`Response::data`]: connector_request::Response::data
     /// [`Response::error`]: connector_request::Response::error
-=======
-    /// [`Request::transport_request`]: crate::services::connector::request_service::Request::transport_request
-    /// [`Request::supergraph_request`]: crate::services::connector::request_service::Request::supergraph_request
-    /// [`Request::context`]: crate::services::connector::request_service::Request::context
-    /// [`Request::into_error_response`]: crate::services::connector::request_service::Request::into_error_response
-    /// [`Response::context`]: crate::services::connector::request_service::Response::context
-    /// [`Response::transport_outcome`]: crate::services::connector::request_service::Response::transport_outcome
-    /// [`Response::data`]: crate::services::connector::request_service::Response::data
-    /// [`Response::error`]: crate::services::connector::request_service::Response::error
->>>>>>> origin/dev
     fn connector_request_service(
         &self,
         service: connector_request::BoxCloneService,
@@ -825,8 +814,8 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
     /// This service handles connector execution (wrapping individual connector requests)
     fn connector_service(
         &self,
-        service: crate::services::connect::BoxService,
-    ) -> crate::services::connect::BoxService {
+        service: crate::services::connect::BoxCloneService,
+    ) -> crate::services::connect::BoxCloneService {
         service
     }
 
@@ -964,8 +953,8 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// This service handles connector execution (wrapping individual connector requests)
     fn connector_service(
         &self,
-        service: crate::services::connect::BoxService,
-    ) -> crate::services::connect::BoxService;
+        service: crate::services::connect::BoxCloneService,
+    ) -> crate::services::connect::BoxCloneService;
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -1033,8 +1022,8 @@ where
 
     fn connector_service(
         &self,
-        service: crate::services::connect::BoxService,
-    ) -> crate::services::connect::BoxService {
+        service: crate::services::connect::BoxCloneService,
+    ) -> crate::services::connect::BoxCloneService {
         self.connector_service(service)
     }
 

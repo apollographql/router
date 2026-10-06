@@ -109,16 +109,9 @@ where
         Ok(response) => {
             let (parts, body) = response.into_parts();
 
-<<<<<<< HEAD
-            let mut result: Result<TransportResponse, Error> =
-                Ok(TransportResponse::Http(HttpResponse {
-                    inner: parts.clone(),
-                }));
-=======
-            let outcome = TransportOutcome::Response(HttpResponse {
+            let mut outcome = TransportOutcome::Response(HttpResponse {
                 inner: parts.clone(),
             });
->>>>>>> origin/dev
 
             let make_err = |message: String, code: &str| -> Box<RuntimeError> {
                 let mut err = RuntimeError::new(message, &response_key);
@@ -183,7 +176,7 @@ where
                     make_invalid_response_err()
                 }),
             };
-            if body_incomplete && let Ok(TransportResponse::Http(http_response)) = &mut result {
+            if body_incomplete && let TransportOutcome::Response(http_response) = &mut outcome {
                 http_response
                     .inner
                     .extensions
@@ -539,7 +532,6 @@ mod tests {
     use apollo_federation::connectors::Label;
     use apollo_federation::connectors::Namespace;
     use apollo_federation::connectors::runtime::errors::RuntimeError;
-    use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
     use apollo_federation::connectors::runtime::inputs::RequestInputs;
     use apollo_federation::connectors::runtime::key::ResponseKey;
     use insta::assert_debug_snapshot;
@@ -555,13 +547,11 @@ mod tests {
     use crate::plugins::connectors::handle_responses::aggregate_responses;
     use crate::plugins::connectors::handle_responses::handle_raw_response;
     use crate::plugins::connectors::handle_responses::process_response;
-<<<<<<< HEAD
-    use crate::services::http::IncompleteResponseBody;
-=======
     use crate::plugins::connectors::handle_responses::stamp_connector_coordinate;
     use crate::plugins::include_subgraph_errors::config::Config as IncludeSubgraphErrorsConfig;
     use crate::plugins::include_subgraph_errors::effective_config::EffectiveConfig;
->>>>>>> origin/dev
+    use crate::services::connector::request_service::TransportOutcome;
+    use crate::services::http::IncompleteResponseBody;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
 
@@ -2527,8 +2517,8 @@ mod tests {
         .await;
 
         // The router cut this body off itself, so it must not be counted against the source.
-        let Ok(TransportResponse::Http(http_response)) = &result.transport_result else {
-            panic!("the source answered: {:?}", result.transport_result);
+        let TransportOutcome::Response(http_response) = &result.transport_outcome else {
+            panic!("the source answered: {:?}", result.transport_outcome);
         };
         assert!(
             http_response
@@ -2579,8 +2569,8 @@ mod tests {
         )
         .await;
 
-        let Ok(TransportResponse::Http(http_response)) = &result.transport_result else {
-            panic!("the headers arrived: {:?}", result.transport_result);
+        let TransportOutcome::Response(http_response) = &result.transport_outcome else {
+            panic!("the headers arrived: {:?}", result.transport_outcome);
         };
         assert_eq!(http_response.inner.status, http::StatusCode::OK);
         assert!(

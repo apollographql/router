@@ -11,12 +11,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-<<<<<<< HEAD
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
-=======
-use schemars::JsonSchema;
-use serde::Deserialize;
->>>>>>> origin/dev
 use tower::BoxError;
 use tower::ServiceExt;
 use tower::util::BoxCloneService;

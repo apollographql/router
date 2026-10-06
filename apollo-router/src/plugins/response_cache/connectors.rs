@@ -15,7 +15,6 @@ use opentelemetry::Key;
 use opentelemetry::StringValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
@@ -88,10 +87,19 @@ use crate::spec::TYPENAME;
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct ConnectorCacheConfiguration {
     /// Options applying to all connector sources
+    #[schemars(extend("default" = {
+        "cache_key_headers": null,
+        "enabled": null,
+        "invalidation": null,
+        "private_id": null,
+        "redis": null,
+        "ttl": null
+    }))]
     pub(crate) all: ConnectorCacheSource,
 
     /// Map of subgraph_name.connector_source_name to configuration
     #[serde(default)]
+    #[schemars(extend("default" = {}))]
     pub(crate) sources: HashMap<String, ConnectorCacheSource>,
 }
 
@@ -149,11 +157,13 @@ impl ConnectorCacheConfiguration {
 }
 
 /// Per connector source configuration for response caching
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
+// Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct ConnectorCacheSource {
     /// Redis configuration
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses
@@ -200,6 +210,7 @@ pub(crate) struct ConnectorCacheSource {
 
     /// Invalidation configuration
     #[serde(default)]
+    #[schemars(extend("default" = null))]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
 }
 
@@ -235,7 +246,7 @@ pub(super) struct ConnectorCacheService {
 impl Service<connect::Request> for ConnectorCacheService {
     type Response = connect::Response;
     type Error = BoxError;
-    type Future = <connect::BoxService as Service<connect::Request>>::Future;
+    type Future = <connect::BoxCloneService as Service<connect::Request>>::Future;
 
     fn poll_ready(
         &mut self,
@@ -1240,7 +1251,7 @@ pub(super) struct ConnectorRequestCacheService {
 impl Service<connector::request_service::Request> for ConnectorRequestCacheService {
     type Response = connector::request_service::Response;
     type Error = BoxError;
-    type Future = <connector::request_service::BoxService as Service<
+    type Future = <connector::request_service::BoxCloneService as Service<
         connector::request_service::Request,
     >>::Future;
 
@@ -1342,6 +1353,7 @@ impl ConnectorRequestCacheService {
                             transport_outcome: TransportOutcome::Error(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
                             ),
+                            break_status: None,
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1646,6 +1658,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     transport_outcome: TransportOutcome::Response(http_response),
+                    break_status: None,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,

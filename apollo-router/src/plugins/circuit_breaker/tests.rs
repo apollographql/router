@@ -28,6 +28,7 @@ use crate::plugins::test::PluginTestHarness;
 use crate::plugins::test::ServiceHandle;
 use crate::services::connector::request_service::Request as ConnectorRequest;
 use crate::services::connector::request_service::Response as ConnectorResponse;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::http::HttpRequest as SourceHttpRequest;
 use crate::services::http::HttpResponse as SourceHttpResponse;
 use crate::services::router;
@@ -388,10 +389,11 @@ fn connector_response(status: StatusCode, request: &ConnectorRequest) -> Connect
     ConnectorResponse {
         context: request.context.clone(),
         subgraph_name: request.connector.id.subgraph_name.to_string(),
-        transport_result: Ok(HttpResponse { inner: parts }.into()),
+        transport_outcome: TransportOutcome::Response(HttpResponse { inner: parts }),
         mapped_response: MappedResponse::Data {
             data: Default::default(),
             problems: Vec::new(),
+            declared_errors: vec![],
             key: response_key(),
         },
         break_status: None,
@@ -1668,7 +1670,10 @@ async fn a_connector_circuit_opens_after_consecutive_failures() {
             .call(connector_request())
             .await
             .expect("the source answered");
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
         assert_eq!(connector_error_code(&response), None);
     }
     assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -1681,8 +1686,8 @@ async fn a_connector_circuit_opens_after_consecutive_failures() {
         .await
         .expect("the circuit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::CircuitBreakerOpen)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::CircuitBreakerOpen)
     ));
     assert_eq!(
         connector_error_code(&response),
@@ -1731,7 +1736,7 @@ async fn a_connector_source_with_no_entry_of_its_own_follows_all() {
             .await
             .expect("the source answered");
         assert!(
-            response.transport_result.is_ok(),
+            !matches!(response.transport_outcome, TransportOutcome::Error(_)),
             "reviews.api should still be reaching the source after {failure} failures"
         );
     }
@@ -1782,7 +1787,10 @@ async fn a_connector_circuit_opens_and_recovers_on_a_probe() {
             .call(connector_request())
             .await
             .expect("the source answered");
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
     }
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 
@@ -1794,8 +1802,8 @@ async fn a_connector_circuit_opens_and_recovers_on_a_probe() {
         .await
         .expect("the circuit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::CircuitBreakerOpen)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::CircuitBreakerOpen)
     ));
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -1816,7 +1824,10 @@ async fn a_connector_circuit_opens_and_recovers_on_a_probe() {
             .call(connector_request())
             .await
             .expect("the source answered");
-        assert!(response.transport_result.is_ok());
+        assert!(!matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(_)
+        ));
         assert_eq!(connector_error_code(&response), None);
         assert_eq!(calls.load(Ordering::SeqCst), expected_calls);
     }
@@ -1858,7 +1869,10 @@ async fn a_connector_circuit_is_shared_by_every_service_built_for_it() {
         .await
         .expect("the circuit answered");
     assert!(
-        matches!(response.transport_result, Err(Error::CircuitBreakerOpen)),
+        matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(Error::CircuitBreakerOpen)
+        ),
         "the failure recorded by one service should open the circuit for the other"
     );
 }
@@ -1888,7 +1902,7 @@ async fn a_4xx_connector_response_is_not_a_failure() {
             .await
             .expect("the source answered");
         assert!(
-            response.transport_result.is_ok(),
+            !matches!(response.transport_outcome, TransportOutcome::Error(_)),
             "a 4xx should not open the circuit"
         );
     }
@@ -1957,7 +1971,10 @@ async fn a_connector_request_over_max_requests_is_not_recorded() {
         .oneshot(request_in(&operation))
         .await
         .expect("the source answered");
-    assert!(response.transport_result.is_ok());
+    assert!(!matches!(
+        response.transport_outcome,
+        TransportOutcome::Error(_)
+    ));
 
     let response = service
         .clone()
@@ -1965,8 +1982,8 @@ async fn a_connector_request_over_max_requests_is_not_recorded() {
         .await
         .expect("the limit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::RequestLimitExceeded)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::RequestLimitExceeded)
     ));
 
     // Another operation, with its own allowance.
@@ -2024,8 +2041,8 @@ async fn a_connector_request_over_max_requests_does_not_take_the_recovery_probe(
         .await
         .expect("the limit answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::RequestLimitExceeded)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::RequestLimitExceeded)
     ));
 
     // Had the rejected request closed the circuit, this failure would only start a new count;
@@ -2065,7 +2082,10 @@ async fn a_connector_request_the_rate_limit_sheds_is_not_recorded() {
 
     call().await.expect("the source answered");
     let response = call().await.expect("the rate limit answered");
-    assert!(matches!(response.transport_result, Err(Error::RateLimited)));
+    assert!(matches!(
+        response.transport_outcome,
+        TransportOutcome::Error(Error::RateLimited)
+    ));
 
     tokio::time::advance(Duration::from_secs(10)).await;
     call().await.expect("the source answered");
@@ -2190,7 +2210,7 @@ async fn a_mapping_only_connector_response_is_not_a_failure() {
         "products.api",
         tower::service_fn(|req: ConnectorRequest| async move {
             let mut response = connector_response(StatusCode::OK, &req);
-            response.transport_result = Ok(TransportResponse::MappingOnly);
+            response.transport_outcome = TransportOutcome::MappingOnly;
             Ok(response)
         })
         .boxed_clone(),
@@ -2205,8 +2225,8 @@ async fn a_mapping_only_connector_response_is_not_a_failure() {
             .await
             .expect("the connector answered");
         assert!(matches!(
-            response.transport_result,
-            Ok(TransportResponse::MappingOnly)
+            response.transport_outcome,
+            TransportOutcome::MappingOnly
         ));
     }
 }
@@ -2234,8 +2254,8 @@ async fn a_source_that_stops_answering_opens_its_circuit_at_its_timeout() {
         .await
         .expect("the timeout answered");
     assert!(matches!(
-        response.transport_result,
-        Err(Error::GatewayTimeout)
+        response.transport_outcome,
+        TransportOutcome::Error(Error::GatewayTimeout)
     ));
 
     // That timeout was the circuit's one failure.
@@ -2271,7 +2291,7 @@ async fn a_connector_response_cut_off_part_way_through_its_body_is_a_failure() {
     let (mut service, calls) =
         connector_service(&plugin, "products.api", |req: &ConnectorRequest| {
             let mut response = connector_response(StatusCode::OK, req);
-            if let Ok(TransportResponse::Http(http_response)) = &mut response.transport_result {
+            if let TransportOutcome::Response(http_response) = &mut response.transport_outcome {
                 http_response
                     .inner
                     .extensions
@@ -2314,7 +2334,7 @@ async fn a_mapping_only_request_goes_around_an_open_circuit() {
         connector_service(&plugin, "products.api", |req: &ConnectorRequest| {
             if matches!(req.transport_request, TransportRequest::MappingOnly) {
                 let mut response = connector_response(StatusCode::OK, req);
-                response.transport_result = Ok(TransportResponse::MappingOnly);
+                response.transport_outcome = TransportOutcome::MappingOnly;
                 response
             } else {
                 connector_response(StatusCode::BAD_GATEWAY, req)
@@ -2347,8 +2367,8 @@ async fn a_mapping_only_request_goes_around_an_open_circuit() {
         .await
         .expect("the connector answered");
     assert!(matches!(
-        response.transport_result,
-        Ok(TransportResponse::MappingOnly)
+        response.transport_outcome,
+        TransportOutcome::MappingOnly
     ));
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -2377,7 +2397,7 @@ async fn a_mapping_only_request_uses_the_permit_it_was_readied_with() {
         .concurrency_limit(1)
         .service_fn(|request: ConnectorRequest| async move {
             let mut response = connector_response(StatusCode::OK, &request);
-            response.transport_result = Ok(TransportResponse::MappingOnly);
+            response.transport_outcome = TransportOutcome::MappingOnly;
             Ok::<_, BoxError>(response)
         })
         .boxed_clone();
@@ -2392,8 +2412,8 @@ async fn a_mapping_only_request_uses_the_permit_it_was_readied_with() {
     .expect("the request should not wait on a permit its own service is holding")
     .expect("the connector answered");
     assert!(matches!(
-        response.transport_result,
-        Ok(TransportResponse::MappingOnly)
+        response.transport_outcome,
+        TransportOutcome::MappingOnly
     ));
     assert_permit_is_free(&service).await;
 }
