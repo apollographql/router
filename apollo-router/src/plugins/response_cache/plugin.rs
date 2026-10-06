@@ -1514,6 +1514,7 @@ impl CacheService {
                 cache_control,
                 data: serde_json_bytes::to_value(resp.response.body().clone()).unwrap_or_default(),
                 warnings: Vec::new(),
+                has_errors: false,
                 should_store: false,
                 indexes: *self.indexes,
             }
@@ -1712,6 +1713,9 @@ impl CacheService {
                         data: serde_json_bytes::to_value(response.response.body().clone())
                             .unwrap_or_default(),
                         warnings: Vec::new(),
+                        // `cache_store_root_from_response` skips the write when the response
+                        // carries any error, so the debugger must not report `shouldStore`
+                        has_errors: !response.response.body().errors.is_empty(),
                         should_store: true,
                         indexes: *self.indexes,
                     }
@@ -1809,6 +1813,7 @@ impl CacheService {
                                     "data": serde_json_bytes::to_value(cache_entry.data.clone()).unwrap_or_default()
                                 }),
                             warnings: Vec::new(),
+                            has_errors: false,
                             should_store: false,
                             indexes: *self.indexes,
                         }.update_metadata())
@@ -2068,6 +2073,7 @@ async fn cache_lookup_root(
                         cache_control: debug_value.control.clone(),
                         data: serde_json_bytes::json!({"data": debug_value.data.clone()}),
                         warnings: Vec::new(),
+                        has_errors: false,
                         should_store: false,
                         indexes: *indexes,
                     }
@@ -2456,6 +2462,7 @@ async fn cache_lookup_entities(
                         cache_control: cache_entry.control.clone(),
                         data: serde_json_bytes::json!({"data": cache_entry.data.clone()}),
                         warnings: Vec::new(),
+                        has_errors: false,
                         should_store: false,
                         indexes: *indexes,
                     }
@@ -2611,6 +2618,10 @@ async fn cache_store_entities_from_response(
         // specific entity and its tags are treated individually to that entity rather than
         // applying to all entities
 
+        // Moved out rather than borrowed, since `new_errors` replaces this list below. Taken before
+        // `per_entity_surrogate_keys` borrows the body.
+        let errors = std::mem::take(&mut response.response.body_mut().errors);
+
         let per_entity_surrogate_keys = response
             .response
             .body()
@@ -2626,7 +2637,7 @@ async fn cache_store_entities_from_response(
                 .ok_or_else(|| FetchError::MalformedResponse {
                     reason: "expected an array of entities".to_string(),
                 })?,
-            &response.response.body().errors,
+            errors,
             cache,
             default_subgraph_ttl,
             cache_control,
@@ -2647,10 +2658,8 @@ async fn cache_store_entities_from_response(
             .and_then(|v| v.as_object_mut())
             .map(|o| o.insert(ENTITIES, new_entities.into()));
         response.response.body_mut().data = data;
-        // Errors that could not be reindexed into an entity slot are not the merge's to discard.
-        let mut errors = non_entity_errors(&response.response.body().errors);
-        errors.extend(new_errors);
-        response.response.body_mut().errors = errors;
+        // `new_errors` holds every subgraph error, including those with no entity slot.
+        response.response.body_mut().errors = new_errors;
     } else {
         let (new_entities, new_errors) =
             assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
@@ -3337,20 +3346,14 @@ fn filter_representations(
     Ok((new_representations, result, cache_control))
 }
 
-/// Reindexes the GraphQL errors belonging to the entity at `entity_idx` (its position in the
-/// original response) onto `new_entity_idx` (its position after cache hits are spliced back in).
-/// Shared by the subgraph (`insert_entities_in_result`) and connector
-/// (`ConnectorRequestCacheService::merge_cached_entities` in `connectors.rs`) entity-merge loops,
-/// which both need to do this identically.
-/// The errors from a subgraph or connector response that are **not** scoped to a specific
-/// `_entities[i]` slot.
+/// The errors from a connector response that are **not** scoped to a specific `_entities[i]` slot.
 ///
-/// The entity-merge loops rebuild the error list from the errors they can reindex — see
+/// The connector entity-merge loop (`ConnectorRequestCacheService::merge_cached_entities` in
+/// `connectors.rs`) rebuilds the error list from the errors it can reindex — see
 /// [`reindex_entity_errors`], which keeps only errors whose path starts `_entities[i]`. Anything
 /// else (a top-level error, an error on a non-entity field) has no slot to be reindexed into and
-/// would be dropped by that rebuild, so it is carried across unchanged instead. Both the subgraph
-/// and connector loops use this, so a partial cache hit never swallows an error that a full miss
-/// would have returned.
+/// would be dropped by that rebuild, so it is carried across unchanged instead. The subgraph loop
+/// handles these through `attribute_errors_to_entities`.
 pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
     errors
         .iter()
@@ -3366,6 +3369,9 @@ pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
         .collect()
 }
 
+/// Reindexes the GraphQL errors belonging to the entity at `entity_idx` (its position in the
+/// original response) onto `new_entity_idx` (its position after cache hits are spliced back in).
+/// Used by the connector entity-merge loop.
 pub(super) fn reindex_entity_errors(
     errors: &[Error],
     entity_idx: usize,
@@ -3411,6 +3417,9 @@ pub(super) struct EntityCacheMiss<'a> {
     pub(super) entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) has_tags: bool,
+    /// Whether an error in the response keeps this entity out of the cache. Callers check it
+    /// before storing, and the debugger entry reports it, so the two cannot disagree.
+    pub(super) has_errors: bool,
 }
 
 pub(super) fn build_entity_store_document(
@@ -3465,6 +3474,7 @@ pub(super) fn build_entity_debug_entry(
         cache_control: cache_control.clone(),
         data: serde_json_bytes::json!({"data": miss.value.clone()}),
         warnings: Vec::new(),
+        has_errors: miss.has_errors,
         should_store: false,
         indexes,
     }
@@ -3475,7 +3485,7 @@ pub(super) fn build_entity_debug_entry(
 #[allow(clippy::too_many_arguments)]
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
-    errors: &[Error],
+    errors: Vec<Error>,
     cache: Storage,
     default_subgraph_ttl: Duration,
     cache_control: CacheControl,
@@ -3498,11 +3508,23 @@ async fn insert_entities_in_result(
         .unwrap_or(default_subgraph_ttl);
 
     let mut new_entities = Vec::new();
-    let mut new_errors = Vec::new();
+    // Each error keeps its position in the subgraph's list, so the original order can be restored.
+    let mut new_errors: Vec<(usize, Error)> = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
     let mut debug_ctx_entries = Vec::new();
+    // Only the entities this reassembly consumes, one per cache miss, can have errors attributed
+    // to them.
+    let entity_miss_count = result.iter().filter(|r| r.cache_entry.is_none()).count();
+    let attributable_entity_count = entity_miss_count.min(entities.len());
+    let (mut errors_by_entity_idx, unattributed_errors) =
+        attribute_errors_to_entities(errors, attributable_entity_count);
+    // An unattributed error pointing into `_entities` may describe any entity of this fetch, so
+    // none of them is cached. Errors with no path or a path elsewhere don't affect caching.
+    let has_unattributable_entity_errors = unattributed_errors
+        .iter()
+        .any(|(_, error)| error_targets_entities(error));
     let mut entities_it = entities.drain(..).enumerate();
     // iterate through per-entity cache tags in parallel with entities; tags are matched
     // positionally, meaning the first tag array applies to the first entity, etc
@@ -3541,9 +3563,16 @@ async fn insert_entities_in_result(
                     key = format!("{key}:{id}");
                 }
 
-                let reindexed_errors = reindex_entity_errors(errors, entity_idx, new_entity_idx);
-                let has_errors = !reindexed_errors.is_empty();
-                new_errors.extend(reindexed_errors);
+                let entity_errors = errors_by_entity_idx.remove(&entity_idx).unwrap_or_default();
+                let has_errors = !entity_errors.is_empty();
+                for (error_idx, mut error) in entity_errors {
+                    // update the entity index, because it does not match with the original one
+                    if let Some(path) = error.path.as_mut() {
+                        path.0[1] = PathElement::Index(new_entity_idx);
+                    }
+
+                    new_errors.push((error_idx, error));
+                }
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
                 if indexes.tracks_invalidation_labels(cdn_invalidation_enabled)
@@ -3597,6 +3626,7 @@ async fn insert_entities_in_result(
                     entity_key,
                     invalidation_keys,
                     has_tags,
+                    has_errors: has_errors || has_unattributable_entity_errors,
                 };
 
                 // Only in debug mode
@@ -3612,7 +3642,7 @@ async fn insert_entities_in_result(
                         subgraph_request.clone(),
                     ));
                 }
-                if !has_errors && cache_control.should_store() && should_cache_private {
+                if !miss.has_errors && cache_control.should_store() && should_cache_private {
                     to_insert.push(build_entity_store_document(
                         &miss,
                         CacheScope::Subgraph,
@@ -3626,9 +3656,27 @@ async fn insert_entities_in_result(
         }
     }
 
+    // Errors that could not be tied to an entity are passed through rather than dropped.
+    new_errors.extend(unattributed_errors);
+    debug_assert!(
+        errors_by_entity_idx.is_empty(),
+        "every attributed entity index is consumed by the loop above"
+    );
+    let new_errors = errors_in_original_order(new_errors);
+
     // For debug mode
     if !debug_ctx_entries.is_empty() {
         add_cache_keys_to_context(&context, debug_ctx_entries.into_iter())?;
+    }
+
+    // Logged only when these errors are what kept the batch out of the cache, not when
+    // `Cache-Control` or a missing private id would have anyway.
+    if has_unattributable_entity_errors && cache_control.should_store() && should_cache_private {
+        tracing::debug!(
+            "subgraph.name" = subgraph_name,
+            entities = entity_miss_count,
+            "response cache skipped storing every entity of an `_entities` fetch: the subgraph returned an error that could not be tied to a specific entity"
+        );
     }
 
     if !to_insert.is_empty() {
@@ -3650,6 +3698,80 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
+}
+
+/// Splits the errors of an `_entities` fetch into those attributed to one of the
+/// `attributable_entity_count` entities being reassembled, keyed by that entity's index in the
+/// subgraph response, and the rest. Each error is paired with its position in `errors`.
+///
+/// An error is attributed when its path starts with `["_entities", <index>]` and the index is in
+/// range. Some subgraphs report entity errors without the index, as `["_entities", "fieldName"]`;
+/// such an error is attributed only when a single entity is being reassembled, with the index
+/// inserted into its path. Everything else is unattributed.
+#[allow(clippy::type_complexity)]
+pub(crate) fn attribute_errors_to_entities(
+    errors: Vec<Error>,
+    attributable_entity_count: usize,
+) -> (HashMap<usize, Vec<(usize, Error)>>, Vec<(usize, Error)>) {
+    let mut attributed: HashMap<usize, Vec<(usize, Error)>> = HashMap::new();
+    let mut unattributed: Vec<(usize, Error)> = Vec::new();
+
+    for (error_idx, mut error) in errors.into_iter().enumerate() {
+        match entity_index_from_error_path(&error) {
+            Some(entity_idx) if entity_idx < attributable_entity_count => {
+                attributed
+                    .entry(entity_idx)
+                    .or_default()
+                    .push((error_idx, error));
+            }
+            // An index outside the reassembled entities can't be rewritten. Strip it so
+            // `FetchNode::response_at_path` re-paths the error onto the whole fetch instead of
+            // blaming an unrelated entity.
+            Some(_) => {
+                if let Some(path) = error.path.as_mut() {
+                    path.0.remove(1);
+                }
+                unattributed.push((error_idx, error));
+            }
+            // With a single fetched entity, an index-less `_entities` error can only be about that
+            // entity. The index is inserted so the caller can rewrite it like any other.
+            None if attributable_entity_count == 1 && error_targets_entities(&error) => {
+                if let Some(path) = error.path.as_mut() {
+                    path.0.insert(1, PathElement::Index(0));
+                }
+                attributed.entry(0).or_default().push((error_idx, error));
+            }
+            None => unattributed.push((error_idx, error)),
+        }
+    }
+
+    (attributed, unattributed)
+}
+
+/// Whether the error's path points into the `_entities` field.
+pub(crate) fn error_targets_entities(error: &Error) -> bool {
+    matches!(
+        error.path.as_ref().and_then(|path| path.0.first()),
+        Some(PathElement::Key(key, None)) if key == ENTITIES
+    )
+}
+
+/// The index of the entity an error refers to, if its path starts with `["_entities", <index>]`.
+fn entity_index_from_error_path(error: &Error) -> Option<usize> {
+    match error.path.as_ref()?.0.as_slice() {
+        [
+            PathElement::Key(key, None),
+            PathElement::Index(entity_idx),
+            ..,
+        ] if key == ENTITIES => Some(*entity_idx),
+        _ => None,
+    }
+}
+
+/// Puts errors paired with their original positions back in that order.
+pub(crate) fn errors_in_original_order(mut errors: Vec<(usize, Error)>) -> Vec<Error> {
+    errors.sort_unstable_by_key(|(error_idx, _)| *error_idx);
+    errors.into_iter().map(|(_, error)| error).collect()
 }
 
 pub(super) fn assemble_response_from_errors(
@@ -3752,12 +3874,18 @@ mod tests {
     use tokio::sync::broadcast;
     use uuid::Uuid;
 
+    use super::ENTITIES;
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::graphql::Error;
+    use crate::json_ext::Path;
+    use crate::json_ext::PathElement;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::response_cache::plugin::ResponseCache;
+    use crate::plugins::response_cache::plugin::attribute_errors_to_entities;
+    use crate::plugins::response_cache::plugin::error_targets_entities;
     use crate::plugins::response_cache::plugin::get_entity_key_from_selection_set;
     use crate::plugins::response_cache::plugin::get_invalidation_entity_keys_from_schema;
     use crate::plugins::response_cache::plugin::get_invalidation_root_keys_from_schema;
@@ -5279,5 +5407,198 @@ mod tests {
         }))
         .unwrap();
         assert!(!config.include_cache_control_header_on_router_response);
+    }
+
+    fn error_with_path(message: &str, path: Option<Path>) -> Error {
+        match path {
+            Some(path) => Error::builder()
+                .message(message)
+                .path(path)
+                .extension_code("TEST")
+                .build(),
+            None => Error::builder()
+                .message(message)
+                .extension_code("TEST")
+                .build(),
+        }
+    }
+
+    fn entities_path(elements: Vec<PathElement>) -> Path {
+        let mut path = vec![PathElement::Key(ENTITIES.to_string(), None)];
+        path.extend(elements);
+        Path(path)
+    }
+
+    #[test]
+    fn attribute_errors_with_an_entity_index() {
+        let errors = vec![
+            error_with_path(
+                "first",
+                Some(entities_path(vec![
+                    PathElement::Index(0),
+                    PathElement::Key("name".to_string(), None),
+                ])),
+            ),
+            error_with_path("second", Some(entities_path(vec![PathElement::Index(1)]))),
+            error_with_path("third", Some(entities_path(vec![PathElement::Index(1)]))),
+        ];
+
+        let (attributed, unattributed) = attribute_errors_to_entities(errors, 2);
+
+        assert!(unattributed.is_empty());
+        assert_eq!(
+            attributed
+                .get(&0)
+                .map(|errors| errors.iter().map(|(_, e)| e.message.as_str()).collect()),
+            Some(vec!["first"])
+        );
+        assert_eq!(
+            attributed
+                .get(&1)
+                .map(|errors| errors.iter().map(|(_, e)| e.message.as_str()).collect()),
+            Some(vec!["second", "third"])
+        );
+        // Each error keeps its position in the subgraph's error list.
+        assert_eq!(
+            attributed
+                .values()
+                .flatten()
+                .map(|(error_idx, e)| (*error_idx, e.message.as_str()))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(0, "first"), (1, "second"), (2, "third")])
+        );
+    }
+
+    // An entity index the reassembly will never reach — the subgraph returned more entities than
+    // we sent representations for — cannot be attributed either, and its errors must survive.
+    #[test]
+    fn attribute_errors_beyond_the_reassembled_entities() {
+        let errors = vec![
+            error_with_path("kept", Some(entities_path(vec![PathElement::Index(0)]))),
+            error_with_path(
+                "extra",
+                Some(entities_path(vec![
+                    PathElement::Index(1),
+                    PathElement::Key("name".to_string(), None),
+                ])),
+            ),
+        ];
+
+        let (attributed, unattributed) = attribute_errors_to_entities(errors, 1);
+
+        assert_eq!(
+            attributed
+                .get(&0)
+                .map(|errors| errors.iter().map(|(_, e)| e.message.as_str()).collect()),
+            Some(vec!["kept"])
+        );
+        assert_eq!(
+            unattributed
+                .iter()
+                .map(|(_, e)| e.message.as_str())
+                .collect::<Vec<_>>(),
+            vec!["extra"]
+        );
+        // The out-of-range index is stripped: keeping it would make `response_at_path` resolve it
+        // against the original representation list and blame an unrelated entity, or drop the
+        // error once the index is past the end of that list.
+        assert_eq!(
+            unattributed[0].1.path,
+            Some(entities_path(vec![PathElement::Key(
+                "name".to_string(),
+                None
+            )]))
+        );
+    }
+
+    // A fetch of a single entity leaves an index-less error unambiguous, so it is attributed to
+    // that entity with the index filled in rather than passed through to be re-pathed onto the
+    // whole fetch.
+    #[test]
+    fn attribute_index_less_error_to_a_single_fetched_entity() {
+        let errors = vec![error_with_path(
+            "no index",
+            Some(entities_path(vec![PathElement::Key(
+                "name".to_string(),
+                None,
+            )])),
+        )];
+
+        let (attributed, unattributed) = attribute_errors_to_entities(errors, 1);
+
+        assert!(unattributed.is_empty());
+        assert_eq!(
+            attributed.get(&0).map(|errors| errors
+                .iter()
+                .map(|(_, e)| e.path.clone())
+                .collect::<Vec<_>>()),
+            Some(vec![Some(entities_path(vec![
+                PathElement::Index(0),
+                PathElement::Key("name".to_string(), None)
+            ]))])
+        );
+    }
+
+    // Only an error pointing into `_entities` can be about a fetched entity, and only those
+    // suppress the batch's cache write.
+    #[test]
+    fn only_entity_errors_target_entities() {
+        assert!(error_targets_entities(&error_with_path(
+            "no index",
+            Some(entities_path(vec![PathElement::Key(
+                "name".to_string(),
+                None
+            )]))
+        )));
+        assert!(error_targets_entities(&error_with_path(
+            "with index",
+            Some(entities_path(vec![PathElement::Index(0)]))
+        )));
+        assert!(!error_targets_entities(&error_with_path("no path", None)));
+        assert!(!error_targets_entities(&error_with_path(
+            "not an entity error",
+            Some(Path(vec![PathElement::Key("topLevel".to_string(), None)]))
+        )));
+    }
+
+    // Errors that cannot be tied to one fetched entity: a path without the index (as produced by
+    // some subgraphs), no path at all, an index past the end of the fetched entities, and a path
+    // that does not point into `_entities`.
+    #[test]
+    fn attribute_errors_without_an_entity_index() {
+        let errors = vec![
+            error_with_path(
+                "no index",
+                Some(entities_path(vec![PathElement::Key(
+                    "createShipment".to_string(),
+                    None,
+                )])),
+            ),
+            error_with_path("no path", None),
+            error_with_path(
+                "out of range",
+                Some(entities_path(vec![PathElement::Index(5)])),
+            ),
+            error_with_path(
+                "not an entity error",
+                Some(Path(vec![PathElement::Key("topLevel".to_string(), None)])),
+            ),
+        ];
+
+        let (attributed, unattributed) = attribute_errors_to_entities(errors, 2);
+
+        assert!(attributed.is_empty());
+        assert_eq!(
+            unattributed
+                .iter()
+                .map(|(error_idx, e)| (*error_idx, e.message.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, "no index"),
+                (1, "no path"),
+                (2, "out of range"),
+                (3, "not an entity error")
+            ]
+        );
     }
 }
