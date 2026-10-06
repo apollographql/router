@@ -2,12 +2,12 @@ switcher:
   heading: "Apollo Router"
   versions:
     - label: v3 (Preview)
-      href: ./v3
+      href: ../v3
     - label: v2
       latest: true
-      href: ./
+      href: ../
     - label: v1
-      href: ./v1
+      href: ../v1
 items:
   - label: "Overview"
     href: "."
@@ -227,6 +227,8 @@ items:
         children:
           - label: "Native Query Planner"
             href: "./query-planning/native-query-planner"
+          - label: "Incremental Query Planner"
+            href: "./query-planning/incremental-query-planner"
           - label: "Best Practices"
             href: "./query-planning/query-planning-best-practices"
           - label: "Caching"

@@ -1,7 +1,6 @@
-# Startup migration 2045 moves these flat settings under `deduplication.all`.
-subscription:
-  deduplication:
-    enabled: true
+# Startup migration moves this plugin section to the top-level `expose_query_plan` key.
+plugins:
+  experimental.expose_query_plan: true
 # The schema accepts any string here, but the plugin's config rejects it as a duration.
 traffic_shaping:
   router:
