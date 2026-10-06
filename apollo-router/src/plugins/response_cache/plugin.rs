@@ -1883,7 +1883,7 @@ impl CacheService {
                     store_cache_control.merge_no_store(&request_cache_control);
                 }
 
-                if !is_known_private && header_cache_control.private() {
+                if !is_known_private && store_cache_control.private() {
                     self.private_queries
                         .write()
                         .await
