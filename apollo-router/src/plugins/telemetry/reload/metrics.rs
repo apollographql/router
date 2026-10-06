@@ -153,7 +153,7 @@ impl<'a> MetricsBuilder<'a> {
         let counting = if std::mem::replace(&mut self.has_push_overflow_counter, true) {
             OverflowCounting::Off
         } else {
-            OverflowCounting::Starts(OverflowTracker::default())
+            OverflowCounting::EveryOverflowStart(OverflowTracker::default())
         };
         OverflowMetricExporter::new(exporter, counting)
     }

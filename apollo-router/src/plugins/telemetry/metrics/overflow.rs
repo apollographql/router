@@ -48,7 +48,7 @@ pub(crate) enum OverflowCounting {
     EveryExport,
     /// Count when a metric starts overflowing. Used by the public meter provider's counting
     /// source.
-    Starts(OverflowTracker),
+    EveryOverflowStart(OverflowTracker),
     /// Don't count, because another source on the same meter provider does.
     Off,
 }
@@ -146,7 +146,9 @@ impl<T: PushMetricExporter> PushMetricExporter for OverflowMetricExporter<T> {
             OverflowCounting::EveryExport => {
                 overflowing_otel_names(metrics).for_each(record_cardinality_overflow)
             }
-            OverflowCounting::Starts(tracker) => tracker.record(overflowing_otel_names(metrics)),
+            OverflowCounting::EveryOverflowStart(tracker) => {
+                tracker.record(overflowing_otel_names(metrics))
+            }
             OverflowCounting::Off => {}
         }
         self.inner.export(metrics)
@@ -338,7 +340,7 @@ mod tests {
         async {
             let exporter = OverflowMetricExporter::new(
                 InMemoryMetricExporter::default(),
-                OverflowCounting::Starts(OverflowTracker::default()),
+                OverflowCounting::EveryOverflowStart(OverflowTracker::default()),
             );
             let overflowing = collected(3);
 
