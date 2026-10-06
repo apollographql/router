@@ -3,15 +3,15 @@
 //! When OpenTelemetry SDK exceeds cardinality limits for a metric, it aggregates
 //! overflow measurements into a special data point marked with `otel.metric.overflow=true`.
 //! This module detects those overflow data points and increments
-//! `apollo.router.telemetry.metrics.cardinality_overflow`.
+//! `apollo.router.telemetry.metrics.cardinality_overflow`, with the OpenTelemetry name of the
+//! overflowing metric as its `metric.name` attribute.
 //!
 //! For the public meter provider the counter goes up when a metric starts overflowing, not on
 //! every collection; see [`OverflowTracker`]. Push exporters (OTLP, Apollo usage reporting) are
-//! checked on every export, with OpenTelemetry metric names. The Prometheus exporter is a pull
-//! exporter: it serves scrapes from its own internal collector, which never calls back into a
-//! reader wrapper, so the Prometheus endpoint checks each scrape itself, with Prometheus family
-//! names. The Apollo usage-reporting exporters don't track starts: they count every export that
-//! has overflow, as they always have.
+//! checked on every export. The Prometheus exporter is a pull exporter: it serves scrapes from its
+//! own internal collector, which never calls back into a reader wrapper, so the Prometheus
+//! endpoint checks each scrape itself. The Apollo usage-reporting exporters don't track starts:
+//! they count every export that has overflow, as they always have.
 //!
 //! Each meter provider must count an overflow once. The metrics builder decides which source
 //! counts for the public meter provider; see [`OverflowCounting`].
@@ -61,30 +61,47 @@ pub(crate) enum OverflowCounting {
 /// each interval empty, so a metric can stop overflowing and later start again; each observed
 /// restart counts again.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct OverflowTracker(Arc<Mutex<HashSet<String>>>);
+pub(crate) struct OverflowTracker(Arc<Mutex<Overflowing>>);
+
+#[derive(Debug, Default)]
+struct Overflowing {
+    /// OpenTelemetry names of the metrics overflowing in the last collection.
+    metrics: HashSet<String>,
+    /// Prometheus names of the families overflowing in the last scrape.
+    families: HashSet<String>,
+}
 
 impl OverflowTracker {
     /// Record the metrics overflowing in one export, counting those that weren't overflowing in
     /// the previous one.
     fn record<'a>(&self, overflowing: impl IntoIterator<Item = &'a str>) {
-        let started = track_starts(&mut self.0.lock(), overflowing);
+        let started = track_starts(&mut self.0.lock().metrics, overflowing);
         started
             .iter()
             .map(String::as_str)
             .for_each(record_cardinality_overflow);
     }
 
-    /// Gather a Prometheus scrape and record its overflowing families, counting those that
-    /// weren't overflowing in the previous scrape.
+    /// Gather a Prometheus scrape and record the metrics that started overflowing since the
+    /// previous scrape.
     ///
-    /// The lock is held across `gather` so that concurrent scrapes are compared in the order they
-    /// were taken. Otherwise an older snapshot recorded after a newer one would end an overflow
-    /// that never cleared, and the next scrape would count it again.
+    /// A scrape only has Prometheus family names, and the exporter's name conversion can map
+    /// different OpenTelemetry names to one family. So when the set of overflowing families
+    /// changes, `collect` reads the same pipeline once more, as the Prometheus exporter's own
+    /// reader, for the OpenTelemetry names of the overflowing metrics. Scrapes that show no change
+    /// do no extra work. The one case this misses is two metrics that share a family: if the
+    /// second starts overflowing while the first already is, it counts only once the family set
+    /// next changes.
+    ///
+    /// The lock is held across `gather` and `collect` so that concurrent scrapes are compared in
+    /// the order they were taken. Otherwise an older snapshot recorded after a newer one would
+    /// end an overflow that never cleared, and the next scrape would count it again.
     pub(crate) fn gather_and_record(
         &self,
         gather: impl FnOnce() -> Vec<MetricFamily>,
+        collect: impl FnOnce(&mut ResourceMetrics) -> OTelSdkResult,
     ) -> Vec<MetricFamily> {
-        let (scrape, started) = self.gather_and_track(gather);
+        let (scrape, started) = self.gather_and_track(gather, collect);
         started
             .iter()
             .map(String::as_str)
@@ -95,10 +112,24 @@ impl OverflowTracker {
     fn gather_and_track(
         &self,
         gather: impl FnOnce() -> Vec<MetricFamily>,
+        collect: impl FnOnce(&mut ResourceMetrics) -> OTelSdkResult,
     ) -> (Vec<MetricFamily>, Vec<String>) {
-        let mut previous = self.0.lock();
+        let mut overflowing = self.0.lock();
         let scrape = gather();
-        let started = track_starts(&mut previous, overflowing_prometheus_names(&scrape));
+        let families: HashSet<String> = overflowing_prometheus_names(&scrape)
+            .map(str::to_string)
+            .collect();
+        if families == overflowing.families {
+            return (scrape, Vec::new());
+        }
+        let mut metrics = ResourceMetrics::default();
+        if let Err(error) = collect(&mut metrics) {
+            // Leave the families unchanged so that the next scrape tries again.
+            tracing::debug!(%error, "could not collect metrics to name overflowing families");
+            return (scrape, Vec::new());
+        }
+        overflowing.families = families;
+        let started = track_starts(&mut overflowing.metrics, overflowing_otel_names(&metrics));
         (scrape, started)
     }
 }
@@ -263,6 +294,7 @@ mod tests {
     use super::*;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::test_utils::ClonableManualReader;
+    use crate::plugins::telemetry::metrics::prometheus::SharedPrometheusExporter;
 
     #[test]
     fn detects_overflow_attribute() {
@@ -481,31 +513,51 @@ mod tests {
         family
     }
 
+    /// A `collect` for [`OverflowTracker::gather_and_record`] that returns [`collected`] with
+    /// `values` attribute sets, and counts how often it was called.
+    fn collect_with(
+        values: usize,
+        calls: &std::cell::Cell<usize>,
+    ) -> impl FnOnce(&mut ResourceMetrics) -> OTelSdkResult + '_ {
+        move |metrics| {
+            calls.set(calls.get() + 1);
+            *metrics = collected(values);
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn scrapes_count_each_start_of_overflow_once() {
         async {
             let tracker = OverflowTracker::default();
             let overflowing = [scraped_family(OVERFLOW_FAMILY, true)];
+            let collects = std::cell::Cell::new(0);
 
-            // However many scrapes see the overflow, it is counted once, with the family name.
+            // However many scrapes see the overflow, it is counted once, with the OpenTelemetry
+            // name. Only the scrape where it starts collects again to find that name.
             for _ in 0..3 {
-                tracker.gather_and_record(|| overflowing.to_vec());
+                tracker.gather_and_record(|| overflowing.to_vec(), collect_with(3, &collects));
             }
             assert_counter!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 1,
-                "metric.name" = OVERFLOW_FAMILY
+                "metric.name" = OVERFLOW_METRIC
             );
+            assert_eq!(collects.get(), 1);
 
             // Once a scrape no longer shows the overflow, as can happen with an observable gauge, a
             // later one counts again.
-            tracker.gather_and_record(|| vec![scraped_family(OVERFLOW_FAMILY, false)]);
-            tracker.gather_and_record(|| overflowing.to_vec());
+            tracker.gather_and_record(
+                || vec![scraped_family(OVERFLOW_FAMILY, false)],
+                collect_with(1, &collects),
+            );
+            tracker.gather_and_record(|| overflowing.to_vec(), collect_with(3, &collects));
             assert_counter!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 2,
-                "metric.name" = OVERFLOW_FAMILY
+                "metric.name" = OVERFLOW_METRIC
             );
+            assert_eq!(collects.get(), 3);
         }
         .with_metrics()
         .await
@@ -514,12 +566,39 @@ mod tests {
     #[tokio::test]
     async fn scrapes_do_not_count_without_overflow() {
         async {
-            OverflowTracker::default()
-                .gather_and_record(|| vec![scraped_family(OVERFLOW_FAMILY, false)]);
+            let collects = std::cell::Cell::new(0);
+            OverflowTracker::default().gather_and_record(
+                || vec![scraped_family(OVERFLOW_FAMILY, false)],
+                collect_with(1, &collects),
+            );
             assert_counter_not_exists!(
                 "apollo.router.telemetry.metrics.cardinality_overflow",
                 u64,
-                "metric.name" = OVERFLOW_FAMILY
+                "metric.name" = OVERFLOW_METRIC
+            );
+            assert_eq!(collects.get(), 0);
+        }
+        .with_metrics()
+        .await
+    }
+
+    /// A failed collect doesn't lose the start of an overflow: the next scrape tries again.
+    #[tokio::test]
+    async fn scrapes_retry_naming_after_a_failed_collect() {
+        async {
+            let tracker = OverflowTracker::default();
+            let overflowing = [scraped_family(OVERFLOW_FAMILY, true)];
+            let collects = std::cell::Cell::new(0);
+
+            tracker.gather_and_record(
+                || overflowing.to_vec(),
+                |_| Err(opentelemetry_sdk::error::OTelSdkError::AlreadyShutdown),
+            );
+            tracker.gather_and_record(|| overflowing.to_vec(), collect_with(3, &collects));
+            assert_counter!(
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                1,
+                "metric.name" = OVERFLOW_METRIC
             );
         }
         .with_metrics()
@@ -534,21 +613,33 @@ mod tests {
         let tracker = &OverflowTracker::default();
         let before = &vec![scraped_family(OVERFLOW_FAMILY, false)];
         let after = &vec![scraped_family(OVERFLOW_FAMILY, true)];
+        let collect_before = |metrics: &mut ResourceMetrics| {
+            *metrics = collected(1);
+            Ok(())
+        };
+        let collect_after = |metrics: &mut ResourceMetrics| {
+            *metrics = collected(3);
+            Ok(())
+        };
         let (a_gathering, a_gathered) = std::sync::mpsc::channel();
         let (release_a, a_released) = std::sync::mpsc::channel::<()>();
 
         let mut started = std::thread::scope(|scope| {
             let a = scope.spawn(move || {
                 tracker
-                    .gather_and_track(|| {
-                        a_gathering.send(()).unwrap();
-                        a_released.recv().unwrap();
-                        before.clone()
-                    })
+                    .gather_and_track(
+                        || {
+                            a_gathering.send(()).unwrap();
+                            a_released.recv().unwrap();
+                            before.clone()
+                        },
+                        collect_before,
+                    )
                     .1
             });
             a_gathered.recv().unwrap();
-            let b = scope.spawn(move || tracker.gather_and_track(|| after.clone()).1);
+            let b =
+                scope.spawn(move || tracker.gather_and_track(|| after.clone(), collect_after).1);
             // Without ordering, B would finish here while A is still delayed.
             std::thread::sleep(std::time::Duration::from_millis(100));
             release_a.send(()).unwrap();
@@ -556,9 +647,84 @@ mod tests {
             started.extend(b.join().unwrap());
             started
         });
-        started.extend(tracker.gather_and_track(|| after.clone()).1);
+        started.extend(tracker.gather_and_track(|| after.clone(), collect_after).1);
 
-        assert_eq!(started, vec![OVERFLOW_FAMILY.to_string()]);
+        assert_eq!(started, vec![OVERFLOW_METRIC.to_string()]);
+    }
+
+    /// A provider whose only reader is a real Prometheus exporter on `registry`, limiting `test.`
+    /// instruments to two attribute sets and the overflow counter to one.
+    fn prometheus_provider(
+        registry: &prometheus::Registry,
+    ) -> (SdkMeterProvider, SharedPrometheusExporter) {
+        let exporter = SharedPrometheusExporter::from(
+            opentelemetry_prometheus::exporter()
+                .with_registry(registry.clone())
+                .build()
+                .unwrap(),
+        );
+        let provider = SdkMeterProvider::builder()
+            .with_reader(exporter.clone())
+            .with_resource(Resource::builder_empty().build())
+            .with_view(|instrument: &opentelemetry_sdk::metrics::Instrument| {
+                let limit = if instrument.name() == CARDINALITY_OVERFLOW_METRIC {
+                    1
+                } else if instrument.name().starts_with("test.") {
+                    2
+                } else {
+                    return None;
+                };
+                Some(
+                    Stream::builder()
+                        .with_cardinality_limit(limit)
+                        .build()
+                        .expect("valid stream"),
+                )
+            })
+            .build();
+        (provider, exporter)
+    }
+
+    /// Against the real Prometheus exporter, whose family names differ from the OpenTelemetry
+    /// names (separators, unit and `_total` suffixes), scrapes count with the OpenTelemetry name.
+    #[tokio::test]
+    async fn scrapes_count_with_opentelemetry_names() {
+        async {
+            let registry = prometheus::Registry::new();
+            let (provider, exporter) = prometheus_provider(&registry);
+            let meter = provider.meter("test");
+            let histogram = meter
+                .f64_histogram("test.request.duration")
+                .with_unit("s")
+                .build();
+            let counter = meter.u64_counter("test.requests").build();
+            for value in 0..3 {
+                histogram.record(1.0, &[KeyValue::new("key", value as i64)]);
+                counter.add(1, &[KeyValue::new("key", value as i64)]);
+            }
+
+            let tracker = OverflowTracker::default();
+            let mut scrape = Vec::new();
+            for _ in 0..3 {
+                scrape = tracker
+                    .gather_and_record(|| registry.gather(), |metrics| exporter.collect(metrics));
+            }
+            let mut families: Vec<&str> = overflowing_prometheus_names(&scrape).collect();
+            families.sort_unstable();
+            assert_eq!(
+                families,
+                ["test_request_duration_seconds", "test_requests_total"]
+            );
+            for metric_name in ["test.request.duration", "test.requests"] {
+                assert_counter!(
+                    "apollo.router.telemetry.metrics.cardinality_overflow",
+                    1,
+                    "metric.name" = metric_name
+                );
+            }
+        }
+        .with_metrics()
+        .await
     }
 
     /// The counter's own family, as the real Prometheus exporter names it, never counts.
@@ -566,22 +732,7 @@ mod tests {
     async fn scrapes_do_not_count_their_own_overflow() {
         async {
             let registry = prometheus::Registry::new();
-            let exporter = opentelemetry_prometheus::exporter()
-                .with_registry(registry.clone())
-                .build()
-                .unwrap();
-            let provider = SdkMeterProvider::builder()
-                .with_reader(exporter)
-                .with_resource(Resource::builder_empty().build())
-                .with_view(|instrument: &opentelemetry_sdk::metrics::Instrument| {
-                    (instrument.name() == CARDINALITY_OVERFLOW_METRIC).then(|| {
-                        Stream::builder()
-                            .with_cardinality_limit(1)
-                            .build()
-                            .expect("valid stream")
-                    })
-                })
-                .build();
+            let (provider, exporter) = prometheus_provider(&registry);
             let counter = provider
                 .meter("test")
                 .u64_counter(CARDINALITY_OVERFLOW_METRIC)
@@ -599,6 +750,9 @@ mod tests {
                 "expected the counter's own family to overflow: {scrape:?}"
             );
             assert_eq!(overflowing_prometheus_names(&scrape).count(), 0);
+            let mut metrics = ResourceMetrics::default();
+            exporter.collect(&mut metrics).unwrap();
+            assert_eq!(overflowing_otel_names(&metrics).count(), 0);
         }
         .with_metrics()
         .await

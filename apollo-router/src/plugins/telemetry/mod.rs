@@ -3421,8 +3421,8 @@ mod tests {
     }
 
     /// With Prometheus as the only exporter, a scrape of an instrument past its cardinality limit
-    /// reports `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with the scraped
-    /// Prometheus family name. The counter is recorded after the scrape is gathered, so it first
+    /// reports `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with the
+    /// instrument's OpenTelemetry name. The counter is recorded after the scrape is gathered, so it first
     /// appears on the following scrape. It counts the start of the overflow once, however many
     /// scrapes follow.
     #[tokio::test(flavor = "multi_thread")]
@@ -3448,7 +3448,7 @@ mod tests {
 
             for _ in 0..3 {
                 let scrape = scrape_prometheus(plugin.as_ref()).await;
-                assert_single_cardinality_overflow_series(&scrape, "apollo_test_histo", 1);
+                assert_single_cardinality_overflow_series(&scrape, "apollo.test.histo", 1);
             }
         }
         .with_metrics()
@@ -3492,7 +3492,7 @@ mod tests {
             u64_histogram!("apollo.test.histo", "it's a test", 1u64, "k" = "c");
             scrape_prometheus(plugin.as_ref()).await;
             let before = scrape_prometheus(plugin.as_ref()).await;
-            assert_single_cardinality_overflow_series(&before, "apollo_test_histo", 1);
+            assert_single_cardinality_overflow_series(&before, "apollo.test.histo", 1);
 
             let reloaded = create_plugin_with_config(
                 &config.replace("service_name: apollo-router", "service_name: reloaded"),
@@ -3505,7 +3505,7 @@ mod tests {
             scrape_prometheus(reloaded.as_ref()).await;
             let after = scrape_prometheus(reloaded.as_ref()).await;
             assert!(after.contains(r#"service_name="reloaded""#), "{after}");
-            assert_single_cardinality_overflow_series(&after, "apollo_test_histo", 1);
+            assert_single_cardinality_overflow_series(&after, "apollo.test.histo", 1);
         }
         .with_metrics()
         .await;

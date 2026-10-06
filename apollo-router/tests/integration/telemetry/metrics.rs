@@ -1181,8 +1181,9 @@ async fn scraped_overflow_count(router: &IntegrationTest, metric_name: &str) -> 
 }
 
 /// With only the Prometheus exporter, an overflowed instrument is reported by
-/// `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with its Prometheus family
-/// name. The start of the overflow counts once, however many times the endpoint is scraped.
+/// `apollo.router.telemetry.metrics.cardinality_overflow`, labelled with its OpenTelemetry name,
+/// as with the other exporters. The start of the overflow counts once, however many times the
+/// endpoint is scraped.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_prometheus_cardinality_overflow_counter() {
     let mut router = IntegrationTest::builder()
@@ -1200,7 +1201,7 @@ async fn test_prometheus_cardinality_overflow_counter() {
         .assert_metrics_contains_multiple(
             vec![
                 r#"http_server_request_duration_seconds_count{otel_metric_overflow="true""#,
-                r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http_server_request_duration_seconds",otel_scope_name="apollo/router"} 1"#,
+                r#"apollo_router_telemetry_metrics_cardinality_overflow_total{metric_name="http.server.request.duration",otel_scope_name="apollo/router"} 1"#,
             ],
             None,
         )
@@ -1214,7 +1215,7 @@ async fn test_prometheus_cardinality_overflow_counter() {
             .await
             .expect("second scraper failed");
         assert_eq!(
-            scraped_overflow_count(&router, "http_server_request_duration_seconds").await,
+            scraped_overflow_count(&router, "http.server.request.duration").await,
             1
         );
     }

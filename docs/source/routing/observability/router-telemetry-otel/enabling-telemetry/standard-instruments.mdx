@@ -334,7 +334,7 @@ telemetry:
   - `error`: One of `channel closed`, `channel full`.
 
 - `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit OpenTelemetry's cardinality limit. When a metric exceeds its cardinality limit, new attribute combinations are aggregated into an overflow bucket. Every metrics exporter reports it, including Prometheus. It increases by one when a metric starts overflowing, and not again while that metric stays overflowed. A metric that stops overflowing and later starts again, such as an observable gauge or a metric exported with delta temporality, counts again. The exception is metrics sent to GraphOS usage reporting, which count once for every report that has overflow.
-  - `metric.name`: The name of the metric that exceeded its cardinality limit. With an OTLP exporter configured, this is the OpenTelemetry name (for example, `http.server.request.duration`). With Prometheus as the only exporter, this is the Prometheus name (for example, `http_server_request_duration_seconds`).
+  - `metric.name`: The OpenTelemetry name of the metric that exceeded its cardinality limit, for example `http.server.request.duration`, whichever exporters are configured.
 
 ## Internals
 

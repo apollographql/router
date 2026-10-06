@@ -80,9 +80,10 @@ impl<'a> MetricsBuilder<'a> {
         HashMap<MeterProviderType, FilterMeterProvider>,
         Sender,
     ) {
-        // Count each overflow on the public meter provider once. The first push exporter counts,
-        // with OpenTelemetry metric names. Prometheus scrapes count only when Prometheus is the
-        // provider's only exporter.
+        // Count each overflow on the public meter provider once. The first push exporter counts;
+        // Prometheus scrapes count only when Prometheus is the provider's only exporter. Both
+        // label the counter with OpenTelemetry metric names, so it doesn't change with the
+        // exporters configured.
         let mut prometheus_registry = self.prometheus_registry;
         if self.has_push_overflow_counter
             && let Some(prometheus_registry) = &mut prometheus_registry

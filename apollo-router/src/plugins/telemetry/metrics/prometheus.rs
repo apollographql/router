@@ -1,9 +1,19 @@
+use std::sync::Arc;
+use std::sync::Weak;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
+use opentelemetry_prometheus::PrometheusExporter;
 use opentelemetry_prometheus::ResourceSelector;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::Pipeline;
+use opentelemetry_sdk::metrics::Temporality;
+use opentelemetry_sdk::metrics::data::ResourceMetrics;
+use opentelemetry_sdk::metrics::reader::MetricReader;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -77,15 +87,18 @@ impl MetricsConfigurator for Config {
     fn configure(&self, builder: &mut MetricsBuilder) -> Result<(), BoxError> {
         let registry = Registry::new();
 
-        let exporter = opentelemetry_prometheus::exporter()
-            .with_resource_selector(self.resource_selector)
-            .with_registry(registry.clone())
-            .build()?;
+        let exporter = SharedPrometheusExporter::from(
+            opentelemetry_prometheus::exporter()
+                .with_resource_selector(self.resource_selector)
+                .with_registry(registry.clone())
+                .build()?,
+        );
 
-        builder.with_reader(MeterProviderType::Public, exporter);
+        builder.with_reader(MeterProviderType::Public, exporter.clone());
         // Scrapes bypass reader wrappers, so the endpoint checks each scrape for overflow itself
         builder.with_prometheus_registry(PrometheusRegistry {
             registry,
+            exporter,
             overflow_tracker: Some(OverflowTracker::default()),
         });
 
@@ -93,12 +106,48 @@ impl MetricsConfigurator for Config {
     }
 }
 
-/// What the Prometheus endpoint serves scrapes from: the metrics registry, and the tracker that
-/// scrapes use to count cardinality overflow.
+/// The Prometheus exporter, shared by the public meter provider, which reads from it, and the
+/// endpoint, which collects from it directly to name overflowing metrics.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedPrometheusExporter(Arc<PrometheusExporter>);
+
+impl From<PrometheusExporter> for SharedPrometheusExporter {
+    fn from(exporter: PrometheusExporter) -> Self {
+        Self(Arc::new(exporter))
+    }
+}
+
+impl MetricReader for SharedPrometheusExporter {
+    fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
+        self.0.register_pipeline(pipeline)
+    }
+
+    fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+        self.0.collect(rm)
+    }
+
+    fn force_flush(&self) -> OTelSdkResult {
+        self.0.force_flush()
+    }
+
+    fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+        self.0.shutdown_with_timeout(timeout)
+    }
+
+    fn temporality(&self, kind: InstrumentKind) -> Temporality {
+        self.0.temporality(kind)
+    }
+}
+
+/// What the Prometheus endpoint serves scrapes from: the metrics registry, the exporter behind
+/// it, and the tracker that scrapes use to count cardinality overflow.
 #[derive(Clone, Debug)]
 pub(crate) struct PrometheusRegistry {
     /// The metrics each scrape gathers.
     pub(crate) registry: Registry,
+    /// The exporter that `registry` gathers from. Collecting from it directly gives the same
+    /// metrics with their OpenTelemetry names.
+    pub(crate) exporter: SharedPrometheusExporter,
     /// The families that were overflowing in the last scrape, so that a scrape counts only those
     /// that started overflowing since. Present when scrapes count cardinality overflow on the
     /// public meter provider, which is when Prometheus is its only exporter. `None` when a push
@@ -128,9 +177,10 @@ impl Service<router::Request> for PrometheusService {
         Box::pin(async move {
             // As with the push exporters, the counter shows up from the next collection.
             let metric_families = match &registry.overflow_tracker {
-                Some(overflow_tracker) => {
-                    overflow_tracker.gather_and_record(|| registry.registry.gather())
-                }
+                Some(overflow_tracker) => overflow_tracker.gather_and_record(
+                    || registry.registry.gather(),
+                    |metrics| registry.exporter.collect(metrics),
+                ),
                 None => registry.registry.gather(),
             };
             let encoder = TextEncoder::new();
