@@ -1305,6 +1305,8 @@ async fn test_otlp_cardinality_overflow_counted_once() {
             "      prometheus:\n        enabled: true\n        path: /metrics\n",
             "",
         );
+    // If the fixture changes so the replacement misses, this would silently test both exporters.
+    assert!(!config.contains("prometheus:"), "{config}");
     let mut router = IntegrationTest::builder().config(&config).build().await;
 
     router.start().await;
