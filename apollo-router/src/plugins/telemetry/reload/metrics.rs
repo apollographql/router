@@ -43,7 +43,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::OverflowCounting;
 use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::OverflowTracker;
-use crate::plugins::telemetry::metrics::prometheus::PrometheusRegistry;
+use crate::plugins::telemetry::metrics::prometheus::PrometheusEndpoint;
 
 /// Trait for metric exporters to contribute to meter provider construction
 pub(crate) trait MetricsConfigurator {
@@ -64,7 +64,7 @@ pub(crate) struct MetricsBuilder<'a> {
     /// when observable instruments are registered with providers that have no readers.
     providers_with_readers: HashSet<MeterProviderType>,
     apollo_metrics_sender: Sender,
-    prometheus_registry: Option<PrometheusRegistry>,
+    prometheus_registry: Option<PrometheusEndpoint>,
     /// Whether a push exporter counts cardinality overflow for the public meter provider. The
     /// first one does; Prometheus scrapes count only when there is none.
     has_push_overflow_counter: bool,
@@ -76,7 +76,7 @@ impl<'a> MetricsBuilder<'a> {
     pub(crate) fn build(
         self,
     ) -> (
-        Option<PrometheusRegistry>,
+        Option<PrometheusEndpoint>,
         HashMap<MeterProviderType, FilterMeterProvider>,
         Sender,
     ) {
@@ -143,7 +143,7 @@ impl<'a> MetricsBuilder<'a> {
     }
     pub(crate) fn with_prometheus_registry(
         &mut self,
-        prometheus_registry: PrometheusRegistry,
+        prometheus_registry: PrometheusEndpoint,
     ) -> &mut Self {
         self.prometheus_registry = Some(prometheus_registry);
         self

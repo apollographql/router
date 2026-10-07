@@ -96,7 +96,7 @@ impl MetricsConfigurator for Config {
 
         builder.with_reader(MeterProviderType::Public, exporter.clone());
         // Scrapes bypass reader wrappers, so the endpoint checks each scrape for overflow itself
-        builder.with_prometheus_registry(PrometheusRegistry {
+        builder.with_prometheus_registry(PrometheusEndpoint {
             registry,
             exporter,
             overflow_tracker: Some(OverflowTracker::default()),
@@ -142,7 +142,7 @@ impl MetricReader for SharedPrometheusExporter {
 /// What the Prometheus endpoint serves scrapes from: the metrics registry, the exporter behind
 /// it, and the tracker that scrapes use to count cardinality overflow.
 #[derive(Clone, Debug)]
-pub(crate) struct PrometheusRegistry {
+pub(crate) struct PrometheusEndpoint {
     /// The metrics each scrape gathers.
     pub(crate) registry: Registry,
     /// The exporter that `registry` gathers from. Collecting from it directly gives the same
@@ -154,7 +154,7 @@ pub(crate) struct PrometheusRegistry {
 }
 
 pub(crate) struct PrometheusService {
-    pub(crate) registry: PrometheusRegistry,
+    pub(crate) endpoint: PrometheusEndpoint,
 }
 
 impl Service<router::Request> for PrometheusService {
@@ -167,19 +167,19 @@ impl Service<router::Request> for PrometheusService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let registry = self.registry.clone();
+        let endpoint = self.endpoint.clone();
         // Endpoint services are buffered, so `call` runs on the buffer worker task. Doing the work
         // in the response future keeps the overflow counter on the task handling the scrape. That
         // only matters for task-local test meter providers (`with_metrics`); in production the
         // counter goes to the global meter provider whichever task records it.
         Box::pin(async move {
             // As with the push exporters, the counter shows up from the next collection.
-            let metric_families = match &registry.overflow_tracker {
+            let metric_families = match &endpoint.overflow_tracker {
                 Some(overflow_tracker) => overflow_tracker.gather_and_record(
-                    || registry.registry.gather(),
-                    |metrics| registry.exporter.collect(metrics),
+                    || endpoint.registry.gather(),
+                    |metrics| endpoint.exporter.collect(metrics),
                 ),
-                None => registry.registry.gather(),
+                None => endpoint.registry.gather(),
             };
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
