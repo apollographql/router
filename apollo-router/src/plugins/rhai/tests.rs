@@ -788,7 +788,7 @@ async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError
 // that raise text still return it to the client, which is why this test is named for the case it
 // covers rather than for binding failures in general.
 #[tokio::test]
-async fn it_redacts_a_binding_error_that_carries_no_message() -> Result<(), BoxError> {
+async fn it_redacts_a_router_function_error() -> Result<(), BoxError> {
     async {
         let (mock_service, handle) =
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
