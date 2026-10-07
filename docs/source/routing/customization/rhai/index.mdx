@@ -670,22 +670,20 @@ Every _other_ kind of failure is replaced with the status code's reason phrase -
 
 - Failures raised by the Rhai engine itself, such as calling an undefined function or a type mismatch.
 - A `throw` that carries only a status, like `throw #{ status: 400 }`, which the client sees as `Bad Request`.
-- Failures in the router's own Rhai functions that carry no message of their own, such as reading a header that isn't present.
+- Failures in the router's own Rhai functions, such as `env::get()` on a variable that isn't set, `base64::decode()` or `json::decode()` on malformed input, or reading a header that isn't present.
 - A `throw` of a value that is not a string or an object map, such as `throw 42`. Returning it would mean dumping the thrown value, so throw a string or an object map when you want the client to see a message.
 - A `throw` of an object map the router cannot read, such as `throw #{ status: "four hundred", message: "Invalid request" }` where the status is not a number. The map is discarded as a whole, so the `message` beside the unreadable field is dropped with it and the status falls back to `500`. If a message you threw does not arrive, check the router's logs for the map it could not read.
 
 This keeps script line numbers, callback names and the fact that the router runs Rhai out of
 client-facing responses.
 
-<Caution>
+<Note>
 
-A router function that fails with a message of its own still returns that message to the client.
-`env::get("MY_VAR")` on a variable that isn't set reports `could not expand variable: MY_VAR,
-environment variable not found`, and `json::decode(...)` on malformed input reports the parse
-error, which gives away the position it failed at. If your script calls these on a client-facing
-path, catch the error and throw your own rather than letting it propagate.
+When a `catch` block catches an error from one of the router's Rhai functions, `err` is an error
+object rather than a string. `${err}` and `err.to_string()` give its message, but `type_of(err)` is
+not `"string"` and comparisons such as `err == "..."` don't match.
 
-</Caution>
+</Note>
 
 If you want a client to see a specific message for any of these cases, catch the error and throw
 your own:

@@ -61,9 +61,9 @@ rhai:
 // A script that fails used to report the Rhai error verbatim to the client, disclosing that the
 // router runs Rhai, the name of the failing callback, and where in the script it failed.
 //
-// `script_disclosures` are the details out of that particular script that the old message carried,
-// on top of the Rhai internals every failure used to carry. Only pass a string the pre-fix message
-// actually contained - anything else asserts nothing, since it was never there to leak.
+// `script_disclosures` are the details out of that particular script that its error carries, on top
+// of the Rhai internals every failure used to carry. Only pass a string the error actually contains -
+// anything else asserts nothing, since it was never there to leak.
 async fn assert_client_error_omits_rhai_internals(script: &str, script_disclosures: &[&str]) {
     let config = format!(
         r#"
@@ -117,13 +117,14 @@ rhai:
     router.graceful_shutdown().await;
 }
 
-// A router Rhai function that fails without a message of its own.
+// A router Rhai function that fails, naming the header the script expected.
 #[tokio::test(flavor = "multi_thread")]
 async fn client_errors_omit_rhai_internals() {
-    // No script-specific disclosure to check: the binding raises an empty message, so the pre-fix
-    // client message was `rhai execution error: 'Runtime error (line N, position M)'` and named
-    // neither the header nor the callback. The Rhai internals above are all this script leaked.
-    assert_client_error_omits_rhai_internals("rhai_redacted_error.rhai", &[]).await;
+    assert_client_error_omits_rhai_internals(
+        "rhai_redacted_error.rhai",
+        &["x-header-that-is-not-there"],
+    )
+    .await;
 }
 
 // The Rhai engine's own failure, which never reaches a router function. This needs a script of its

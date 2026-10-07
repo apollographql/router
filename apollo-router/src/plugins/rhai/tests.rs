@@ -10,8 +10,10 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use parking_lot::Mutex;
+use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
+use rhai::Scope;
 use serde_json::Value;
 use sha2::Digest;
 use tower::BoxError;
@@ -41,6 +43,7 @@ use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
+use crate::plugins::rhai::engine::reveal_router_function_error;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
@@ -331,6 +334,32 @@ fn it_prints_messages_to_log() {
         engine
             .eval::<()>(r#"print("info log")"#)
             .expect("it logged a message");
+    });
+}
+
+// The Rhai customization docs show this pattern for logging a router function's error.
+#[test]
+fn it_logs_the_text_of_a_caught_router_function_error() {
+    use tracing::subscriber;
+
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        let mut scope = Scope::new();
+        scope.push("headers", HeaderMap::new());
+        engine
+            .run_with_scope(
+                &mut scope,
+                r#"
+                try {
+                    let value = headers["x-custom-header"];
+                } catch(err) {
+                    log_error(`missing header: ${err}`);
+                    log_error(err);
+                }"#,
+            )
+            .expect("the script catches the error");
     });
 }
 
@@ -784,9 +813,6 @@ async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError
     .await
 }
 
-// Only the router Rhai functions that raise no message of their own are redacted here - the ones
-// that raise text still return it to the client, which is why this test is named for the case it
-// covers rather than for binding failures in general.
 #[tokio::test]
 async fn it_redacts_a_router_function_error() -> Result<(), BoxError> {
     async {
@@ -794,8 +820,8 @@ async fn it_redacts_a_router_function_error() -> Result<(), BoxError> {
             tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
         let dyn_plugin = create_plugin("rhai_redacted_error.rhai").await?;
 
-        // supergraph_service reads a header that is not there, which raises an exception carrying
-        // no message at all - the client must not see that as a blank error.
+        // supergraph_service reads a header that is not there. The error names the header, which
+        // the logs keep and the client must not see.
         let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
         let req = SupergraphRequest::fake_builder()
             .context(Context::new())
@@ -808,6 +834,81 @@ async fn it_redacts_a_router_function_error() -> Result<(), BoxError> {
     }
     .with_subscriber(assert_snapshot_subscriber!())
     .await
+}
+
+// The router's own Rhai functions describe what went wrong in terms of the script's inputs, such as
+// the environment variables it reads or the headers it expects, so clients must not see the text.
+#[test]
+fn it_redacts_router_function_errors() {
+    let engine = new_rhai_test_engine();
+    for (script, logged) in [
+        (
+            r#"env::get("THIS_SHOULD_NOT_EXIST")"#,
+            "could not expand variable: THIS_SHOULD_NOT_EXIST",
+        ),
+        (r#"base64::decode("$$$")"#, "Invalid symbol 36, offset 0."),
+        ("status_code_from_int(1000)", "invalid status code"),
+        (r#"json::decode("{")"#, "EOF while parsing"),
+        (r#"headers["x-missing"]"#, "header 'x-missing' not found"),
+        (
+            r#"headers["bad name"] = "value""#,
+            "invalid HTTP header name",
+        ),
+        (
+            r#"headers["x-name"] = "bad\nvalue""#,
+            "failed to parse header value",
+        ),
+        (r#"uri.host = "bad host""#, "invalid uri character"),
+    ] {
+        let mut scope = Scope::new();
+        scope.push("headers", HeaderMap::new());
+        scope.push("uri", http::Uri::from_static("http://localhost:4000/"));
+        let error = engine
+            .eval_with_scope::<Dynamic>(&mut scope, script)
+            .expect_err("the router function fails");
+
+        let processed_error = process_error(error);
+        assert_eq!(
+            processed_error.message.as_deref(),
+            Some("Internal Server Error"),
+            "{script}"
+        );
+        let internal_detail = processed_error
+            .internal_detail
+            .expect("the real error is kept for the logs");
+        assert!(
+            internal_detail.contains(logged),
+            "{script}: {internal_detail}"
+        );
+    }
+}
+
+// Catching a router function's error is how a script chooses what the client sees instead. `err` is
+// an error object rather than a string, as the upgrade note says.
+#[test]
+fn it_returns_a_message_thrown_after_catching_a_router_function_error() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(
+            r#"
+            try {
+                env::get("THIS_SHOULD_NOT_EXIST");
+            } catch (err) {
+                if type_of(err) == "string" || err == err.to_string() {
+                    throw "caught a string";
+                }
+                throw "caught: " + err.to_string();
+            }"#,
+        )
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(
+        processed_error.message.as_deref(),
+        Some(
+            "caught: could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"
+        )
+    );
 }
 
 // The response stream ending before there is a primary response is not a callback failure, but the
@@ -982,18 +1083,17 @@ async fn it_mentions_source_when_syntax_error_occurs() {
 }
 
 #[test]
-#[should_panic(
-    expected = "can use env: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", none)"
-)]
 fn it_cannot_expand_missing_environment_variable() {
     assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
     let engine = new_rhai_test_engine();
-    let _: String = engine
-        .eval(
-            r#"
-        env::get("THIS_SHOULD_NOT_EXIST")"#,
-        )
-        .expect("can use env");
+    let mut error = engine
+        .eval::<String>(r#"env::get("THIS_SHOULD_NOT_EXIST")"#)
+        .expect_err("the variable is not set");
+    assert!(reveal_router_function_error(&mut error));
+    assert_eq!(
+        error.to_string(),
+        "Runtime error: could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"
+    );
 }
 
 // POSIX specifies HOME is always set

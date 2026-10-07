@@ -799,7 +799,8 @@ fn redacted_message(status: StatusCode) -> String {
         .to_string()
 }
 
-fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
+fn process_error(mut error: Box<EvalAltResult>) -> ErrorDetails {
+    let is_router_function_error = engine::reveal_router_function_error(&mut error);
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: None,
@@ -814,23 +815,18 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     // A script's `throw` is the only source of a message the author chose to show a client, and it
     // always arrives as `ErrorRuntime`. Every other variant is an engine failure - unknown
     // function, type mismatch, script recursion limit - whose text describes the script's
-    // internals, so those keep the redacted message set below.
-    if let EvalAltResult::ErrorRuntime(thrown, pos) = inner_error {
+    // internals. Errors from the router's own Rhai functions also arrive as `ErrorRuntime`, but
+    // the script did not choose them. Both keep the redacted message set below.
+    if let EvalAltResult::ErrorRuntime(thrown, pos) = inner_error
+        && !is_router_function_error
+    {
         error_details.position = Some(pos.into());
 
         if let Ok(thrown_message) = thrown.as_immutable_string_ref() {
             // `throw "some message"`. The author wrote this string, so it is theirs to return -
-            // but only the string itself, not the Rhai wrapper around it.
-            //
-            // The router's own Rhai functions raise their errors in this same shape, with nothing
-            // recording which side raised them, so this discriminates on the value rather than the
-            // origin: an empty message - `engine::NO_CLIENT_MESSAGE`, all the router functions
-            // raise - falls through to the redacted message below. A script's own `throw ""` is
-            // caught by the same branch, and router functions that raise text of their own are
-            // returned verbatim; see `NO_CLIENT_MESSAGE` for why and for what a real fix needs.
-            if thrown_message.as_str() != engine::NO_CLIENT_MESSAGE {
-                error_details.message = Some(thrown_message.to_string());
-            }
+            // but only the string itself, not the Rhai wrapper around it. An empty string is
+            // treated like a missing message.
+            error_details.message = Some(thrown_message.to_string()).filter(|m| !m.is_empty());
         } else if let Ok(thrown_details) = rhai::serde::from_dynamic::<ErrorDetails>(thrown) {
             // `throw #{ status: ..., message: ..., body: ... }`.
             //
