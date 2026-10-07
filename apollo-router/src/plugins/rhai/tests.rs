@@ -231,8 +231,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
             );
         }
 
-        // The script threw this string, so the client gets it as written - without the Rhai
-        // wrapper that used to disclose the callback name and the line it failed on.
+        // The script threw this string, so the client gets exactly that, with no Rhai wrapper.
         assert_eq!(
             body.errors.first().unwrap().message.as_str(),
             "An error occured"

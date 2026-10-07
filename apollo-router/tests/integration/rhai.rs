@@ -58,12 +58,9 @@ rhai:
     router.graceful_shutdown().await;
 }
 
-// A script that fails used to report the Rhai error verbatim to the client, disclosing that the
-// router runs Rhai, the name of the failing callback, and where in the script it failed.
-//
-// `script_disclosures` are the details out of that particular script that its error carries, on top
-// of the Rhai internals every failure used to carry. Only pass a string the error actually contains -
-// anything else asserts nothing, since it was never there to leak.
+// Asserts that a failing script's client response hides the Rhai wrapper, callback names and
+// script positions. `script_disclosures` are extra strings from this script's error that must not
+// reach the client; pass only strings the error actually contains, or the check asserts nothing.
 async fn assert_client_error_omits_rhai_internals(script: &str, script_disclosures: &[&str]) {
     let config = format!(
         r#"
@@ -132,7 +129,7 @@ async fn client_errors_omit_rhai_internals() {
 // callback could run.
 #[tokio::test(flavor = "multi_thread")]
 async fn client_errors_omit_rhai_engine_internals() {
-    // The engine names the function it could not find, so the pre-fix message carried it.
+    // The engine's error names the missing function.
     assert_client_error_omits_rhai_internals(
         "rhai_engine_error.rhai",
         &["this_function_does_not_exist"],

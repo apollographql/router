@@ -767,17 +767,10 @@ struct ErrorDetails {
     message: Option<String>,
     position: Option<Position>,
     body: Option<crate::graphql::Response>,
-    /// The unredacted Rhai error, kept for server-side logging only.
-    ///
-    /// This holds Rhai implementation details - the engine's error text, script line numbers and
-    /// the names of the callbacks involved - so it must never be copied into `message` or into a
-    /// client-facing response. It is skipped by serde so that a value deserialized from a script's
-    /// `throw` can never set it either.
-    ///
-    /// Outside of tests this is read only through the `Debug` impl, which is how every call site
-    /// logs the whole struct - dead code analysis does not count that, hence the `allow`.
+    /// The unredacted Rhai error, for logs only. Never copy it into a client-facing response.
+    /// Skipped by serde so a script's `throw` can't set it.
     #[serde(skip)]
-    #[allow(dead_code)]
+    #[allow(dead_code)] // only read through `Debug` when the error is logged
     internal_detail: Option<String>,
 }
 
@@ -785,12 +778,7 @@ fn default_thrown_status_code() -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
-/// The client-facing message for a failure the script author did not choose, i.e. anything the
-/// script did not explicitly `throw`.
-///
-/// Returning the Rhai error itself discloses that the router runs Rhai, which script functions are
-/// registered, and where in the script the failure happened, so clients get the status code's
-/// reason phrase instead and the real error is logged.
+/// The client-facing message for a failure whose text the script author didn't choose.
 fn redacted_message(status: StatusCode) -> String {
     // A script can throw a status with no reason phrase, such as 599.
     status
@@ -806,40 +794,25 @@ fn process_error(mut error: Box<EvalAltResult>) -> ErrorDetails {
         message: None,
         position: None,
         body: None,
-        // Rendered before `error` is taken apart below: this is the only place the whole Rhai
-        // error is available, including the chain of script callbacks it came up through.
         internal_detail: Some(format!("rhai execution error: '{error}'")),
     };
 
     let inner_error = error.unwrap_inner();
-    // A script's `throw` is the only source of a message the author chose to show a client, and it
-    // always arrives as `ErrorRuntime`. Every other variant is an engine failure - unknown
-    // function, type mismatch, script recursion limit - whose text describes the script's
-    // internals. Errors from the router's own Rhai functions also arrive as `ErrorRuntime`, but
-    // the script did not choose them. Both keep the redacted message set below.
+    // Only a script's own `throw` carries a message its author chose. Engine failures and router
+    // function errors keep the redacted message set below.
     if let EvalAltResult::ErrorRuntime(thrown, pos) = inner_error
         && !is_router_function_error
     {
         error_details.position = Some(pos.into());
 
         if let Ok(thrown_message) = thrown.as_immutable_string_ref() {
-            // `throw "some message"`. The author wrote this string, so it is theirs to return -
-            // but only the string itself, not the Rhai wrapper around it. An empty string is
-            // treated like a missing message.
             error_details.message = Some(thrown_message.to_string()).filter(|m| !m.is_empty());
         } else if let Ok(thrown_details) = rhai::serde::from_dynamic::<ErrorDetails>(thrown) {
-            // `throw #{ status: ..., message: ..., body: ... }`.
-            //
-            // A throw carrying only a status - `throw #{ status: 400 }` - gets the status it asked
-            // for and, because there is no author-provided message, the redacted message below. An
-            // empty `message` is treated the same way as an empty thrown string.
             error_details.status = thrown_details.status;
             error_details.message = thrown_details.message.filter(|message| !message.is_empty());
             error_details.body = thrown_details.body;
         }
-        // Anything else a script can `throw` - an integer, an array, a map that does not
-        // deserialize - carries no message this code can return without also dumping the thrown
-        // value, so it keeps the redacted message below.
+        // Any other thrown value would have to be dumped to return it, so it stays redacted.
     }
 
     if error_details.message.is_none() {
