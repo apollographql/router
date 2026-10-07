@@ -85,7 +85,7 @@ You can attach custom attributes using [router selectors](/router/configuration/
 
 ## GraphQL
 
-- `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
+- `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation and connectors' response mapping phases, which are represented in client responses as `extensions.valueCompletion` and `extensions.connectorErrors` respectively instead of actual GraphQL errors. Attributes:
   - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
 ## Session
@@ -312,6 +312,24 @@ telemetry:
 
 - `apollo.router.operations.batching` - A counter of the number of query batches received by the router.
 - `apollo.router.operations.batching.size` - A histogram tracking the number of queries contained within a query batch.
+
+## Query deduplication
+
+<Tip>
+
+[Learn more about query deduplication.](/graphos/routing/performance/traffic-shaping#query-deduplication)
+
+</Tip>
+
+- `apollo.router.subgraph_deduplication.requests` - A counter of subgraph requests that reached [query deduplication](/graphos/routing/performance/traffic-shaping#query-deduplication). Each request is counted once. Only subgraphs with `deduplicate_query` enabled report it. Attributes:
+  - `subgraph.name`: The name of the subgraph.
+  - `apollo.router.subgraph_deduplication.outcome`: How deduplication handled the request:
+    - `leader`: The request was passed on to be sent, and any identical requests that arrived while it was in flight reused its response. Response caching or a coprocessor can still answer a `leader` request, so it isn't always an HTTP request to the subgraph.
+    - `follower`: The request reused the response of an identical in-flight request instead of being sent.
+    - `bypassed_batch`: The request is a query that is part of a query batch, so it wasn't considered.
+    - `bypassed_operation`: The request is a mutation or subscription, so it wasn't considered, whether or not it is part of a batch.
+
+  A cancelled request (for example, one that times out) is counted under the outcome it had when it was cancelled. If a `leader` is cancelled, a `follower` waiting on it sends the request itself and is counted as a `leader` instead.
 
 ## Limits
 

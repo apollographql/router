@@ -32,6 +32,7 @@ use tower::timeout::error::Elapsed;
 use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::configuration::shared::default_pool_idle_timeout;
+use crate::configuration::shared::without_default;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -53,6 +54,20 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
+/// `pool_idle_timeout` as written in one block: `None` if omitted (inherit from `all`, then
+/// [`default_pool_idle_timeout`]), `Some(None)` for `null` (no idle eviction).
+type PoolIdleTimeout = Option<Option<Duration>>;
+
+fn deserialize_pool_idle_timeout<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<PoolIdleTimeout, D::Error> {
+    humantime_serde::deserialize(deserializer).map(Some)
+}
+
+fn resolve_pool_idle_timeout(pool_idle_timeout: PoolIdleTimeout) -> Option<Duration> {
+    pool_idle_timeout.unwrap_or_else(default_pool_idle_timeout)
+}
+
 /// Traffic shaping options
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -71,13 +86,12 @@ struct Shaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for subgraphs
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    pool_idle_timeout: Option<Duration>,
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    /// Defaults to 15 seconds; `null` disables idle eviction. A `subgraphs.<name>` block that
+    /// omits it uses the value from `all`.
+    #[serde(deserialize_with = "deserialize_pool_idle_timeout", default)]
+    #[schemars(with = "Option<String>", transform = without_default)]
+    pool_idle_timeout: PoolIdleTimeout,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -188,13 +202,12 @@ struct ConnectorShaping {
     experimental_http2: Option<Http2Config>,
     /// DNS resolution strategy for connectors
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
-    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "default_pool_idle_timeout"
-    )]
-    #[schemars(with = "Option<String>", default = "default_pool_idle_timeout")]
-    pool_idle_timeout: Option<Duration>,
+    /// Specify a timeout for idle sockets being kept-alive in the client's connection pool.
+    /// Defaults to 15 seconds; `null` disables idle eviction. A `sources.<name>` block that omits
+    /// it uses the value from `connector.all`.
+    #[serde(deserialize_with = "deserialize_pool_idle_timeout", default)]
+    #[schemars(with = "Option<String>", transform = without_default)]
+    pool_idle_timeout: PoolIdleTimeout,
     /// Configure the interval for HTTP/2 keep-alive pings. Requires HTTP/2 to be enabled. If
     /// unset (the default), keep-alive pings are disabled.
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
@@ -468,7 +481,7 @@ impl PluginPrivate for TrafficShaping {
                         .shaping
                         .deduplicate_query
                         .unwrap_or_default()
-                        .then(QueryDeduplicationLayer::default),
+                        .then(|| QueryDeduplicationLayer::new(name)),
                 )
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.shaping.compression {
@@ -587,17 +600,7 @@ impl TrafficShaping {
             self.config.all.as_ref(),
             self.config.subgraphs.get(service_name),
         )
-        .map(|config| crate::configuration::shared::Client {
-            experimental_http2: config.shaping.experimental_http2,
-            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
-            pool_idle_timeout: config.shaping.pool_idle_timeout,
-            experimental_http2_keep_alive_interval: config
-                .shaping
-                .experimental_http2_keep_alive_interval,
-            experimental_http2_keep_alive_timeout: config
-                .shaping
-                .experimental_http2_keep_alive_timeout,
-        })
+        .map(|config| config.shaping.into())
         .unwrap_or_default()
     }
 
@@ -607,17 +610,31 @@ impl TrafficShaping {
     ) -> crate::configuration::shared::Client {
         let source_config = self.config.connector.sources.get(source_name).cloned();
         Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
-            .map(|config| crate::configuration::shared::Client {
-                experimental_http2: config.experimental_http2,
-                dns_resolution_strategy: config.dns_resolution_strategy,
-                pool_idle_timeout: config.pool_idle_timeout,
-                experimental_http2_keep_alive_interval: config
-                    .experimental_http2_keep_alive_interval,
-                experimental_http2_keep_alive_timeout: config.experimental_http2_keep_alive_timeout,
-            })
+            .map(Into::into)
             .unwrap_or_default()
     }
 }
+
+/// Subgraph and connector blocks share the client fields, so one body converts both.
+macro_rules! impl_client_from_shaping {
+    ($($shaping:ty),+) => {$(
+        impl From<$shaping> for crate::configuration::shared::Client {
+            fn from(shaping: $shaping) -> Self {
+                Self {
+                    experimental_http2: shaping.experimental_http2,
+                    dns_resolution_strategy: shaping.dns_resolution_strategy,
+                    pool_idle_timeout: resolve_pool_idle_timeout(shaping.pool_idle_timeout),
+                    experimental_http2_keep_alive_interval: shaping
+                        .experimental_http2_keep_alive_interval,
+                    experimental_http2_keep_alive_timeout: shaping
+                        .experimental_http2_keep_alive_timeout,
+                }
+            }
+        }
+    )+};
+}
+
+impl_client_from_shaping!(Shaping, ConnectorShaping);
 
 fn concurrency_limit_error() -> graphql::Error {
     graphql::Error::builder()
@@ -670,6 +687,7 @@ mod test {
     use crate::Configuration;
     use crate::Context;
     use crate::json_ext::Object;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockSubgraph;
@@ -681,6 +699,7 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::services::connector::request_service::Request as ConnectorRequest;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
@@ -1169,6 +1188,52 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn deduplication_requests_are_only_counted_where_enabled() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+        subgraphs:
+            deduplicated:
+                deduplicate_query: true
+            not_deduplicated:
+                deduplicate_query: false
+        "#,
+            )
+            .unwrap();
+            let plugin = get_traffic_shaping_plugin(&config).await;
+
+            for subgraph in ["deduplicated", "not_deduplicated"] {
+                let test_service = MockSubgraph::new(hashmap! {
+                    graphql::Request::default() => graphql::Response::default()
+                });
+                plugin
+                    .subgraph_service(subgraph, test_service.boxed())
+                    .ready()
+                    .await
+                    .expect("it is ready")
+                    .call(SubgraphRequest::fake_builder().build())
+                    .await
+                    .expect("it responded");
+            }
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = "deduplicated",
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+            assert_counter_not_exists!(
+                "apollo.router.subgraph_deduplication.requests",
+                u64,
+                "subgraph.name" = "not_deduplicated",
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_connector_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
@@ -1195,16 +1260,16 @@ mod test {
             "test_subgraph.test_sourcename".to_string(),
         );
 
-        assert!(
+        assert!(matches!(
             svc.ready()
                 .await
                 .expect("it is ready")
                 .call(request)
                 .await
                 .unwrap()
-                .transport_result
-                .is_ok()
-        );
+                .transport_outcome,
+            TransportOutcome::Response(_)
+        ));
 
         let request = get_fake_connector_request(None, "testing".to_string());
         let response = svc
@@ -1215,25 +1280,24 @@ mod test {
             .await
             .expect("it responded");
 
-        assert!(response.transport_result.is_err());
         assert!(matches!(
-            response.transport_result.err().unwrap(),
-            Error::RateLimited
+            response.transport_outcome,
+            TransportOutcome::Error(Error::RateLimited)
         ));
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         let request = get_fake_connector_request(None, "testing".to_string());
-        assert!(
+        assert!(matches!(
             svc.ready()
                 .await
                 .expect("it is ready")
                 .call(request)
                 .await
                 .unwrap()
-                .transport_result
-                .is_ok()
-        );
+                .transport_outcome,
+            TransportOutcome::Response(_)
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1360,6 +1424,8 @@ mod test {
             pool_idle_timeout: 2s
           explicit_null:
             pool_idle_timeout: null
+          omitted:
+            experimental_http2: enable
         router:
           timeout: 65s
         "#,
@@ -1382,8 +1448,16 @@ mod test {
             shaping_config
                 .subgraph_client_config("explicit_null")
                 .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction"
+        );
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("omitted")
+                .pool_idle_timeout,
             Some(Duration::from_secs(10)),
-            "explicit null falls back to all"
+            "subgraph block that omits it falls back to all"
         );
 
         assert_eq!(
@@ -1406,6 +1480,8 @@ mod test {
             pool_idle_timeout: 10s
           explicit_null:
             pool_idle_timeout: null
+          omitted:
+            experimental_http2: enable
         router:
           timeout: 65s
         "#,
@@ -1424,12 +1500,20 @@ mod test {
             "subgraph-specific override should win"
         );
 
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction instead of using the default"
+        );
+
         assert!(
             shaping_config
-                .subgraph_client_config("unknown")
+                .subgraph_client_config("omitted")
                 .pool_idle_timeout
                 .is_none(),
-            "explicit null falls back to all"
+            "subgraph block that omits it falls back to all"
         );
 
         assert!(
@@ -1453,6 +1537,8 @@ mod test {
               pool_idle_timeout: 3s
             explicit_null:
               pool_idle_timeout: null
+            omitted:
+              experimental_http2: enable
         router:
           timeout: 65s
         "#,
@@ -1475,8 +1561,16 @@ mod test {
             shaping_config
                 .connector_client_config("explicit_null")
                 .pool_idle_timeout,
+            None,
+            "explicit null disables idle eviction"
+        );
+
+        assert_eq!(
+            shaping_config
+                .connector_client_config("omitted")
+                .pool_idle_timeout,
             Some(Duration::from_secs(20)),
-            "explicit null falls back to all"
+            "source block that omits it falls back to all"
         );
 
         assert_eq!(
@@ -1510,6 +1604,71 @@ mod test {
                 .pool_idle_timeout,
             default_pool_idle_timeout(),
             "when pool_idle_timeout is not in the config, it should use the default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pool_idle_timeout_uses_default_without_all_block() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        subgraphs:
+          products:
+            pool_idle_timeout: 2s
+          explicit_null:
+            pool_idle_timeout: null
+        connector:
+          sources:
+            my_source:
+              pool_idle_timeout: 3s
+            explicit_null:
+              pool_idle_timeout: null
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_builder().config(config).build())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("products")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(2)),
+        );
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("unconfigured")
+                .pool_idle_timeout,
+            default_pool_idle_timeout(),
+            "a subgraph with no block and no all block should use the default"
+        );
+        assert_eq!(
+            shaping_config
+                .subgraph_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null must not fall through to the default"
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("my_source")
+                .pool_idle_timeout,
+            Some(Duration::from_secs(3)),
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("unconfigured")
+                .pool_idle_timeout,
+            default_pool_idle_timeout(),
+            "a source with no block and no all block should use the default"
+        );
+        assert_eq!(
+            shaping_config
+                .connector_client_config("explicit_null")
+                .pool_idle_timeout,
+            None,
+            "explicit null must not fall through to the default"
         );
     }
 

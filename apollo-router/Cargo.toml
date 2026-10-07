@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.98.1"
+rust-version = "1.99.0"
 edition = "2024"
 build = "build/main.rs"
 default-run = "router"
@@ -251,7 +251,7 @@ tower.workspace = true
 tower-http = { version = "0.7.0", features = ["full"] }
 tower-service = "0.3.2"
 tracing = "0.1.40"
-tracing-core = "0.1.32"
+tracing-core = { version = "0.1.32", features = ["valuable"] }
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 url = { version = "2.5.4", features = ["serde"] }
@@ -294,6 +294,10 @@ log = "0.4.22"
 scopeguard = "1.2.0"
 tokio-tar = { package = "astral-tokio-tar", version = "0.7.0" }
 blake3 = { version = "1.8.2", features = ["serde"] }
+
+[target.'cfg(tracing_unstable)'.dependencies]
+valuable = "0.1.1"
+valuable-serde = "0.1.1"
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
@@ -368,6 +372,9 @@ wiremock = "0.6"
 libtest-mimic = "0.8.0"
 rstest = "0.27.0"
 
+[target.'cfg(tracing_unstable)'.dev-dependencies]
+valuable = { version = "0.1.1", features = ["derive"] }
+
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
 
@@ -425,17 +432,22 @@ name = "planner"
 
 [lints.rust]
 
+# ROUTER-2100: `tracing_unstable` is set via RUSTFLAGS, not by a Cargo feature, so rustc
+# doesn't know it's a legitimate cfg name and warns on every `#[cfg(tracing_unstable)]`.
+# This registers it as expected without silencing the lint for anything else.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tracing_unstable)'] }
+
 # Compatibility with the 2024 edition, remove after switching to it:
-boxed-slice-into-iter = "warn"
-dependency-on-unit-never-type-fallback = "warn"
-deprecated-safe-2024 = "warn"
-impl-trait-overcaptures = "warn"
-keyword-idents-2024 = "warn"
-missing-unsafe-on-extern = "warn"
-never-type-fallback-flowing-into-unsafe = "warn"
-rust-2024-guarded-string-incompatible-syntax = "warn"
-rust-2024-incompatible-pat = "warn"
-rust-2024-prelude-collisions = "warn"
-static-mut-refs = "warn"
-unsafe-attr-outside-unsafe = "warn"
-unsafe-op-in-unsafe-fn = "warn"
+boxed_slice_into_iter = "warn"
+dependency_on_unit_never_type_fallback = "warn"
+deprecated_safe_2024 = "warn"
+impl_trait_overcaptures = "warn"
+keyword_idents_2024 = "warn"
+missing_unsafe_on_extern = "warn"
+never_type_fallback_flowing_into_unsafe = "warn"
+rust_2024_guarded_string_incompatible_syntax = "warn"
+rust_2024_incompatible_pat = "warn"
+rust_2024_prelude_collisions = "warn"
+static_mut_refs = "warn"
+unsafe_attr_outside_unsafe = "warn"
+unsafe_op_in_unsafe_fn = "warn"

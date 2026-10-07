@@ -8,6 +8,7 @@ use crate::connectors::json_selection::MethodArgs;
 use crate::connectors::json_selection::ShapeContext;
 use crate::connectors::json_selection::VarsWithPathsMap;
 use crate::connectors::json_selection::apply_to::ApplyToResultMethods;
+use crate::connectors::json_selection::helpers::missing_as_null;
 use crate::connectors::json_selection::immutable::InputPath;
 use crate::connectors::json_selection::location::Ranged;
 use crate::connectors::json_selection::location::WithRange;
@@ -64,8 +65,16 @@ fn map_method(
 
         for (i, element) in array.iter().enumerate() {
             let input_path = input_path.append(JSON::Number(i.into()));
-            let (applied_opt, arg_errors) =
+            let (applied_opt, mut arg_errors) =
                 first_arg.apply_to_path(element, vars, &input_path, spec);
+            // ->map is index-preserving (a element that produces nothing becomes
+            // null rather than being dropped), so the input index is also the
+            // output index. Contrast ->filter, which deliberately does not do
+            // this: it renumbers, so an input index would name the wrong output
+            // element, and a coarser path beats a wrong one.
+            for error in &mut arg_errors {
+                error.prepend_output_segment(JSON::Number(i.into()));
+            }
             errors.extend(arg_errors);
             output.insert(i, applied_opt.unwrap_or(JSON::Null));
         }
@@ -101,14 +110,33 @@ fn map_shape(
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    first_arg.compute_output_shape(context, shape.clone(), dollar_shape.clone())
+                    missing_as_null(
+                        context,
+                        first_arg.compute_output_shape(
+                            context,
+                            shape.clone(),
+                            dollar_shape.clone(),
+                        ),
+                    )
                 })
                 .collect::<Vec<_>>();
             let new_tail = first_arg.compute_output_shape(context, tail.clone(), dollar_shape);
+            // A None tail means there are no more elements, so a None result
+            // there must not become Null. The mapped tail is kept even so, as it
+            // was before, since expressions like `$([])->map({ id: "x" })`
+            // depend on it to validate against their expected output.
+            let new_tail = if tail.is_none() {
+                new_tail
+            } else {
+                missing_as_null(context, new_tail)
+            };
             Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
         }
         _ => Shape::list(
-            first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
+            missing_as_null(
+                context,
+                first_arg.compute_output_shape(context, input_shape.any_item([]), dollar_shape),
+            ),
             input_shape.locations().cloned(),
         ),
     }
@@ -221,6 +249,28 @@ mod tests {
                     }))
                 ]
             ),
+        );
+    }
+
+    // Mapping an array with no more elements (a None tail) keeps the mapped
+    // tail shape, as before connect/v0.5 changed how missing elements map.
+    // Without it, `$([])->map({ id: "x" })` has no `id` field to validate.
+    #[rstest::rstest]
+    #[case::v0_3(ConnectSpec::V0_3)]
+    #[case::v0_4(ConnectSpec::V0_4)]
+    #[case::v0_5(ConnectSpec::V0_5)]
+    fn map_shape_keeps_mapped_tail_of_empty_array(#[case] spec: ConnectSpec) {
+        assert_eq!(
+            selection!(r#"items: $([])->map({ id: "x" })"#, spec)
+                .shape()
+                .pretty_print(),
+            r#"{ items: List<{ id: "x" }> }"#,
+        );
+        assert_eq!(
+            selection!(r#"items: $(["a"])->map(@)"#, spec)
+                .shape()
+                .pretty_print(),
+            r#"{ items: ["a"] }"#,
         );
     }
 }
