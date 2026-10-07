@@ -572,8 +572,10 @@ mod tests {
 
     use crate::subgraph::typestate::Subgraph;
 
+    /// `connect/v0.1` is auto-upgraded to `v0.2` during expansion, so the expanded schema links
+    /// `v0.2` and gets the `v0.2` definitions. See `connectors::spec::upgrade_connect_link_if_needed`.
     #[test]
-    fn expands_connect_v01() {
+    fn expands_connect_v01_as_v0_2() {
         let sdl = r#"
             type Query { hello: String }
             extend schema
@@ -590,7 +592,7 @@ mod tests {
           query: Query
         }
 
-        extend schema @link(url: "https://specs.apollo.dev/federation/v2.10") @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@source"])
+        extend schema @link(url: "https://specs.apollo.dev/federation/v2.10") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@source"])
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -1234,6 +1236,7 @@ mod tests {
 
         let subgraph_error = Subgraph::parse("s1", "http://s1", sdl)
             .expect("parsed successfully")
+            // Raised by expansion itself (spec definition checking), not by GraphQL validation.
             .expand_links()
             .expect_err("should fail");
         assert_eq!(

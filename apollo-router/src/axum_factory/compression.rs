@@ -168,7 +168,6 @@ mod tests {
     use async_compression::tokio::write::DeflateDecoder;
     use async_compression::tokio::write::GzipDecoder;
     use async_compression::tokio::write::ZstdDecoder;
-    use futures::StreamExt as _;
     use futures::stream;
     use rand::RngExt as _;
     use rstest::rstest;

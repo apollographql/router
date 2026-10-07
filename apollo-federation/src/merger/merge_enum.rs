@@ -177,7 +177,7 @@ impl Merger {
                     CompositionError::EnumValueMismatch {
                         message: format!(
                             "Enum type \"{}\" is used as both input type (for example, as type of \"{}\") and output type (for example, as type of \"{}\"), but value \"{}\" is not defined in all the subgraphs defining \"{}\": ",
-                            &value_pos.type_name, input_example.coordinate, output_example.coordinate, &value_pos.value_name, &value_pos.type_name
+                            value_pos.type_name, input_example.coordinate, output_example.coordinate, value_pos.value_name, value_pos.type_name
                         ),
                     },
                     &value_pos,

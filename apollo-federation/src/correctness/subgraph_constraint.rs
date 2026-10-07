@@ -47,9 +47,10 @@ fn is_resolvable(
 }
 
 impl<'a> SubgraphConstraint<'a> {
-    pub(crate) fn at_root(
-        subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
-    ) -> Self {
+    /// A constraint with no type information: all subgraphs and types are possible. The
+    /// comparison may start at any scope (e.g. the entity type for `@requires`/`@key`
+    /// conditions); the first type condition encountered narrows the constraint to that scope.
+    pub(crate) fn new(subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>) -> Self {
         let all_subgraphs = subgraphs_by_name.keys().cloned().collect();
         SubgraphConstraint {
             subgraphs_by_name,

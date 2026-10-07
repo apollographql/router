@@ -16,16 +16,18 @@ mod pretty;
 mod selection_set;
 mod selection_trie;
 
-// Pretty code is currently only used in tests, so this cfg is to suppress the
-// unused lint warning. If pretty code is needed in not test code, feel free to
-// remove the `#[cfg(test)]`.
 #[allow(unused_imports)] // Consumers land in follow-up PRs.
 pub(crate) use analysis::SelectionAnalysis;
 pub use apply_to::*;
 pub(crate) use lit_expr::LitExpr;
 pub(crate) use location::Ranged;
+// Validation uses this to check an output shape the same way method shapes
+// check their arguments, without denying one that could succeed at runtime.
+pub(crate) use methods::could_satisfy;
 pub use parser::*;
-#[cfg(test)]
+// Pretty printing is used outside tests now: ->withWarning renders the syntax of
+// a call whose message it had to discard, so the author can find the expression
+// that was supposed to produce it.
 pub(crate) use pretty::*;
 pub(crate) use selection_trie::SelectionTrie;
 #[cfg(test)]

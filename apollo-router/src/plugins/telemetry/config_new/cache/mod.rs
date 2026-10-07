@@ -3,6 +3,7 @@ use std::sync::Arc;
 use attributes::CacheAttributes;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry::metrics::Counter;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -30,6 +31,11 @@ pub(crate) const CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
 pub(crate) const RESPONSE_CACHE_METRIC: &str = "apollo.router.response.cache";
 const ENTITY_TYPE: Key = Key::from_static_str("graphql.type.name");
 const CACHE_HIT: Key = Key::from_static_str("cache.hit");
+/// Connector source id ("subgraph_name.source_name") on connector cache hit/miss metrics. Emitted
+/// under the `subgraph.name` key so subgraph and connector cache series share one attribute, as
+/// documented in observability.mdx. (Honoring operator-configured attributes/selectors on the
+/// connector path — rather than always emitting this one — is tracked as follow-up work.)
+const CONNECTOR_SOURCE_NAME: Key = Key::from_static_str("subgraph.name");
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -227,5 +233,225 @@ impl Instrumented for CacheInstruments {
         if let Some(field_length) = &self.cache_hit_response_cache {
             field_length.on_error(error, ctx);
         }
+    }
+}
+
+/// Cache instruments for connector services.
+///
+/// Unlike `CacheInstruments` which is typed on `subgraph::Request/Response` and uses the
+/// `CustomCounter` generic machinery, this struct directly holds an OTel counter and reads
+/// cache hit/miss data from the request context. This avoids needing `Selector`/`Selectors`
+/// trait impls for connector request/response types.
+pub(crate) struct ConnectorCacheInstruments {
+    counter: Option<Counter<f64>>,
+    source_name: String,
+}
+
+impl ConnectorCacheInstruments {
+    pub(crate) fn new(counter: Option<Counter<f64>>, source_name: String) -> Self {
+        Self {
+            counter,
+            source_name,
+        }
+    }
+
+    /// Read cache hit/miss data from context and record metrics.
+    /// Call this after the connector service response is available.
+    pub(crate) fn on_response(&self, context: &crate::Context) {
+        let Some(counter) = &self.counter else {
+            return;
+        };
+
+        let cache_info: ResponseCacheSubgraph = match context
+            .get(ResponseCacheMetricContextKey::new(self.source_name.clone()))
+            .ok()
+            .flatten()
+        {
+            Some(cache_info) => cache_info,
+            None => {
+                return;
+            }
+        };
+
+        for (entity_type, ResponseCacheHitMiss { hit, miss }) in &cache_info.0 {
+            if *hit > 0 {
+                counter.add(
+                    *hit as f64,
+                    &[
+                        KeyValue::new(ENTITY_TYPE, entity_type.to_string()),
+                        KeyValue::new(CACHE_HIT, true),
+                        KeyValue::new(CONNECTOR_SOURCE_NAME, self.source_name.clone()),
+                    ],
+                );
+            }
+            if *miss > 0 {
+                counter.add(
+                    *miss as f64,
+                    &[
+                        KeyValue::new(ENTITY_TYPE, entity_type.to_string()),
+                        KeyValue::new(CACHE_HIT, false),
+                        KeyValue::new(CONNECTOR_SOURCE_NAME, self.source_name.clone()),
+                    ],
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::Context;
+    use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+
+    fn config_with_response_cache_instrument() -> InstrumentsConfig {
+        serde_json::from_value(serde_json::json!({
+            "cache": {
+                "apollo.router.response.cache": {
+                    "attributes": { "graphql.type.name": true }
+                }
+            }
+        }))
+        .expect("config should parse")
+    }
+
+    /// The connector hit/miss path of the `apollo.router.response.cache` instrument: given the
+    /// per-source hit/miss context entry the caching layer writes, the configured counter must
+    /// emit with `graphql.type.name` and `cache.hit` attributes. This is the config→counter→emit
+    /// seam; the caching layer's context writes are covered by the response_cache integration
+    /// tests, and the end-to-end pipeline wiring by black-box testing.
+    #[tokio::test]
+    async fn connector_response_cache_instrument_emits_hits_and_misses() {
+        async {
+            let config = config_with_response_cache_instrument();
+            let static_instruments = Arc::new(config.new_builtin_cache_instruments());
+            let source_name = "connectors.api".to_string();
+
+            // Miss
+            let context = Context::new();
+            let mut hit_miss = HashMap::new();
+            hit_miss.insert(
+                "Query".to_string(),
+                ResponseCacheHitMiss { hit: 0, miss: 1 },
+            );
+            let _ = context.insert(
+                ResponseCacheMetricContextKey::new(source_name.clone()),
+                ResponseCacheSubgraph(hit_miss),
+            );
+            config
+                .new_connector_cache_instruments(static_instruments.clone(), source_name.clone())
+                .on_response(&context);
+
+            assert_counter!(
+                "apollo.router.response.cache",
+                1.0,
+                "graphql.type.name" = "Query",
+                "cache.hit" = false,
+                "subgraph.name" = "connectors.api"
+            );
+
+            // Hit (fresh context, as in a second request)
+            let context = Context::new();
+            let mut hit_miss = HashMap::new();
+            hit_miss.insert(
+                "Query".to_string(),
+                ResponseCacheHitMiss { hit: 1, miss: 0 },
+            );
+            let _ = context.insert(
+                ResponseCacheMetricContextKey::new(source_name.clone()),
+                ResponseCacheSubgraph(hit_miss),
+            );
+            config
+                .new_connector_cache_instruments(static_instruments.clone(), source_name.clone())
+                .on_response(&context);
+
+            assert_counter!(
+                "apollo.router.response.cache",
+                1.0,
+                "graphql.type.name" = "Query",
+                "cache.hit" = true,
+                "subgraph.name" = "connectors.api"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// Entity-batch shape: hits and misses for the same type accumulate into the two
+    /// attribute-distinguished series.
+    #[tokio::test]
+    async fn connector_response_cache_instrument_partial_hit() {
+        async {
+            let config = config_with_response_cache_instrument();
+            let static_instruments = Arc::new(config.new_builtin_cache_instruments());
+            let source_name = "connectors.api".to_string();
+
+            let context = Context::new();
+            let mut hit_miss = HashMap::new();
+            hit_miss.insert(
+                "Product".to_string(),
+                ResponseCacheHitMiss { hit: 2, miss: 1 },
+            );
+            let _ = context.insert(
+                ResponseCacheMetricContextKey::new(source_name.clone()),
+                ResponseCacheSubgraph(hit_miss),
+            );
+            config
+                .new_connector_cache_instruments(static_instruments.clone(), source_name)
+                .on_response(&context);
+
+            assert_counter!(
+                "apollo.router.response.cache",
+                2.0,
+                "graphql.type.name" = "Product",
+                "cache.hit" = true,
+                "subgraph.name" = "connectors.api"
+            );
+            assert_counter!(
+                "apollo.router.response.cache",
+                1.0,
+                "graphql.type.name" = "Product",
+                "cache.hit" = false,
+                "subgraph.name" = "connectors.api"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    /// The instrument must NOT emit when it isn't configured (counter absent).
+    #[tokio::test]
+    async fn connector_response_cache_instrument_disabled_by_default() {
+        async {
+            let config: InstrumentsConfig =
+                serde_json::from_value(serde_json::json!({})).expect("config should parse");
+            let static_instruments = Arc::new(config.new_builtin_cache_instruments());
+            let context = Context::new();
+            let mut hit_miss = HashMap::new();
+            hit_miss.insert(
+                "Query".to_string(),
+                ResponseCacheHitMiss { hit: 1, miss: 0 },
+            );
+            let _ = context.insert(
+                ResponseCacheMetricContextKey::new("connectors.api".to_string()),
+                ResponseCacheSubgraph(hit_miss),
+            );
+            config
+                .new_connector_cache_instruments(static_instruments, "connectors.api".to_string())
+                .on_response(&context);
+
+            assert!(
+                crate::metrics::collect_metrics()
+                    .find("apollo.router.response.cache")
+                    .is_none(),
+                "unconfigured instrument must not emit"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

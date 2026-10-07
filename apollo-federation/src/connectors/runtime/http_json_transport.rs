@@ -25,7 +25,7 @@ use crate::connectors::runtime::debug::DebugRequest;
 use crate::connectors::runtime::debug::SelectionData;
 use crate::connectors::runtime::mapping::Problem;
 use crate::connectors::runtime::mapping::aggregate_apply_to_errors;
-use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_problem_locations;
+use crate::connectors::runtime::mapping::aggregate_apply_to_errors_with_warning_locations;
 
 /// Request to an HTTP transport
 #[derive(Debug)]
@@ -80,7 +80,7 @@ pub fn make_request(
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let (uri, uri_apply_to_errors) = transport.make_uri(&inputs)?;
     let uri_mapping_problems =
-        aggregate_apply_to_errors_with_problem_locations(uri_apply_to_errors);
+        aggregate_apply_to_errors_with_warning_locations(uri_apply_to_errors);
 
     let method = transport.method;
     let request = http::Request::builder()
@@ -96,7 +96,7 @@ pub fn make_request(
         transport.body.is_some(),
     );
     let header_mapping_problems =
-        aggregate_apply_to_errors_with_problem_locations(header_apply_to_errors);
+        aggregate_apply_to_errors_with_warning_locations(header_apply_to_errors);
 
     let (json_body, form_body, body, content_length, body_apply_to_errors) =
         if let Some(ref selection) = transport.body {

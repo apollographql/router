@@ -30,6 +30,12 @@ members = [
     "xtask",
 ]
 
+# Line tables keep file:line in backtraces while making rebuilds and the build output smaller.
+# For full debug info (e.g. inspecting locals in a debugger), build with
+# CARGO_PROFILE_DEV_DEBUG=true.
+[profile.dev]
+debug = "line-tables-only"
+
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
 # If you un-comment the next line with 1.60.0, compile fails on circle-ci linux
@@ -48,9 +54,9 @@ debug = 1
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]
 ahash = "0.8.11"
-apollo-compiler = "1.32.0"
+apollo-compiler = "1.33.0"
 apollo-parser = "0.8.6"
-apollo-smith = "0.15.2"
+apollo-smith = "0.16.0"
 async-trait = "0.1.77"
 encoding_rs = "0.8"
 heck = "0.5.0"
@@ -71,7 +77,7 @@ serde_json = { version = "1.0.114", features = [
     "preserve_order",
     "float_roundtrip",
 ] }
-serde_json_bytes = { version = "0.2.5", features = ["preserve_order"] }
+serde_json_bytes = { version = "0.2.6", features = ["preserve_order"] }
 similar = { version = "3.0.0", features = ["inline"] }
 sha1 = "0.10.6"
 tempfile = "3.10.1"

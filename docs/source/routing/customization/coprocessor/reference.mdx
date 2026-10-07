@@ -313,6 +313,8 @@ This value is present for coprocessor requests from the router's `SubgraphServic
 
 The HTTP status code returned with a response.
 
+Absent on a `ConnectorResponse` whose request failed before a response was received, and on one for a mapping-only connector, which makes no HTTP call.
+
 </td>
 </tr>
 
@@ -1014,3 +1016,4 @@ The following keys are populated by the demand control plugin:
 ```
 
 </ExpansionPanel>
+

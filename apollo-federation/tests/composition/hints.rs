@@ -1957,7 +1957,7 @@ type Query @shareable {
     http: {
       GET: "/resources"
     }
-    selection: ""
+    selection: "id description"
   )
 }
 
@@ -1989,7 +1989,7 @@ type Resource {
         assert_has_hint(
             &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.10",
+            "Subgraph upgraded has been implicitly upgraded from federation v2.5 to v2.11",
         );
     }
 
@@ -2010,7 +2010,16 @@ type Query @shareable {
     http: {
       GET: "/resources"
     }
-    selection: ""
+    selection: "id description"
+  )
+
+  resource(id: ID!): Resource @connect(
+    source: "v1"
+    http: {
+      GET: "/resources/{$args.id}"
+    }
+    selection: "id description"
+    entity: true
   )
 }
 
@@ -2031,12 +2040,12 @@ type Resource @shareable @key(fields: "id") {
         assert_has_hint(
             &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.10",
+            "Subgraph upgraded-1 has been implicitly upgraded from federation v2.5 to v2.11",
         );
         assert_has_hint(
             &result,
             "IMPLICITLY_UPGRADED_FEDERATION_VERSION",
-            "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.10",
+            "Subgraph upgraded-2 has been implicitly upgraded from federation v2.5 to v2.11",
         );
     }
 

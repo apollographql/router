@@ -199,9 +199,10 @@ impl<'schema> Selection<'schema> {
 
                 for concrete_type_ref in concrete_type_refs {
                     // Use the new shape-based walk method for each concrete type
-                    match validator.walk_selection_with_shape(concrete_type_ref, &shape) {
-                        Ok(mut fields) => all_resolved_fields.append(&mut fields),
-                        Err(err) => return Err(err),
+                    {
+                        let mut fields =
+                            validator.walk_selection_with_shape(concrete_type_ref, &shape)?;
+                        all_resolved_fields.append(&mut fields)
                     }
                 }
 
@@ -523,7 +524,7 @@ impl<'schema> SelectionValidator<'schema> {
                     code: Code::CircularReference,
                     message: format!(
                         "Circular reference detected in {coordinate}: type `{type_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.coordinate,
+                        coordinate = self.coordinate,
                         selection_path = self
                             .path_with_root()
                             .map(|part| match part {
@@ -610,6 +611,30 @@ impl<'schema> SelectionValidator<'schema> {
                         continue;
                     }
 
+                    // A field whose shape is an error means the mapping that
+                    // produces it is malformed: a method called wrongly, most
+                    // often. The shape functions already diagnosed it precisely
+                    // (`Error<"Method ->withWarning requires exactly one
+                    // argument, the value to record as the message, got 0">`);
+                    // without this arm that diagnosis is computed and
+                    // discarded, the selection type-checks, and the author
+                    // finds out only when a request runs and the mapping
+                    // silently produces nothing. Reported here rather than in
+                    // the terminal `ShapeCase::Error` arm below because an
+                    // error nested in an object never reaches that arm: the
+                    // walk treats a non-object field shape as a scalar leaf and
+                    // stops.
+                    if let ShapeCase::Error(shape::Error { message, .. }) = field_shape.case() {
+                        return Err(Message {
+                            code: Code::InvalidSelection,
+                            message: format!(
+                                "{} contains an invalid mapping for field `{field_name}`: {message}",
+                                self.coordinate,
+                            ),
+                            locations: self.get_shape_locations(field_shape.locations()),
+                        });
+                    }
+
                     let fields_by_type_name = type_ref.get_fields(field_name.as_str());
                     if fields_by_type_name.is_empty() {
                         return Err(Message {
@@ -658,7 +683,7 @@ impl<'schema> SelectionValidator<'schema> {
                                 code: Code::ConnectorsFieldWithArguments,
                                 message: format!(
                                     "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
-                                    coordinate = &self.coordinate,
+                                    coordinate = self.coordinate,
                                     parent_type = type_ref.name(),
                                     field_name = field_name,
                                 ),
@@ -895,7 +920,7 @@ impl<'schema> LegacySelectionValidator<'schema> {
                     code: Code::CircularReference,
                     message: format!(
                         "Circular reference detected in {coordinate}: type `{new_object_name}` appears more than once in `{selection_path}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                        coordinate = &self.coordinate,
+                        coordinate = self.coordinate,
                         selection_path = self.path_string(field.definition),
                         new_object_name = object.name,
                     ),
@@ -1042,7 +1067,7 @@ impl<'schema> GroupVisitor<LegacyGroup<'schema>, LegacyField<'schema>>
                         code: Code::SelectedFieldNotFound,
                         message: format!(
                             "{coordinate} contains field `{field_name}`, which does not exist on `{parent_type}`.",
-                            coordinate = &self.coordinate,
+                            coordinate = self.coordinate,
                             parent_type = group.ty.name,
                         ),
                         locations: self.get_selection_location(selection).collect(),

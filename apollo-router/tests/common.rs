@@ -21,6 +21,7 @@ use fred::interfaces::KeysInterface;
 use fred::prelude::Config as RedisConfig;
 use fred::types::scan::Scanner;
 use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
@@ -125,6 +126,30 @@ const TEST_LICENSE_JWKS_SECRET_BASE64URL: &str =
 /// stays valid through any reasonable test session and well within
 /// tokio's `DelayQueue` scheduler cap.
 fn mint_test_license_jwt() -> String {
+    mint_license_jwt(None, LICENSE_SIX_MONTHS_SECS, LICENSE_SIX_MONTHS_SECS)
+}
+
+/// ~6 months in seconds: far enough out that a minted JWT stays valid through
+/// any reasonable test session, and well within tokio's `DelayQueue`
+/// scheduler cap (about a year — see `mint_license_jwt`).
+#[allow(dead_code)]
+pub const LICENSE_SIX_MONTHS_SECS: i64 = 60 * 60 * 24 * 180;
+
+/// Mint a test license JWT signed with the bundled HS256 test secret.
+///
+/// `allowed_features` is the `allowedFeatures` claim: `None` omits the claim
+/// entirely (which `LicenseLimits` interprets as "all features allowed"),
+/// `Some(&[])` is an empty allow-list. `warn_at_offset_secs` and
+/// `halt_at_offset_secs` are relative to now — negative values put the claim
+/// in the past. Keep future offsets under about a year: the license stream
+/// schedules `haltAt`/`warnAt` on a tokio `DelayQueue`, which cannot schedule
+/// `Instant`s derived from far-future `SystemTime`s.
+#[allow(dead_code)]
+pub fn mint_license_jwt(
+    allowed_features: Option<&[&str]>,
+    warn_at_offset_secs: i64,
+    halt_at_offset_secs: i64,
+) -> String {
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
@@ -134,23 +159,24 @@ fn mint_test_license_jwt() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system clock before unix epoch")
-        .as_secs();
-    let six_months_secs: u64 = 60 * 60 * 24 * 180;
-    let halt_at = now + six_months_secs;
+        .as_secs() as i64;
 
     let secret_bytes = URL_SAFE_NO_PAD
         .decode(TEST_LICENSE_JWKS_SECRET_BASE64URL)
         .expect("test JWKS secret is valid base64url");
     let key = jsonwebtoken::EncodingKey::from_secret(&secret_bytes);
     let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
-    let claims = serde_json::json!({
+    let mut claims = serde_json::json!({
         "exp": 10000000000_u64,
         "iss": "https://www.apollographql.com/",
         "sub": "apollo",
         "aud": "SELF_HOSTED",
-        "warnAt": halt_at,
-        "haltAt": halt_at,
+        "warnAt": now + warn_at_offset_secs,
+        "haltAt": now + halt_at_offset_secs,
     });
+    if let Some(features) = allowed_features {
+        claims["allowedFeatures"] = serde_json::json!(features);
+    }
     jsonwebtoken::encode(&header, &claims, &key).expect("sign test license JWT")
 }
 
@@ -1420,11 +1446,17 @@ impl IntegrationTest {
     }
 
     /// Make a raw multipart request to the router.
+    ///
+    /// By default the form is streamed part by part. With `buffered`, it is collected first and
+    /// sent as a single body with a `Content-Length`. Use this when the router rejects the request
+    /// after reading only the first parts: if the rest of a streamed body is still arriving, the
+    /// router closes the connection and the client can hit a reset before it reads the response.
     #[allow(dead_code)]
     pub fn execute_multipart_request(
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
+        buffered: bool,
     ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
@@ -1439,14 +1471,26 @@ impl IntegrationTest {
             let span_id = span.context().span().span_context().trace_id().to_string();
 
             async move {
-                let mut request = client
+                let builder = client
                     .post(url)
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("apollo-require-preflight", "test")
-                    .multipart(request)
-                    .build()
-                    .unwrap();
+                    .header("apollo-require-preflight", "test");
+                let builder = if buffered {
+                    let content_type =
+                        format!("multipart/form-data; boundary={}", request.boundary());
+                    let chunks: Vec<bytes::Bytes> = request
+                        .into_stream()
+                        .try_collect()
+                        .await
+                        .expect("multipart form can be buffered");
+                    builder
+                        .header(CONTENT_TYPE, content_type)
+                        .body(chunks.concat())
+                } else {
+                    builder.multipart(request)
+                };
+                let mut request = builder.build().unwrap();
 
                 // Optionally transform the request if needed
                 let transformer = transform.unwrap_or(core::convert::identity);

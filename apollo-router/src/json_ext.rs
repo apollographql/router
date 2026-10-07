@@ -1073,7 +1073,15 @@ impl Path {
     }
 
     // Checks whether self and other are equal if PathElement::Flatten and PathElement::Index are
-    // treated as equal
+    // treated as equal, and PathElement::Key type conditions are ignored.
+    //
+    // Type conditions on a `Key` only matter while a path is still being matched against live,
+    // still-typed data (see `iterate_path`, which strips them once matched: they're a filter
+    // applied once, not part of a materialized path's identity). By the time we're comparing an
+    // error's declared path (which can still carry a type condition from the query plan) against
+    // the real per-entity paths a fetch actually produced, every candidate path already satisfies
+    // whatever type condition applied, so a `Key` with a type condition and a `Key` without one at
+    // the same position denote the same location and must compare equal here.
     pub fn equal_if_flattened(&self, other: &Path) -> bool {
         if self.len() != other.len() {
             return false;
@@ -1083,6 +1091,7 @@ impl Path {
             let equal_elements = match (elem1, elem2) {
                 (PathElement::Index(_), PathElement::Flatten(_)) => true,
                 (PathElement::Flatten(_), PathElement::Index(_)) => true,
+                (PathElement::Key(k1, _), PathElement::Key(k2, _)) => k1 == k2,
                 (elem1, elem2) => elem1 == elem2,
             };
             if !equal_elements {
@@ -1432,6 +1441,30 @@ mod tests {
         let path = Path::from("obj/arr/@/obj2");
         let result = Value::from_path(&path, json);
         assert_eq!(result, json!({"obj":{"arr":null}}));
+    }
+
+    #[test]
+    fn test_equal_if_flattened_ignores_key_type_conditions() {
+        // A fetch-level error's declared path (from the query plan) can retain a
+        // type condition on a `Key` element when the fetch is reached through an abstract-typed
+        // (interface/union) field, e.g. `.../node|[BlockBuilderCoreListingCollection]/collection`.
+        // The real per-entity paths produced during execution never carry that type condition
+        // (`iterate_path` strips it once matched). These must still compare equal, or a fetch-level
+        // error (e.g. a subgraph timeout) silently fails to attach to any entity and is dropped.
+        let declared_error_path =
+            Path::from("edges/@/node|[BlockBuilderCoreListingCollection]/collection");
+        let real_entity_path = Path::from("edges/3/node/collection");
+        assert!(declared_error_path.equal_if_flattened(&real_entity_path));
+        assert!(real_entity_path.equal_if_flattened(&declared_error_path));
+
+        // Different key names must still not match, type condition or no.
+        let different_key = Path::from("edges/3/node/otherField");
+        assert!(!declared_error_path.equal_if_flattened(&different_key));
+
+        // Pre-existing Index/Flatten equivalence must still hold.
+        let flatten_path = Path::from("edges/@/node/collection");
+        let index_path = Path::from("edges/7/node/collection");
+        assert!(flatten_path.equal_if_flattened(&index_path));
     }
 
     #[test]

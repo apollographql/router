@@ -18,7 +18,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 📚 Documentation
 -->
 
-# [2.16.x](unreleased) - Unreleased
+# [2.18.x](unreleased) - Unreleased
 
 ## 🐛 Fixes
 
@@ -76,6 +76,148 @@ Federation 2 pattern.
 
 By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/9832>
 
+### Process renamed root operation types in deterministic order ([PR #10396](https://github.com/apollographql/router/pull/10396))
+
+Renamed root operation types were processed using `HashMap`, which led to
+non-deterministic order. Re-generating the same supergraph schema could result in
+semantically equivalent schemas with different type ordering. Renamed root
+operation types are now processed in order using `IndexMap`.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10396>
+
+### Allow nested object literals in requestless connectors ([PR #10394](https://github.com/apollographql/router/pull/10394))
+
+A `@connect` directive with no `http:` (a virtual connector) failed composition
+with `REQUESTLESS_SELECTION_USES_REQUEST_DATA` when its selection contained a
+nested object literal, such as `price: { amount: 1395, currencyCode: "USD" }`,
+even though it reads nothing from a response. These selections now compose as
+expected. Selections that do read the response body, like `price { amount }` or a
+bare `$`, are still rejected.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10394>
+
+### Connector validation no longer rejects some `->` method calls that work at runtime ([PR #10286](https://github.com/apollographql/router/pull/10286))
+
+Composition could reject connector expressions that succeed at runtime, such as
+`$args.ids->map(@)->joinNotNull(",")`, because the shape checks for several `->`
+methods were stricter than the methods themselves. Validation now only rejects a
+method call when no possible value could make it succeed.
+
+The same applies to `isSuccess`, which counts a missing or non-boolean value as
+failure at runtime. Expressions like `$args.s?->eq("a")` or a `->match` without a
+boolean fallback no longer fail composition. Only an `isSuccess` expression that
+can never be a boolean, like `$.items->size`, is rejected.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10286>
+
+### Connector validation reports errors in `->` method arguments and accepts `null` array elements ([PR #10316](https://github.com/apollographql/router/pull/10316))
+
+Composition now rejects expressions with an error inside most `->` method
+arguments, like `$(true)->and($(1)->gt("x"))`, which always fail at runtime.
+`->in`, `->contains` and `->joinNotNull` no longer reject array elements that are
+`null` or have no value, which the runtime skips.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10316>
+
+### Fix connector mappings misreading names that begin with a keyword or a number ([PR #10260](https://github.com/apollographql/router/pull/10260))
+
+`JSONSelection` could stop reading a name partway through and treat the rest as a
+separate selection:
+
+- **Names beginning with `null`, `true`, or `false`.** `displayName: nullableName`
+  parsed as `displayName: null ableName`, assigning `null` to `displayName` and
+  adding a selection for `ableName`. In other positions, such as
+  `$(nullField ?? "fallback")`, it failed with an opaque
+  `nom::error::ErrorKind::Eof`.
+- **Paths rooted at a number.** `alias: 1.foo` parsed as `alias: 1.0 foo`, and
+  `$(1.foo)` failed to parse.
+
+Bare keys like `nullableName` or `outer { nullableName }` were never affected.
+
+A selection list also now rejects two items that abut with an identifier character
+on each side and nothing between them, so input like `alias: 1b: 2` is an error
+rather than two selections. Minified input like `{a{x}b}` still parses.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/10260>
+
+### Cache sorted out-edges during query graph followup precompute ([PR #9690](https://github.com/apollographql/router/pull/9690))
+
+During federated query graph construction, `precompute_non_trivial_followup_edges()`
+called `out_edges()` once per edge, and each of those calls filtered and sorted a
+fresh list of the tail node's outgoing edges. On connector-heavy supergraphs, where
+many synthetic subgraphs share entity types and produce a dense cross-subgraph key
+graph, the same lists were rebuilt over and over.
+
+The filtered and sorted list is now computed once per tail node and reused. The
+edge set and its order are unchanged. On a connector-expanded supergraph with 32
+connectors, total allocation during router startup drops from 5.85 GB to 0.85 GB
+and startup time drops from 40.8s to 31.7s.
+
+By [@benjamn](https://github.com/benjamn) in <https://github.com/apollographql/router/pull/9690>
+
+### Reduce memory use and repeated work during query graph construction ([PR #10358](https://github.com/apollographql/router/pull/10358))
+
+Dense federated query graphs, including connector-expanded schemas, could reserve
+excessive memory and repeatedly filter identical outgoing edges during graph
+construction, increasing the cost of schema composition.
+
+Root-resolution and subgraph-entry transitions now reuse the final filtered
+followups for each destination. Filtered key followup vectors grow with the
+surviving edges instead of reserving space for every candidate. Transitions that
+retain all candidates keep exact-size preallocation, avoiding excess capacity on
+wide graphs. Followup edge membership and ordering are preserved.
+
+By [@cgati](https://github.com/cgati) in <https://github.com/apollographql/router/pull/10358>
+
+## 🛠 Maintenance
+
+### Connectors are validated as part of subgraph validation ([PR #10035](https://github.com/apollographql/router/pull/10035))
+
+Connectors validation used to run outside this crate, in `federation-rs`, which
+wrapped the individual composition phases and interleaved connectors work between
+them. It now runs inside `Subgraph::validate`, so `compose` owns the whole
+pipeline and connectors validation cannot be skipped. Diagnostic codes are
+unchanged.
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/10035>
+
+# [2.16.4](https://crates.io/crates/apollo-federation/2.16.4) - 2026-09-24
+
+## 🚀 Features
+
+### Add federation 3 compatibility shim for GraphQL 2025 spec `@deprecated` changes ([PR #10029](https://github.com/apollographql/router/pull/10029))
+
+Composition now automatically upgrades federation 2 subgraph schemas for
+compatibility with the GraphQL September 2025 spec (federation 3). Two
+transformations are applied during the upgrade phase, with composition hints
+emitted for each:
+
+- `@deprecated(reason: null)` has its `reason` argument stripped, leaving a
+  bare `@deprecated`, because `reason` became non-nullable in the 2025 spec.
+- `@deprecated` on an implementing field whose interface field is not
+  deprecated is removed, as this is disallowed by the 2025 spec.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10029>
+
+## 🐛 Fixes
+
+### Deduplicate equivalent paths during satisfiability validation ([PR #10134](https://github.com/apollographql/router/pull/10134))
+
+During satisfiability validation, advancing subgraph paths across a transition
+can produce multiple options that share the same tail node, subgraph-entry
+source, contexts, and runtime types. These equivalent options advance identically
+from that point on, so keeping more than one exemplar per equivalence class only
+multiplies work on every subsequent transition.
+
+This change deduplicates such options after each transition, keeping one exemplar
+per equivalence class. Trade-off: satisfiability error messages may omit some
+subgraph bullets that would have appeared without dedup. The set of schemas that
+pass or fail validation is unchanged.
+
+By [@tninesling](https://github.com/tninesling) in <https://github.com/apollographql/router/pull/10134>
+
+# [2.16.2](https://crates.io/crates/apollo-federation/2.16.2) - 2026-08-13
+
 ### Propagate directives from `@interfaceObject` fields to `@external` implementations ([PR #9831](https://github.com/apollographql/router/pull/9831))
 
 When an implementation re-declares a field as `@external` (e.g. to reference it in `@requires`), the field's only resolvable definition lives on the abstracting `@interfaceObject`. Directives like `@tag` applied there were not being propagated to the implementation's copy in the supergraph.
@@ -97,6 +239,24 @@ against the supergraph. `@requires` is now partially validated against subgraph 
 and fully validated against supergraph schema during the merge process.
 
 By [@dariuszkuc](https://github.com/dariuszkuc) in <https://github.com/apollographql/router/pull/9722>
+
+# [2.16.1](https://crates.io/crates/apollo-federation/2.16.1) - 2026-07-21
+
+### Fix various issues in GraphQL value coercion and validation
+
+The `coerce_value()` function in `compat.rs` has been rewritten to fix multiple bugs in how default values in schemas and operations are coerced and validated.
+
+Bug fixes include:
+
+- Invalid default values are now correctly reported as errors.
+- Removed default value auto-expansion logic.
+- Non-list value coercion is now only applied to operations.
+- Fixed missing coercion edge cases to always reject null values applied to non-null types.
+- Fixed validation of unknown fields in input object default values.
+- Added missing enum value validations to ensure they are valid and are part of the enum definition.
+- Adds missing validation for `@deprecated` on required arguments and input fields.
+
+By [@sachindshinde](https://github.com/sachindshinde)
 
 # [2.16.0](https://crates.io/crates/apollo-federation/2.16.0) - 2026-06-30
 
@@ -124,10 +284,6 @@ Applying a merged directive to an `@external` field now produces a `MERGED_DIREC
 
 Custom specifications can no longer import from `https://specs.apollo.dev`. This prevents future conflicts with new Apollo specifications.
 
-##### Invalid input object defaults are removed
-
-Default values for input objects are now validated at composition time. If a default object value is missing required fields, composition removes it from the supergraph.
-
 ##### `@tag` validation runs during composition
 
 `@tag` errors now surface during the main composition process so you can catch tag problems at build time.
@@ -146,10 +302,6 @@ The `_FieldSet` scalar no longer accepts non-string values through automatic coe
 ##### Hints are emitted on composition failure
 
 The composition process now emits hints even when composition fails, giving you more context to diagnose what went wrong.
-
-##### Input object defaults are fully expanded
-
-When an input object has a default value of `{}`, composition now expands it to list all field defaults explicitly — for example, `{}` becomes `{ limit: 100, sort: DESC }`.
 
 ##### Default values are normalized to their correct types
 
