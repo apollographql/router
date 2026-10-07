@@ -147,9 +147,9 @@ impl Config {
 
 /// The retry policy for every OTLP exporter the router builds: none.
 ///
-/// Sending each export once keeps a failing collector from delaying the flush on shutdown or
-/// reload. Apollo metrics already retry in `RetryMetricExporter`, so retrying here as well would
-/// multiply the attempts.
+/// Metric exports already retry in `RetryMetricExporter`, so exporter retries would multiply the
+/// attempts. Trace exports are sent once, so a failing collector doesn't delay the flush on
+/// shutdown or reload.
 pub(super) fn no_retries() -> RetryPolicy {
     RetryPolicy::disabled()
 }
