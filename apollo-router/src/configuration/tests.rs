@@ -28,7 +28,7 @@ use crate::error::SchemaError;
 fn schema_generation() {
     let schema = generate_config_schema();
     insta::with_settings!({sort_maps => true}, {
-        assert_json_snapshot!(&schema)
+        assert_json_snapshot!(&schema);
     });
     let json_schema =
         serde_json::to_string_pretty(&schema).expect("must be able to deserialize schema");

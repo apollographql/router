@@ -30,6 +30,12 @@ members = [
     "xtask",
 ]
 
+# Line tables keep file:line in backtraces while making rebuilds and the build output smaller.
+# For full debug info (e.g. inspecting locals in a debugger), build with
+# CARGO_PROFILE_DEV_DEBUG=true.
+[profile.dev]
+debug = "line-tables-only"
+
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
 # If you un-comment the next line with 1.60.0, compile fails on circle-ci linux

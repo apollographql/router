@@ -248,6 +248,7 @@ where
 
 #[cfg(test)]
 mod tests {
+<<<<<<< HEAD
     use std::time::Duration;
 
     use futures::future::BoxFuture;
@@ -255,6 +256,9 @@ mod tests {
     use tokio::time::Instant;
     use tower::BoxError;
     use tower::Layer;
+=======
+    use futures::FutureExt;
+>>>>>>> origin/dev
     use tower::Service;
     use tower::ServiceExt;
     use tower_test::mock::Handle;
@@ -265,6 +269,7 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::subgraph;
 
+<<<<<<< HEAD
     // Testing strategy:
     //  - Two calls with the same cache key are joined in the same task via tokio::join!.
     //    join! polls fut1 first: it locks the wait_map, inserts an entry, calls the inner
@@ -275,28 +280,20 @@ mod tests {
     //  - The driver handles exactly one request. If dedup fails and fut2 reaches the inner
     //    service a second time, the closed handle returns an error and res2 fails.
     #[tokio::test(flavor = "multi_thread")]
+=======
+    #[tokio::test]
+>>>>>>> origin/dev
     async fn test_dedup_service() {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
-
-        let driver = tokio::spawn(async move {
-            let (req, responder) = handle.next_request().await.unwrap();
-            responder.send_response(
-                SubgraphResponse::fake_builder()
-                    .context(req.context)
-                    .build(),
-            );
-        });
-
         let mut svc = QueryDeduplicationService::new(mock);
         let request = SubgraphRequest::fake_builder().build();
 
-        // call() returns a lazy BoxFuture — no work happens yet. Both calls share the same
-        // wait_map Arc, so they will see each other's entries when polled.
         svc.ready().await.expect("it is ready");
-        let fut1 = svc.call(request.clone());
+        let mut fut1 = svc.call(request.clone());
         svc.ready().await.expect("it is ready");
-        let fut2 = svc.call(request);
+        let mut fut2 = svc.call(request);
 
+<<<<<<< HEAD
         // tokio::join! polls fut1 first. fut1 inserts a wait_map entry and yields waiting
         // for the inner service response. join! then polls fut2, which finds the entry and
         // joins the shared fetch. Both are suspended before the driver responds,
@@ -304,8 +301,26 @@ mod tests {
         let (res1, res2) = tokio::join!(fut1, fut2);
         res1.expect("fut1 joined");
         res2.expect("fut2 joined");
+=======
+        // Poll both callers before the mock answers: fut1 starts the fetch and fut2 subscribes
+        // to its result.
+        assert!(futures::poll!(&mut fut1).is_pending());
+        assert!(futures::poll!(&mut fut2).is_pending());
+>>>>>>> origin/dev
 
-        crate::plugin::test::await_mock_driver(driver).await;
+        let (req, responder) = handle.next_request().await.expect("the mock is called");
+        assert!(
+            handle.next_request().now_or_never().is_none(),
+            "the second caller joins the first fetch instead of calling the mock"
+        );
+        responder.send_response(
+            SubgraphResponse::fake_builder()
+                .context(req.context)
+                .build(),
+        );
+
+        fut1.await.expect("fut1 gets the response");
+        fut2.await.expect("fut2 gets the response");
     }
 
     const TIMEOUT: Duration = Duration::from_millis(100);
