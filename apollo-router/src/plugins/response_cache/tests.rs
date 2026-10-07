@@ -7241,7 +7241,7 @@ async fn partial_entity_hit_stores_fetched_entity_under_its_own_ttl() {
         .unwrap();
     assert!(
         client_s_maxage <= ADVERTISED_TTL - CACHED_AGE,
-        "the client header must be as fresh as the oldest cached organization, got {client_cache_control:?}"
+        "the client header must not advertise more time than the oldest cached organization has left, got {client_cache_control:?}"
     );
 
     let organization_3 = get_cache_keys_context(&response)
