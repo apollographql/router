@@ -14,6 +14,7 @@ use crate::plugins::telemetry::metrics::BlockingSafeTokioRuntime;
 use crate::plugins::telemetry::otlp::Config;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::tracing::TracingBuilder;
 use crate::plugins::telemetry::reload::tracing::TracingConfigurator;
@@ -108,6 +109,7 @@ impl Config {
 
         let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
+            .with_retry_policy(no_retries())
             .with_timeout(self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
 
@@ -126,6 +128,7 @@ impl Config {
 
         let mut exporter_builder = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
+            .with_retry_policy(no_retries())
             .with_timeout(self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
 

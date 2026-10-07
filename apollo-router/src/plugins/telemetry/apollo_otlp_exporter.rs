@@ -27,6 +27,7 @@ use super::apollo::ErrorsConfiguration;
 use super::config_new::subgraph::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
 use super::otlp::TelemetryDataKind;
+use super::otlp::no_retries;
 use super::otlp::process_endpoint;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use super::tracing::apollo_telemetry::LightSpanData;
@@ -72,6 +73,7 @@ impl ApolloOtlpExporter {
                 metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
                 SpanExporterBuilder::new()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_timeout(batch_config.max_export_timeout)
                     .with_endpoint(endpoint.to_string())
@@ -90,6 +92,7 @@ impl ApolloOtlpExporter {
                 headers.insert("x-api-key".to_string(), apollo_key.to_string());
                 SpanExporterBuilder::new()
                     .with_http()
+                    .with_retry_policy(no_retries())
                     .with_timeout(batch_config.max_export_timeout)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
                     .with_headers(headers)

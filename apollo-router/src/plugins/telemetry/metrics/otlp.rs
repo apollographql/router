@@ -11,6 +11,7 @@ use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
@@ -74,6 +75,7 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_tonic()
+            .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
             .with_timeout(self.batch_processor.max_export_timeout)
             .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
@@ -96,6 +98,7 @@ impl super::super::otlp::Config {
 
         let mut exporter_builder = MetricExporter::builder()
             .with_http()
+            .with_retry_policy(no_retries())
             .with_temporality(self.temporality.into())
             .with_timeout(self.batch_processor.max_export_timeout)
             .with_headers(self.http.headers.clone());
