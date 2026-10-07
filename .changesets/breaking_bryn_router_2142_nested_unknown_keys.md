@@ -4,4 +4,4 @@
 
 To migrate, run `router config validate` and correct or remove any unknown key it reports in these blocks.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/####
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10317
