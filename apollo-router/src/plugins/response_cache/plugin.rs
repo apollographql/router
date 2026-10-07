@@ -254,8 +254,6 @@ pub(crate) struct Config {
     pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Configure response caching per connector source
-    // Holds Ttl, a tuple struct (see PLAT-320), and Redis config, which have no Validate impl.
-    #[config(skip_validate)]
     pub(crate) connector: ConnectorCacheConfiguration,
 
     /// Global invalidation configuration

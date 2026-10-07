@@ -13,8 +13,6 @@ use lru::LruCache;
 use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::sync::RwLock;
@@ -83,8 +81,7 @@ use crate::services::connector::request_service::TransportOutcome;
 use crate::spec::TYPENAME;
 
 /// Configuration for connector response caching: global defaults plus per-source overrides
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorCacheConfiguration {
     /// Options applying to all connector sources
     #[schemars(extend("default" = {
@@ -98,7 +95,6 @@ pub(crate) struct ConnectorCacheConfiguration {
     pub(crate) all: ConnectorCacheSource,
 
     /// Map of subgraph_name.connector_source_name to configuration
-    #[serde(default)]
     #[schemars(extend("default" = {}))]
     pub(crate) sources: HashMap<String, ConnectorCacheSource>,
 }
@@ -158,20 +154,20 @@ impl ConnectorCacheConfiguration {
 
 /// Per connector source configuration for response caching
 // Holds Redis credentials, so it cannot serialize its defaults: the schema declares them by hand.
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) struct ConnectorCacheSource {
     /// Redis configuration
-    #[serde(default)]
     #[schemars(extend("default" = null))]
+    // The Redis config doesn't use the configuration attribute, so it has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) redis: Option<storage::redis::Config>,
 
     /// Expiration for all keys for this connector source, unless overridden by the `Cache-Control` header in connector responses
-    #[serde(default)]
+    // Ttl is a tuple struct, which the configuration attribute can't take yet (PLAT-320).
+    #[config(skip_validate)]
     pub(crate) ttl: Option<Ttl>,
 
     /// Activates caching for this connector source, overrides the global configuration
-    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
     /// The client request header names whose values are folded into this source's cache key.
@@ -201,16 +197,18 @@ pub(crate) struct ConnectorCacheSource {
     // better fit and cheaper here. (See `configuration::cors` for the same pattern.) This is a
     // deliberate, localized departure from the surrounding `Vec`/`String` convention — keep it
     // scoped to these cache-key-header fields unless you are converting a field for the same reason.
-    #[serde(default)]
+    //
+    // A slice (`[Arc<str>]`) has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) cache_key_headers: Option<Arc<[Arc<str>]>>,
 
     /// Context key used to separate cache sections per user
-    #[serde(default)]
     pub(crate) private_id: Option<String>,
 
     /// Invalidation configuration
-    #[serde(default)]
     #[schemars(extend("default" = null))]
+    // SubgraphInvalidationConfig doesn't use the configuration attribute, so it has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
 }
 
