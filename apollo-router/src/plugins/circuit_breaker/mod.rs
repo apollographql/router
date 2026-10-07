@@ -115,8 +115,8 @@ struct ConnectorConfig {
     sources: HashMap<String, CircuitBreakerConfig>,
 }
 
-/// A classifier deciding what a response the inner service considered successful records against
-/// the circuit.
+/// Decides whether a response the inner service returned counts as a failure or a success for the
+/// circuit.
 ///
 /// A function pointer rather than a closure so that the resulting
 /// [`CircuitBreakerLayer`] has a nameable type, which the per-target layer cache needs.
