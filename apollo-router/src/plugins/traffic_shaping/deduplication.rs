@@ -248,17 +248,14 @@ where
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     use std::time::Duration;
 
+    use futures::FutureExt;
     use futures::future::BoxFuture;
     use http::StatusCode;
     use tokio::time::Instant;
     use tower::BoxError;
     use tower::Layer;
-=======
-    use futures::FutureExt;
->>>>>>> origin/dev
     use tower::Service;
     use tower::ServiceExt;
     use tower_test::mock::Handle;
@@ -269,20 +266,7 @@ mod tests {
     use crate::services::SubgraphResponse;
     use crate::services::subgraph;
 
-<<<<<<< HEAD
-    // Testing strategy:
-    //  - Two calls with the same cache key are joined in the same task via tokio::join!.
-    //    join! polls fut1 first: it locks the wait_map, inserts an entry, calls the inner
-    //    service, and yields (pending on the mock response). join! then polls fut2: it finds
-    //    the entry and joins the shared fetch. Both are suspended before the driver ever
-    //    responds. This ordering is structural — cooperative scheduling in a single task —
-    //    not a timing assumption.
-    //  - The driver handles exactly one request. If dedup fails and fut2 reaches the inner
-    //    service a second time, the closed handle returns an error and res2 fails.
-    #[tokio::test(flavor = "multi_thread")]
-=======
     #[tokio::test]
->>>>>>> origin/dev
     async fn test_dedup_service() {
         let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
         let mut svc = QueryDeduplicationService::new(mock);
@@ -293,20 +277,10 @@ mod tests {
         svc.ready().await.expect("it is ready");
         let mut fut2 = svc.call(request);
 
-<<<<<<< HEAD
-        // tokio::join! polls fut1 first. fut1 inserts a wait_map entry and yields waiting
-        // for the inner service response. join! then polls fut2, which finds the entry and
-        // joins the shared fetch. Both are suspended before the driver responds,
-        // guaranteeing deduplication.
-        let (res1, res2) = tokio::join!(fut1, fut2);
-        res1.expect("fut1 joined");
-        res2.expect("fut2 joined");
-=======
         // Poll both callers before the mock answers: fut1 starts the fetch and fut2 subscribes
         // to its result.
         assert!(futures::poll!(&mut fut1).is_pending());
         assert!(futures::poll!(&mut fut2).is_pending());
->>>>>>> origin/dev
 
         let (req, responder) = handle.next_request().await.expect("the mock is called");
         assert!(
