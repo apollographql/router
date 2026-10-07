@@ -112,6 +112,13 @@ pub(super) fn extract(
                     &subgraph_enum_value,
                 )?;
 
+                // Skip if the field doesn't exist in this subgraph (e.g. expanded
+                // connector subgraphs where graphs: includes all synthetic subgraphs
+                // but only one owns the field)
+                if object_field_pos.try_get(subgraph.schema.schema()).is_none() {
+                    continue;
+                }
+
                 object_field_pos
                     .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
             }
@@ -188,6 +195,10 @@ pub(super) fn extract(
                     .map(|t| matches!(t, TypeDefinitionPosition::Interface(_)))
                     .unwrap_or_default()
                 {
+                    // Skip if the field doesn't exist in this subgraph
+                    if intf_field_pos.try_get(subgraph.schema.schema()).is_none() {
+                        continue;
+                    }
                     intf_field_pos
                         .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 } else {
@@ -196,6 +207,10 @@ pub(super) fn extract(
                         type_name: intf_field_pos.type_name.clone(),
                         field_name: intf_field_pos.field_name.clone(),
                     };
+                    // Skip if the field doesn't exist in this subgraph
+                    if object_field_pos.try_get(subgraph.schema.schema()).is_none() {
+                        continue;
+                    }
                     object_field_pos
                         .insert_directive(&mut subgraph.schema, Node::new(directive.clone()))?;
                 }

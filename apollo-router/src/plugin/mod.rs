@@ -627,9 +627,9 @@ pub trait PluginUnstable: Send + Sync + 'static {
     ///   `Control::Break`.
     ///
     /// On the response, a plugin can read and write [`Response::context`], read and
-    /// rewrite the raw transport outcome through [`Response::transport_result`], and
+    /// rewrite the raw transport outcome through [`Response::transport_outcome`], and
     /// read or replace what is returned to the client through [`Response::data`],
-    /// [`Response::error`] and their setters. Rewriting `transport_result` does not
+    /// [`Response::error`] and their setters. Rewriting `transport_outcome` does not
     /// recompute the mapped response, so changing one without the other makes
     /// telemetry disagree with what the client receives.
     ///
@@ -638,7 +638,7 @@ pub trait PluginUnstable: Send + Sync + 'static {
     /// [`Request::context`]: connector_request::Request::context
     /// [`Request::into_error_response`]: connector_request::Request::into_error_response
     /// [`Response::context`]: connector_request::Response::context
-    /// [`Response::transport_result`]: connector_request::Response::transport_result
+    /// [`Response::transport_outcome`]: connector_request::Response::transport_outcome
     /// [`Response::data`]: connector_request::Response::data
     /// [`Response::error`]: connector_request::Response::error
     fn connector_request_service(
@@ -811,6 +811,14 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles connector execution (wrapping individual connector requests)
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxCloneService,
+    ) -> crate::services::connect::BoxCloneService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -942,6 +950,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         source_name: String,
     ) -> connector_request::BoxCloneService;
 
+    /// This service handles connector execution (wrapping individual connector requests)
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxCloneService,
+    ) -> crate::services::connect::BoxCloneService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -1004,6 +1018,13 @@ where
         source_name: String,
     ) -> connector_request::BoxCloneService {
         self.connector_request_service(service, source_name)
+    }
+
+    fn connector_service(
+        &self,
+        service: crate::services::connect::BoxCloneService,
+    ) -> crate::services::connect::BoxCloneService {
+        self.connector_service(service)
     }
 
     fn name(&self) -> &'static str {

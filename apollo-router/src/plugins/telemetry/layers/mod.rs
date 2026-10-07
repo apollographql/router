@@ -2,6 +2,7 @@
 //! request/response type. Each submodule owns its `Instrument*Layer` type(s) and the
 //! `Telemetry::instrument_*_layer` accessor(s) that construct them.
 
+pub(crate) mod connect;
 pub(crate) mod connector;
 pub(crate) mod execution;
 pub(crate) mod http_client;

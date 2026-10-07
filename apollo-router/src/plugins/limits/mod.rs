@@ -418,6 +418,7 @@ mod test {
     use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::test::PluginTestHarness;
     use crate::services::connector;
+    use crate::services::connector::request_service::TransportOutcome;
     use crate::services::router;
 
     async fn body_to_string(resp: router::Response) -> String {
@@ -946,7 +947,6 @@ mod test {
         req: &crate::services::connector::request_service::Request,
     ) -> crate::services::connector::request_service::Response {
         use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
-        use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
         use apollo_federation::connectors::runtime::responses::MappedResponse;
         use serde_json_bytes::Value;
 
@@ -954,11 +954,12 @@ mod test {
         crate::services::connector::request_service::Response {
             context: req.context.clone(),
             subgraph_name: req.connector.id.subgraph_name.to_string(),
-            transport_result: Ok(TransportResponse::Http(HttpResponse { inner: parts })),
+            transport_outcome: TransportOutcome::Response(HttpResponse { inner: parts }),
             mapped_response: MappedResponse::Data {
                 data: Value::Null,
                 key: req.key.clone(),
                 problems: vec![],
+                declared_errors: vec![],
             },
             break_status: None,
         }

@@ -59,7 +59,6 @@ use std::sync::Arc;
 use apollo_configuration::configuration;
 use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
-use apollo_federation::connectors::runtime::http_json_transport::TransportResponse;
 use apollo_qos::circuit_breaker::CircuitBreakerConfig;
 use apollo_qos::circuit_breaker::CircuitBreakerLayer;
 use http::StatusCode;
@@ -74,6 +73,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::SubgraphResponse;
 use crate::services::connector;
+use crate::services::connector::request_service::TransportOutcome;
 use crate::services::http::IncompleteResponseBody;
 use crate::services::subgraph;
 
@@ -309,9 +309,9 @@ fn connector_response_is_failure(response: &connector::request_service::Response
     if let Some(status) = response.break_status {
         return status_is_failure(status);
     }
-    match &response.transport_result {
-        Err(_) => true,
-        Ok(TransportResponse::Http(http_response)) => {
+    match &response.transport_outcome {
+        TransportOutcome::Error(_) => true,
+        TransportOutcome::Response(http_response) => {
             status_is_failure(http_response.inner.status)
                 || http_response
                     .inner
@@ -321,7 +321,7 @@ fn connector_response_is_failure(response: &connector::request_service::Response
         }
         // Mapping-only requests never touch the network, and go around the circuit before they
         // could get here.
-        Ok(TransportResponse::MappingOnly) => false,
+        TransportOutcome::MappingOnly => false,
     }
 }
 
