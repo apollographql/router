@@ -233,17 +233,17 @@ pub(crate) fn build_subgraph_service(
         // The rate limit can't be cloned, so neither box beneath this buffer needs `Clone`; the
         // buffer is what makes the stack cloneable again.
         .layer(box_layer())
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)
         })
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
             t.load_shed_layer(ShapingTarget::Subgraph(name))
         })
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
             t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
         .layer(box_layer())
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
         // The circuit judges execution, never admission: what admission turns away never
@@ -253,11 +253,13 @@ pub(crate) fn build_subgraph_service(
         .apply_plugin_layer(plugins, |c: &CircuitBreaker| c.subgraph_circuit_layer(name))
         // Below deduplication, one timeout covers every request joined to the same fetch, and it
         // bounds the plugins and the call beneath it.
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| t.subgraph_timeout_layer(name))
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
+            t.subgraph_timeout_layer(name)
+        })
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_compression_layer(name)
         })
-        .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+        .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_backpressure_buffer_layer(name)
         })
         .rust_plugins(plugins.clone(), |plugin, service| {
@@ -314,13 +316,13 @@ pub(crate) fn build_connector_request_services(
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
                 .buffered()
                 .layer(box_layer())
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_error_response_layer(&source)
                 })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
                     t.load_shed_layer(ShapingTarget::ConnectorSource(&source))
                 })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
                     t.rate_limit_layer(ShapingTarget::ConnectorSource(&source))
                 })
                 // The operation's `max_requests` is admission too: a request over it is never sent,
@@ -330,13 +332,13 @@ pub(crate) fn build_connector_request_services(
                 .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
                     c.connector_source_circuit_layer(&source)
                 })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_timeout_layer(&source)
                 })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_compression_layer(&source)
                 })
-                .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
+                .apply_required_plugin_option_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_backpressure_buffer_layer(&source)
                 })
                 .rust_plugins(plugins.clone(), |plugin, service| {
@@ -355,7 +357,7 @@ pub(crate) fn build_connector_request_services(
 
 /// The longest type name a service may have where [`box_layer`] or [`box_clone_layer`] boxes
 /// it: well above the largest boxed type in these stacks, and far below the unboxed stack.
-const MAX_BOXED_TYPE_NAME_LEN: usize = 100_000;
+const MAX_BOXED_TYPE_NAME_LEN: usize = 20_000;
 
 /// A layer that boxes a service `S` into `Boxed`.
 type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
@@ -370,7 +372,7 @@ type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
 /// # Panics
 ///
 /// In debug builds, when the stack is built, if the boxed service's type name is longer than
-/// [`MAX_BOXED_TYPE_NAME_LEN`].
+/// [`MAX_BOXED_TYPE_NAME_LEN`], or if it wraps one optional layer's `Either` directly in another.
 fn box_layer<S, Req>() -> BoxingLayer<S, BoxService<Req, S::Response, S::Error>>
 where
     S: Service<Req> + Send + 'static,
@@ -387,7 +389,7 @@ where
 /// # Panics
 ///
 /// In debug builds, when the stack is built, if the boxed service's type name is longer than
-/// [`MAX_BOXED_TYPE_NAME_LEN`].
+/// [`MAX_BOXED_TYPE_NAME_LEN`], or if it wraps one optional layer's `Either` directly in another.
 fn box_clone_layer<S, Req>() -> BoxingLayer<S, BoxCloneService<Req, S::Response, S::Error>>
 where
     S: Service<Req> + Clone + Send + 'static,
@@ -406,6 +408,15 @@ fn debug_assert_boxed_type_name_bounded<S>() {
         "a boxed service's type name is {} bytes, over the limit of {MAX_BOXED_TYPE_NAME_LEN}; \
          see `box_layer` and box the stack again beneath this point. The type starts: {}",
         name.len(),
+        name.get(..500).unwrap_or(name),
+    );
+    // A shaping getter already returns an `OptionLayer`; wrapping it in another one names the
+    // service beneath three times instead of twice.
+    debug_assert!(
+        !name.contains("Either<tower::util::either::Either<"),
+        "an optional layer is wrapped in a second optional layer. Apply a getter that returns an \
+         `OptionLayer` with `apply_required_plugin_option_layer`, not \
+         `apply_required_plugin_layer`. The type starts: {}",
         name.get(..500).unwrap_or(name),
     );
 }
