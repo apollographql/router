@@ -91,7 +91,7 @@ where
     /// Panics if `priority` is not in `AVAILABLE_PRIORITIES`
     pub(crate) fn send(&self, priority: Priority, message: T) -> Result<(), SendError> {
         self.queued_count
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous_count| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |previous_count| {
                 (previous_count < self.capacity).then_some(previous_count + 1)
             })
             .map_err(|_| SendError::QueueIsFull)?;
