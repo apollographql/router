@@ -40,6 +40,41 @@ pub(crate) struct HttpResponse {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IncompleteResponseBody;
 
+/// Marks a subgraph response the router produced without calling the subgraph: a coprocessor or
+/// plugin broke the request, or the response cache answered it.
+///
+/// Such a response says nothing about the subgraph's health, so the circuit breaker records no
+/// outcome for it. It lives in the response's `http` extensions, like [`IncompleteResponseBody`].
+/// A connector response carries the same fact as its `answered_by_router` field.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AnsweredByRouter;
+
+/// Marks a subgraph response to a fetch that failed because the client's file upload, which the
+/// router was streaming to the subgraph, failed part way through.
+///
+/// The failure is the client's, not the subgraph's, so the circuit breaker records no outcome for
+/// it, whatever status the response carries.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct UploadStreamFailed;
+
+/// The error an HTTP fetch fails with when the client's file upload it was streaming failed part
+/// way through. It reads exactly like the error it wraps, and only tells the subgraph service to
+/// mark its response with [`UploadStreamFailed`].
+#[derive(Debug)]
+pub(crate) struct UploadStreamError(pub(crate) BoxError);
+
+impl std::fmt::Display for UploadStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for UploadStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
 /// Test-only wrapper around the `build_http_client_service` pipeline function: a
 /// subgraph client for `name` built from default configuration with no plugins.
 #[cfg(test)]

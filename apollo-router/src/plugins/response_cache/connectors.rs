@@ -1353,7 +1353,7 @@ impl ConnectorRequestCacheService {
                             transport_outcome: TransportOutcome::Error(
                                 apollo_federation::connectors::runtime::errors::Error::InvalidCacheControl(message),
                             ),
-                            break_status: None,
+                            answered_by_router: true,
                             mapped_response:
                                 apollo_federation::connectors::runtime::responses::MappedResponse::Error {
                                     error: runtime_error,
@@ -1646,7 +1646,9 @@ impl ConnectorRequestCacheService {
                 // downstream — telemetry selectors, the coprocessor `ConnectorResponse` stage,
                 // public connector plugins — reads a hit exactly as it reads a fetch, so none
                 // of them need a cache concept. This mirrors the subgraph path, which builds a
-                // `subgraph::Response` on a hit and lets its status default to 200.
+                // `subgraph::Response` on a hit and lets its status default to 200. Only the
+                // circuit breaker is told, through `answered_by_router`: a hit says nothing about
+                // the source's health.
                 //
                 // The status is the one the origin actually sent (replayed from the entry)
                 // rather than a blanket 200, because `@connect(errors: { is_success: ... })`
@@ -1658,7 +1660,7 @@ impl ConnectorRequestCacheService {
                     context: request.context,
                     subgraph_name,
                     transport_outcome: TransportOutcome::Response(http_response),
-                    break_status: None,
+                    answered_by_router: true,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
                             data: entry.data,

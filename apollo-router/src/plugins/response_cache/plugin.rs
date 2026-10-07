@@ -93,6 +93,7 @@ use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportOutcome;
+use crate::services::http::AnsweredByRouter;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
@@ -1395,7 +1396,7 @@ impl CacheService {
             let cache_control = match CacheControl::try_from(request.subgraph_request.headers()) {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
-                    return Ok(subgraph::Response::builder()
+                    let mut response = subgraph::Response::builder()
                         .subgraph_name(request.subgraph_name)
                         .id(request.id)
                         .context(request.context)
@@ -1406,7 +1407,9 @@ impl CacheService {
                                 .build(),
                         )
                         .extensions(Object::default())
-                        .build());
+                        .build();
+                    response.response.extensions_mut().insert(AnsweredByRouter);
+                    return Ok(response);
                 }
             };
 
@@ -1562,7 +1565,8 @@ impl CacheService {
         ))
         .await?
         {
-            ControlFlow::Break(response) => {
+            ControlFlow::Break(mut response) => {
+                response.response.extensions_mut().insert(AnsweredByRouter);
                 cache_hit.insert(
                     DEFAULT_ROOT_FIELD_TYPE_NAME.to_string(),
                     CacheHitMiss { hit: 1, miss: 0 },
@@ -1773,7 +1777,10 @@ impl CacheService {
         ))
         .await?
         {
-            ControlFlow::Break(response) => Ok(response),
+            ControlFlow::Break(mut response) => {
+                response.response.extensions_mut().insert(AnsweredByRouter);
+                Ok(response)
+            }
             ControlFlow::Continue((request, mut cache_result)) => {
                 let context = request.context.clone();
                 let mut debug_subgraph_request = None;

@@ -180,9 +180,8 @@ impl Request {
     /// a connector request deliberately, for example to circuit break on an upstream a
     /// plugin knows to be unhealthy.
     ///
-    /// The response carries no status, so the router's own circuit breaker counts the
-    /// failure against the connector source, like any other error from a request it has
-    /// admitted.
+    /// The connector source is never called, so the router's own circuit breaker records no
+    /// outcome for the response.
     ///
     /// The error's remaining fields are derived from the request and are not settable,
     /// for the same reason the coprocessor does not let a coprocessor set them: the
@@ -198,7 +197,6 @@ impl Request {
             self.context,
             self.connector,
             self.key,
-            None,
             message,
             code,
             extensions,
@@ -252,10 +250,10 @@ pub struct Response {
     /// are reachable; see the accessors on [`Response`].
     pub(crate) mapped_response: MappedResponse,
 
-    /// The status a coprocessor gave when it broke this request before it was sent, so the
-    /// circuit breaker can judge the break the way it judges a subgraph response's status.
-    /// `None` for every request that was not broken with a status.
-    pub(crate) break_status: Option<http::StatusCode>,
+    /// Whether the router produced this response without calling the source: a coprocessor or
+    /// plugin broke the request, or the response cache answered it. The circuit breaker records
+    /// no outcome for such a response. Without this, a break would look like a transport error.
+    pub(crate) answered_by_router: bool,
 }
 
 impl Response {
@@ -346,7 +344,7 @@ impl Response {
             subgraph_name,
             transport_outcome: TransportOutcome::Error(error),
             mapped_response,
-            break_status: None,
+            answered_by_router: false,
         }
     }
 
@@ -354,7 +352,6 @@ impl Response {
         request_context: Context,
         request_connector: Arc<Connector>,
         request_key: ResponseKey,
-        break_status: Option<http::StatusCode>,
         message: impl Into<String>,
         code: impl Into<String>,
         extensions: impl IntoIterator<Item = (impl Into<ByteString>, impl Into<Value>)>,
@@ -379,7 +376,7 @@ impl Response {
                 key: request_key,
                 problems: Vec::new(),
             },
-            break_status,
+            answered_by_router: true,
         }
     }
 
@@ -412,7 +409,7 @@ impl Response {
             subgraph_name: String::new(),
             transport_outcome: TransportOutcome::Response(http_response),
             mapped_response,
-            break_status: None,
+            answered_by_router: false,
         }
     }
 }
@@ -508,7 +505,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                         subgraph_name: original_subgraph_name,
                         transport_outcome: TransportOutcome::MappingOnly,
                         mapped_response: mapped,
-                        break_status: None,
+                        answered_by_router: false,
                     })
                 }
 

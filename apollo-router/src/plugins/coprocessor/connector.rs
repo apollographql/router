@@ -362,7 +362,6 @@ where
             request.context.clone(),
             request.connector,
             request.key,
-            control.get_http_status().ok(),
             message,
             code,
             extensions,
