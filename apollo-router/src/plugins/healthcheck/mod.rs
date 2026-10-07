@@ -315,7 +315,7 @@ mod test {
     use crate::plugins::test::PluginTestHarness;
     use crate::plugins::test::ServiceHandle;
 
-    /// An interval that sets only `unready` still samples every 5s, rather than every 0s, which
+    /// An interval that omits `sampling` still samples every 5s, rather than every 0s, which
     /// panicked the readiness ticker.
     #[test]
     fn omitted_sampling_interval_defaults_to_five_seconds() {
@@ -327,6 +327,9 @@ mod test {
             config.interval.unready.map(|unready| *unready),
             Some(Duration::from_secs(10))
         );
+
+        let config: ReadinessConfig = serde_json::from_value(json!({ "interval": {} })).unwrap();
+        assert_eq!(*config.interval.sampling, Duration::from_secs(5));
     }
 
     // Create a base for testing. Even though we don't use the test_harness once this function
