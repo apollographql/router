@@ -326,8 +326,8 @@ fn connector_response_is_failure(response: &connector::request_service::Response
     }
 }
 
-/// The outcome a classifier's failure verdict records against the circuit. No response is recorded
-/// as [`Outcome::Ignored`].
+/// Turns a failure check into the outcome the circuit records. Responses are never
+/// [`Outcome::Ignored`].
 fn failure_or_success(is_failure: bool) -> Outcome {
     if is_failure {
         Outcome::Failure
