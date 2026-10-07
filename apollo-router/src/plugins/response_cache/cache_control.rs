@@ -682,6 +682,12 @@ impl CacheControl {
         self.remaining_duration(self.max_age(), Some(now))
     }
 
+    /// Moves `created` back by `seconds`, as if this value had been stored that long ago.
+    #[allow(dead_code)]
+    pub(crate) fn backdate(&mut self, seconds: u64) {
+        self.created -= seconds;
+    }
+
     /// Sets `created` to 0, making time-dependent fields deterministic in snapshot tests.
     #[allow(dead_code)]
     pub(crate) fn zero_out_created(&mut self) {

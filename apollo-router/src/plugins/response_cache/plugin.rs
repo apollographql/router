@@ -1858,25 +1858,32 @@ impl CacheService {
                     }
                 };
 
-                let mut cache_control =
+                let response_cache_control =
                     response.subgraph_cache_control(self.subgraph_ttl.into())?;
 
                 save_original_cache_control(
                     response.id.clone(),
                     &response.context,
-                    cache_control.clone(),
+                    response_cache_control.clone(),
                 );
 
-                if let Some(control_from_cached) = cache_result.1 {
-                    cache_control = cache_control.merge(&control_from_cached);
-                }
+                // The entities this response fetched are stored under its own Cache-Control. The
+                // client header also covers the entities served from cache in this fetch, so it is
+                // only as fresh as the oldest of them. Storing that merged value instead would
+                // give fresh entities the remaining lifetime of their cached siblings.
+                let mut store_cache_control = response_cache_control.clone();
+                let mut header_cache_control = match cache_result.1 {
+                    Some(control_from_cached) => response_cache_control.merge(&control_from_cached),
+                    None => response_cache_control,
+                };
 
-                // if the request had no_store on it, propagate that to this cache control
+                // if the request had no_store on it, propagate that to both cache controls
                 if let Some(request_cache_control) = request_cache_control {
-                    cache_control.merge_no_store(&request_cache_control);
+                    header_cache_control.merge_no_store(&request_cache_control);
+                    store_cache_control.merge_no_store(&request_cache_control);
                 }
 
-                if !is_known_private && cache_control.private() {
+                if !is_known_private && store_cache_control.private() {
                     self.private_queries
                         .write()
                         .await
@@ -1887,7 +1894,7 @@ impl CacheService {
                     storage,
                     self.subgraph_ttl,
                     &mut response,
-                    cache_control.clone(),
+                    store_cache_control,
                     cache_result.0,
                     is_known_private,
                     private_id,
@@ -1897,7 +1904,7 @@ impl CacheService {
                 )
                 .await?;
 
-                cache_control.update_response_headers(response.response.headers_mut())?;
+                header_cache_control.update_response_headers(response.response.headers_mut())?;
 
                 Ok(response)
             }
