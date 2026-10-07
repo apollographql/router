@@ -61,6 +61,7 @@ use apollo_federation::connectors::runtime::errors::Error;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_qos::circuit_breaker::CircuitBreakerConfig;
 use apollo_qos::circuit_breaker::CircuitBreakerLayer;
+use apollo_qos::circuit_breaker::Outcome;
 use http::StatusCode;
 use parking_lot::Mutex;
 use tower::BoxError;
@@ -114,12 +115,12 @@ struct ConnectorConfig {
     sources: HashMap<String, CircuitBreakerConfig>,
 }
 
-/// A classifier deciding whether a response the inner service considered successful should still
-/// count as a failure against the circuit.
+/// A classifier deciding what a response the inner service considered successful records against
+/// the circuit.
 ///
 /// A function pointer rather than a closure so that the resulting
 /// [`CircuitBreakerLayer`] has a nameable type, which the per-target layer cache needs.
-type Classifier<Res> = fn(&Res) -> bool;
+type Classifier<Res> = fn(&Res) -> Outcome;
 
 /// The circuits for one kind of target: all subgraphs, or all connector sources.
 ///
@@ -184,12 +185,12 @@ impl PluginPrivate for CircuitBreaker {
         let config = init.config;
 
         Ok(Self {
-            subgraphs: Circuits::new(config.all, config.subgraphs, subgraph_response_is_failure),
-            connectors: Circuits::new(
-                config.connector.all,
-                config.connector.sources,
-                connector_response_is_failure,
-            ),
+            subgraphs: Circuits::new(config.all, config.subgraphs, |response| {
+                failure_or_success(subgraph_response_is_failure(response))
+            }),
+            connectors: Circuits::new(config.connector.all, config.connector.sources, |response| {
+                failure_or_success(connector_response_is_failure(response))
+            }),
         })
     }
 }
@@ -322,6 +323,16 @@ fn connector_response_is_failure(response: &connector::request_service::Response
         // Mapping-only requests never touch the network, and go around the circuit before they
         // could get here.
         TransportOutcome::MappingOnly => false,
+    }
+}
+
+/// The outcome a classifier's failure verdict records against the circuit. No response is recorded
+/// as [`Outcome::Ignored`].
+fn failure_or_success(is_failure: bool) -> Outcome {
+    if is_failure {
+        Outcome::Failure
+    } else {
+        Outcome::Success
     }
 }
 
