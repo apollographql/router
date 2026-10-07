@@ -543,16 +543,11 @@ macro_rules! gen_map_deferred_response {
                             message: Some(redacted_message(StatusCode::INTERNAL_SERVER_ERROR)),
                             position: None,
                             body: None,
-                            // No Rhai error to redact, since no callback ran. The
-                            // `rhai execution error` prefix is still the marker every cause behind
-                            // a redacted client response is logged under, so keep it here too -
-                            // one log query has to find the whole class.
+                            // Keep the `rhai execution error` prefix so one log search finds every redacted failure.
                             internal_detail: Some(
                                 "rhai execution error: the response stream ended before a primary response was available".to_string()
                             ),
                         };
-                        // Not a callback failure: the response stream ended before there was a
-                        // primary response to hand the map_response callback, so it never ran.
                         tracing::error!(rhai.stage = %$stage, "map_response was not called: {error_details:#?}");
                         return Ok($base::response_failure(
                             context,
@@ -797,11 +792,7 @@ fn default_thrown_status_code() -> StatusCode {
 /// registered, and where in the script the failure happened, so clients get the status code's
 /// reason phrase instead and the real error is logged.
 fn redacted_message(status: StatusCode) -> String {
-    // A script is free to throw a status code that has no reason phrase - `throw #{ status: 599 }`
-    // - so there has to be a fallback. It is deliberately as vague as the status is: saying
-    // "Internal Server Error" alongside a 599 would be a lie. Kept local to the redaction rather
-    // than shared with the other reason-phrase call sites: this wording is chosen for what a client
-    // sees instead of a Rhai error, and should be free to change without moving anything else.
+    // A script can throw a status with no reason phrase, such as 599.
     status
         .canonical_reason()
         .unwrap_or("Unknown Error")
