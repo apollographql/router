@@ -463,7 +463,9 @@ mod test {
         let mut settings = insta::Settings::clone_current();
         settings.set_sort_maps(true);
         settings.add_redaction("[].request_id", "[REDACTED]");
-        settings.bind(|| insta::assert_json_snapshot!(results));
+        settings.bind(|| {
+            insta::assert_json_snapshot!(results);
+        });
         Ok(())
     }
 
