@@ -87,9 +87,10 @@ impl OverflowTracker {
     ///
     /// A scrape only has Prometheus family names, and the exporter's name conversion can map
     /// different OpenTelemetry names to one family. So when the set of overflowing families
-    /// changes, `collect` reads the same pipeline once more, as the Prometheus exporter's own
-    /// reader, for the OpenTelemetry names of the overflowing metrics. Scrapes that show no change
-    /// do no extra work.
+    /// changes, the endpoint calls `collect` to collect the metrics a second time through the
+    /// Prometheus exporter's reader, for the OpenTelemetry names of the overflowing metrics. That
+    /// reruns observable gauge and counter callbacks and copies every metric once, but nothing is
+    /// aggregated twice. It doesn't happen while the set stays the same, except as described next.
     ///
     /// The scrape and the collect are separate readings. An observable gauge runs its callback for
     /// each, so it can overflow in one and not the other. If the collect finds fewer overflowing
