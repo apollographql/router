@@ -68,7 +68,7 @@ impl FilterMeterProvider {
             .delegate(MeterProviderInner::Sdk(delegate))
             .allow(
                 Regex::new(
-                  r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
+                  r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|^apollo\.router\.subgraph_deduplication\.requests$|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
             )
@@ -312,10 +312,18 @@ mod test {
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
             .build();
+        filtered
+            .u64_counter("apollo.router.subgraph_deduplication.requests")
+            .build()
+            .add(1, &[]);
 
         // Mismatches allow
         filtered
             .u64_counter("apollo.router.unknown.test")
+            .build()
+            .add(1, &[]);
+        filtered
+            .u64_counter("apollo.router.subgraph_deduplication.requests.test")
             .build()
             .add(1, &[]);
 
@@ -347,8 +355,11 @@ mod test {
         assert!(metric_names.contains(&"apollo.router.operations.connectors"));
         assert!(metric_names.contains(&"apollo.router.schema.connectors"));
 
+        assert!(metric_names.contains(&"apollo.router.subgraph_deduplication.requests"));
+
         // Mismatches allow
         assert!(!metric_names.contains(&"apollo.router.unknown.test"));
+        assert!(!metric_names.contains(&"apollo.router.subgraph_deduplication.requests.test"));
 
         // Matches deny
         assert!(!metric_names.contains(&"apollo.router.operations.error"));
@@ -417,6 +428,10 @@ mod test {
             .u64_observable_gauge("apollo.router.schema.connectors")
             .with_callback(move |observer| observer.observe(1, &[]))
             .build();
+        filtered
+            .u64_counter("apollo.router.subgraph_deduplication.requests")
+            .build()
+            .add(1, &[]);
         meter_provider.force_flush().unwrap();
 
         let finished = exporter.get_finished_metrics().unwrap();
@@ -427,6 +442,7 @@ mod test {
             .map(|m| m.name())
             .collect();
 
+        assert!(metric_names.contains(&"apollo.router.subgraph_deduplication.requests"));
         assert!(!metric_names.contains(&"apollo.router.config"));
         assert!(!metric_names.contains(&"apollo.router.config.test"));
         assert!(!metric_names.contains(&"apollo.router.entities"));
