@@ -546,7 +546,7 @@ fn now() -> u64 {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl Storage {
-    async fn mocked(
+    pub(crate) async fn mocked(
         config: &Config,
         is_cluster: bool,
         mock_storage: std::sync::Arc<dyn fred::mocks::Mocks>,

@@ -205,6 +205,16 @@ impl StorageInterface {
     pub(crate) fn replace_storage(&self, storage: Storage) -> Option<()> {
         self.all.as_ref()?.set(storage).ok()
     }
+
+    /// A `StorageInterface` whose connector `all` layer is `storage`, with nothing for subgraphs.
+    pub(crate) fn for_connectors(storage: Storage) -> Self {
+        Self {
+            all: None,
+            subgraphs: HashMap::new(),
+            connector_all: Some(Arc::new(storage.into())),
+            connector_sources: HashMap::new(),
+        }
+    }
 }
 
 #[cfg(all(

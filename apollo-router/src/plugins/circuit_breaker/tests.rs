@@ -1435,6 +1435,81 @@ async fn a_connector_request_a_coprocessor_breaks_with_a_5xx_records_nothing() {
     assert_source_breaks_recorded_nothing(&responses);
 }
 
+/// The response cache in front of a connector source turns away a request whose client sent a
+/// `Cache-Control` header it can't parse, without calling the source. A burst of them records
+/// nothing: the two source failures either side of them are still consecutive, and open the
+/// circuit. This covers the cache's check beneath the circuit; it makes the same check at the
+/// connector stage, above the circuit, where a rejection never reaches the circuit at all.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothing() {
+    let plugin = harness(
+        r#"
+        circuit_breaker:
+          connector:
+            all:
+              consecutive_failures: 2
+        "#,
+    )
+    .await;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let source = {
+        let calls = calls.clone();
+        tower::service_fn(move |req: ConnectorRequest| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let response = connector_response(StatusCode::INTERNAL_SERVER_ERROR, &req);
+            async move { Ok::<_, BoxError>(response) }
+        })
+        .boxed_clone()
+    };
+    let cache =
+        crate::plugins::response_cache::connectors::request_cache_for_test(source, "products.api")
+            .await;
+    let service = behind_source_circuit(&plugin, "products.api", cache);
+
+    let send = |cache_control: &'static str| {
+        let mut request = connector_request();
+        request.supergraph_request = Arc::new(
+            http::Request::builder()
+                .header(http::header::CACHE_CONTROL, cache_control)
+                .body(crate::graphql::Request::default())
+                .unwrap(),
+        );
+        service.clone().oneshot(request)
+    };
+    // `no-cache, no-store` sends the request past the cache to the source.
+    const PAST_THE_CACHE: &str = "no-cache, no-store";
+
+    send(PAST_THE_CACHE).await.expect("answered");
+    for _ in 0..BREAKS {
+        let response = send("max-age=notanumber").await.expect("answered");
+        assert_eq!(
+            connector_error_code(&response),
+            Some("INVALID_CACHE_CONTROL_HEADER"),
+            "the cache should have turned it away while the circuit is closed"
+        );
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the cache never calls the source"
+    );
+
+    let response = send(PAST_THE_CACHE).await.expect("answered");
+    assert_ne!(
+        connector_error_code(&response),
+        Some(Error::CircuitBreakerOpen.code())
+    );
+    let response = send(PAST_THE_CACHE).await.expect("answered");
+    assert_eq!(
+        connector_error_code(&response),
+        Some(Error::CircuitBreakerOpen.code()),
+        "the failures either side of the rejections should have opened the circuit"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
 /// A caller that goes away before the subgraph answers says nothing about the subgraph: between
 /// two failures, it must not reset the count of consecutive failures, as a success would.
 #[tokio::test(start_paused = true)]

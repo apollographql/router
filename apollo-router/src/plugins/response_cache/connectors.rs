@@ -2162,6 +2162,47 @@ fn connector_key_inputs(
     Value::Object(root)
 }
 
+/// The connector request cache for `source_name` in front of `service`, as the response cache
+/// places it for a source it caches. Its store is a mock that answers every command with its own
+/// arguments, so it suits tests of what the cache lets through rather than of what it stores.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn request_cache_for_test(
+    service: ConnectorRequestBoxCloneService,
+    source_name: &str,
+) -> ConnectorRequestBoxCloneService {
+    use tower::ServiceExt as _;
+
+    let config = storage::redis::Config::test(false, "connector-request-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, Arc::new(fred::mocks::Echo), drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate("type Query { hello: String }", "schema.graphql").unwrap(),
+    );
+
+    ConnectorRequestCacheService {
+        service,
+        storage: Arc::new(StorageInterface::for_connectors(storage)),
+        source_name: source_name.to_string(),
+        connector_ttl: Duration::from_secs(60),
+        private_id_key: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cache_key_headers: Arc::new([]),
+    }
+    .boxed_clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
