@@ -1678,18 +1678,21 @@ mod tests {
         .expect("url must be valid");
 
         // The graph manifest is discovered once (a GET, never a HEAD) and
-        // never re-read afterward, so a single fixed response is enough.
+        // never re-read afterward. Count requests to prove this directly,
+        // rather than relying on the mock only ever being asked once.
+        let graph_manifest_request_count = Arc::new(AtomicUsize::new(0));
+        let graph_manifest_count = graph_manifest_request_count.clone();
+        let graph_manifest_body = serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap();
+        let graph_manifest_digest = graph_manifest_info.manifest_digest.clone();
         let _ = Mock::given(method("GET"))
             .and(path(manifest_url.path()))
-            .respond_with(
+            .respond_with(move |_request: &Request| {
+                graph_manifest_count.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
-                    .append_header(
-                        "Docker-Content-Digest",
-                        &graph_manifest_info.manifest_digest,
-                    )
+                    .append_header("Docker-Content-Digest", &graph_manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap()),
-            )
+                    .set_body_bytes(graph_manifest_body.clone())
+            })
             .mount(mock_server)
             .await;
 
@@ -1752,6 +1755,11 @@ mod tests {
             1,
             "Blob should not be fetched again when digest is unchanged"
         );
+        assert_eq!(
+            graph_manifest_request_count.load(Ordering::Relaxed),
+            1,
+            "Graph manifest should be fetched once and never re-read across poll cycles"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1762,7 +1770,8 @@ mod tests {
         let entitlement_id = "test-entitlement-id";
 
         // The graph manifest is read once to discover the entitlement id and
-        // never re-read afterward, so it stays fixed for the whole test.
+        // never re-read afterward. Count requests to prove this directly,
+        // rather than relying on the mock only ever being asked once.
         let graph_manifest_info = create_graph_manifest_with_entitlement_id(entitlement_id, None);
         let manifest_url = Url::parse(&format!(
             "{}/v2/{}/manifests/{}",
@@ -1771,17 +1780,19 @@ mod tests {
             reference
         ))
         .expect("url must be valid");
+        let graph_manifest_request_count = Arc::new(AtomicUsize::new(0));
+        let graph_manifest_count = graph_manifest_request_count.clone();
+        let graph_manifest_body = serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap();
+        let graph_manifest_digest = graph_manifest_info.manifest_digest.clone();
         let _ = Mock::given(method("GET"))
             .and(path(manifest_url.path()))
-            .respond_with(
+            .respond_with(move |_request: &Request| {
+                graph_manifest_count.fetch_add(1, Ordering::Relaxed);
                 ResponseTemplate::new(200)
-                    .append_header(
-                        "Docker-Content-Digest",
-                        &graph_manifest_info.manifest_digest,
-                    )
+                    .append_header("Docker-Content-Digest", &graph_manifest_digest)
                     .append_header(http::header::CONTENT_TYPE, OCI_IMAGE_MEDIA_TYPE)
-                    .set_body_bytes(serde_json::to_vec(&graph_manifest_info.oci_manifest).unwrap()),
-            )
+                    .set_body_bytes(graph_manifest_body.clone())
+            })
             .mount(mock_server)
             .await;
 
@@ -1885,6 +1896,12 @@ mod tests {
             blob_request_count.load(Ordering::Relaxed),
             2,
             "Blob should be fetched twice when manifest digest changes"
+        );
+        assert_eq!(
+            graph_manifest_request_count.load(Ordering::Relaxed),
+            1,
+            "Graph manifest should be fetched once and never re-read across poll cycles, \
+             even though the entitlement manifest changed"
         );
     }
 

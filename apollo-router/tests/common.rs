@@ -418,6 +418,12 @@ pub struct IntegrationTest {
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
     stderr_tx: tokio::sync::mpsc::Sender<String>,
+    /// Lines written to the router process's stderr (e.g. a top-level
+    /// `anyhow::Error` from `main()`, printed via `eprintln!` rather than
+    /// through the tracing logger that stdout carries). Continuously
+    /// appended by a background task so reading it never backpressures the
+    /// child process; see `stderr_log_contains` / `wait_for_stderr_message`.
+    stderr_logs: Arc<Mutex<Vec<String>>>,
     apollo_otlp_metrics_rx: tokio::sync::mpsc::Receiver<ExportMetricsServiceRequest>,
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
@@ -926,10 +932,13 @@ impl IntegrationTest {
         // channel) to avoid congestion in one to contend the other
 
         let (stderr_tx, mut stderr_rx) = tokio::sync::mpsc::channel::<String>(2000);
-        // we want to continually drain stderr, not let it build up backpressure
+        // We want to continually drain stderr, not let it build up backpressure, so this
+        // appends to a shared buffer rather than waiting for a test to read it.
+        let stderr_logs = Arc::new(Mutex::new(Vec::new()));
+        let stderr_logs_writer = stderr_logs.clone();
         task::spawn(async move {
-            while stderr_rx.recv().await.is_some() {
-                // we discard stderr to prevent backpressure
+            while let Some(line) = stderr_rx.recv().await {
+                stderr_logs_writer.lock().push(line);
             }
         });
         let collect_stdio = collect_stdio.map(|sender| {
@@ -1004,6 +1013,7 @@ impl IntegrationTest {
             stdio_tx,
             stdio_rx,
             stderr_tx,
+            stderr_logs,
             apollo_otlp_metrics_rx,
             collect_stdio,
             _subgraphs: subgraphs,
@@ -1764,6 +1774,36 @@ impl IntegrationTest {
                 logs = self.logs.join("\n")
             );
         }
+    }
+
+    /// Like `log_contains`, but for stderr — where a top-level `anyhow::Error`
+    /// from `main()` lands (printed via `eprintln!`), not the tracing logger
+    /// that stdout carries.
+    #[allow(dead_code)]
+    pub fn stderr_log_contains(&self, msg: &str) -> bool {
+        self.stderr_logs
+            .lock()
+            .iter()
+            .any(|line| line.contains(msg))
+    }
+
+    /// Like `wait_for_log_message`, but for stderr.
+    #[allow(dead_code)]
+    pub async fn wait_for_stderr_message(&mut self, msg: &str) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if self.stderr_log_contains(msg) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "'{msg}' not detected in stderr. Log dump below:\n\n{logs}",
+            logs = self.stderr_logs.lock().join("\n")
+        );
     }
 
     #[allow(dead_code)]
