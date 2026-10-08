@@ -7350,6 +7350,7 @@ async fn partial_entity_hit_stores_fetched_entity_under_its_own_ttl() {
 enum ToggledSubgraphResponse {
     Healthy,
     PrivateStorable,
+    PrivateStorableNoData,
     PrivateDataWithErrors,
     PrivateStorableWithErrors,
     PrivateNullDataWithErrors,
@@ -7388,6 +7389,9 @@ fn toggled_subgraph_service(
                     Some(healthy_data),
                     vec![],
                 ),
+                ToggledSubgraphResponse::PrivateStorableNoData => {
+                    (http::StatusCode::OK, "private, max-age=600", None, vec![])
+                }
                 ToggledSubgraphResponse::PrivateDataWithErrors => (
                     http::StatusCode::OK,
                     "max-age=0, private, must-revalidate",
@@ -7440,18 +7444,24 @@ fn toggled_subgraph_service(
                     vec![error],
                 ),
             };
-            let mut headers = http::HeaderMap::new();
-            headers.insert(CACHE_CONTROL, HeaderValue::from_static(cache_control));
-            Ok(subgraph::Response::builder()
-                .context(req.context)
-                .subgraph_name(req.subgraph_name)
-                .id(req.id)
-                .and_data(data)
-                .errors(errors)
-                .extensions(crate::json_ext::Object::new())
-                .status_code(status)
-                .headers(headers)
-                .build())
+            // Built like the HTTP subgraph service does, because `subgraph::Response::builder()`
+            // turns missing `data` into `null`.
+            let response = http::Response::builder()
+                .status(status)
+                .header(CACHE_CONTROL, cache_control)
+                .body(
+                    graphql::Response::builder()
+                        .and_data(data)
+                        .errors(errors)
+                        .build(),
+                )
+                .unwrap();
+            Ok(subgraph::Response::new_from_response(
+                response,
+                req.context,
+                req.subgraph_name,
+                req.id,
+            ))
         }
     })
     .boxed()
@@ -7647,6 +7657,7 @@ impl ToggledSubgraphHarness {
 #[tokio::test]
 async fn unstorable_response_does_not_mark_root_field_query_private(
     #[values(
+        ToggledSubgraphResponse::PrivateStorableNoData,
         ToggledSubgraphResponse::PrivateDataWithErrors,
         ToggledSubgraphResponse::PrivateStorableWithErrors,
         ToggledSubgraphResponse::PrivateNullDataWithErrors,
