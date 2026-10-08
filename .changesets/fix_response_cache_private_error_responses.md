@@ -6,4 +6,4 @@ Now a response marks its query as private only if it succeeded and its `Cache-Co
 
 If a connector's mapping declares an error with `->withError` in an entity response, the router now caches none of the entities in that response, whether or not `include_subgraph_errors` shows the error to the client. Before, it could cache the entity that had the error, or skip a different one.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10437
