@@ -1,6 +1,6 @@
 ### Stop disclosing Rhai internals in client-facing error responses ([PR #10004](https://github.com/apollographql/router/pull/10004))
 
-When a Rhai script failed, the router wrapped the failure in its own error text before returning it to the client, which exposed the fact that the router runs Rhai, the names of the script's callbacks, and the line and position where the failure happened:
+When a Rhai script failed, the router wrapped the failure in its own error text before returning it to the client. That revealed that the router runs Rhai, the names of the script's callbacks, and the line and position of the failure:
 
 ```json
 {

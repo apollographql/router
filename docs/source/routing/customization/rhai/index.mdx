@@ -662,11 +662,11 @@ fn supergraph_service(service) {
 }
 ```
 
-Throwing an object map works the same way, and additionally lets you pick the status code and the
+Throwing an object map works the same way, and also lets you pick the status code and the
 full GraphQL response body, as shown in the sections above.
 
-Every _other_ kind of failure is replaced with the status code's reason phrase - such as
-`Internal Server Error` - and the real error is written to the router's logs instead. This covers:
+For every _other_ kind of failure, the client sees the status code's reason phrase, such as
+`Internal Server Error`, and the full error goes to the router's logs. This covers:
 
 - Failures raised by the Rhai engine itself, such as calling an undefined function or a type mismatch.
 - A `throw` that carries only a status, like `throw #{ status: 400 }`, which the client sees as `Bad Request`.
