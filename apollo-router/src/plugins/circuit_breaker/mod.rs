@@ -38,15 +38,23 @@
 //!   joined to it receives the same answer, an open circuit's rejection included.
 //! - **Execution** is everything done to fulfil an admitted fetch: the target's timeout, every
 //!   plugin hook on the fetch's path (Rhai, coprocessors, the response cache, user plugins) and
-//!   the call itself. All of it is beneath the circuit, so the circuit judges it. An expired
-//!   timeout reaches the circuit as the `504` or `Error::GatewayTimeout` it is rendered into and
-//!   counts, a coprocessor or plugin failing the fetch counts like any failure of the target's,
-//!   and a response-cache hit counts as a success, which also means an open circuit turns cache
-//!   hits away.
+//!   the call itself. All of it is beneath the circuit, so an open circuit turns all of it away,
+//!   cache hits included. An expired timeout reaches the circuit as the `504` or
+//!   `Error::GatewayTimeout` it is rendered into and counts, as does a coprocessor or plugin
+//!   failing the fetch with an error.
 //!
-//! The classifiers below therefore hold no rule for anything the router did itself: whatever the
-//! router turns away is placed above the circuit instead. Telemetry sits above both phases and
-//! records every answer, rejections included.
+//! Some answers from beneath the circuit say nothing about the target's health, and the router
+//! marks them so that the classifiers below record no outcome for them:
+//!
+//! - A break by a coprocessor, a rhai script or one of the router's own plugins, or a
+//!   response-cache hit. The router answered without calling the target. Each plugin that breaks
+//!   marks the response it breaks with: a subgraph response carries [`AnsweredByRouter`], and a
+//!   connector response sets `answered_by_router`. A third-party plugin's subgraph break isn't
+//!   marked, so it is judged by its status.
+//! - A file upload whose stream from the client failed while the router was forwarding it to the
+//!   subgraph, marked with [`UploadStreamFailed`]. The client is at fault, not the subgraph.
+//!
+//! Telemetry sits above both phases and records every answer, rejections included.
 //!
 //! A plugin that replaces the target's service instead of forwarding to it, such as
 //! `experimental_mock_subgraphs`, stays behind the circuit. Only a request that never reaches a
@@ -75,7 +83,9 @@ use crate::plugin::PluginPrivate;
 use crate::services::SubgraphResponse;
 use crate::services::connector;
 use crate::services::connector::request_service::TransportOutcome;
+use crate::services::http::AnsweredByRouter;
 use crate::services::http::IncompleteResponseBody;
+use crate::services::http::UploadStreamFailed;
 use crate::services::subgraph;
 
 mod service;
@@ -116,7 +126,7 @@ struct ConnectorConfig {
 }
 
 /// Decides whether a response the inner service returned counts as a failure or a success for the
-/// circuit.
+/// circuit, or records no outcome.
 ///
 /// A function pointer rather than a closure so that the resulting
 /// [`CircuitBreakerLayer`] has a nameable type, which the per-target layer cache needs.
@@ -185,12 +195,12 @@ impl PluginPrivate for CircuitBreaker {
         let config = init.config;
 
         Ok(Self {
-            subgraphs: Circuits::new(config.all, config.subgraphs, |response| {
-                failure_or_success(subgraph_response_is_failure(response))
-            }),
-            connectors: Circuits::new(config.connector.all, config.connector.sources, |response| {
-                failure_or_success(connector_response_is_failure(response))
-            }),
+            subgraphs: Circuits::new(config.all, config.subgraphs, classify_subgraph_response),
+            connectors: Circuits::new(
+                config.connector.all,
+                config.connector.sources,
+                classify_connector_response,
+            ),
         })
     }
 }
@@ -277,8 +287,9 @@ impl Target for SourceTarget {
     }
 }
 
-/// Counts a subgraph response as a failure against the circuit when it has a 5xx or a `429`
-/// status, or when its body was cut off after the headers arrived.
+/// Records no outcome for a subgraph response the router marked as saying nothing about the
+/// subgraph's health. Otherwise counts it as a failure when it has a 5xx or a `429` status, or when
+/// its body was cut off after the headers arrived, and as a success for anything else.
 ///
 /// A `429` says the subgraph is overloaded, which is what the circuit is for. Any other 4xx says
 /// something about the request rather than about the subgraph's health, and a successful response
@@ -286,31 +297,36 @@ impl Target for SourceTarget {
 /// circuit always counts as a failure, whatever this returns — though the subgraph service reports
 /// a failed fetch as a `500` response rather than an `Err`, and a body it failed to read with the
 /// status the headers carried, which is why it marks the response with [`IncompleteResponseBody`].
-fn subgraph_response_is_failure(response: &subgraph::Response) -> bool {
-    status_is_failure(response.response.status())
-        || response
-            .response
-            .extensions()
-            .get::<IncompleteResponseBody>()
-            .is_some()
+fn classify_subgraph_response(response: &subgraph::Response) -> Outcome {
+    let extensions = response.response.extensions();
+    if extensions.get::<AnsweredByRouter>().is_some()
+        || extensions.get::<UploadStreamFailed>().is_some()
+    {
+        return Outcome::Ignored;
+    }
+    if status_is_failure(response.response.status())
+        || extensions.get::<IncompleteResponseBody>().is_some()
+    {
+        Outcome::Failure
+    } else {
+        Outcome::Success
+    }
 }
 
-/// Counts a connector response as a failure against the circuit when the fetch failed during
-/// execution, or when the source answered with a 5xx or a `429` status or with a body that never
-/// arrived in full.
+/// Records no outcome for a connector response the router answered without calling the source.
+/// Otherwise counts it as a failure when the fetch failed during execution, or when the source
+/// answered with a 5xx or a `429` status or with a body that never arrived in full.
 ///
-/// A coprocessor that breaks the request gives it a status, and that status is judged the way a
-/// subgraph response's is: a `401` break says something about the request, a `503` break says the
-/// path to the source is failing. Every other error a connector response carries from beneath the
-/// circuit is execution failing: the source not answering, the target timeout expiring, or a
-/// plugin failing the fetch without a status. The errors the router raises when it declines to
-/// send a request, such as `Error::RateLimited` and `Error::RequestLimitExceeded`, are raised
-/// above the circuit and never reach it.
-fn connector_response_is_failure(response: &connector::request_service::Response) -> bool {
-    if let Some(status) = response.break_status {
-        return status_is_failure(status);
+/// Every error a connector response carries from beneath the circuit, other than one the router
+/// answered with, is execution failing: the source not answering, the target timeout expiring, or
+/// a plugin failing the fetch with an error. The errors the router raises when it declines to send
+/// a request, such as `Error::RateLimited` and `Error::RequestLimitExceeded`, are raised above the
+/// circuit and never reach it.
+fn classify_connector_response(response: &connector::request_service::Response) -> Outcome {
+    if response.answered_by_router {
+        return Outcome::Ignored;
     }
-    match &response.transport_outcome {
+    let is_failure = match &response.transport_outcome {
         TransportOutcome::Error(_) => true,
         TransportOutcome::Response(http_response) => {
             status_is_failure(http_response.inner.status)
@@ -323,12 +339,7 @@ fn connector_response_is_failure(response: &connector::request_service::Response
         // Mapping-only requests never touch the network, and go around the circuit before they
         // could get here.
         TransportOutcome::MappingOnly => false,
-    }
-}
-
-/// Turns a failure check into the outcome the circuit records. Responses are never
-/// [`Outcome::Ignored`].
-fn failure_or_success(is_failure: bool) -> Outcome {
+    };
     if is_failure {
         Outcome::Failure
     } else {
@@ -356,5 +367,7 @@ fn circuit_breaker_open_error() -> graphql::Error {
 
 register_private_plugin!("apollo", "circuit_breaker", CircuitBreaker);
 
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

@@ -45,3 +45,49 @@ async fn replay_recording() {
         }
     }
 }
+
+/// A replayed subgraph response comes from the recording, not the subgraph, so the subgraph's
+/// circuit records nothing for it.
+#[tokio::test]
+async fn a_replayed_subgraph_response_records_no_circuit_outcome() {
+    use super::super::recording::Recording;
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    let request = serde_json::json!({
+        "query": "query Recorded { hello }",
+        "operation_name": "Recorded",
+        "variables": {},
+        "headers": {},
+        "header_errors": {},
+        "method": "POST",
+        "uri": "http://products/",
+    });
+    let response = serde_json::json!({
+        "chunks": [{ "data": { "hello": "recorded" } }],
+        "headers": {},
+        "header_errors": {},
+    });
+    let recording: Recording = serde_json::from_value(serde_json::json!({
+        "supergraph_sdl": "",
+        "client_request": request,
+        "client_response": response,
+        "formatted_query_plan": null,
+        "subgraph_fetches": {
+            "Recorded": {
+                "subgraph_name": "products",
+                "request": request,
+                "response": response,
+            },
+        },
+    }))
+    .expect("the recording parses");
+    let replay = Replay::new(recording);
+
+    assert_router_answers_record_nothing(
+        async |subgraph| crate::plugin::Plugin::subgraph_service(&replay, "products", subgraph),
+        || subgraph_request("Live"),
+        || subgraph_request("Recorded"),
+    )
+    .await;
+}

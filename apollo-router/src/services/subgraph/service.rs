@@ -34,6 +34,8 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::http::HttpRequest;
 use crate::services::http::IncompleteResponseBody;
+use crate::services::http::UploadStreamError;
+use crate::services::http::UploadStreamFailed;
 use crate::services::http::service::WireByteCount;
 use crate::services::router;
 use crate::services::subgraph;
@@ -176,6 +178,7 @@ async fn call_http(
     }
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
+    let mut upload_failed = false;
     let fetch_result: Result<_, FetchError> = async {
         let response = client
             .call(HttpRequest {
@@ -185,6 +188,7 @@ async fn call_http(
             .await
             .map_err(|err| {
                 tracing::error!(fetch_error = ?err);
+                upload_failed = err.is::<UploadStreamError>();
                 FetchError::SubrequestHttpError {
                     status_code: None,
                     service: service_name.to_string(),
@@ -225,13 +229,20 @@ async fn call_http(
     let (parts, body) = match fetch_result {
         Ok(resp) => resp,
         Err(err) => {
-            return Ok(SubgraphResponse::builder()
+            let mut response = SubgraphResponse::builder()
                 .subgraph_name(service_name.to_string())
                 .error(err.to_graphql_error(None))
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
                 .extensions(Object::default())
-                .build());
+                .build();
+            if upload_failed {
+                response
+                    .response
+                    .extensions_mut()
+                    .insert(UploadStreamFailed);
+            }
+            return Ok(response);
         }
     };
 
@@ -400,6 +411,7 @@ mod tests {
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::http::HttpResponse;
     use crate::services::http::test_http_client_service;
     use crate::services::layers::apq::subgraph::SubgraphApqLayer;
     use crate::services::layers::apq::subgraph::SubgraphApqService;
@@ -1137,6 +1149,67 @@ mod tests {
                 .get::<IncompleteResponseBody>()
                 .is_some()
         );
+    }
+
+    /// A fetch that failed because the client's file upload failed part way through is marked, so
+    /// the circuit breaker can tell it apart from the subgraph failing. Any other failed fetch is
+    /// not, and both read the same to the client.
+    #[tokio::test]
+    async fn test_subgraph_service_marks_a_fetch_the_client_upload_failed() {
+        let fetch = |upload_failed: bool| async move {
+            let client = tower::service_fn(move |_: HttpRequest| async move {
+                let error: BoxError = "error from user's Body stream: Missing files".into();
+                Err::<HttpResponse, _>(if upload_failed {
+                    UploadStreamError(error).into()
+                } else {
+                    error
+                })
+            })
+            .boxed_clone();
+            with_content_negotiation_layer(SubgraphService::new("test", client))
+                .oneshot(
+                    SubgraphRequest::builder()
+                        .supergraph_request(supergraph_request("query"))
+                        .subgraph_request(subgraph_http_request(
+                            Uri::from_static("http://localhost"),
+                            "query",
+                        ))
+                        .operation_kind(OperationKind::Query)
+                        .subgraph_name(String::from("test"))
+                        .context(Context::new())
+                        .build(),
+                )
+                .await
+                .unwrap()
+        };
+
+        let failed_upload = fetch(true).await;
+        let failed_fetch = fetch(false).await;
+
+        assert!(
+            failed_upload
+                .response
+                .extensions()
+                .get::<UploadStreamFailed>()
+                .is_some()
+        );
+        assert!(
+            failed_fetch
+                .response
+                .extensions()
+                .get::<UploadStreamFailed>()
+                .is_none()
+        );
+        for response in [&failed_upload, &failed_fetch] {
+            assert_eq!(
+                response.response.status(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+        }
+        let [upload_error, fetch_error] = [&failed_upload, &failed_fetch]
+            .map(|response| response.response.body().errors[0].clone());
+        assert_eq!(upload_error.message, fetch_error.message);
+        assert_eq!(upload_error.extensions, fetch_error.extensions);
     }
 
     #[tokio::test(flavor = "multi_thread")]

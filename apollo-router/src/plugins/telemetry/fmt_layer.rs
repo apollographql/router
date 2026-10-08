@@ -1133,7 +1133,7 @@ connector:
                         ],
                         declared_errors: vec![],
                     },
-                    break_status: None,
+                    answered_by_router: false,
                 };
                 connector_events.on_response(&connector_response);
             },
@@ -1577,7 +1577,7 @@ subgraph:
                         ],
                         declared_errors: vec![],
                     },
-                    break_status: None,
+                    answered_by_router: false,
                 };
                 connector_events.on_response(&connector_response);
             },

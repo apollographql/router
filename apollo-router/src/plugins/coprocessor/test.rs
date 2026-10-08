@@ -7567,7 +7567,7 @@ mod tests {
                         key: create_test_response_key(),
                         problems: Vec::new(),
                     },
-                    break_status: None,
+                    answered_by_router: false,
                 })
             })
             .boxed_clone()

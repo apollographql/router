@@ -947,7 +947,7 @@ mod test {
                 problems: vec![],
                 declared_errors: vec![],
             },
-            break_status: None,
+            answered_by_router: false,
         }
     }
 
