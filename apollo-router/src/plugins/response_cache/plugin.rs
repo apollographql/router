@@ -1699,6 +1699,9 @@ impl CacheService {
                     cache_control.merge_no_store(&request_cache_control);
                 }
 
+                let body = response.response.body();
+                let storable = body.data.is_some() && body.errors.is_empty();
+
                 if self.debug {
                     let cache_key_context = CacheKeyContext {
                         key: root_cache_key.clone(),
@@ -1726,9 +1729,7 @@ impl CacheService {
                         data: serde_json_bytes::to_value(response.response.body().clone())
                             .unwrap_or_default(),
                         warnings: Vec::new(),
-                        // Mirrors `cache_store_root_from_response`.
-                        should_store: response.response.body().data.is_some()
-                            && response.response.body().errors.is_empty(),
+                        should_store: storable,
                         indexes: *self.indexes,
                     }
                     .update_metadata();
@@ -1739,7 +1740,7 @@ impl CacheService {
                 // users, so we do not store the response in cache
                 let unstorable_private_response = cache_control.private() && private_id.is_none();
 
-                if !unstorable_private_response && cache_control.should_store() {
+                if storable && !unstorable_private_response && cache_control.should_store() {
                     // Prepend the whole-subgraph index entry when that index is active. The
                     // by-type and per-tag entries were already appended in scope by the
                     // cache-lookup and extension-read paths according to the same indexes.
@@ -2544,6 +2545,7 @@ fn save_original_cache_control(
     });
 }
 
+/// Stores a root-field response's data. The caller decides whether the response may be stored.
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
@@ -2553,39 +2555,38 @@ async fn cache_store_root_from_response(
     cache_tags: Vec<CacheTag>,
     cdn_invalidation_tags: Vec<String>,
 ) -> Result<(), BoxError> {
-    if let Some(data) = response.response.body().data.as_ref() {
-        let ttl = cache_control
-            .ttl()
-            .map(Duration::from_secs)
-            .unwrap_or(default_subgraph_ttl);
+    let Some(data) = response.response.body().data.as_ref() else {
+        return Ok(());
+    };
+    let ttl = cache_control
+        .ttl()
+        .map(Duration::from_secs)
+        .unwrap_or(default_subgraph_ttl);
 
-        if response.response.body().errors.is_empty() && cache_control.should_store() {
-            let document = Document {
-                key: cache_key,
-                data: data.clone(),
-                control: cache_control,
-                cache_tags,
-                cdn_invalidation_tags,
-                expire: ttl,
-                scope: CacheScope::Subgraph,
-                // Subgraph responses have no connector response mapping.
-                mapping_problems: Vec::new(),
-                // ... nor an upstream connector status to replay.
-                status: None,
-            };
+    let document = Document {
+        key: cache_key,
+        data: data.clone(),
+        control: cache_control,
+        cache_tags,
+        cdn_invalidation_tags,
+        expire: ttl,
+        scope: CacheScope::Subgraph,
+        // Subgraph responses have no connector response mapping.
+        mapping_problems: Vec::new(),
+        // ... nor an upstream connector status to replay.
+        status: None,
+    };
 
-            let subgraph_name = response.subgraph_name.clone();
-            let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
+    let subgraph_name = response.subgraph_name.clone();
+    let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
 
-            // Write to cache in a non-awaited task so that it's not on the request’s critical path
-            tokio::spawn(async move {
-                let _ = cache
-                    .insert(document, &subgraph_name)
-                    .instrument(span)
-                    .await;
-            });
-        }
-    }
+    // Write to cache in a non-awaited task so that it's not on the request’s critical path
+    tokio::spawn(async move {
+        let _ = cache
+            .insert(document, &subgraph_name)
+            .instrument(span)
+            .await;
+    });
 
     Ok(())
 }
