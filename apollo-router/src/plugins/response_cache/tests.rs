@@ -7359,8 +7359,8 @@ enum ToggledSubgraphResponse {
     NoStoreDataWithErrors,
 }
 
-/// A subgraph service that answers with `healthy_data` or with the response shape currently
-/// selected in `mode`, counting every call that actually reaches it.
+/// A subgraph service that answers with the status, `Cache-Control` header, data and errors
+/// selected in `mode`, and counts every call that reaches it.
 fn toggled_subgraph_service(
     mode: Arc<std::sync::Mutex<ToggledSubgraphResponse>>,
     calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -7771,6 +7771,82 @@ async fn response_with_errors_is_not_reported_as_stored() {
     assert!(!entries[0].should_store);
 
     harness.assert_healthy_response_is_cached(None).await;
+}
+
+/// In an entity batch, only the entity an error points at is reported as not stored.
+#[tokio::test]
+async fn entity_with_error_is_not_reported_as_stored() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                { "__typename": "Organization", "id": "1" },
+                { "__typename": "Organization", "id": "3" }
+            ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=600")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": { "representations": [
+                    { "id": "1", "__typename": "Organization" },
+                    { "id": "3", "__typename": "Organization" }
+                ]}
+            }},
+            serde_json::json! {{
+                "data": { "_entities": [{ "name": null }, { "name": "Organization 3" }] },
+                "errors": [{ "message": "subgraph failure", "path": ["_entities", 0] }]
+            }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=600")).build()),
+    ].into_iter().collect());
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(HashMap::from([
+        ("user".to_string(), Subgraph::default()),
+        ("orga".to_string(), Subgraph::default()),
+    ]));
+    let response_cache =
+        ResponseCache::for_test(storage, subgraphs_conf, valid_schema, true, drop_tx, true)
+            .await
+            .unwrap();
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { allOrganizations { id name } } }")
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    let should_store_by_id: HashMap<String, bool> = get_cache_keys_context(&response)
+        .expect("missing cache keys")
+        .into_iter()
+        .filter_map(|entry| match entry.kind {
+            CacheEntryKind::Entity { entity_key, .. } => Some((
+                entity_key.get("id")?.as_str()?.to_string(),
+                entry.should_store,
+            )),
+            CacheEntryKind::RootFields { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        should_store_by_id,
+        HashMap::from([("1".to_string(), false), ("3".to_string(), true)])
+    );
 }
 
 /// With `private_id`, a storable private response is cached for that user only.
