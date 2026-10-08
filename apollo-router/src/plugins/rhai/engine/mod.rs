@@ -93,23 +93,20 @@ fn header_not_found(name: &str) -> Box<EvalAltResult> {
     router_function_error(format!("header '{name}' not found"))
 }
 
-/// Replaces a router function's error within `error` with its text, and returns whether there was
-/// one.
+/// Replaces a router function's error within `error` with its text.
 ///
 /// Rhai prints a custom type by its type name, so without this a logged error would not show the
 /// text.
-pub(super) fn reveal_router_function_error(error: &mut EvalAltResult) -> bool {
+pub(super) fn reveal_router_function_error(error: &mut EvalAltResult) {
     match error {
         EvalAltResult::ErrorInFunctionCall(.., inner, _)
         | EvalAltResult::ErrorInModule(.., inner, _) => reveal_router_function_error(inner),
         EvalAltResult::ErrorRuntime(thrown, _) => {
-            let Some(RouterFunctionError(message)) = thrown.clone().try_cast() else {
-                return false;
-            };
-            *thrown = message.into();
-            true
+            if let Some(RouterFunctionError(message)) = thrown.clone().try_cast() {
+                *thrown = message.into();
+            }
         }
-        _ => false,
+        _ => {}
     }
 }
 

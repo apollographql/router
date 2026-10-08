@@ -1088,7 +1088,7 @@ fn it_cannot_expand_missing_environment_variable() {
     let mut error = engine
         .eval::<String>(r#"env::get("THIS_SHOULD_NOT_EXIST")"#)
         .expect_err("the variable is not set");
-    assert!(reveal_router_function_error(&mut error));
+    reveal_router_function_error(&mut error);
     assert_eq!(
         error.to_string(),
         "Runtime error: could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"

@@ -788,21 +788,18 @@ fn redacted_message(status: StatusCode) -> String {
 }
 
 fn process_error(mut error: Box<EvalAltResult>) -> ErrorDetails {
-    let is_router_function_error = engine::reveal_router_function_error(&mut error);
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: None,
         position: None,
         body: None,
-        internal_detail: Some(format!("rhai execution error: '{error}'")),
+        internal_detail: None,
     };
 
-    let inner_error = error.unwrap_inner();
-    // Only a script's own `throw` carries a message its author chose. Engine failures and router
-    // function errors keep the redacted message set below.
-    if let EvalAltResult::ErrorRuntime(thrown, pos) = inner_error
-        && !is_router_function_error
-    {
+    // Only a script's own `throw` carries a message its author chose, so engine failures keep the
+    // redacted message set below. A router function's error is a `RouterFunctionError`, not a
+    // string or map, so it keeps the redacted message too.
+    if let EvalAltResult::ErrorRuntime(thrown, pos) = error.unwrap_inner() {
         error_details.position = Some(pos.into());
 
         if let Ok(thrown_message) = thrown.as_immutable_string_ref() {
@@ -815,6 +812,8 @@ fn process_error(mut error: Box<EvalAltResult>) -> ErrorDetails {
         // Any other thrown value would have to be dumped to return it, so it stays redacted.
     }
 
+    engine::reveal_router_function_error(&mut error);
+    error_details.internal_detail = Some(format!("rhai execution error: '{error}'"));
     if error_details.message.is_none() {
         error_details.message = Some(redacted_message(error_details.status));
     }
