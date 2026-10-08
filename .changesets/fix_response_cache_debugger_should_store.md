@@ -4,4 +4,4 @@ The cache debugger reports `shouldStore: false` for requests that bypass the cac
 
 The `apollo.router.response_cache.private_queries.lru.size` gauge includes queries added by subgraph entity fetches, as well as root-field and connector fetches.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/10436
