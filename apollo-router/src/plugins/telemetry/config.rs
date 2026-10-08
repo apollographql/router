@@ -553,10 +553,6 @@ pub enum AttributeValue {
     Array(AttributeArray),
 }
 
-// The configuration attribute can't validate the F64 variant because f64 has no Validate impl.
-// Attribute values are scalars with no nested rules.
-impl apollo_configuration::Validate for AttributeValue {}
-
 impl AttributeValue {
     pub(crate) fn as_f64(&self) -> Option<f64> {
         match self {
@@ -1074,7 +1070,7 @@ mod tests {
         assert!(error.to_string().contains("request.[cs"));
     }
 
-    /// A view name that isn't a valid pattern fails the configuration parse, at the name's key.
+    /// A view name that isn't a valid pattern fails the configuration parse, and the error points at the name's value.
     #[test]
     fn metric_view_names_are_validated_when_the_configuration_is_parsed() {
         let parse = |name: &str| {
