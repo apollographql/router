@@ -416,9 +416,15 @@ fn matches_condition_for_kind(
     }
 
     match directive.specified_argument_by_name("if") {
-        Some(v) => match v.as_variable() {
-            Some(directive_var) => conditions.condition_kind(directive_var) == Some(kind),
-            None => true,
+        Some(v) => match v.as_ref() {
+            Value::Variable(directive_var) => {
+                conditions.condition_kind(directive_var) == Some(kind)
+            }
+            // A constant is never handled by a variable condition. It can only be dropped when it
+            // is a no-op (`@include(if: true)` or `@skip(if: false)`): dropping a constant
+            // exclusion would make a selection that must never be executed executable.
+            Value::Boolean(value) => *value == (kind == ConditionKind::Include),
+            _ => false,
         },
         // Directive without argument: unreachable in a valid document.
         None => false,
@@ -431,6 +437,30 @@ mod tests {
     use apollo_compiler::Schema;
 
     use super::*;
+    use crate::operation::Operation;
+    use crate::schema::ValidFederationSchema;
+
+    fn parse_operation(schema: &str, query: &str) -> Operation {
+        let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        Operation::parse(schema, query, "query.graphql").unwrap()
+    }
+
+    fn only_child(set: &SelectionSet) -> &Selection {
+        let mut selections = set.selections.values();
+        let child = selections.next().unwrap();
+        assert!(selections.next().is_none(), "expected one selection: {set}");
+        child
+    }
+
+    fn field_conditions(set: &SelectionSet, name: &str) -> Conditions {
+        set.selections
+            .values()
+            .find(|s| matches!(s, Selection::Field(f) if f.field.name() == name))
+            .unwrap_or_else(|| panic!("no field {name} in {set}"))
+            .conditions()
+            .unwrap()
+    }
 
     fn parse(directives: &str) -> Conditions {
         let schema =
@@ -587,5 +617,57 @@ mod tests {
             list,
             "update with constant does not affect conditions"
         );
+    }
+
+    #[test]
+    fn removing_handled_variable_preserves_literal_exclusion() {
+        let cases = [
+            "query($x: Boolean!) { obj @include(if: $x) { live dead @include(if: false) } }",
+            "query($x: Boolean!) { obj @include(if: $x) { live dead @skip(if: true) } }",
+            "query($x: Boolean!) { obj @skip(if: $x) { live dead @include(if: false) } }",
+            "query($x: Boolean!) { obj @skip(if: $x) { live dead @skip(if: true) } }",
+            // The handled variable condition is removed, the literal exclusion next to it is not.
+            "query($x: Boolean!) { obj @include(if: $x) { live dead @include(if: $x) @skip(if: true) } }",
+            "query($x: Boolean!) { obj @skip(if: $x) { live dead @skip(if: $x) @include(if: false) } }",
+        ];
+        for query in cases {
+            let op = parse_operation(
+                "type Query { obj: Obj } type Obj { live: Int dead: Int }",
+                query,
+            );
+            let handled = op.selection_set.conditions().unwrap();
+            assert!(
+                matches!(handled, Conditions::Variables(_)),
+                "fixture must remove a variable guard: {query}"
+            );
+            let before = only_child(&op.selection_set).selection_set().unwrap();
+            assert_eq!(field_conditions(before, "dead"), Conditions::never());
+
+            let result = remove_conditions_from_selection_set(&op.selection_set, &handled).unwrap();
+            let obj = only_child(&result);
+            assert!(
+                obj.element().directives().is_empty(),
+                "handled guard was not removed: {result}"
+            );
+            let after = obj.selection_set().unwrap();
+            assert_eq!(
+                field_conditions(after, "dead"),
+                Conditions::never(),
+                "a constant-false selection became executable: {query} => {result}"
+            );
+            assert_eq!(field_conditions(after, "live"), Conditions::always());
+        }
+    }
+
+    #[test]
+    fn removing_handled_variable_drops_literal_inclusion() {
+        // Constant conditions that always match are no-ops and may still be removed.
+        let op = parse_operation(
+            "type Query { obj: Obj } type Obj { a: Int b: Int }",
+            "query($x: Boolean!) { obj @include(if: $x) { a @include(if: true) b @skip(if: false) } }",
+        );
+        let handled = op.selection_set.conditions().unwrap();
+        let result = remove_conditions_from_selection_set(&op.selection_set, &handled).unwrap();
+        assert_eq!(result.to_string(), "{ obj { a b } }");
     }
 }
