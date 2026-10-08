@@ -697,14 +697,29 @@ fn iterate_path_mut<'a, F>(
             if let Some(array) = data.as_array_mut() {
                 for (i, value) in array.iter_mut().enumerate() {
                     if let Some(tc) = type_conditions {
-                        if !tc.is_empty()
-                            && let Value::Object(o) = value
-                            && let Some(Value::String(type_name)) = o.get("__typename")
-                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                        {
-                            parent.push(PathElement::Index(i));
-                            iterate_path_mut(schema, parent, &path[1..], value, f);
-                            parent.pop();
+                        if !tc.is_empty() {
+                            if let Value::Object(o) = value
+                                && let Some(Value::String(type_name)) = o.get("__typename")
+                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                            {
+                                parent.push(PathElement::Index(i));
+                                iterate_path_mut(schema, parent, &path[1..], value, f);
+                                parent.pop();
+                            } else if let Value::Array(array) = value {
+                                // Same one level of nested-array matching as `iterate_path`.
+                                parent.push(PathElement::Index(i));
+                                for (j, value) in array.iter_mut().enumerate() {
+                                    if let Value::Object(o) = value
+                                        && let Some(Value::String(type_name)) = o.get("__typename")
+                                        && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
+                                    {
+                                        parent.push(PathElement::Index(j));
+                                        iterate_path_mut(schema, parent, &path[1..], value, f);
+                                        parent.pop();
+                                    }
+                                }
+                                parent.pop();
+                            }
                         }
                     } else {
                         parent.push(PathElement::Index(i));
@@ -1465,6 +1480,36 @@ mod tests {
         let flatten_path = Path::from("edges/@/node/collection");
         let index_path = Path::from("edges/7/node/collection");
         assert!(flatten_path.equal_if_flattened(&index_path));
+    }
+
+    #[test]
+    fn conditional_flatten_mutation_visits_matching_objects_inside_ragged_nested_arrays() {
+        let schema = test_schema();
+        let mut document = json!({"items": [
+            [{"__typename": "A", "x": 1}, {"__typename": "B", "y": 2}],
+            [{"__typename": "A", "x": 3}]
+        ]});
+        let path = Path(vec![
+            PathElement::Key("items".into(), None),
+            PathElement::Flatten(Some(vec!["A".into()])),
+            PathElement::Key("x".into(), None),
+        ]);
+        let mut visited = Vec::new();
+        document.select_values_and_paths_mut(&schema, &path, |p, value| {
+            visited.push(p.clone());
+            *value = Value::from("matched")
+        });
+        assert_eq!(
+            visited,
+            vec![Path::from("items/0/0/x"), Path::from("items/1/0/x")]
+        );
+        assert_eq!(
+            document,
+            json!({"items": [
+                [{"__typename": "A", "x": "matched"}, {"__typename": "B", "y": 2}],
+                [{"__typename": "A", "x": "matched"}]
+            ]})
+        );
     }
 
     #[test]
