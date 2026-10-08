@@ -1,8 +1,8 @@
 ### Substituted values in Connector `$config` keep their YAML type
 
-A `${env.NAME}` or `${file.PATH}` value in a Connector's `$config` object, or in any other setting that accepts any value, is read as if you had written it directly in YAML: `5` becomes the number `5`, `false` the boolean `false`, `~` null, and `0042` the string `"0042"`. A substitution with other text around it, such as `count-${env.N}`, is a string.
+A `${env.NAME}` or `${file.PATH}` value in a Connector's `$config` object, or in any other setting that accepts any value, is read as if you had written it directly in YAML: `5` becomes the number `5`, `false` the boolean `false`, an empty value, `~` or `null` becomes null, and `0042` the string `"0042"`. A substitution with other text around it, such as `count-${env.N}`, is a string.
 
-Settings that declare a type still take that type, and a setting that accepts either of two different types, such as a number or a string, keeps the text. OTLP gRPC `metadata` values are now declared as strings, so a numeric value such as `x-api-key: ${env.API_KEY}` stays a string and is sent as a header.
+Settings that declare a type still take that type, and a setting that accepts either of two different types, such as a number or a string, keeps the text. OTLP gRPC `metadata` values are still read as strings, so `x-api-key: ${env.API_KEY}` with a numeric key keeps working.
 
 Two smaller changes apply to substituted values:
 
