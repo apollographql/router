@@ -22,15 +22,21 @@ In this guide, you will:
 
 Let's start by downloading and running the router locally.
 
-1. Download the latest version of the router binary with a single command line:
+<Note>
+
+This installs the **Apollo Router 3.0 preview** (`v3.0.0-preview.0`), a prerelease build for evaluation. It isn't recommended for production use. For the current stable release, see the [v2 quickstart](/graphos/routing/get-started).
+
+</Note>
+
+1. Download the Router 3.0 preview binary with a single command line:
 
     ```bash showLineNumbers=false
-    curl -sSL https://router.apollo.dev/download/nix/latest | sh
+    curl -sSL https://router.apollo.dev/download/nix/v3.0.0-preview.0 | sh
     ```
 
-    <ExpansionPanel title="Download a specific router version">
+    <ExpansionPanel title="Download a different router version">
 
-    To download and install a specific version of router, set the version in the download URL path.
+    To download and install a different version of router, set the version in the download URL path.
 
     For example, to download router v2.0.0:
 
@@ -40,7 +46,7 @@ Let's start by downloading and running the router locally.
 
     </ExpansionPanel>
 
-    Optionally, go to [router releases](https://github.com/apollographql/router/releases) in GitHub to download and extract a bundle.
+    Optionally, go to [router releases](https://github.com/apollographql/router/releases) in GitHub to download and extract a bundle (look for `v3.0.0-preview.0`).
 
 1. Check that your router downloaded successfully by running the `router` binary from your project's root directory:
 
