@@ -7485,7 +7485,7 @@ impl ToggledSubgraphHarness {
         .await
     }
 
-    async fn entities() -> Self {
+    async fn entities(with_private_id: bool) -> Self {
         Self::new(
             "orga",
             "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }",
@@ -7496,7 +7496,7 @@ impl ToggledSubgraphHarness {
                     "creatorUser": { "__typename": "User", "id": 2 }
                 }]
             }),
-            false,
+            with_private_id,
         )
         .await
     }
@@ -7694,7 +7694,7 @@ async fn unstorable_response_does_not_mark_entity_query_private(
     failure: ToggledSubgraphResponse,
 ) {
     async move {
-        let mut harness = ToggledSubgraphHarness::entities().await;
+        let mut harness = ToggledSubgraphHarness::entities(false).await;
 
         harness.respond_with(failure);
         let entries = harness.call(None).await;
@@ -7740,7 +7740,7 @@ async fn storable_private_response_marks_root_field_query_private() {
 #[tokio::test]
 async fn storable_private_response_marks_entity_query_private() {
     async {
-        let mut harness = ToggledSubgraphHarness::entities().await;
+        let mut harness = ToggledSubgraphHarness::entities(false).await;
 
         harness.respond_with(ToggledSubgraphResponse::PrivateStorable);
         harness.call(None).await;
@@ -7850,10 +7850,17 @@ async fn entity_with_error_is_not_reported_as_stored() {
 }
 
 /// With `private_id`, a storable private response is cached for that user only.
+#[rstest]
+#[case::root_fields(false)]
+#[case::entities(true)]
 #[tokio::test]
-async fn storable_private_response_is_cached_per_user_with_private_id() {
-    async {
-        let mut harness = ToggledSubgraphHarness::root_fields(true).await;
+async fn storable_private_response_is_cached_per_user_with_private_id(#[case] entity_fetch: bool) {
+    async move {
+        let mut harness = if entity_fetch {
+            ToggledSubgraphHarness::entities(true).await
+        } else {
+            ToggledSubgraphHarness::root_fields(true).await
+        };
 
         harness.respond_with(ToggledSubgraphResponse::PrivateStorable);
         let entries = harness.call(Some("1234")).await;
