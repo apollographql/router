@@ -230,8 +230,8 @@ pub(crate) fn build_subgraph_service(
         // service they can clone. The timeout answers its own errors, so it doesn't depend on
         // the layers above it.
         .buffered()
-        // The rate limit can't be cloned, so this box doesn't need `Clone`; the buffer above
-        // is what makes the stack cloneable again.
+        // The rate limit can't be cloned, so neither box beneath this buffer needs `Clone`; the
+        // buffer is what makes the stack cloneable again.
         .layer(box_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)
@@ -242,7 +242,7 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
-        .layer(box_clone_layer())
+        .layer(box_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
@@ -326,7 +326,7 @@ pub(crate) fn build_connector_request_services(
                 // The operation's `max_requests` is admission too: a request over it is never sent,
                 // so no plugin hook sees it.
                 .layer(RequestLimitLayer)
-                .layer(box_clone_layer())
+                .layer(box_layer())
                 .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
                     c.connector_source_circuit_layer(&source)
                 })
@@ -354,8 +354,7 @@ pub(crate) fn build_connector_request_services(
 }
 
 /// The longest type name a service may have where [`box_layer`] or [`box_clone_layer`] boxes
-/// it. The longest today, the subgraph stack beneath its rate limit, is about 37 KB; the
-/// subgraph stack unboxed is about 6 MB.
+/// it: well above the largest boxed type in these stacks, and far below the unboxed stack.
 const MAX_BOXED_TYPE_NAME_LEN: usize = 100_000;
 
 /// A layer that boxes a service `S` into `Boxed`.
@@ -404,12 +403,8 @@ fn debug_assert_boxed_type_name_bounded<S>() {
     let name = std::any::type_name::<S>();
     debug_assert!(
         name.len() <= MAX_BOXED_TYPE_NAME_LEN,
-        "a boxed service's type name is {} bytes, over the limit of {MAX_BOXED_TYPE_NAME_LEN}. \
-         Each optional layer is an `Either` that names the service beneath it twice, so the \
-         name grows exponentially with the optional layers beneath the box, and with it the \
-         crate's debug info and compile and link memory. Box the stack again between those \
-         layers with `box_layer` or `box_clone_layer`, or avoid nesting optional layers. The \
-         type starts: {}",
+        "a boxed service's type name is {} bytes, over the limit of {MAX_BOXED_TYPE_NAME_LEN}; \
+         see `box_layer` and box the stack again beneath this point. The type starts: {}",
         name.len(),
         name.get(..500).unwrap_or(name),
     );
