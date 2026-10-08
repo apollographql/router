@@ -482,19 +482,20 @@ fn schema_validation_errors_do_not_print_expanded_secret_values() {
     assert!(error.contains("unexpected"), "{error}");
 }
 
-/// Pins a known difference from router v2.x: apollo-configuration converts an expanded value only
-/// to the type its setting's schema declares, and connector `$config` values declare none, so
-/// `${env.FIVE}` stays the string `"5"` where v2.x produced the number `5`. When
-/// apollo-configuration converts values at untyped positions as YAML does, this should assert the
-/// number.
+/// Connector `$config` values declare no type, so an expanded value resolves as the same text
+/// written directly in YAML would.
 #[test]
-fn expanded_connector_config_values_stay_strings() {
+fn expanded_connector_config_values_resolve_like_yaml() {
     let expansion = Expansion::builder()
         .supported_mode("env")
         .mocked_env_var("FIVE", "5")
+        .mocked_env_var("FALSE", "false")
+        .mocked_env_var("NULL", "~")
+        .mocked_env_var("PADDED", "0042")
+        .mocked_env_var("TEXT", "hello")
         .build();
     let config = parse_configuration(
-        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n",
+        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n        enabled: ${env.FALSE}\n        region: ${env.NULL}\n        code: ${env.PADDED}\n        name: ${env.TEXT}\n        label: count-${env.FIVE}\n",
         expansion,
         Migration::None,
     )
@@ -502,8 +503,15 @@ fn expanded_connector_config_values_stay_strings() {
 
     let document = config.validated_yaml.expect("the retained document");
     assert_eq!(
-        document["connectors"]["sources"]["products.api"]["$config"]["timeout"],
-        json!("5")
+        document["connectors"]["sources"]["products.api"]["$config"],
+        json!({
+            "timeout": 5,
+            "enabled": false,
+            "region": null,
+            "code": "0042",
+            "name": "hello",
+            "label": "count-5",
+        })
     );
 }
 
