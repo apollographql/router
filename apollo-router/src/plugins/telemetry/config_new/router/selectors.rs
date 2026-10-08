@@ -31,8 +31,8 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[apollo_configuration::configuration]
+#[serde(untagged)]
 pub(crate) enum RouterValue {
     Standard(Standard),
     Custom(RouterSelector),
@@ -197,6 +197,11 @@ pub(crate) enum RouterSelector {
         context_id: bool,
     },
 }
+
+// RouterSelector can't take the configuration attribute: its response error selectors hold a
+// JsonPathInst, which has no Debug impl for the macro's derive, nor a Validate impl. Its other
+// fields are scalars with no nested rules.
+impl apollo_configuration::Validate for RouterSelector {}
 
 impl Selector for RouterSelector {
     type Request = router::Request;
