@@ -8,7 +8,6 @@ use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
 use tonic::transport::Identity;
@@ -282,8 +281,18 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-    HashMap::<String, Value>::json_schema(generator)
+/// `http_serde::header_map` reads each value as a string or a list of strings. Declaring them as
+/// strings also keeps an expanded `${env.NAME}` such as `12345` a string.
+fn header_map(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "object",
+        "additionalProperties": {
+            "anyOf": [
+                { "type": "string" },
+                { "type": "array", "items": { "type": "string" } }
+            ]
+        }
+    })
 }
 
 impl GrpcExporter {

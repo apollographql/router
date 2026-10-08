@@ -6161,7 +6161,19 @@ expression: "&schema"
           "x-apollo-secret": true
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
           "default": {},
           "description": "gRPC metadata",
           "type": "object"

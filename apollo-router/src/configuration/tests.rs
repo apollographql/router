@@ -482,19 +482,21 @@ fn schema_validation_errors_do_not_print_expanded_secret_values() {
     assert!(error.contains("unexpected"), "{error}");
 }
 
-/// Pins a known difference from router v2.x: apollo-configuration converts an expanded value only
-/// to the type its setting's schema declares, and connector `$config` values declare none, so
-/// `${env.FIVE}` stays the string `"5"` where v2.x produced the number `5`. When
-/// apollo-configuration converts values at untyped positions as YAML does, this should assert the
-/// number.
+/// Connector `$config` values declare no type, so an expanded value resolves as the same text
+/// written directly in YAML would.
 #[test]
-fn expanded_connector_config_values_stay_strings() {
+fn expanded_connector_config_values_resolve_like_yaml() {
     let expansion = Expansion::builder()
         .supported_mode("env")
         .mocked_env_var("FIVE", "5")
+        .mocked_env_var("FALSE", "false")
+        .mocked_env_var("NULL", "~")
+        .mocked_env_var("EMPTY", "")
+        .mocked_env_var("PADDED", "0042")
+        .mocked_env_var("TEXT", "hello")
         .build();
     let config = parse_configuration(
-        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n",
+        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n        enabled: ${env.FALSE}\n        region: ${env.NULL}\n        token: ${env.EMPTY}\n        code: ${env.PADDED}\n        name: ${env.TEXT}\n        label: count-${env.FIVE}\n",
         expansion,
         Migration::None,
     )
@@ -502,8 +504,39 @@ fn expanded_connector_config_values_stay_strings() {
 
     let document = config.validated_yaml.expect("the retained document");
     assert_eq!(
-        document["connectors"]["sources"]["products.api"]["$config"]["timeout"],
-        json!("5")
+        document["connectors"]["sources"]["products.api"]["$config"],
+        json!({
+            "timeout": 5,
+            "enabled": false,
+            "region": null,
+            "token": null,
+            "code": "0042",
+            "name": "hello",
+            "label": "count-5",
+        })
+    );
+}
+
+/// gRPC metadata values are header values, so an expanded value that looks like a number or a
+/// boolean must stay a string rather than resolve as YAML.
+#[test]
+fn expanded_otlp_grpc_metadata_values_stay_strings() {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("API_KEY", "12345")
+        .mocked_env_var("FLAG", "true")
+        .build();
+    let config = parse_configuration(
+        "telemetry:\n  exporters:\n    tracing:\n      otlp:\n        enabled: true\n        protocol: grpc\n        grpc:\n          metadata:\n            x-api-key: ${env.API_KEY}\n            x-flags:\n              - ${env.FLAG}\n",
+        expansion,
+        Migration::None,
+    )
+    .expect("the metadata values are strings");
+
+    let document = config.validated_yaml.expect("the retained document");
+    assert_eq!(
+        document["telemetry"]["exporters"]["tracing"]["otlp"]["grpc"]["metadata"],
+        json!({ "x-api-key": "12345", "x-flags": ["true"] })
     );
 }
 
