@@ -108,7 +108,7 @@ pub(crate) fn validate_yaml_configuration(
     });
 
     if migration == Mode::Upgrade {
-        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Minor)?;
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::current_minor())?;
         let expanded_yaml = expansion.expand(&upgraded)?;
         if validator.is_valid(&expanded_yaml) {
             yaml = upgraded;
