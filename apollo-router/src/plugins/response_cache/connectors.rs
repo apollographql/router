@@ -989,10 +989,9 @@ impl ConnectorCacheService {
 
         // Track private queries in the LRU so future requests can short-circuit
         if !is_known_private
-            && marks_query_private(
-                &response_cache_control,
-                succeeded_without_errors(&response.response) && !has_declared_errors,
-            )
+            && succeeded_without_errors(&response.response)
+            && !has_declared_errors
+            && marks_query_private(&response_cache_control)
         {
             remember_private_query(private_queries, private_query_key, lru_size_instrument).await;
         }
@@ -1739,18 +1738,15 @@ impl ConnectorRequestCacheService {
                     }
 
                     // Track private queries in the LRU so future requests can short-circuit
+                    if !is_known_private && marks_query_private(&cache_control) {
+                        remember_private_query(
+                            &private_queries,
+                            private_query_key,
+                            &lru_size_instrument,
+                        )
+                        .await;
+                    }
                     if cache_control.private() && !is_known_private {
-                        // Reaching this block means the connector mapped the response to data
-                        // without declared errors, which is its own definition of success.
-                        if marks_query_private(&cache_control, true) {
-                            remember_private_query(
-                                &private_queries,
-                                private_query_key,
-                                &lru_size_instrument,
-                            )
-                            .await;
-                        }
-
                         // Update cache key with private_id suffix now that we know the
                         // response is private (matching subgraph pattern at line 1278)
                         if let Some(ref s) = private_id {
