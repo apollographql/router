@@ -5086,6 +5086,29 @@ fn create_post_requires_node(
     if conditions_node_data.is_fully_local_requires {
         return Ok((fetch_node_id, fetch_node_path.clone()));
     }
+    // The @skip/@include conditionals in force at this point are not necessarily all in `context`.
+    // `OpGraphPathContext` is only populated from `OpGraphPathTrigger::Context`, which rides
+    // non-collecting (subgraph-jump) edges; conditionals met while walking operation elements
+    // within a single subgraph are recorded in the node path instead. A @requires edge is a
+    // collecting edge, so when the conditional and the @requires live in the same subgraph, the
+    // context here is empty and the conditions would be lost: `for_new_key_fetch()` below replaces
+    // `path_in_node` wholesale with the path built from this context.
+    //
+    // Fold the node path's conditionals in so the post-@requires fetch stays conditioned. Where a
+    // condition has already been hoisted into a ConditionNode, `handled_conditions` and
+    // `remove_conditions_from_selection_set()` strip the now-redundant directive back off during
+    // node processing, so this does not double up.
+    //
+    // This applies to the fetch's inputs as well as its path. Two branches with opposite conditions
+    // have different @requires field sets, and unconditioned inputs let them merge back into a
+    // single union block demanding fields that were only fetched on the other branch. It costs an
+    // extra nested inline fragment in the inputs, consistent with the type-condition nesting
+    // `wrap_selection_with_type_and_conditions()` already produces.
+    let mut effective_context = context.clone();
+    for element in fetch_node_path.path_in_node.0.iter() {
+        effective_context = effective_context.with_context_of(element)?;
+    }
+    let context = &effective_context;
 
     // NOTE: The code paths diverge below similar to handle_conditions_tree(), checking whether we
     // tried optimizing based on whether there's a single parent and whether the path in the node is
