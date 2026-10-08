@@ -223,7 +223,7 @@ where
 #[apollo_configuration::configuration]
 #[derive(PartialEq)]
 pub(crate) struct BatchProcessorConfig {
-    #[config(default = scheduled_delay_default())]
+    #[config(default = scheduled_delay_default().into())]
     #[schemars(with = "String")]
     /// The delay interval in milliseconds between two consecutive processing
     /// of batches. The default value is 5 seconds.
@@ -243,7 +243,7 @@ pub(crate) struct BatchProcessorConfig {
 
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
-    #[config(default = max_export_timeout_default())]
+    #[config(default = max_export_timeout_default().into())]
     #[schemars(with = "String")]
     pub(crate) max_export_timeout: apollo_configuration::types::Duration,
 
@@ -257,16 +257,16 @@ pub(crate) struct BatchProcessorConfig {
     pub(crate) max_concurrent_exports: usize,
 }
 
-pub(crate) fn scheduled_delay_default() -> apollo_configuration::types::Duration {
-    Duration::from_secs(5).into()
+pub(crate) fn scheduled_delay_default() -> Duration {
+    Duration::from_secs(5)
 }
 
 pub(crate) fn max_queue_size_default() -> usize {
     2048
 }
 
-pub(crate) fn max_export_timeout_default() -> apollo_configuration::types::Duration {
-    Duration::from_secs(30).into()
+pub(crate) fn max_export_timeout_default() -> Duration {
+    Duration::from_secs(30)
 }
 
 impl BatchProcessorConfig {
@@ -275,8 +275,9 @@ impl BatchProcessorConfig {
         Ok(BatchProcessorConfig {
             scheduled_delay: Self::parse_duration_env(
                 "OTEL_BSP_SCHEDULE_DELAY",
-                self.scheduled_delay,
-            )?,
+                *self.scheduled_delay,
+            )?
+            .into(),
             max_queue_size: Self::parse_usize_env("OTEL_BSP_MAX_QUEUE_SIZE", self.max_queue_size)?,
             max_export_batch_size: Self::parse_usize_env(
                 "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
@@ -284,8 +285,9 @@ impl BatchProcessorConfig {
             )?,
             max_export_timeout: Self::parse_duration_env(
                 "OTEL_BSP_EXPORT_TIMEOUT",
-                self.max_export_timeout,
-            )?,
+                *self.max_export_timeout,
+            )?
+            .into(),
             max_concurrent_exports: Self::parse_usize_env(
                 "OTEL_BSP_MAX_CONCURRENT_EXPORTS",
                 self.max_concurrent_exports,
@@ -293,10 +295,7 @@ impl BatchProcessorConfig {
         })
     }
 
-    fn parse_duration_env(
-        var: &str,
-        default: apollo_configuration::types::Duration,
-    ) -> Result<apollo_configuration::types::Duration, BoxError> {
+    fn parse_duration_env(var: &str, default: Duration) -> Result<Duration, BoxError> {
         match std::env::var(var) {
             Ok(value) => {
                 let millis = value.parse::<u64>().map_err(|e| {
@@ -305,7 +304,7 @@ impl BatchProcessorConfig {
                         value, var, e
                     )
                 })?;
-                Ok(Duration::from_millis(millis).into())
+                Ok(Duration::from_millis(millis))
             }
             Err(_) => Ok(default),
         }
