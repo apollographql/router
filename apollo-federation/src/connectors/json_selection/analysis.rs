@@ -416,6 +416,27 @@ mod tests {
     }
 
     #[test]
+    fn rh_1415_first_does_not_record_index_key() {
+        // Regression for RH-1415: `->first` narrows its input to element 0,
+        // but a GraphQL field set has no syntax for a list index. Recording
+        // the index produced `tagIds { "0" }`, which failed to parse as a
+        // @key field set and crashed the router at startup with "error
+        // creating resolvable key". The consumer still needs the whole list.
+        let analysis = analyze("id: $this.tagIds->first");
+        let this = analysis.consumption().get("$this").expect("$this entry");
+        assert_eq!(this.to_string(), "tagIds");
+    }
+
+    #[test]
+    fn first_then_field_records_element_field_without_index() {
+        // Fields read from the first element land directly under the list,
+        // the same as they would for `->last` or a subselection.
+        let analysis = analyze("id: $this.items->first.id");
+        let this = analysis.consumption().get("$this").expect("$this entry");
+        assert_eq!(this.to_string(), "items { id }");
+    }
+
+    #[test]
     fn output_shape_is_cached_and_stable() {
         let analysis = analyze("id name");
         let first = analysis.output_shape().pretty_print();
