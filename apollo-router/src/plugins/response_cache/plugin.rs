@@ -1699,10 +1699,8 @@ impl CacheService {
                 }
 
                 let body = response.response.body();
-                // Single source of truth for whether this response could be stored: a 2xx
-                // status, data, no GraphQL errors, and a `Cache-Control` that allows storing.
-                // Marking the query private, the debugger's `shouldStore` and the store gate
-                // below all read this one value.
+                // Marking the query private, the debugger's `shouldStore` and the store below must agree,
+                // so all three read this value.
                 let storable_data = body.data.as_ref().filter(|_| {
                     response.response.status().is_success()
                         && body.errors.is_empty()
@@ -2575,6 +2573,7 @@ fn save_original_cache_control(
 }
 
 /// Stores a root-field response's data. The caller decides whether the response may be stored.
+#[allow(clippy::too_many_arguments)]
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
