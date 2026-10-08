@@ -1,0 +1,104 @@
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments!) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+enum join__Graph {
+  LOCATIONS @join__graph(name: "locations", url: "http://locations")
+  REVIEWS @join__graph(name: "reviews", url: "http://reviews")
+}
+
+type Query @join__type(graph: LOCATIONS) @join__type(graph: REVIEWS) {
+  locations: [Location!]! @join__field(graph: LOCATIONS, type: "[Location!]!")
+  location(id: ID!): Location @join__field(graph: LOCATIONS, type: "Location")
+  feed: [Item!]! @join__field(graph: LOCATIONS, type: "[Item!]!")
+  latestReviews: [Review!]! @join__field(graph: REVIEWS, type: "[Review!]!")
+}
+
+type Location @join__type(graph: LOCATIONS, key: "id") @join__type(graph: REVIEWS, key: "id") {
+  id: ID! @join__field(graph: LOCATIONS, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  name: String! @join__field(graph: LOCATIONS, type: "String!")
+  reviewsForLocation: [Review]! @join__field(graph: LOCATIONS, external: true, type: "[Review]!") @join__field(graph: REVIEWS, type: "[Review]!")
+  """
+  A @requires whose field set wraps its body in a type condition that is already the field's own type.
+  """
+  reviews: [Review!]! @join__field(graph: LOCATIONS, requires: "reviewsForLocation { ... on Review { id rating } }", type: "[Review!]!")
+  overallRating: Float @join__field(graph: REVIEWS, type: "Float")
+}
+
+type Review @join__type(graph: LOCATIONS, key: "id", resolvable: false) @join__type(graph: REVIEWS, key: "id") {
+  id: ID! @join__field(graph: LOCATIONS, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  rating: Int @join__field(graph: LOCATIONS, external: true, type: "Int") @join__field(graph: REVIEWS, type: "Int")
+  comment: String @join__field(graph: REVIEWS, type: "String")
+  location: Location @join__field(graph: REVIEWS, type: "Location")
+}
+
+"""
+Two entity types under one interface whose `@key` field sets name different fields. An entity
+fetch over both gets one `requires` entry per case, and the checker tries every entry against
+every case -- so it must decide pairs whose `@key` does not typecheck at the entry's type.
+"""
+interface Item @join__type(graph: LOCATIONS) @join__type(graph: REVIEWS) {
+  id: ID! @join__field(graph: LOCATIONS, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+}
+
+type Book implements Item @join__type(graph: LOCATIONS, key: "id") @join__implements(graph: LOCATIONS, interface: "Item") @join__type(graph: REVIEWS, key: "id") @join__implements(graph: REVIEWS, interface: "Item") {
+  id: ID! @join__field(graph: LOCATIONS, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  isbn: String! @join__field(graph: LOCATIONS, type: "String!") @join__field(graph: REVIEWS, external: true, type: "String!")
+  """
+  A `@requires` naming a field the other subgraph owns, on an entity keyed by `id`.
+  """
+  blurb: String! @join__field(graph: REVIEWS, requires: "isbn", type: "String!")
+}
+
+type Film implements Item @join__type(graph: LOCATIONS, key: "code") @join__implements(graph: LOCATIONS, interface: "Item") @join__type(graph: REVIEWS, key: "code") @join__implements(graph: REVIEWS, interface: "Item") {
+  id: ID! @join__field(graph: LOCATIONS, type: "ID!") @join__field(graph: REVIEWS, type: "ID!")
+  code: String! @join__field(graph: LOCATIONS, type: "String!") @join__field(graph: REVIEWS, type: "String!")
+  minutes: Int! @join__field(graph: LOCATIONS, type: "Int!") @join__field(graph: REVIEWS, external: true, type: "Int!")
+  """
+  The same, on an entity keyed by a different field -- `code`, which `Book` does not declare.
+  """
+  summary: String! @join__field(graph: REVIEWS, requires: "minutes", type: "String!")
+}
+
+scalar Import @join__type(graph: LOCATIONS) @join__type(graph: REVIEWS)
+
