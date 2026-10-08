@@ -491,11 +491,12 @@ fn expanded_connector_config_values_resolve_like_yaml() {
         .mocked_env_var("FIVE", "5")
         .mocked_env_var("FALSE", "false")
         .mocked_env_var("NULL", "~")
+        .mocked_env_var("EMPTY", "")
         .mocked_env_var("PADDED", "0042")
         .mocked_env_var("TEXT", "hello")
         .build();
     let config = parse_configuration(
-        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n        enabled: ${env.FALSE}\n        region: ${env.NULL}\n        code: ${env.PADDED}\n        name: ${env.TEXT}\n        label: count-${env.FIVE}\n",
+        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n        enabled: ${env.FALSE}\n        region: ${env.NULL}\n        token: ${env.EMPTY}\n        code: ${env.PADDED}\n        name: ${env.TEXT}\n        label: count-${env.FIVE}\n",
         expansion,
         Migration::None,
     )
@@ -508,6 +509,7 @@ fn expanded_connector_config_values_resolve_like_yaml() {
             "timeout": 5,
             "enabled": false,
             "region": null,
+            "token": null,
             "code": "0042",
             "name": "hello",
             "label": "count-5",

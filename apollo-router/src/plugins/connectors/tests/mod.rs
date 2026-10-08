@@ -2366,14 +2366,11 @@ async fn execute(
     query: &str,
     variables: JsonMap,
     config: Option<serde_json_bytes::Value>,
-    mut request_mutator: impl FnMut(&mut Request),
+    request_mutator: impl FnMut(&mut Request),
     license: Option<LicenseState>,
 ) -> serde_json::Value {
     let connector_uri = format!("{uri}/");
     let subgraph_uri = format!("{uri}/graphql");
-
-    // we cannot use Testharness because the subgraph connectors are actually extracted in PipelineFactory
-    let mut factory = PipelineFactory;
 
     let common_config = json!({
         "include_subgraph_errors": { "all": true },
@@ -2393,6 +2390,22 @@ async fn execute(
         common_config
     };
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();
+
+    execute_with_configuration(schema, query, variables, config, request_mutator, license).await
+}
+
+/// Runs `query` against `schema` with a configuration the caller has already parsed, such as one
+/// whose values come from `${env.*}` substitutions.
+async fn execute_with_configuration(
+    schema: &str,
+    query: &str,
+    variables: JsonMap,
+    config: Configuration,
+    mut request_mutator: impl FnMut(&mut Request),
+    license: Option<LicenseState>,
+) -> serde_json::Value {
+    // we cannot use Testharness because the subgraph connectors are actually extracted in PipelineFactory
+    let mut factory = PipelineFactory;
 
     let pipeline = factory
         .create_pipeline(
