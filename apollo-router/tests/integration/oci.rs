@@ -315,13 +315,14 @@ async fn setup_mock_oci_server_with_tag(
         .mount(&mock_server)
         .await;
 
-    // Tag - GET returns initial, then next call will return updated (if tag_changes is true)
-    // or 404 (if return_404_after_first is true)
-    let get_count = Arc::new(AtomicUsize::new(0));
+    // Tag - GET serves whichever manifest the last HEAD advertised, keyed off the HEAD counter
+    // rather than an independent GET counter. The schema poll loop is the only HEAD caller, so tag
+    // transitions stay deterministic even when other readers (the license stream discovering the
+    // entitlement identifier) GET the same manifest in between.
     Mock::given(method("GET"))
         .and(path(tag_path.clone()))
         .respond_with({
-            let get_count = get_count.clone();
+            let head_count = head_count.clone();
             let initial_digest = initial_manifest_digest.clone();
             let updated_digest = updated_manifest_digest.clone();
             let initial_manifest_bytes =
@@ -329,10 +330,10 @@ async fn setup_mock_oci_server_with_tag(
             let updated_manifest_bytes =
                 Arc::new(serde_json::to_vec(&updated_oci_manifest).unwrap());
             move |_req: &wiremock::Request| {
-                let count = get_count.fetch_add(1, Ordering::SeqCst);
-                if return_404_after_first && count > 0 {
+                let heads_so_far = head_count.load(Ordering::SeqCst);
+                if return_404_after_first && heads_so_far > 1 {
                     ResponseTemplate::new(404)
-                } else if count == 0 || !tag_changes {
+                } else if heads_so_far <= 1 || !tag_changes {
                     ResponseTemplate::new(200)
                         .append_header("content-type", OCI_IMAGE_MEDIA_TYPE)
                         .append_header("docker-content-digest", initial_digest.as_str())
