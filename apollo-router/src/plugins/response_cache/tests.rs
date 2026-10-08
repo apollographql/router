@@ -7419,7 +7419,7 @@ struct ToggledSubgraphHarness {
 }
 
 impl ToggledSubgraphHarness {
-    async fn root_fields(with_private_id: bool) -> Self {
+    async fn root_fields() -> Self {
         Self::new(
             "user",
             "query { currentUser { activeOrganization { id } } }",
@@ -7428,7 +7428,6 @@ impl ToggledSubgraphHarness {
                     "activeOrganization": { "__typename": "Organization", "id": "1" }
                 }
             }),
-            with_private_id,
         )
         .await
     }
@@ -7444,7 +7443,6 @@ impl ToggledSubgraphHarness {
                     "creatorUser": { "__typename": "User", "id": 2 }
                 }]
             }),
-            false,
         )
         .await
     }
@@ -7453,7 +7451,6 @@ impl ToggledSubgraphHarness {
         subgraph_name: &'static str,
         query: &'static str,
         healthy_data: serde_json_bytes::Value,
-        with_private_id: bool,
     ) -> Self {
         let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
         let mode = Arc::new(std::sync::Mutex::new(ToggledSubgraphResponse::Healthy));
@@ -7463,13 +7460,9 @@ impl ToggledSubgraphHarness {
         let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
             .await
             .unwrap();
-        let subgraph = Subgraph {
-            private_id: with_private_id.then(|| "sub".to_string()),
-            ..Default::default()
-        };
         let subgraphs_conf = create_subgraph_conf(HashMap::from([
-            ("user".to_string(), subgraph.clone()),
-            ("orga".to_string(), subgraph),
+            ("user".to_string(), Subgraph::default()),
+            ("orga".to_string(), Subgraph::default()),
         ]));
         let response_cache = ResponseCache::for_test(
             storage.clone(),
@@ -7537,14 +7530,9 @@ impl ToggledSubgraphHarness {
 
     /// Sends the query with cache debugging on and returns the debugger entries recorded for the
     /// toggleable subgraph.
-    async fn call(&mut self, private_id: Option<&str>) -> CacheKeysContext {
-        let context = Context::new();
-        if let Some(private_id) = private_id {
-            context.insert_json_value("sub", private_id.into());
-        }
+    async fn call(&mut self) -> CacheKeysContext {
         let request = supergraph::Request::fake_builder()
             .query(self.query)
-            .context(context)
             .header(
                 HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
                 HeaderValue::from_static("true"),
@@ -7568,11 +7556,11 @@ impl ToggledSubgraphHarness {
 
     /// Checks that the next healthy public response is stored and the request after it is served
     /// from the cache.
-    async fn assert_healthy_response_is_cached(&mut self, private_id: Option<&str>) {
+    async fn assert_healthy_response_is_cached(&mut self) {
         self.respond_with(ToggledSubgraphResponse::Healthy);
         let calls_before = self.subgraph_calls();
 
-        let entries = self.call(private_id).await;
+        let entries = self.call().await;
         assert_eq!(self.subgraph_calls(), calls_before + 1);
         assert!(
             !entries.is_empty() && entries.iter().all(|entry| entry.should_store),
@@ -7580,7 +7568,7 @@ impl ToggledSubgraphHarness {
         );
         wait_for_cache(&self.storage, expected_cached_keys(&entries)).await;
 
-        self.call(private_id).await;
+        self.call().await;
         assert_eq!(
             self.subgraph_calls(),
             calls_before + 1,
@@ -7594,15 +7582,15 @@ impl ToggledSubgraphHarness {
 #[tokio::test]
 async fn storable_private_response_marks_root_field_query_private() {
     async {
-        let mut harness = ToggledSubgraphHarness::root_fields(false).await;
+        let mut harness = ToggledSubgraphHarness::root_fields().await;
 
         harness.respond_with(ToggledSubgraphResponse::PrivateStorable);
-        harness.call(None).await;
+        harness.call().await;
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         harness.respond_with(ToggledSubgraphResponse::Healthy);
         for expected_calls in 2..=3 {
-            let entries = harness.call(None).await;
+            let entries = harness.call().await;
             assert_eq!(harness.subgraph_calls(), expected_calls);
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].key, "-", "the request should skip the cache");
@@ -7621,12 +7609,12 @@ async fn storable_private_response_marks_entity_query_private() {
         let mut harness = ToggledSubgraphHarness::entities().await;
 
         harness.respond_with(ToggledSubgraphResponse::PrivateStorable);
-        harness.call(None).await;
+        harness.call().await;
         assert_gauge!("apollo.router.response_cache.private_queries.lru.size", 1);
 
         harness.respond_with(ToggledSubgraphResponse::Healthy);
         for expected_calls in 2..=3 {
-            let entries = harness.call(None).await;
+            let entries = harness.call().await;
             assert_eq!(harness.subgraph_calls(), expected_calls);
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].key, "-", "the request should skip the cache");
@@ -7641,12 +7629,88 @@ async fn storable_private_response_marks_entity_query_private() {
 /// `Cache-Control` would allow storing.
 #[tokio::test]
 async fn response_with_errors_is_not_reported_as_stored() {
-    let mut harness = ToggledSubgraphHarness::root_fields(false).await;
+    let mut harness = ToggledSubgraphHarness::root_fields().await;
 
     harness.respond_with(ToggledSubgraphResponse::PublicDataWithErrors);
-    let entries = harness.call(None).await;
+    let entries = harness.call().await;
     assert_eq!(entries.len(), 1);
     assert!(!entries[0].should_store);
 
-    harness.assert_healthy_response_is_cached(None).await;
+    harness.assert_healthy_response_is_cached().await;
+}
+
+/// In an entity batch, only the entity an error points at is reported as not stored.
+#[tokio::test]
+async fn entity_with_error_is_not_reported_as_stored() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+            serde_json::json! {{"query":"{currentUser{allOrganizations{__typename id}}}"}},
+            serde_json::json! {{"data": {"currentUser": { "allOrganizations": [
+                { "__typename": "Organization", "id": "1" },
+                { "__typename": "Organization", "id": "3" }
+            ] }}}},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=600")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json! {{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": { "representations": [
+                    { "id": "1", "__typename": "Organization" },
+                    { "id": "3", "__typename": "Organization" }
+                ]}
+            }},
+            serde_json::json! {{
+                "data": { "_entities": [{ "name": null }, { "name": "Organization 3" }] },
+                "errors": [{ "message": "subgraph failure", "path": ["_entities", 0] }]
+            }},
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public, max-age=600")).build()),
+    ].into_iter().collect());
+
+    let (drop_tx, drop_rx) = tokio::sync::broadcast::channel(2);
+    let storage = Storage::new(&Config::test(false, &Uuid::new_v4().to_string()), drop_rx)
+        .await
+        .unwrap();
+    let subgraphs_conf = create_subgraph_conf(HashMap::from([
+        ("user".to_string(), Subgraph::default()),
+        ("orga".to_string(), Subgraph::default()),
+    ]));
+    let response_cache =
+        ResponseCache::for_test(storage, subgraphs_conf, valid_schema, true, drop_tx, true)
+            .await
+            .unwrap();
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_private_plugin(response_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { currentUser { allOrganizations { id name } } }")
+        .header(
+            HeaderName::from_static(CACHE_DEBUG_HEADER_NAME),
+            HeaderValue::from_static("true"),
+        )
+        .build()
+        .unwrap();
+    let response = service.oneshot(request).await.unwrap();
+
+    let should_store_by_id: HashMap<String, bool> = get_cache_keys_context(&response)
+        .expect("missing cache keys")
+        .into_iter()
+        .filter_map(|entry| match entry.kind {
+            CacheEntryKind::Entity { entity_key, .. } => Some((
+                entity_key.get("id")?.as_str()?.to_string(),
+                entry.should_store,
+            )),
+            CacheEntryKind::RootFields { .. } => None,
+        })
+        .collect();
+    assert_eq!(
+        should_store_by_id,
+        HashMap::from([("1".to_string(), false), ("3".to_string(), true)])
+    );
 }
