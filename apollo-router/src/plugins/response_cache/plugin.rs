@@ -1700,7 +1700,7 @@ impl CacheService {
                 }
 
                 let body = response.response.body();
-                let storable = body.data.is_some() && body.errors.is_empty();
+                let storable_data = body.data.as_ref().filter(|_| body.errors.is_empty());
 
                 if self.debug {
                     let cache_key_context = CacheKeyContext {
@@ -1729,7 +1729,7 @@ impl CacheService {
                         data: serde_json_bytes::to_value(response.response.body().clone())
                             .unwrap_or_default(),
                         warnings: Vec::new(),
-                        should_store: storable,
+                        should_store: storable_data.is_some(),
                         indexes: *self.indexes,
                     }
                     .update_metadata();
@@ -1740,7 +1740,10 @@ impl CacheService {
                 // users, so we do not store the response in cache
                 let unstorable_private_response = cache_control.private() && private_id.is_none();
 
-                if storable && !unstorable_private_response && cache_control.should_store() {
+                if let Some(data) = storable_data
+                    && !unstorable_private_response
+                    && cache_control.should_store()
+                {
                     // Prepend the whole-subgraph index entry when that index is active. The
                     // by-type and per-tag entries were already appended in scope by the
                     // cache-lookup and extension-read paths according to the same indexes.
@@ -1750,7 +1753,8 @@ impl CacheService {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
-                        &response,
+                        data,
+                        response.subgraph_name.clone(),
                         cache_control,
                         root_cache_key,
                         cache_tags,
@@ -2549,15 +2553,13 @@ fn save_original_cache_control(
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
-    response: &subgraph::Response,
+    data: &Value,
+    subgraph_name: String,
     cache_control: CacheControl,
     cache_key: String,
     cache_tags: Vec<CacheTag>,
     cdn_invalidation_tags: Vec<String>,
 ) -> Result<(), BoxError> {
-    let Some(data) = response.response.body().data.as_ref() else {
-        return Ok(());
-    };
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2577,7 +2579,6 @@ async fn cache_store_root_from_response(
         status: None,
     };
 
-    let subgraph_name = response.subgraph_name.clone();
     let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
 
     // Write to cache in a non-awaited task so that it's not on the request’s critical path
