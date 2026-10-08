@@ -1,4 +1,11 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
+//!
+//! Plugins reach this module through
+//! [`PluginUnstable::connector_request_service`](crate::plugin::PluginUnstable::connector_request_service),
+//! and everything in it shares that hook's instability: it may change in any
+//! release. That includes [`Error`] and [`RuntimeError`], which are re-exported
+//! from `apollo-federation` so that a plugin does not need to depend on that crate
+//! directly.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -9,8 +16,8 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::Connector;
 use apollo_federation::connectors::runtime::debug::ConnectorContext;
-use apollo_federation::connectors::runtime::errors::Error;
-use apollo_federation::connectors::runtime::errors::RuntimeError;
+pub use apollo_federation::connectors::runtime::errors::Error;
+pub use apollo_federation::connectors::runtime::errors::RuntimeError;
 use apollo_federation::connectors::runtime::http_json_transport::HttpResponse;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::key::ResponseKey;
@@ -75,16 +82,9 @@ pub struct Request {
     // through a narrow accessor or a purpose-built type rather than the whole struct.
     pub(crate) connector: Arc<Connector>,
 
-    /// The request to the underlying transport.
-    ///
-    /// [`TransportRequest::Http`] holds the outgoing [`http::Request`], so a plugin can
-    /// read and rewrite its URI, headers, body and method.
-    ///
-    /// Note that the method is writable here but *not* through the coprocessor
-    /// `ConnectorRequest` stage, which sends the method to the coprocessor but ignores
-    /// any method it sends back. A plugin that rewrites the method therefore has no
-    /// coprocessor equivalent.
-    pub transport_request: TransportRequest,
+    /// The request to the underlying transport. Read and rewrite it through
+    /// [`Request::http_request`] and [`Request::http_request_mut`].
+    pub(crate) transport_request: TransportRequest,
 
     /// Information about how to map the response to GraphQL
     pub(crate) key: ResponseKey,
@@ -114,10 +114,36 @@ impl Request {
     /// Read-only on purpose. `ConnectorRequestService::call` and its callees read this
     /// request while handling the connector call, and every other plugin on the chain
     /// sees the same value, so letting one plugin swap it out would change behaviour
-    /// well outside that plugin. Rewrite [`Request::transport_request`] instead to
+    /// well outside that plugin. Rewrite [`Request::http_request_mut`] instead to
     /// change what goes over the wire.
     pub fn supergraph_request(&self) -> &Arc<http::Request<graphql::Request>> {
         &self.supergraph_request
+    }
+
+    /// The outgoing HTTP request for this connector call.
+    ///
+    /// `None` when the connector is mapping-only: it applies its selection to an empty
+    /// object and makes no HTTP request at all.
+    pub fn http_request(&self) -> Option<&http::Request<String>> {
+        match &self.transport_request {
+            TransportRequest::Http(http_request) => Some(&http_request.inner),
+            TransportRequest::MappingOnly => None,
+        }
+    }
+
+    /// The outgoing HTTP request for this connector call, for rewriting its URI,
+    /// headers, body or method before it is sent. `None` as for
+    /// [`Request::http_request`].
+    ///
+    /// Note that the method is writable here but *not* through the coprocessor
+    /// `ConnectorRequest` stage, which sends the method to the coprocessor but ignores
+    /// any method it sends back. A plugin that rewrites the method therefore has no
+    /// coprocessor equivalent.
+    pub fn http_request_mut(&mut self) -> Option<&mut http::Request<String>> {
+        match &mut self.transport_request {
+            TransportRequest::Http(http_request) => Some(&mut http_request.inner),
+            TransportRequest::MappingOnly => None,
+        }
     }
 
     /// Consume this request and produce a failed [`Response`] for it, without making
@@ -153,7 +179,7 @@ impl Request {
 
 /// What happened at the transport layer for a single connector call.
 #[derive(Debug)]
-pub enum TransportOutcome {
+pub(crate) enum TransportOutcome {
     /// The connector call was made over HTTP and the upstream responded. This is the only
     /// state that carries a status and headers.
     Response(HttpResponse),
@@ -181,15 +207,9 @@ pub struct Response {
     /// connector calls don't race when resolving per-subgraph response rules.
     pub(crate) subgraph_name: String,
 
-    /// What happened at the transport layer for this connector call.
-    ///
-    /// This is the raw transport outcome: HTTP status, headers and transport-level
-    /// errors. Telemetry and downstream plugins read it, but the data returned to the
-    /// client comes from the mapped response, which is *not* recomputed when this
-    /// changes. Rewriting the status or headers here therefore makes telemetry
-    /// disagree with what the client actually receives unless you make the
-    /// corresponding change through the mapped-response accessors.
-    pub transport_outcome: TransportOutcome,
+    /// What happened at the transport layer for this connector call. Read and rewrite
+    /// it through [`Response::transport_status`] and the other `transport_*` accessors.
+    pub(crate) transport_outcome: TransportOutcome,
 
     /// The mapped response, including any mapping problems encountered when processing
     /// the response. This is what is merged into the GraphQL response returned to the
@@ -214,8 +234,9 @@ impl Response {
     /// customization cannot turn a failed connector call into a successful one, which
     /// is also true of the coprocessor `ConnectorResponse` stage.
     ///
-    /// This does not touch [`Response::transport_outcome`], so telemetry continues to
-    /// report the status and headers actually received from the upstream.
+    /// This does not touch [`Response::transport_status`] or
+    /// [`Response::transport_headers`], so telemetry continues to report the status and
+    /// headers actually received from the upstream.
     pub fn set_data(&mut self, data: serde_json_bytes::Value) -> bool {
         match &mut self.mapped_response {
             MappedResponse::Data { data: current, .. } => {
@@ -263,6 +284,70 @@ impl Response {
                 true
             }
             MappedResponse::Data { .. } => false,
+        }
+    }
+
+    /// The HTTP status received from the upstream.
+    ///
+    /// `None` when there is no HTTP response to report a status for: the connector
+    /// mapped a response without making a request, or the call failed at the transport
+    /// level. See [`Response::transport_error`] for that case.
+    pub fn transport_status(&self) -> Option<http::StatusCode> {
+        match &self.transport_outcome {
+            TransportOutcome::Response(http_response) => Some(http_response.inner.status),
+            TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+        }
+    }
+
+    /// The response headers received from the upstream, or `None` as for
+    /// [`Response::transport_status`].
+    pub fn transport_headers(&self) -> Option<&http::HeaderMap> {
+        match &self.transport_outcome {
+            TransportOutcome::Response(http_response) => Some(&http_response.inner.headers),
+            TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
+        }
+    }
+
+    /// The transport-level error for this connector call, or `None` when the transport
+    /// succeeded or the connector is mapping-only. A connector call can also fail
+    /// during mapping, which is reported through [`Response::error`] instead.
+    pub fn transport_error(&self) -> Option<&Error> {
+        match &self.transport_outcome {
+            TransportOutcome::Error(error) => Some(error),
+            TransportOutcome::Response(_) | TransportOutcome::MappingOnly => None,
+        }
+    }
+
+    /// Replace the HTTP status reported for this connector call.
+    ///
+    /// Returns `false` and changes nothing when there is no HTTP response to rewrite,
+    /// as for [`Response::transport_status`].
+    ///
+    /// This is the status telemetry reports. The data returned to the client comes from
+    /// the mapped response and is *not* recomputed when this changes, so rewriting the
+    /// status here makes telemetry disagree with what the client actually receives
+    /// unless you make the corresponding change through [`Response::set_data`] or
+    /// [`Response::set_error_message`]. The coprocessor `ConnectorResponse` stage has
+    /// the same trap.
+    pub fn set_transport_status(&mut self, status: http::StatusCode) -> bool {
+        match &mut self.transport_outcome {
+            TransportOutcome::Response(http_response) => {
+                http_response.inner.status = status;
+                true
+            }
+            TransportOutcome::MappingOnly | TransportOutcome::Error(_) => false,
+        }
+    }
+
+    /// The response headers received from the upstream, for rewriting in place.
+    ///
+    /// `None` when there is no HTTP response to rewrite, as for
+    /// [`Response::transport_status`], and carries the same caveat about telemetry as
+    /// [`Response::set_transport_status`].
+    pub fn transport_headers_mut(&mut self) -> Option<&mut http::HeaderMap> {
+        match &mut self.transport_outcome {
+            TransportOutcome::Response(http_response) => Some(&mut http_response.inner.headers),
+            TransportOutcome::MappingOnly | TransportOutcome::Error(_) => None,
         }
     }
 
