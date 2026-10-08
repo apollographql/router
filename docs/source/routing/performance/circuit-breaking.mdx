@@ -169,7 +169,7 @@ Subgraphs and connector sources are configured independently: an `all` block und
 Every request to a subgraph or connector source passes through two phases, and the circuit sits between them:
 
 - **Admission** is the router deciding whether to send the request at all: a traffic shaping [rate limit](./traffic-shaping#rate-limiting) and the load shedding in front of it, and a connector's [`max_requests`](/graphos/routing/connectors/limits) limit. These run before the circuit, so a request they turn away never reaches it and isn't recorded, as either a failure or a success. The router's own throttling can't open the circuit of a healthy target, and a throttled request can't stand in for the probe that closes one.
-- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
+- **Execution** is everything the router does to fulfill an admitted request: [coprocessors](/router/customizations/coprocessor), [rhai scripts](/graphos/routing/customization/rhai), the [response cache](./caching/response-caching) (except a connector's entity lookups, which happen first; see [Cached connector entities](#cached-connector-entities)), your own [native Rust plugins](/graphos/routing/customization/native), and the call to the target, all bounded by the target's [traffic shaping timeout](./traffic-shaping#timeouts). These run behind the circuit, so the circuit judges its target by the outcome of all of them together.
 
 Identical requests joined by [query deduplication](./traffic-shaping#query-deduplication) are one call to the target, so they're recorded once, and each of them receives the same answer.
 
@@ -226,7 +226,7 @@ Requests turned away by admission never reach the circuit, so they don't appear 
 
 ## What clients see
 
-While a circuit is open, the affected fetch fails immediately without the router making a request. Coprocessors, rhai scripts, native plugins, and the response cache don't run for a rejected fetch, so a response the cache holds isn't served while the circuit is open. The traffic shaping rate limit still applies first, so a request it turns away gets its own error instead. The router adds an error to the GraphQL response with the extension code `REQUEST_CIRCUIT_BREAKER_OPEN`:
+While a circuit is open, the affected fetch fails immediately without the router making a request. Coprocessors, rhai scripts, native plugins, and the response cache don't run for a rejected fetch, so a response the cache holds isn't served while the circuit is open. Connector entity fetches are the exception; see [Cached connector entities](#cached-connector-entities). The traffic shaping rate limit still applies first, so a request it turns away gets its own error instead. The router adds an error to the GraphQL response with the extension code `REQUEST_CIRCUIT_BREAKER_OPEN`:
 
 ```json
 {
@@ -248,6 +248,16 @@ Whether the client receives partial data alongside the error depends on the quer
 The error is attached to the subgraph response, so [`include_subgraph_errors`](/router/configuration/subgraph-error-inclusion) applies to it like any other subgraph error. With the default configuration, your client sees `Subgraph errors redacted` instead of the message and code above.
 
 </Note>
+
+### Cached connector entities
+
+The router looks up a connector's entities in the [response cache](/graphos/routing/performance/caching/response-caching/overview) before the request reaches the source's circuit. While a connector source's circuit is open:
+
+- An entity fetch whose entities are all cached is served from the cache, with no error.
+- An entity fetch whose entities are only partly cached returns the cached entities. Each entity that isn't cached is `null`, with a `REQUEST_CIRCUIT_BREAKER_OPEN` error.
+- Every other request to the source fails with `REQUEST_CIRCUIT_BREAKER_OPEN`, including a root field fetch whose response is cached.
+
+An entity counts as cached only when the response cache would also serve it with the circuit closed. If the cache is skipped, for example because caching is turned off for the source or the client sent `Cache-Control: no-cache`, the request goes to the source's circuit and is rejected.
 
 ## Alternatives
 
