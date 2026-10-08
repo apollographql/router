@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use apollo_redaction::Redacted;
 use http::Uri;
+use opentelemetry_otlp::RetryPolicy;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -142,6 +143,15 @@ impl Config {
             .into()),
         }
     }
+}
+
+/// The retry policy for every OTLP exporter the router builds: none.
+///
+/// Metric exports already retry in `RetryMetricExporter`, so exporter retries would multiply the
+/// attempts. Trace exports are sent once, so a failing collector doesn't delay the flush on
+/// shutdown or reload.
+pub(super) fn no_retries() -> RetryPolicy {
+    RetryPolicy::disabled()
 }
 
 #[derive(Copy, Clone, Debug)]

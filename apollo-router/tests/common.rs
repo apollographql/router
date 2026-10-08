@@ -13,6 +13,8 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_router::_private::telemetry::DatadogPropagator;
+use apollo_router::_private::telemetry::datadog_pipeline;
 use buildstructor::buildstructor;
 use flate2::read::GzDecoder;
 use fred::clients::Client as RedisClient;
@@ -684,8 +686,9 @@ impl Telemetry {
                 .with_resource(resource)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
-                        opentelemetry_datadog::new_pipeline()
+                        datadog_pipeline()
                             .with_service_name(service_name)
+                            .with_http_client(reqwest::Client::new())
                             .build_exporter()
                             .expect("datadog pipeline failed"),
                         runtime::Tokio,
@@ -716,7 +719,7 @@ impl Telemetry {
                     .headers()
                     .get("x-datadog-sampling-priority")
                     .cloned();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
@@ -762,7 +765,7 @@ impl Telemetry {
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
-                let propagator = opentelemetry_datadog::DatadogPropagator::new();
+                let propagator = DatadogPropagator::new();
                 let mut context = propagator.extract_with_context(context, &headers);
                 // We're going to override the sampled so that we can test sampling priority
                 if let Some(psr) = headers.get("x-datadog-sampling-priority") {

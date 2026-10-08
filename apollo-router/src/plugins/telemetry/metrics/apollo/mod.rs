@@ -37,6 +37,7 @@ use crate::plugins::telemetry::metrics::OverflowMetricExporter;
 use crate::plugins::telemetry::metrics::RetryMetricExporter;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::plugins::telemetry::otlp::no_retries;
 use crate::plugins::telemetry::otlp::process_endpoint;
 use crate::plugins::telemetry::reload::metrics::MetricsBuilder;
 use crate::plugins::telemetry::reload::metrics::MetricsConfigurator;
@@ -139,6 +140,7 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
                     .with_timeout(batch_config.max_export_timeout)
@@ -150,6 +152,7 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_tonic()
+                    .with_retry_policy(no_retries())
                     .with_tls_config(ClientTlsConfig::new().with_native_roots())
                     .with_endpoint(endpoint.as_str())
                     .with_timeout(batch_config.max_export_timeout)
@@ -170,6 +173,7 @@ impl Config {
 
                 let exporter = MetricExporter::builder()
                     .with_http()
+                    .with_retry_policy(no_retries())
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
@@ -180,6 +184,7 @@ impl Config {
                 // MetricExporter builder does not implement Clone, so we need to create a new builder for the realtime exporter
                 let realtime_exporter = MetricExporter::builder()
                     .with_http()
+                    .with_retry_policy(no_retries())
                     .with_timeout(batch_config.max_export_timeout)
                     .with_temporality(Temporality::Delta)
                     .with_compression(opentelemetry_otlp::Compression::Gzip)
