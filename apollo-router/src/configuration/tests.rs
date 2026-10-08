@@ -507,6 +507,29 @@ fn expanded_connector_config_values_stay_strings() {
     );
 }
 
+/// gRPC metadata values are header values, so an expanded value that looks like a number or a
+/// boolean must stay a string rather than resolve as YAML.
+#[test]
+fn expanded_otlp_grpc_metadata_values_stay_strings() {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("API_KEY", "12345")
+        .mocked_env_var("FLAG", "true")
+        .build();
+    let config = parse_configuration(
+        "telemetry:\n  exporters:\n    tracing:\n      otlp:\n        enabled: true\n        protocol: grpc\n        grpc:\n          metadata:\n            x-api-key: ${env.API_KEY}\n            x-flags:\n              - ${env.FLAG}\n",
+        expansion,
+        Migration::None,
+    )
+    .expect("the metadata values are strings");
+
+    let document = config.validated_yaml.expect("the retained document");
+    assert_eq!(
+        document["telemetry"]["exporters"]["tracing"]["otlp"]["grpc"]["metadata"],
+        json!({ "x-api-key": "12345", "x-flags": ["true"] })
+    );
+}
+
 /// An expansion reference anchored in a non-secret field and aliased into `password`.
 const ANCHORED_EXPANSION: &str = "apq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${env.TEST_CONFIG_REDIS_PASSWORD}\n        password: *pw\n";
 
