@@ -1,0 +1,21 @@
+coprocessor:
+  url: "<coprocessor-address>"
+  subgraph:
+    all:
+      request:
+        headers: true
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        preserve_trace_context_on_subgraph_requests: true
+      common:
+        service_name: router
+        sampler: 1.0
+        parent_based_sampler: false
+      otlp:
+        enabled: true
+        protocol: http
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 10ms
