@@ -2550,6 +2550,7 @@ fn save_original_cache_control(
 }
 
 /// Stores a root-field response's data. The caller decides whether the response may be stored.
+#[allow(clippy::too_many_arguments)]
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
