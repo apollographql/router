@@ -345,6 +345,18 @@ impl Referencers {
     }
 
     pub(crate) fn rename_union_type(&mut self, old_name: &Name, new_name: &Name) {
+        for (_scalar_name, scalar_refs) in self.scalar_types.iter_mut() {
+            Self::update_union_typename_field_positions(
+                &mut scalar_refs.union_fields,
+                old_name,
+                new_name,
+            );
+        }
+
+        for (_object_name, object_refs) in self.object_types.iter_mut() {
+            Self::update_union_type_positions(&mut object_refs.union_types, old_name, new_name);
+        }
+
         for (_directive_name, directive_refs) in self.directives.iter_mut() {
             Self::update_union_type_positions(&mut directive_refs.union_types, old_name, new_name);
         }
@@ -365,6 +377,23 @@ impl Referencers {
 
         types.retain(|t| &t.type_name != old_type_name);
         types.extend(updated_types);
+    }
+
+    fn update_union_typename_field_positions(
+        fields: &mut IndexSet<UnionTypenameFieldDefinitionPosition>,
+        old_type_name: &Name,
+        new_type_name: &Name,
+    ) {
+        let updated_fields: Vec<_> = fields
+            .iter()
+            .filter(|f| &f.type_name == old_type_name)
+            .map(|_| UnionTypenameFieldDefinitionPosition {
+                type_name: new_type_name.clone(),
+            })
+            .collect();
+
+        fields.retain(|f| &f.type_name != old_type_name);
+        fields.extend(updated_fields);
     }
 
     pub(crate) fn rename_enum_type(&mut self, old_name: &Name, new_name: &Name) {
