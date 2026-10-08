@@ -1699,14 +1699,19 @@ impl CacheService {
                 }
 
                 let body = response.response.body();
-                let storable = response.response.status().is_success()
-                    && body.data.is_some()
-                    && body.errors.is_empty()
-                    && cache_control.should_store();
+                // Single source of truth for whether this response could be stored: a 2xx
+                // status, data, no GraphQL errors, and a `Cache-Control` that allows storing.
+                // Marking the query private, the debugger's `shouldStore` and the store gate
+                // below all read this one value.
+                let storable_data = body.data.as_ref().filter(|_| {
+                    response.response.status().is_success()
+                        && body.errors.is_empty()
+                        && cache_control.should_store()
+                });
 
                 // we did not know in advance that this was a query with a private scope, so we update the cache key
                 if cache_control.private() && !is_known_private {
-                    if storable {
+                    if storable_data.is_some() {
                         remember_private_query(
                             &self.private_queries,
                             private_query_key,
@@ -1747,7 +1752,7 @@ impl CacheService {
                         data: serde_json_bytes::to_value(response.response.body().clone())
                             .unwrap_or_default(),
                         warnings: Vec::new(),
-                        should_store: storable,
+                        should_store: storable_data.is_some(),
                         indexes: *self.indexes,
                     }
                     .update_metadata();
@@ -1758,7 +1763,9 @@ impl CacheService {
                 // users, so we do not store the response in cache
                 let unstorable_private_response = cache_control.private() && private_id.is_none();
 
-                if storable && !unstorable_private_response {
+                if let Some(data) = storable_data
+                    && !unstorable_private_response
+                {
                     // Prepend the whole-subgraph index entry when that index is active. The
                     // by-type and per-tag entries were already appended in scope by the
                     // cache-lookup and extension-read paths according to the same indexes.
@@ -1768,7 +1775,8 @@ impl CacheService {
                     cache_store_root_from_response(
                         storage,
                         self.subgraph_ttl,
-                        &response,
+                        data,
+                        response.subgraph_name.clone(),
                         cache_control,
                         root_cache_key,
                         cache_tags,
@@ -2570,15 +2578,13 @@ fn save_original_cache_control(
 async fn cache_store_root_from_response(
     cache: Storage,
     default_subgraph_ttl: Duration,
-    response: &subgraph::Response,
+    data: &Value,
+    subgraph_name: String,
     cache_control: CacheControl,
     cache_key: String,
     cache_tags: Vec<CacheTag>,
     cdn_invalidation_tags: Vec<String>,
 ) -> Result<(), BoxError> {
-    let Some(data) = response.response.body().data.as_ref() else {
-        return Ok(());
-    };
     let ttl = cache_control
         .ttl()
         .map(Duration::from_secs)
@@ -2598,7 +2604,6 @@ async fn cache_store_root_from_response(
         status: None,
     };
 
-    let subgraph_name = response.subgraph_name.clone();
     let span = tracing::info_span!("response_cache.store", "kind" = "root", "subgraph.name" = subgraph_name.clone(), "ttl" = ?ttl);
 
     // Write to cache in a non-awaited task so that it's not on the request’s critical path
