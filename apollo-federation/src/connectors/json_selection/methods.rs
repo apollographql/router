@@ -70,6 +70,7 @@ pub(super) enum ArrowMethod {
     TrimEnd,
     WithWarning,
     WithError,
+    IfThen,
 
     // Future methods:
     TypeOf,
@@ -202,6 +203,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::TrimEnd => &public::TrimEndMethod,
             Self::WithWarning => &public::WithWarningMethod,
             Self::WithError => &public::WithErrorMethod,
+            Self::IfThen => &public::IfThenMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
@@ -268,6 +270,7 @@ impl ArrowMethod {
             "trimEnd" => Some(Self::TrimEnd),
             "withWarning" => Some(Self::WithWarning),
             "withError" => Some(Self::WithError),
+            "ifThen" => Some(Self::IfThen),
             _ => None,
         };
 
@@ -324,6 +327,7 @@ impl ArrowMethod {
                 | Self::TrimEnd
                 | Self::WithWarning
                 | Self::WithError
+                | Self::IfThen
         )
     }
 }
