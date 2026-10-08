@@ -12,13 +12,11 @@ use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::prelude::BASE64_URL_SAFE;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use http::HeaderMap;
-use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::uri::Scheme;
 use parking_lot::Mutex;
-use tower::BoxError;
 use uuid::Uuid;
 
 use super::Rhai;
@@ -57,6 +55,7 @@ mod rhai_imports {
     pub(super) use rhai::Instant;
     pub(super) use rhai::Map;
     pub(super) use rhai::NativeCallContext;
+    pub(super) use rhai::Position;
     pub(super) use rhai::Scope;
     pub(super) use rhai::combine_with_exported_module;
     pub(super) use rhai::exported_module;
@@ -75,6 +74,50 @@ const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access status_code on a deferred response";
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
+
+/// An error raised by one of the router's Rhai functions.
+///
+/// Clients see the status code's reason phrase instead of this text. The text is logged.
+#[derive(Clone, Debug)]
+pub(crate) struct RouterFunctionError(String);
+
+fn router_function_error(message: impl ToString) -> Box<EvalAltResult> {
+    EvalAltResult::ErrorRuntime(
+        Dynamic::from(RouterFunctionError(message.to_string())),
+        Position::NONE,
+    )
+    .into()
+}
+
+fn header_not_found(name: &str) -> Box<EvalAltResult> {
+    router_function_error(format!("header '{name}' not found"))
+}
+
+/// Replaces a router function's error within `error` with its text.
+///
+/// Rhai prints a custom type by its type name, so without this a logged error would not show the
+/// text.
+pub(super) fn reveal_router_function_error(error: &mut EvalAltResult) {
+    match error {
+        EvalAltResult::ErrorInFunctionCall(.., inner, _)
+        | EvalAltResult::ErrorInModule(.., inner, _) => reveal_router_function_error(inner),
+        EvalAltResult::ErrorRuntime(thrown, _) => {
+            if let Some(RouterFunctionError(message)) = thrown.clone().try_cast() {
+                *thrown = message.into();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// What a script's `log_*` call writes, showing a router function's error by its text for the
+/// same reason as [`reveal_router_function_error`].
+fn log_message(message: Dynamic) -> Dynamic {
+    match message.try_cast_result::<RouterFunctionError>() {
+        Ok(RouterFunctionError(text)) => text.into(),
+        Err(message) => message,
+    }
+}
 
 pub(crate) use types::OptionDance;
 pub(crate) use types::SharedMut;
@@ -113,9 +156,9 @@ mod router_base64 {
         String::from_utf8(
             BASE64_STANDARD
                 .decode(input.as_bytes())
-                .map_err(|e| e.to_string())?,
+                .map_err(router_function_error)?,
         )
-        .map_err(|e| e.to_string().into())
+        .map_err(router_function_error)
     }
 
     #[rhai_fn(pure, name = "decode", return_raw)]
@@ -124,8 +167,12 @@ mod router_base64 {
         alphabet: Alphabet,
     ) -> Result<String, Box<EvalAltResult>> {
         let engine = get_engine(&alphabet);
-        String::from_utf8(engine.decode(input.as_bytes()).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string().into())
+        String::from_utf8(
+            engine
+                .decode(input.as_bytes())
+                .map_err(router_function_error)?,
+        )
+        .map_err(router_function_error)
     }
 
     #[rhai_fn(pure)]
@@ -157,12 +204,12 @@ mod router_json {
 
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn encode(input: &mut Dynamic) -> Result<String, Box<EvalAltResult>> {
-        serde_json::to_string(input).map_err(|e| e.to_string().into())
+        serde_json::to_string(input).map_err(router_function_error)
     }
 
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn decode(input: &mut ImmutableString) -> Result<Dynamic, Box<EvalAltResult>> {
-        serde_json::from_str(input).map_err(|e| e.to_string().into())
+        serde_json::from_str(input).map_err(router_function_error)
     }
 }
 
@@ -183,11 +230,11 @@ mod router_expansion {
 
     #[rhai_fn(name = "get", return_raw)]
     pub(crate) fn expansion_env(key: &str) -> Result<String, Box<EvalAltResult>> {
-        let expander = Expansion::default_rhai().map_err(|e| e.to_string())?;
+        let expander = Expansion::default_rhai().map_err(router_function_error)?;
         expander
             .expand_env(key)
-            .map_err(|e| e.to_string())?
-            .ok_or(CANNOT_GET_ENVIRONMENT_VARIABLE.into())
+            .map_err(router_function_error)?
+            .ok_or_else(|| router_function_error(CANNOT_GET_ENVIRONMENT_VARIABLE))
     }
 }
 
@@ -219,7 +266,7 @@ mod status_code {
 
     #[rhai_fn(return_raw)]
     pub(crate) fn status_code_from_int(number: INT) -> Result<StatusCode, Box<EvalAltResult>> {
-        let code = StatusCode::from_u16(number as u16).map_err(|e| e.to_string())?;
+        let code = StatusCode::from_u16(number as u16).map_err(router_function_error)?;
         Ok(code)
     }
 
@@ -278,7 +325,8 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
-        Ok(String::from_utf8_lossy(x.remove(key).ok_or("")?.as_bytes()).to_string())
+        let value = x.remove(key).ok_or_else(|| header_not_found(key))?;
+        Ok(String::from_utf8_lossy(value.as_bytes()).to_string())
     }
 
     // Register a HeaderMap indexer so we can get/set headers
@@ -294,9 +342,9 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
-        let search_name =
-            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        Ok(String::from_utf8_lossy(x.get(search_name).ok_or("")?.as_bytes()).to_string())
+        let search_name = HeaderName::from_str(key).map_err(router_function_error)?;
+        let value = x.get(search_name).ok_or_else(|| header_not_found(key))?;
+        Ok(String::from_utf8_lossy(value.as_bytes()).to_string())
     }
 
     #[rhai_fn(index_set, return_raw)]
@@ -306,8 +354,8 @@ mod router_header_map {
         value: &str,
     ) -> Result<(), Box<EvalAltResult>> {
         x.insert(
-            HeaderName::from_str(key).map_err(|e| e.to_string())?,
-            HeaderValue::from_str(value).map_err(|e| e.to_string())?,
+            HeaderName::from_str(key).map_err(router_function_error)?,
+            HeaderValue::from_str(value).map_err(router_function_error)?,
         );
         Ok(())
     }
@@ -320,11 +368,14 @@ mod router_header_map {
         key: &str,
         value: Array,
     ) -> Result<(), Box<EvalAltResult>> {
-        let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+        let h_key = HeaderName::from_str(key).map_err(router_function_error)?;
         for v in value {
+            let v = v.into_string().map_err(|type_name| {
+                router_function_error(format!("header values must be strings, not {type_name}"))
+            })?;
             x.append(
                 h_key.clone(),
-                HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+                HeaderValue::from_str(&v).map_err(router_function_error)?,
             );
         }
         Ok(())
@@ -341,8 +392,7 @@ mod router_header_map {
         x: &mut HeaderMap,
         key: &str,
     ) -> Result<Array, Box<EvalAltResult>> {
-        let search_name =
-            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+        let search_name = HeaderName::from_str(key).map_err(router_function_error)?;
         let mut response = Array::new();
         for value in x.get_all(search_name).iter() {
             response.push(String::from_utf8_lossy(value.as_bytes()).to_string().into())
@@ -411,7 +461,7 @@ mod router_context {
     pub(crate) fn context_get(x: &mut Context, key: &str) -> Result<Dynamic, Box<EvalAltResult>> {
         x.get(key)
             .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-            .map_err(|e: BoxError| e.to_string().into())
+            .map_err(router_function_error)
     }
 
     #[rhai_fn(index_set, return_raw)]
@@ -423,7 +473,7 @@ mod router_context {
         let _ = x
             .insert(key, value)
             .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-            .map_err(|e: BoxError| e.to_string())?;
+            .map_err(router_function_error)?;
         Ok(())
     }
 
@@ -443,7 +493,7 @@ mod router_context {
                 .call_within_context(&context, (v.clone(),))
                 .unwrap_or(v)
         })
-        .map_err(|e: BoxError| e.to_string().into())
+        .map_err(router_function_error)
     }
 
     #[rhai_fn(name = "to_string", pure)]
@@ -595,6 +645,7 @@ mod router_plugin {
     pub(crate) type Error = crate::error::Error;
     pub(crate) type Uri = http::Uri;
     pub(crate) type TraceId = crate::tracer::TraceId;
+    pub(crate) type RouterFunctionError = super::RouterFunctionError;
 
     // It would be nice to generate get_originating_headers and
     // set_originating_headers for all response types.
@@ -694,14 +745,18 @@ mod router_plugin {
     pub(crate) fn get_originating_headers_router_deferred_response(
         _obj: &mut SharedMut<router::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(get = "status_code", pure, return_raw)]
     pub(crate) fn get_status_code_router_deferred_response(
         _obj: &mut SharedMut<router::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -729,7 +784,9 @@ mod router_plugin {
     pub(crate) fn get_originating_headers_supergraph_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -757,7 +814,9 @@ mod router_plugin {
     pub(crate) fn get_originating_headers_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -823,7 +882,7 @@ mod router_plugin {
             Ok::<Bytes, Box<EvalAltResult>>(bytes)
         })?;
 
-        String::from_utf8(bytes.to_vec()).map_err(|err| err.to_string().into())
+        String::from_utf8(bytes.to_vec()).map_err(router_function_error)
     }*/
 
     #[rhai_fn(get = "body", pure, return_raw)]
@@ -854,7 +913,9 @@ mod router_plugin {
         _obj: &mut SharedMut<router::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -871,7 +932,9 @@ mod router_plugin {
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -888,7 +951,9 @@ mod router_plugin {
         _obj: &mut SharedMut<execution::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+        Err(router_function_error(
+            CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE,
+        ))
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -988,7 +1053,7 @@ mod router_plugin {
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn urldecode(x: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
         Ok(urlencoding::decode(x)
-            .map_err(|e| e.to_string())?
+            .map_err(router_function_error)?
             .into_owned())
     }
 
@@ -1096,16 +1161,16 @@ mod router_plugin {
         let mut parts: Parts = x.clone().into_parts();
         parts.path_and_query = match parts
             .path_and_query
-            .ok_or("path and query are missing")?
+            .ok_or_else(|| router_function_error("path and query are missing"))?
             .query()
         {
             Some(query) => Some(
                 PathAndQuery::from_maybe_shared(format!("{value}?{query}"))
-                    .map_err(|e| e.to_string())?,
+                    .map_err(router_function_error)?,
             ),
-            None => Some(PathAndQuery::from_str(value).map_err(|e| e.to_string())?),
+            None => Some(PathAndQuery::from_str(value).map_err(router_function_error)?),
         };
-        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        *x = Uri::from_parts(parts).map_err(router_function_error)?;
         Ok(())
     }
 
@@ -1126,15 +1191,15 @@ mod router_plugin {
             Some(old_authority) => {
                 if let Some(port) = old_authority.port() {
                     Authority::from_maybe_shared(format!("{value}:{port}"))
-                        .map_err(|e| e.to_string())?
+                        .map_err(router_function_error)?
                 } else {
-                    Authority::from_str(value).map_err(|e| e.to_string())?
+                    Authority::from_str(value).map_err(router_function_error)?
                 }
             }
-            None => Authority::from_str(value).map_err(|e| e.to_string())?,
+            None => Authority::from_str(value).map_err(router_function_error)?,
         };
         parts.authority = Some(new_authority);
-        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        *x = Uri::from_parts(parts).map_err(router_function_error)?;
         Ok(())
     }
 
@@ -1155,12 +1220,12 @@ mod router_plugin {
             Some(old_authority) => {
                 let host = old_authority.host();
                 let new_authority = Authority::from_maybe_shared(format!("{host}:{value}"))
-                    .map_err(|e| e.to_string())?;
+                    .map_err(router_function_error)?;
                 parts.authority = Some(new_authority);
-                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+                *x = Uri::from_parts(parts).map_err(router_function_error)?;
                 Ok(())
             }
-            None => Err("invalid URI; unable to set port".into()),
+            None => Err(router_function_error("invalid URI; unable to set port")),
         }
     }
 
@@ -1173,9 +1238,9 @@ mod router_plugin {
     #[rhai_fn(set = "scheme", return_raw)]
     pub(crate) fn uri_scheme_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
         let mut parts: Parts = x.clone().into_parts();
-        let new_scheme = Scheme::from_str(value).map_err(|e| e.to_string())?;
+        let new_scheme = Scheme::from_str(value).map_err(router_function_error)?;
         parts.scheme = Some(new_scheme);
-        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        *x = Uri::from_parts(parts).map_err(router_function_error)?;
         Ok(())
     }
 
@@ -1238,7 +1303,7 @@ mod router_plugin {
     pub(crate) fn traceid() -> Result<TraceId, Box<EvalAltResult>> {
         TraceId::maybe_new()
             .or_else(TraceId::current)
-            .ok_or_else(|| "trace unavailable".into())
+            .ok_or_else(|| router_function_error("trace unavailable"))
     }
 
     #[rhai_fn(name = "to_string")]
@@ -1275,6 +1340,16 @@ mod router_plugin {
         format!("{x:?}")
     }
 
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn router_function_error_to_string(x: &mut RouterFunctionError) -> String {
+        x.0.clone()
+    }
+
+    #[rhai_fn(name = "to_debug", pure)]
+    pub(crate) fn router_function_error_to_debug(x: &mut RouterFunctionError) -> String {
+        format!("{:?}", x.0)
+    }
+
     pub(crate) fn uuid_v4() -> String {
         Uuid::new_v4().to_string()
     }
@@ -1283,7 +1358,7 @@ mod router_plugin {
     pub(crate) fn unix_now() -> Result<i64, Box<EvalAltResult>> {
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|e| e.to_string().into())
+            .map_err(router_function_error)
             .map(|x| x.as_secs() as i64)
     }
 
@@ -1291,7 +1366,7 @@ mod router_plugin {
     pub(crate) fn unix_ms_now() -> Result<i64, Box<EvalAltResult>> {
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|e| e.to_string().into())
+            .map_err(router_function_error)
             .map(|x| x.as_millis() as i64)
     }
 
@@ -1348,6 +1423,10 @@ impl Rhai {
         // service which represents the next stage of the pipeline.
         // We could have an error pipeline which always returns results, but that's a big
         // change and one that requires more thought in the future.
+        let error_text = |mut err: Box<EvalAltResult>| {
+            reveal_router_function_error(&mut err);
+            err.to_string()
+        };
         match subgraph {
             Some(name) => {
                 let _ = self
@@ -1358,13 +1437,13 @@ impl Rhai {
                         function_name,
                         (rhai_service, name.to_string()),
                     )
-                    .map_err(|err| err.to_string())?;
+                    .map_err(error_text)?;
             }
             None => {
                 let _ = self
                     .engine
                     .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
-                    .map_err(|err| err.to_string())?;
+                    .map_err(error_text)?;
             }
         }
 
@@ -1444,18 +1523,23 @@ impl Rhai {
             })
             // Register a series of logging functions
             .register_fn("log_trace", move |message: Dynamic| {
+                let message = log_message(message);
                 tracing::trace!(%message, target = %trace_main);
             })
             .register_fn("log_debug", move |message: Dynamic| {
+                let message = log_message(message);
                 tracing::debug!(%message, target = %debug_main);
             })
             .register_fn("log_info", move |message: Dynamic| {
+                let message = log_message(message);
                 tracing::info!(%message, target = %info_main);
             })
             .register_fn("log_warn", move |message: Dynamic| {
+                let message = log_message(message);
                 tracing::warn!(%message, target = %warn_main);
             })
             .register_fn("log_error", move |message: Dynamic| {
+                let message = log_message(message);
                 tracing::error!(%message, target = %error_main);
             });
 

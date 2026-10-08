@@ -10,8 +10,10 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use parking_lot::Mutex;
+use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
+use rhai::Scope;
 use serde_json::Value;
 use sha2::Digest;
 use tower::BoxError;
@@ -41,6 +43,7 @@ use crate::plugins::rhai::engine::RhaiRouterFirstRequest;
 use crate::plugins::rhai::engine::RhaiRouterResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphDeferredResponse;
 use crate::plugins::rhai::engine::RhaiSupergraphResponse;
+use crate::plugins::rhai::engine::reveal_router_function_error;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
@@ -228,9 +231,10 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
             );
         }
 
+        // The script threw this string, so the client gets exactly that, with no Rhai wrapper.
         assert_eq!(
             body.errors.first().unwrap().message.as_str(),
-            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)'"
+            "An error occured"
         );
         crate::plugin::test::assert_no_mock_calls(handle).await;
         Ok(())
@@ -329,6 +333,32 @@ fn it_prints_messages_to_log() {
         engine
             .eval::<()>(r#"print("info log")"#)
             .expect("it logged a message");
+    });
+}
+
+// The Rhai customization docs show this pattern for logging a router function's error.
+#[test]
+fn it_logs_the_text_of_a_caught_router_function_error() {
+    use tracing::subscriber;
+
+    use crate::assert_snapshot_subscriber;
+
+    subscriber::with_default(assert_snapshot_subscriber!(), || {
+        let engine = new_rhai_test_engine();
+        let mut scope = Scope::new();
+        scope.push("headers", HeaderMap::new());
+        engine
+            .run_with_scope(
+                &mut scope,
+                r#"
+                try {
+                    let value = headers["x-custom-header"];
+                } catch(err) {
+                    log_error(`missing header: ${err}`);
+                    log_error(err);
+                }"#,
+            )
+            .expect("the script catches the error");
     });
 }
 
@@ -697,7 +727,10 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 257, position 5)'".to_string()));
+        assert_eq!(
+            processed_error.message,
+            Some("I have raised an error".to_string())
+        );
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -722,17 +755,314 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     if let Err(error) = call_rhai_function("process_subgraph_response_om_missing_message").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(
-            processed_error.message,
-            Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 268, position 5)'"
-                    .to_string()
-            )
-        );
+        // The throw carries no message of its own, so the client gets the status code's reason
+        // phrase rather than a dump of the thrown object.
+        assert_eq!(processed_error.message, Some("Bad Request".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
     }
+}
+
+// What a client must see is the same however the failure was reached, so the redaction tests below
+// assert it in one place. A macro rather than a function because each stage has its own response
+// type, and all they have in common is the shape asserted here.
+macro_rules! assert_client_sees_only_the_redacted_message {
+    ($response:expr) => {{
+        let mut response = $response;
+        assert_eq!(
+            response.response.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let body = response.next_response().await.expect("there is a response");
+        let message = &body.errors.first().expect("the request failed").message;
+        assert_eq!(message, "Internal Server Error");
+    }};
+}
+
+// A failure the script author did not choose - the Rhai engine's own, or one raised by a router
+// Rhai function - describes the script's internals, so the client gets the status code's reason
+// phrase and the real error goes to the logs.
+#[tokio::test]
+async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError> {
+    async {
+        let (mock_service, handle) =
+            tower_test::mock::pair::<execution::Request, execution::Response>();
+        let dyn_plugin = create_plugin("rhai_engine_error.rhai").await?;
+
+        // execution_service calls a function that does not exist, so the engine fails before any
+        // router function is reached.
+        let mut service = dyn_plugin.execution_service(mock_service.boxed());
+        let fake_req = http_ext::Request::fake_builder()
+            .body(Request::builder().query(String::new()).build())
+            .build()?;
+        let req = ExecutionRequest::fake_builder()
+            .context(Context::new())
+            .supergraph_request(fake_req)
+            .build();
+
+        assert_client_sees_only_the_redacted_message!(service.ready().await?.call(req).await?);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        Ok(())
+    }
+    // The snapshot of the logs is what holds the router to still recording the real error.
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
+}
+
+#[tokio::test]
+async fn it_redacts_a_router_function_error() -> Result<(), BoxError> {
+    async {
+        let (mock_service, handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let dyn_plugin = create_plugin("rhai_redacted_error.rhai").await?;
+
+        // supergraph_service reads a header that is not there. The error names the header, which
+        // the logs keep and the client must not see.
+        let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let req = SupergraphRequest::fake_builder()
+            .context(Context::new())
+            .build()?;
+
+        assert_client_sees_only_the_redacted_message!(service.ready().await?.call(req).await?);
+
+        crate::plugin::test::assert_no_mock_calls(handle).await;
+        Ok(())
+    }
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
+}
+
+// The router's own Rhai functions describe what went wrong in terms of the script's inputs, such as
+// the environment variables it reads or the headers it expects, so clients must not see the text.
+#[test]
+fn it_redacts_router_function_errors() {
+    let engine = new_rhai_test_engine();
+    for (script, logged) in [
+        (
+            r#"env::get("THIS_SHOULD_NOT_EXIST")"#,
+            "could not expand variable: THIS_SHOULD_NOT_EXIST",
+        ),
+        (r#"base64::decode("$$$")"#, "Invalid symbol 36, offset 0."),
+        ("status_code_from_int(1000)", "invalid status code"),
+        (r#"json::decode("{")"#, "EOF while parsing"),
+        (r#"headers["x-missing"]"#, "header 'x-missing' not found"),
+        (
+            r#"headers["bad name"] = "value""#,
+            "invalid HTTP header name",
+        ),
+        (
+            r#"headers["x-name"] = "bad\nvalue""#,
+            "failed to parse header value",
+        ),
+        (r#"uri.host = "bad host""#, "invalid uri character"),
+    ] {
+        let mut scope = Scope::new();
+        scope.push("headers", HeaderMap::new());
+        scope.push("uri", http::Uri::from_static("http://localhost:4000/"));
+        let error = engine
+            .eval_with_scope::<Dynamic>(&mut scope, script)
+            .expect_err("the router function fails");
+
+        let processed_error = process_error(error);
+        assert_eq!(
+            processed_error.message.as_deref(),
+            Some("Internal Server Error"),
+            "{script}"
+        );
+        let internal_detail = processed_error
+            .internal_detail
+            .expect("the real error is kept for the logs");
+        assert!(
+            internal_detail.contains(logged),
+            "{script}: {internal_detail}"
+        );
+    }
+}
+
+// Catching a router function's error is how a script chooses what the client sees instead. `err` is
+// an error object rather than a string, as the upgrade note says.
+#[test]
+fn it_returns_a_message_thrown_after_catching_a_router_function_error() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(
+            r#"
+            try {
+                env::get("THIS_SHOULD_NOT_EXIST");
+            } catch (err) {
+                if type_of(err) == "string" || err == err.to_string() {
+                    throw "caught a string";
+                }
+                throw "caught: " + err.to_string();
+            }"#,
+        )
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(
+        processed_error.message.as_deref(),
+        Some(
+            "caught: could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"
+        )
+    );
+}
+
+// The response stream ending before there is a primary response is not a callback failure, but the
+// client still gets a redacted message, so the log is the only record of what actually happened.
+#[tokio::test]
+async fn it_redacts_an_empty_response_stream() -> Result<(), BoxError> {
+    async {
+        let (mock_service, mut handle) =
+            tower_test::mock::pair::<SupergraphRequest, SupergraphResponse>();
+        let driver = tokio::spawn(async move {
+            let (req, responder) = handle.next_request().await.unwrap();
+            let response = SupergraphResponse::fake_builder()
+                .context(req.context)
+                .build()
+                .unwrap();
+            // Throw away the primary response, leaving map_response nothing to be handed.
+            responder.send_response(response.map(|_| futures::stream::empty().boxed()));
+        });
+
+        let dyn_plugin = create_plugin("rhai_empty_response.rhai").await?;
+        let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let req = SupergraphRequest::fake_builder()
+            .context(Context::new())
+            .build()?;
+
+        assert_client_sees_only_the_redacted_message!(service.ready().await?.call(req).await?);
+
+        crate::plugin::test::await_mock_driver(driver).await;
+        Ok(())
+    }
+    // The snapshot is what holds the router to recording a cause the client no longer sees.
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
+}
+
+#[test]
+fn it_returns_a_thrown_string_without_the_rhai_wrapper() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>(r#"throw "failed to convert header to a str";"#)
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        processed_error.message,
+        Some("failed to convert header to a str".to_string()),
+        "the author's string is theirs to return, but nothing around it is"
+    );
+}
+
+#[test]
+fn it_redacts_a_throw_whose_message_is_empty() {
+    let engine = new_rhai_test_engine();
+    // The expected status is spelled out rather than read back off the result, so that a throw
+    // losing the status it asked for fails here too - the reason phrase alone would move with it.
+    for (script, status, message) in [
+        (
+            r#"throw "";"#,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Internal Server Error",
+        ),
+        (
+            r#"throw #{ status: 400, message: "" };"#,
+            StatusCode::BAD_REQUEST,
+            "Bad Request",
+        ),
+    ] {
+        let error = engine.eval::<()>(script).expect_err("the script throws");
+
+        let processed_error = process_error(error);
+        assert_eq!(processed_error.status, status, "{script}");
+        assert_eq!(
+            processed_error.message.as_deref(),
+            Some(message),
+            "an empty message is not one a client can act on: {script}"
+        );
+    }
+}
+
+// A thrown scalar carries no message that can be returned without dumping the thrown value, which
+// is the disclosure this redaction exists to stop, so the author's value is dropped. Documented in
+// the Rhai customization docs alongside the other redacted cases.
+#[test]
+fn it_redacts_a_throw_that_is_not_a_string_or_a_map() {
+    let engine = new_rhai_test_engine();
+    for script in ["throw 42;", r#"throw ["a", "b"];"#, "throw true;"] {
+        let error = engine.eval::<()>(script).expect_err("the script throws");
+
+        let processed_error = process_error(error);
+        assert_eq!(
+            processed_error.status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{script}"
+        );
+        assert_eq!(
+            processed_error.message.as_deref(),
+            Some("Internal Server Error"),
+            "the thrown value must not reach the client: {script}"
+        );
+    }
+}
+
+// A map the router cannot read loses everything in it, including parts it could have read. Split out
+// from the scalar cases because this is the one a script author is liable to hit by accident, and
+// the only one where a message they did write is dropped.
+#[test]
+fn it_redacts_a_throw_whose_map_cannot_be_read() {
+    let engine = new_rhai_test_engine();
+    // `status` is not a status code, so deserializing the map fails as a whole - the `message`
+    // beside it is never read, and the status the author asked for is lost with it.
+    let error = engine
+        .eval::<()>(r#"throw #{ status: "four hundred", message: "nope" };"#)
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        processed_error.message.as_deref(),
+        Some("Internal Server Error"),
+        "a map that cannot be read must not be dumped to the client either"
+    );
+}
+
+#[test]
+fn it_redacts_a_throw_with_an_unrecognised_status() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>("throw #{ status: 599 };")
+        .expect_err("the script throws");
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status.as_u16(), 599);
+    assert_eq!(processed_error.message, Some("Unknown Error".to_string()));
+}
+
+#[test]
+fn it_keeps_the_internal_detail_out_of_the_client_message() {
+    let engine = new_rhai_test_engine();
+    let error = engine
+        .eval::<()>("this_function_does_not_exist();")
+        .expect_err("the function does not exist");
+
+    let processed_error = process_error(error);
+    assert_eq!(
+        processed_error.message,
+        Some("Internal Server Error".to_string())
+    );
+    let internal_detail = processed_error
+        .internal_detail
+        .expect("the real error is kept for the logs");
+    assert!(
+        internal_detail.contains("this_function_does_not_exist"),
+        "the logs have to keep the reason the client no longer sees: {internal_detail}"
+    );
 }
 
 #[tokio::test]
@@ -752,18 +1082,17 @@ async fn it_mentions_source_when_syntax_error_occurs() {
 }
 
 #[test]
-#[should_panic(
-    expected = "can use env: ErrorRuntime(\"could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found\", none)"
-)]
 fn it_cannot_expand_missing_environment_variable() {
     assert!(std::env::var("THIS_SHOULD_NOT_EXIST").is_err());
     let engine = new_rhai_test_engine();
-    let _: String = engine
-        .eval(
-            r#"
-        env::get("THIS_SHOULD_NOT_EXIST")"#,
-        )
-        .expect("can use env");
+    let mut error = engine
+        .eval::<String>(r#"env::get("THIS_SHOULD_NOT_EXIST")"#)
+        .expect_err("the variable is not set");
+    reveal_router_function_error(&mut error);
+    assert_eq!(
+        error.to_string(),
+        "Runtime error: could not expand variable: THIS_SHOULD_NOT_EXIST, environment variable not found"
+    );
 }
 
 // POSIX specifies HOME is always set
@@ -955,16 +1284,11 @@ async fn test_rhai_header_removal_with_non_utf8_header() -> Result<(), BoxError>
 
     // Removing a non-UTF-8 header should be OK
     let body = service_response.next_response().await.unwrap();
-    if body.errors.is_empty() {
-        // yay, no errors
-    } else {
-        let rhai_error = body
-            .errors
-            .iter()
-            .find(|e| e.message.contains("rhai execution error"))
-            .expect("unexpected non-rhai error");
-        panic!("Got an unexpected rhai error: {rhai_error:?}");
-    }
+    assert!(
+        body.errors.is_empty(),
+        "removing a non-UTF-8 header should not fail: {:?}",
+        body.errors
+    );
 
     // Check that the header was actually removed
     let headers = service_response.response.headers().clone();

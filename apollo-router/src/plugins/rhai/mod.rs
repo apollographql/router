@@ -389,7 +389,10 @@ macro_rules! gen_map_response {
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
-                            tracing::error!("map_request callback failed: {error_details:#?}");
+                            // The response macros run outside the span the request macros install,
+                            // so the stage has to be named on the event itself - it is all an
+                            // operator has to go on once the client message is redacted.
+                            tracing::error!(rhai.stage = %$stage, "map_response callback failed: {error_details:#?}");
                         }
                         let mut guard = shared_response.lock();
                         let response_opt = guard.take();
@@ -442,7 +445,7 @@ macro_rules! gen_map_router_deferred_response {
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
-                            tracing::error!("map_request callback failed: {error_details:#?}");
+                            tracing::error!(rhai.stage = %$stage, "map_response callback failed: {error_details:#?}");
                         }
                         let response_opt = shared_response.lock().take();
                         return Ok($base::response_failure(
@@ -537,10 +540,15 @@ macro_rules! gen_map_deferred_response {
                     if first.is_none() {
                         let error_details = ErrorDetails {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: Some("rhai execution error: empty response".to_string()),
+                            message: Some(redacted_message(StatusCode::INTERNAL_SERVER_ERROR)),
                             position: None,
-                            body: None
+                            body: None,
+                            // Keep the `rhai execution error` prefix so one log search finds every redacted failure.
+                            internal_detail: Some(
+                                "rhai execution error: the response stream ended before a primary response was available".to_string()
+                            ),
                         };
+                        tracing::error!(rhai.stage = %$stage, "map_response was not called: {error_details:#?}");
                         return Ok($base::response_failure(
                             context,
                             error_details
@@ -567,7 +575,7 @@ macro_rules! gen_map_deferred_response {
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         if error_details.body.is_none() {
-                            tracing::error!("map_request callback failed: {error_details:#?}");
+                            tracing::error!(rhai.stage = %$stage, "map_response callback failed: {error_details:#?}");
                         }
                         let mut guard = shared_response.lock();
                         let response_opt = guard.take();
@@ -605,7 +613,7 @@ macro_rules! gen_map_deferred_response {
                             if let Err(error) = result {
                                 let error_details = process_error(error);
                                 if error_details.body.is_none() {
-                                    tracing::error!("map_request callback failed: {error_details:#?}");
+                                    tracing::error!(rhai.stage = %$stage, "map_response callback failed: {error_details:#?}");
                                 }
                                 let mut guard = shared_response.lock();
                                 let response_opt = guard.take();
@@ -759,31 +767,55 @@ struct ErrorDetails {
     message: Option<String>,
     position: Option<Position>,
     body: Option<crate::graphql::Response>,
+    /// The unredacted Rhai error, for logs only. Never copy it into a client-facing response.
+    /// Skipped by serde so a script's `throw` can't set it.
+    #[serde(skip)]
+    #[allow(dead_code)] // only read through `Debug` when the error is logged
+    internal_detail: Option<String>,
 }
 
 fn default_thrown_status_code() -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
-fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
+/// The client-facing message for a failure whose text the script author didn't choose.
+fn redacted_message(status: StatusCode) -> String {
+    // A script can throw a status with no reason phrase, such as 599.
+    status
+        .canonical_reason()
+        .unwrap_or("Unknown Error")
+        .to_string()
+}
+
+fn process_error(mut error: Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: Some(format!("rhai execution error: '{error}'")),
+        message: None,
         position: None,
         body: None,
+        internal_detail: None,
     };
 
-    let inner_error = error.unwrap_inner();
-    // We only want to process runtime errors
-    if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
-        if let Ok(temp_error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
-            if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
-                error_details = temp_error_details;
-            } else {
-                error_details.status = temp_error_details.status;
-            }
-        }
+    // Only a script's own `throw` carries a message its author chose, so engine failures keep the
+    // redacted message set below. A router function's error is a `RouterFunctionError`, not a
+    // string or map, so it keeps the redacted message too.
+    if let EvalAltResult::ErrorRuntime(thrown, pos) = error.unwrap_inner() {
         error_details.position = Some(pos.into());
+
+        if let Ok(thrown_message) = thrown.as_immutable_string_ref() {
+            error_details.message = Some(thrown_message.to_string()).filter(|m| !m.is_empty());
+        } else if let Ok(thrown_details) = rhai::serde::from_dynamic::<ErrorDetails>(thrown) {
+            error_details.status = thrown_details.status;
+            error_details.message = thrown_details.message.filter(|message| !message.is_empty());
+            error_details.body = thrown_details.body;
+        }
+        // Any other thrown value would have to be dumped to return it, so it stays redacted.
+    }
+
+    engine::reveal_router_function_error(&mut error);
+    error_details.internal_detail = Some(format!("rhai execution error: '{error}'"));
+    if error_details.message.is_none() {
+        error_details.message = Some(redacted_message(error_details.status));
     }
     error_details
 }
