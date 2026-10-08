@@ -7352,8 +7352,8 @@ enum ToggledSubgraphResponse {
     PublicDataWithErrors,
 }
 
-/// A subgraph service that answers with `healthy_data` or with the response shape currently
-/// selected in `mode`, counting every call that actually reaches it.
+/// A subgraph service that answers with `healthy_data`, using the `Cache-Control` header and
+/// errors selected in `mode`, and counts every call that reaches it.
 fn toggled_subgraph_service(
     mode: Arc<std::sync::Mutex<ToggledSubgraphResponse>>,
     calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -7368,25 +7368,12 @@ fn toggled_subgraph_service(
                 .message("subgraph failure")
                 .extension_code("SUBGRAPH_FAILURE")
                 .build();
-            let (status, cache_control, data, errors) = match mode {
-                ToggledSubgraphResponse::Healthy => (
-                    http::StatusCode::OK,
-                    "public, max-age=600",
-                    Some(healthy_data),
-                    vec![],
-                ),
-                ToggledSubgraphResponse::PrivateStorable => (
-                    http::StatusCode::OK,
-                    "private, max-age=600",
-                    Some(healthy_data),
-                    vec![],
-                ),
-                ToggledSubgraphResponse::PublicDataWithErrors => (
-                    http::StatusCode::OK,
-                    "public, max-age=600",
-                    Some(healthy_data),
-                    vec![error],
-                ),
+            let (cache_control, errors) = match mode {
+                ToggledSubgraphResponse::Healthy => ("public, max-age=600", vec![]),
+                ToggledSubgraphResponse::PrivateStorable => ("private, max-age=600", vec![]),
+                ToggledSubgraphResponse::PublicDataWithErrors => {
+                    ("public, max-age=600", vec![error])
+                }
             };
             let mut headers = http::HeaderMap::new();
             headers.insert(CACHE_CONTROL, HeaderValue::from_static(cache_control));
@@ -7394,10 +7381,10 @@ fn toggled_subgraph_service(
                 .context(req.context)
                 .subgraph_name(req.subgraph_name)
                 .id(req.id)
-                .and_data(data)
+                .data(healthy_data)
                 .errors(errors)
                 .extensions(crate::json_ext::Object::new())
-                .status_code(status)
+                .status_code(http::StatusCode::OK)
                 .headers(headers)
                 .build())
         }
