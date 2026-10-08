@@ -115,7 +115,7 @@ The router performs the following sequence to determine whether a particular que
 
 1. Upon seeing a query for the first time, the router requests the cache as if it were a public-only query.
 2. When the subgraph returns the response with private data, the router recognizes it. If the private ID is provided, the router stores the data in a user-specific part of the cache.
-3. The router stores the query in a list of known queries with private data.
+3. If the response could be stored, the router adds the query to a list of known queries with private data. See [Which responses mark a query as private](#which-responses-mark-a-query-as-private).
 4. When the router subsequently sees a known query:
 
 - If the private ID isn't provided, the router doesn't check the cache and instead transmits the subgraph response directly. The response is never cached.
