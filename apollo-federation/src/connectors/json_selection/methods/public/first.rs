@@ -85,7 +85,10 @@ fn first_shape(
     let locations = input_shape.locations().cloned().chain(location);
 
     match input_shape.case() {
-        ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
+        // Match runtime: the first char (not byte), or no value for "".
+        ShapeCase::String(Some(value)) => value.chars().next().map_or_else(Shape::none, |first| {
+            Shape::string_value(first.encode_utf8(&mut [0; 4]), locations)
+        }),
         ShapeCase::String(None) => Shape::string(locations),
         ShapeCase::Array { prefix, tail } => {
             if let Some(first) = prefix.first() {
@@ -136,5 +139,69 @@ mod tests {
             selection!("$->first").apply_to(&json!("hello")),
             (Some(json!("h")), vec![]),
         );
+    }
+
+    // The string-input shape must agree with runtime, which takes the first
+    // char (not byte) and produces no value for an empty string.
+    mod string_shape {
+        use serde_json_bytes::json;
+        use shape::Shape;
+        use shape::location::SourceId;
+
+        use crate::connectors::ConnectSpec;
+        use crate::connectors::json_selection::ShapeContext;
+        use crate::selection;
+
+        fn first_shape_of(input: &serde_json_bytes::Value) -> Shape {
+            let context = ShapeContext::new(SourceId::Other("first shape test".into()))
+                .with_spec(ConnectSpec::V0_4);
+            selection!("$.text->first", ConnectSpec::V0_4)
+                .compute_output_shape(&context, Shape::from_json_bytes(input))
+        }
+
+        #[test]
+        fn string_first_shape_accepts_empty_string() {
+            let input = json!({ "text": "" });
+            let selection = selection!("$.text->first", ConnectSpec::V0_4);
+            assert_eq!(selection.apply_to(&input), (None, vec![]));
+            let shape = first_shape_of(&input);
+            assert!(shape.is_none(), "shape={}", shape.pretty_print());
+        }
+
+        #[test]
+        fn string_first_shape_accepts_multibyte_string() {
+            let input = json!({ "text": "é🙂" });
+            let selection = selection!("$.text->first", ConnectSpec::V0_4);
+            assert_eq!(selection.apply_to(&input), (Some(json!("é")), vec![]));
+            let shape = first_shape_of(&input);
+            assert!(
+                shape.accepts_json_bytes(&json!("é")),
+                "shape={}",
+                shape.pretty_print()
+            );
+            assert!(
+                !shape.accepts_json_bytes(&json!("é🙂")),
+                "shape={}",
+                shape.pretty_print()
+            );
+        }
+
+        #[test]
+        fn literal_string_first_shape_does_not_panic() {
+            // Literal strings get known-value shapes from the selection alone,
+            // which is what connector validation and expansion compute.
+            for (source, expected) in [("$('')->first", None), ("$('🙂x')->first", Some("🙂"))]
+            {
+                let shape = selection!(source, ConnectSpec::V0_4).shape();
+                match expected {
+                    None => assert!(shape.is_none(), "{source}: {}", shape.pretty_print()),
+                    Some(first) => assert!(
+                        shape.accepts_json_bytes(&json!(first)),
+                        "{source}: {}",
+                        shape.pretty_print()
+                    ),
+                }
+            }
+        }
     }
 }
