@@ -22,8 +22,6 @@ use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 
 impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
-    pub(super) const MAX_NON_LOCAL_SELECTIONS: u64 = 100_000;
-
     /// This calls `check_non_local_selections_limit_exceeded()` for each of the selections in the
     /// open branches stack; see that function's doc comment for more information.
     ///
@@ -52,6 +50,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 branch.selections.len(),
                 tail_nodes_info.next_nodes.len(),
                 state,
+                self.parameters.config.debug.max_non_local_selections.get(),
             ) {
                 return Ok(true);
             }
@@ -91,8 +90,8 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     /// set that wouldn't be avoided by such an optimization (i.e. the "non-local" selections), and
     /// adds it to the given count in the state. Note that the count for a given selection set is
     /// scaled by an approximate upper bound on the possible number of tail nodes for paths ending
-    /// at that selection set. If at any point, the count exceeds `Self::MAX_NON_LOCAL_SELECTIONS`,
-    /// then this function will return `true`.
+    /// at that selection set. If at any point, the count exceeds
+    /// `QueryPlannerDebugConfig::max_non_local_selections`, then this function will return `true`.
     ///
     /// This function's code is closely related to `selection_set_is_fully_local_from_all_nodes()`
     /// (which implements the aforementioned optimization). However, when it comes to traversing the
@@ -227,6 +226,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 selection_set.selections.len(),
                 parent_nodes.next_nodes.len(),
                 state,
+                self.parameters.config.debug.max_non_local_selections.get(),
             )
         {
             return Ok(true);
@@ -235,8 +235,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     }
 
     /// Updates the non-local selection set count in the state, returning true if this causes the
-    /// count to exceed `Self::MAX_NON_LOCAL_SELECTIONS`.
-    fn update_count(num_selections: usize, num_parent_nodes: usize, state: &mut State) -> bool {
+    /// count to exceed `limit`.
+    fn update_count(
+        num_selections: usize,
+        num_parent_nodes: usize,
+        state: &mut State,
+        limit: u64,
+    ) -> bool {
         let Ok(num_selections) = u64::try_from(num_selections) else {
             return true;
         };
@@ -249,7 +254,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         if let Some(new_count) = state
             .count
             .checked_add(additional_count)
-            .take_if(|v| *v <= Self::MAX_NON_LOCAL_SELECTIONS)
+            .take_if(|v| *v <= limit)
         {
             state.count = new_count;
         } else {
