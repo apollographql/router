@@ -7,8 +7,6 @@ use std::sync::Arc;
 use apollo_federation::connectors::runtime::http_json_transport::HttpRequest as ConnectorsHttpRequest;
 use apollo_federation::connectors::runtime::http_json_transport::TransportRequest;
 use apollo_federation::connectors::runtime::responses::MappedResponse;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::Service;
@@ -41,14 +39,18 @@ use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 
 /// What information is passed to a connector request stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<ConnectorSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -63,14 +65,18 @@ pub(super) struct ConnectorRequestConf {
 }
 
 /// What information is passed to a connector response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<ConnectorSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -83,22 +89,19 @@ pub(super) struct ConnectorResponseConf {
 }
 
 /// Configures the connector coprocessor stages
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorStages {
-    #[serde(default)]
     pub(super) all: ConnectorStage,
 }
 
 /// The connector stage request/response configuration
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct ConnectorStage {
     /// The request configuration
-    #[serde(default)]
     pub(super) request: ConnectorRequestConf,
     /// The response configuration
-    #[serde(default)]
     pub(super) response: ConnectorResponseConf,
 }
 

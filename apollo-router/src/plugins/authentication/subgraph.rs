@@ -25,8 +25,6 @@ use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
 use parking_lot::RwLock;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
@@ -39,18 +37,21 @@ use crate::services::router::body::RouterBody;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
     #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
+    #[config(required)]
     access_key_id: Redacted<String>,
     /// The secret key used to sign requests.
     #[serde(deserialize_with = "crate::plugin::serde::deserialize_redacted_string")]
+    #[config(required)]
     secret_access_key: Redacted<String>,
     /// The AWS region this chain applies to.
+    #[config(required)]
     region: String,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
+    #[config(required)]
     service_name: String,
     /// Specify assumed role configuration.
     assume_role: Option<AssumeRoleProvider>,
@@ -74,35 +75,36 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 }
 
 /// Configuration of the DefaultChainProvider
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
+    #[config(required)]
     region: String,
     /// The profile name used by this provider
     profile_name: Option<String>,
     /// The service you're trying to access, eg: "s3", "vpc-lattice-svcs", etc.
+    #[config(required)]
     service_name: String,
     /// Specify assumed role configuration.
     assume_role: Option<AssumeRoleProvider>,
 }
 
 /// Specify assumed role configuration.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
     /// for the role assumed when making requests
+    #[config(required)]
     role_arn: String,
     /// Uniquely identify a session when the same role is assumed by different principals or for different reasons.
+    #[config(required)]
     session_name: String,
     /// Unique identifier that might be required when you assume a role in another account.
     external_id: Option<String>,
 }
 
 /// Configure AWS sigv4 auth.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
     DefaultChain(DefaultChainConfig),
@@ -200,8 +202,7 @@ fn credentials_chain_builder() -> aws_config::default_provider::credentials::Bui
     )
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[apollo_configuration::configuration]
 pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
     AWSSigV4(AWSSigV4Config),
@@ -209,15 +210,12 @@ pub(crate) enum AuthConfig {
 
 /// Configure subgraph authentication
 // Holds AWS credentials, so it cannot serialize its defaults: the schema declares them by hand.
-#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[apollo_configuration::configuration]
 #[schemars(rename = "AuthenticationSubgraphConfig")]
 pub(crate) struct Config {
     /// Configuration that will apply to all subgraphs.
-    #[serde(default)]
     #[schemars(extend("default" = null))]
     pub(crate) all: Option<AuthConfig>,
-    #[serde(default)]
     #[schemars(extend("default" = {}))]
     /// Create a configuration that will apply only to a specific subgraph.
     pub(crate) subgraphs: HashMap<String, AuthConfig>,

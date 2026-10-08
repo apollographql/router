@@ -117,6 +117,7 @@ pub(crate) struct Config {
     // SECURITY: Bind to localhost only by default to prevent network exposure
     // Using 127.0.0.1 instead of 0.0.0.0 ensures the diagnostic endpoints
     // are only accessible from the local machine, not from the network
+    // ListenAddr's UnixSocket variant holds a PathBuf, which has no Validate impl.
     #[config(default = constants::network::default_listen_addr().into(), skip_validate)]
     pub(crate) listen: ListenAddr,
 
@@ -125,6 +126,7 @@ pub(crate) struct Config {
     ///
     /// This directory will be created automatically if it doesn't exist.
     /// Note: Memory dumps are only generated on Linux platforms.
+    // PathBuf has no Validate impl.
     #[config(default = PathBuf::from("/tmp/router-diagnostics"), skip_validate)]
     pub(crate) output_directory: PathBuf,
 }

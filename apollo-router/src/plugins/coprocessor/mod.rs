@@ -227,7 +227,7 @@ impl PluginPrivate for CoprocessorPlugin<HTTPClientService> {
                 client_config,
             )?;
 
-        let client = TimeoutLayer::new(init.config.timeout).layer(http_client_service);
+        let client = TimeoutLayer::new(*init.config.timeout).layer(http_client_service);
 
         // Masking rules are published by the headers plugin into request
         // context at router-service time; each coprocessor stage reads them
@@ -384,14 +384,18 @@ where
     }
 }
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct RouterRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -406,14 +410,18 @@ pub(super) struct RouterRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct RouterResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<RouterSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -425,14 +433,18 @@ pub(super) struct RouterResponseConf {
     pub(super) url: Option<String>,
 }
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphRequestConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
@@ -449,14 +461,18 @@ pub(super) struct SubgraphRequestConf {
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphResponseConf {
     /// Condition to trigger this stage
+    // Condition is generic, so it can't take the configuration attribute.
+    #[config(skip_validate)]
     pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
+    // ContextConf's Selective tuple variant holds a HashSet, which has no Validate impl.
+    #[config(skip_validate)]
     pub(super) context: ContextConf,
     /// Send the body (can be true/false or selective with data/errors/extensions)
     pub(super) body: BodyConf,
@@ -477,47 +493,36 @@ struct Conf {
     /// The url you'd like to offload processing to (can be overridden per-stage). Supports HTTP/HTTPS (http://127.0.0.1:8081/urlpath) and Unix Domain Socket (unix:///path/to/socket) URLs
     #[config(required)]
     url: String,
-    #[config(skip_validate)]
     client: Option<Client>,
     /// The timeout for external requests
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]
-    #[config(default = default_timeout(), skip_validate)]
-    timeout: Duration,
+    #[config(default = default_timeout().into())]
+    timeout: apollo_configuration::types::Duration,
     /// Response validation defaults to true
     #[config(default = default_response_validation())]
     response_validation: bool,
     /// The router stage request/response configuration
-    #[config(skip_validate)]
     router: RouterStage,
     /// The supergraph stage request/response configuration
-    #[config(skip_validate)]
     supergraph: supergraph::SupergraphStage,
     /// The execution stage request/response configuration
-    #[config(skip_validate)]
     execution: execution::ExecutionStage,
     /// The subgraph stage request/response configuration
-    #[config(skip_validate)]
     subgraph: SubgraphStages,
     /// The connector stage request/response configuration
-    #[config(skip_validate)]
     connector: connector::ConnectorStages,
 }
 
 /// Configuration for which body fields to send to coprocessor
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, JsonSchema)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 #[serde(untagged)]
 pub(super) enum BodyConf {
     /// Send entire body (true) or nothing (false)
+    #[config(default)]
     All(bool),
     /// Send specific fields
     Selective(BodyFieldsConf),
-}
-
-impl Default for BodyConf {
-    fn default() -> Self {
-        BodyConf::All(false)
-    }
 }
 
 impl BodyConf {
@@ -532,8 +537,8 @@ impl BodyConf {
 }
 
 /// Configuration for selective body fields
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(Copy, PartialEq)]
 pub(super) struct BodyFieldsConf {
     /// Send the data field
     pub(super) data: bool,
@@ -669,8 +674,8 @@ fn record_coprocessor_operation(stage: PipelineStep, succeeded: bool) {
     );
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct RouterStage {
     /// The request configuration
     pub(super) request: RouterRequestConf,
@@ -801,20 +806,17 @@ impl RouterStage {
 // -----------------------------------------------------------------------------------------
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphStages {
-    #[serde(default)]
     pub(super) all: SubgraphStage,
 }
 
 /// What information is passed to a subgraph request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
+#[apollo_configuration::configuration]
+#[derive(PartialEq)]
 pub(super) struct SubgraphStage {
-    #[serde(default)]
     pub(super) request: SubgraphRequestConf,
-    #[serde(default)]
     pub(super) response: SubgraphResponseConf,
 }
 

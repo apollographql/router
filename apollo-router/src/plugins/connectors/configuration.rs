@@ -3,9 +3,6 @@ use std::sync::Arc;
 
 use apollo_federation::connectors::CustomConfiguration;
 use apollo_federation::connectors::expand::Connectors;
-use http::Uri;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use serde::Serialize;
 
 use super::incompatible::warn_incompatible_plugins;
@@ -20,7 +17,6 @@ use crate::services::connector_service::ConnectorSourceRef;
 #[derive(Serialize)]
 pub(crate) struct ConnectorsConfig {
     /// Map of subgraph_name.connector_source_name to source configuration
-    #[config(skip_validate)]
     pub(crate) sources: HashMap<String, SourceConfiguration>,
 
     /// Enables connector debugging information on response extensions if the feature is enabled
@@ -68,19 +64,20 @@ pub(crate) struct ConnectorsConfig {
 }
 
 /// Configuration for a `@source` directive
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
+#[derive(Serialize)]
 pub(crate) struct SourceConfiguration {
     /// Override the `@source(http: {baseURL:})`
-    #[serde(default, with = "http_serde::option::uri")]
     #[schemars(schema_with = "uri_schema")]
-    pub(crate) override_url: Option<Uri>,
+    pub(crate) override_url: Option<apollo_configuration::types::Uri>,
 
     /// The maximum number of requests for this source
     pub(crate) max_requests_per_operation: Option<usize>,
 
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]
+    // serde_json's Value has no Validate impl.
+    #[config(skip_validate)]
     pub(crate) custom: CustomConfiguration,
 }
 

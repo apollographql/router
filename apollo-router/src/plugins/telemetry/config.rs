@@ -62,14 +62,17 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[schemars(rename = "TelemetryConfig")]
 pub(crate) struct Conf {
     /// Apollo reporting configuration
+    // apollo::Config's nested types don't use the configuration attribute, so they have no Validate impl.
     #[config(skip_validate)]
     pub(crate) apollo: apollo::Config,
 
     /// Instrumentation configuration
+    // Exporters' nested types don't use the configuration attribute, so they have no Validate impl.
     #[config(skip_validate)]
     pub(crate) exporters: Exporters,
 
     /// Instrumentation configuration
+    // Instrumentation's nested types don't use the configuration attribute, so they have no Validate impl.
     #[config(skip_validate)]
     pub(crate) instrumentation: Instrumentation,
 }

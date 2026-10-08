@@ -74,7 +74,7 @@ impl PluginPrivate for FileUploadsPlugin {
                     let context = req.context.clone();
                     let layer_task = router_layer(req, limits);
                     let layer_result = if let Some(timeout) = operation_body_timeout {
-                        match tokio::time::timeout(timeout, layer_task).await {
+                        match tokio::time::timeout(*timeout, layer_task).await {
                             Ok(result) => result,
                             Err(_elapsed) => {
                                 return Ok(ControlFlow::Break(operation_body_timeout_error(
