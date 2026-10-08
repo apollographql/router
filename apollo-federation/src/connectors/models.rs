@@ -78,6 +78,11 @@ pub struct Connector {
 
     pub error_settings: ConnectorErrorsSettings,
 
+    /// Paths (over `$this`/`$args`/`$config`/`$context`) that must all resolve
+    /// to a non-null value for this connector to be invoked. CNN-474 proof of
+    /// concept.
+    pub requires: Vec<JSONSelection>,
+
     /// The GraphQL type this field is declared to return. `None` when
     /// unknown, e.g. for type-level connectors, which have no field
     /// definition to inspect. Used at runtime (via `Type::is_list` /
@@ -250,10 +255,21 @@ impl Connector {
             ConnectorErrorsSettings::from_directive(connect_errors, source_errors, is_success);
 
         // Collect all variables and subselections used in the request mappings
+        // (including `requires`, so its $this/$args/$config/$context fields are
+        // fetched and available even if they're not otherwise used in http/body)
+        let requires_references = connect
+            .requires
+            .iter()
+            .flat_map(|s| s.external_var_paths())
+            .filter_map(PathSelection::variable_reference);
         let request_references: IndexSet<VariableReference<Namespace>> = transport
             .as_ref()
             .map(|t| t.variable_references().collect())
             .unwrap_or_default();
+        let request_references: IndexSet<VariableReference<Namespace>> = request_references
+            .into_iter()
+            .chain(requires_references)
+            .collect();
 
         // Collect all variables and subselections used in response mappings (including errors.message and errors.extensions)
         let response_references: IndexSet<VariableReference<Namespace>> = connect
@@ -311,6 +327,7 @@ impl Connector {
             response_variable_keys,
             batch_settings,
             error_settings,
+            requires: connect.requires,
             output_type,
             label,
         })
@@ -768,6 +785,7 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                requires: [],
                 output_type: Some(
                     List(
                         Named(
@@ -982,6 +1000,7 @@ mod tests {
                     connect_extensions: None,
                     connect_is_success: None,
                 },
+                requires: [],
                 output_type: Some(
                     List(
                         Named(

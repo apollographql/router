@@ -7086,6 +7086,7 @@ mod tests {
 
         fn create_test_connector() -> Arc<Connector> {
             Arc::new(Connector {
+                requires: Vec::new(),
                 id: ConnectId::new(
                     "subgraph".into(),
                     Some(SourceName::cast("source")),

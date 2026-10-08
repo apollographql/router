@@ -881,6 +881,7 @@ mod test {
         use apollo_federation::connectors::runtime::key::ResponseKey;
 
         let connector = Connector {
+            requires: Vec::new(),
             spec: ConnectSpec::V0_1,
             schema_subtypes_map: Default::default(),
             id: ConnectId::new(
