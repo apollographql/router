@@ -364,9 +364,9 @@ type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
 /// A layer that boxes the service beneath it into a [`BoxService`], so the layers above wrap a
 /// short, fixed type.
 ///
-/// Every optional layer nests the type of everything beneath it, so an unboxed stack's type
-/// grows exponentially with its layers, and with it the crate's debug info and the compiler's
-/// and linker's memory.
+/// Each optional layer is an `Either` that names the service beneath it twice, so an unboxed
+/// stack's type name grows exponentially with its layers, and with it the crate's debug info
+/// and the compiler's and linker's memory.
 ///
 /// # Panics
 ///
@@ -405,10 +405,11 @@ fn debug_assert_boxed_type_name_bounded<S>() {
     debug_assert!(
         name.len() <= MAX_BOXED_TYPE_NAME_LEN,
         "a boxed service's type name is {} bytes, over the limit of {MAX_BOXED_TYPE_NAME_LEN}. \
-         Each optional layer nests the type of everything beneath it, so the name grows \
-         exponentially with the layers beneath the box, and with it the crate's debug info and \
-         compile and link memory. Box the stack again between those layers with `box_layer` or \
-         `box_clone_layer`, or avoid nesting optional layers. The type starts: {}",
+         Each optional layer is an `Either` that names the service beneath it twice, so the \
+         name grows exponentially with the optional layers beneath the box, and with it the \
+         crate's debug info and compile and link memory. Box the stack again between those \
+         layers with `box_layer` or `box_clone_layer`, or avoid nesting optional layers. The \
+         type starts: {}",
         name.len(),
         name.get(..500).unwrap_or(name),
     );
