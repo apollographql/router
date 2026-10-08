@@ -667,7 +667,8 @@ impl Plugin for DemandControl {
                                     .context(req.context.clone())
                                     .extensions(crate::json_ext::Object::new())
                                     .subgraph_name(subgraph_name.clone())
-                                    .build(),
+                                    .build()
+                                    .answered_by_router(),
                             ),
                         })
                     }
@@ -1038,5 +1039,47 @@ mod test {
             total, expected_total,
             "Expected total cost {expected_total}, got {total}"
         );
+    }
+
+    /// A subgraph request demand control rejects as too expensive is never sent, so the
+    /// subgraph's circuit records nothing for it.
+    #[tokio::test]
+    async fn a_subgraph_request_rejected_as_too_expensive_records_no_circuit_outcome() {
+        use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+        use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+        let rejecting = PluginTestHarness::<DemandControl>::builder()
+            .config(include_str!(
+                "fixtures/enforce_on_subgraph_request.router.yaml"
+            ))
+            .build()
+            .await
+            .expect("test harness");
+        let accepting = PluginTestHarness::<DemandControl>::builder()
+            .config(include_str!(
+                "fixtures/enforce_on_execution_request.router.yaml"
+            ))
+            .build()
+            .await
+            .expect("test harness");
+        let measured_by = |plugin: &DemandControl| {
+            let request = subgraph_request("Products");
+            request
+                .context
+                .insert_demand_control_context(DemandControlContext {
+                    strategy: plugin.strategy_factory.create(),
+                    variables: Default::default(),
+                });
+            request
+        };
+
+        assert_router_answers_record_nothing(
+            async |subgraph| {
+                crate::plugin::Plugin::subgraph_service(&*rejecting, "products", subgraph)
+            },
+            || measured_by(&accepting),
+            || measured_by(&rejecting),
+        )
+        .await;
     }
 }

@@ -1570,3 +1570,28 @@ async fn test_rhai_metric_deferred_response_causes_multiple_executions() {
     .with_metrics()
     .await;
 }
+
+/// A script that throws from a subgraph request callback answers the request itself, so the
+/// subgraph's circuit records nothing for it.
+#[tokio::test]
+async fn a_subgraph_request_a_script_throws_on_records_no_circuit_outcome() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    let plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+        .find(|factory| factory.name == "apollo.rhai")
+        .expect("Plugin not found")
+        .create_instance_without_schema(&serde_json::json!({
+            "scripts": "tests/fixtures",
+            "main": "turn_away_subgraph_request.rhai",
+        }))
+        .await
+        .unwrap();
+
+    assert_router_answers_record_nothing(
+        async |subgraph| plugin.subgraph_service("products", subgraph),
+        || subgraph_request("SendOn"),
+        || subgraph_request("TurnAway"),
+    )
+    .await;
+}

@@ -177,7 +177,7 @@ impl Request {
     /// from the `ConnectorRequest` stage: the connector call is not made, and `message`,
     /// `code`, and `extensions` are reported to the client as a GraphQL error at this
     /// connector's path (an entry for `code` in `extensions` is ignored). Use it to fail
-    /// a connector request deliberately, for example to circuit break on an upstream a
+    /// a connector request deliberately, for example to stop calling an upstream the
     /// plugin knows to be unhealthy.
     ///
     /// The connector source is never called, so the router's own circuit breaker records no

@@ -313,7 +313,8 @@ impl Plugin for Subscription {
                                     .build(),
                             )
                             .extensions(Object::default())
-                            .build(),
+                            .build()
+                            .answered_by_router(),
                     ))
                 } else {
                     Ok(ControlFlow::Continue(req))
@@ -1183,6 +1184,32 @@ mod tests {
         };
         assert_eq!(no_reconnect_cfg.max_reconnect_attempts, 0);
         assert!(no_reconnect_cfg.reconnect_delay.is_none());
+    }
+
+    /// The error for a subscription sent while subscriptions are disabled is the router's own
+    /// answer, so the subgraph's circuit records nothing for it.
+    #[tokio::test]
+    async fn a_subscription_turned_away_while_disabled_records_no_circuit_outcome() {
+        use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+        use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+        let plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == APOLLO_SUBSCRIPTION_PLUGIN)
+            .expect("Plugin not found")
+            .create_instance_without_schema(&serde_json::json!({ "enabled": false }))
+            .await
+            .unwrap();
+
+        assert_router_answers_record_nothing(
+            async |subgraph| plugin.subgraph_service("products", subgraph),
+            || subgraph_request("Query"),
+            || {
+                let mut request = subgraph_request("Subscription");
+                request.operation_kind = OperationKind::Subscription;
+                request
+            },
+        )
+        .await;
     }
 }
 

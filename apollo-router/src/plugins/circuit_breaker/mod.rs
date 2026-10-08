@@ -46,9 +46,11 @@
 //! Some answers from beneath the circuit say nothing about the target's health, and the router
 //! marks them so that the classifiers below record no outcome for them:
 //!
-//! - A coprocessor or plugin that breaks the request, or a response-cache hit. The router answered
-//!   without calling the target. A subgraph response carries [`AnsweredByRouter`], and a connector
-//!   response sets `answered_by_router`.
+//! - A break by a coprocessor, a rhai script or one of the router's own plugins, or a
+//!   response-cache hit. The router answered without calling the target. Each plugin that breaks
+//!   marks the response it breaks with: a subgraph response carries [`AnsweredByRouter`], and a
+//!   connector response sets `answered_by_router`. A third-party plugin's subgraph break isn't
+//!   marked, so it is judged by its status.
 //! - A file upload whose stream from the client failed while the router was forwarding it to the
 //!   subgraph, marked with [`UploadStreamFailed`]. The client is at fault, not the subgraph.
 //!
@@ -365,5 +367,7 @@ fn circuit_breaker_open_error() -> graphql::Error {
 
 register_private_plugin!("apollo", "circuit_breaker", CircuitBreaker);
 
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

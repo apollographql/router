@@ -2163,8 +2163,7 @@ fn connector_key_inputs(
 }
 
 /// The connector request cache for `source_name` in front of `service`, as the response cache
-/// places it for a source it caches. Its store is a mock that answers every command with its own
-/// arguments, so it suits tests of what the cache lets through rather than of what it stores.
+/// places it for a source it caches, with `store` as a mock Redis behind it.
 #[cfg(all(
     test,
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
@@ -2172,12 +2171,13 @@ fn connector_key_inputs(
 pub(crate) async fn request_cache_for_test(
     service: ConnectorRequestBoxCloneService,
     source_name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
 ) -> ConnectorRequestBoxCloneService {
     use tower::ServiceExt as _;
 
     let config = storage::redis::Config::test(false, "connector-request-cache");
     let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
-    let storage = Storage::mocked(&config, false, Arc::new(fred::mocks::Echo), drop_rx)
+    let storage = Storage::mocked(&config, false, store, drop_rx)
         .await
         .expect("mock storage builds");
     let supergraph_schema = Arc::new(

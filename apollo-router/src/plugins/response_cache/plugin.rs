@@ -93,7 +93,6 @@ use crate::plugins::telemetry::span_ext::SpanMarkError;
 use crate::query_planner::OperationKind;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportOutcome;
-use crate::services::http::AnsweredByRouter;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
@@ -1347,6 +1346,50 @@ impl Service<subgraph::Request> for CacheService {
     }
 }
 
+/// The response cache for subgraph `name` in front of `service`, as the response cache places it
+/// for a subgraph it caches, with `store` as a mock Redis behind it.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+pub(crate) async fn subgraph_cache_for_test(
+    service: subgraph::BoxCloneService,
+    name: &str,
+    store: Arc<dyn fred::mocks::Mocks>,
+) -> subgraph::BoxCloneService {
+    let config = storage::redis::Config::test(false, "subgraph-cache");
+    let (_drop_tx, drop_rx) = tokio::sync::broadcast::channel(1);
+    let storage = Storage::mocked(&config, false, store, drop_rx)
+        .await
+        .expect("mock storage builds");
+    let supergraph_schema = Arc::new(
+        Schema::parse_and_validate(
+            "type Query { hello: String } type Product { upc: String name: String }",
+            "schema.graphql",
+        )
+        .unwrap(),
+    );
+
+    CacheService {
+        service,
+        name: name.to_string(),
+        entity_type: None,
+        storage: Arc::new(storage.into()),
+        subgraph_ttl: Duration::from_secs(60),
+        private_queries: Arc::new(RwLock::new(LruCache::new(
+            std::num::NonZeroUsize::new(1).unwrap(),
+        ))),
+        private_id_key_name: None,
+        debug: false,
+        supergraph_schema,
+        subgraph_enums: Default::default(),
+        lru_size_instrument: LruSizeInstrument::new("test.private_queries.lru.size"),
+        indexes: Default::default(),
+        cdn_invalidation_enabled: false,
+    }
+    .boxed_clone()
+}
+
 impl CacheService {
     async fn call_inner(
         mut self,
@@ -1406,7 +1449,7 @@ impl CacheService {
             let cache_control = match CacheControl::try_from(request.subgraph_request.headers()) {
                 Ok(cache_control) => cache_control,
                 Err(err) => {
-                    let mut response = subgraph::Response::builder()
+                    return Ok(subgraph::Response::builder()
                         .subgraph_name(request.subgraph_name)
                         .id(request.id)
                         .context(request.context)
@@ -1417,9 +1460,8 @@ impl CacheService {
                                 .build(),
                         )
                         .extensions(Object::default())
-                        .build();
-                    response.response.extensions_mut().insert(AnsweredByRouter);
-                    return Ok(response);
+                        .build()
+                        .answered_by_router());
                 }
             };
 
@@ -1575,8 +1617,7 @@ impl CacheService {
         ))
         .await?
         {
-            ControlFlow::Break(mut response) => {
-                response.response.extensions_mut().insert(AnsweredByRouter);
+            ControlFlow::Break(response) => {
                 cache_hit.insert(
                     DEFAULT_ROOT_FIELD_TYPE_NAME.to_string(),
                     CacheHitMiss { hit: 1, miss: 0 },
@@ -1586,7 +1627,7 @@ impl CacheService {
                     CacheSubgraph(cache_hit),
                 );
 
-                Ok(response)
+                Ok(response.answered_by_router())
             }
             ControlFlow::Continue((
                 request,
@@ -1787,10 +1828,7 @@ impl CacheService {
         ))
         .await?
         {
-            ControlFlow::Break(mut response) => {
-                response.response.extensions_mut().insert(AnsweredByRouter);
-                Ok(response)
-            }
+            ControlFlow::Break(response) => Ok(response.answered_by_router()),
             ControlFlow::Continue((request, mut cache_result)) => {
                 let context = request.context.clone();
                 let mut debug_subgraph_request = None;

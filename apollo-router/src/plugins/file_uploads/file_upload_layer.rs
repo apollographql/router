@@ -73,8 +73,8 @@ where
                 let body = router::body::from_result_stream(stream);
                 req.http_request = http::Request::from_parts(parts, body);
             }
-            // An error from the client's upload stream fails the whole fetch. Say so, so that the
-            // subgraph service can tell it apart from the subgraph failing.
+            // Wrap an error caused by the client's upload stream, so the subgraph service can tell
+            // it apart from the subgraph failing.
             inner.call(req).await.map_err(|error| {
                 if upload_failed.load(Ordering::Relaxed) {
                     UploadStreamError(error).into()

@@ -235,7 +235,7 @@ impl Plugin for Replay {
                             });
                         }
 
-                        Ok(ControlFlow::Break(subgraph_response))
+                        Ok(ControlFlow::Break(subgraph_response.answered_by_router()))
                     } else {
                         report.lock().push(ReplayReport::SubgraphRequestMissed(
                             subgraph_name.clone(),

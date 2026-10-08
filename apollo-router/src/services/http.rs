@@ -40,8 +40,10 @@ pub(crate) struct HttpResponse {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct IncompleteResponseBody;
 
-/// Marks a subgraph response the router produced without calling the subgraph: a coprocessor or
-/// plugin broke the request, or the response cache answered it.
+/// Marks a subgraph response the router produced without calling the subgraph: a coprocessor, a
+/// rhai script or one of the router's own plugins broke the request, or the response cache
+/// answered it. Each of them inserts it on the response it builds, through
+/// [`subgraph::Response::answered_by_router`](crate::services::subgraph::Response::answered_by_router).
 ///
 /// Such a response says nothing about the subgraph's health, so the circuit breaker records no
 /// outcome for it. It lives in the response's `http` extensions, like [`IncompleteResponseBody`].

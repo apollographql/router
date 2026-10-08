@@ -1562,7 +1562,7 @@ where
 
             subgraph_response
         };
-        return Ok(ControlFlow::Break(res));
+        return Ok(ControlFlow::Break(res.answered_by_router()));
     }
 
     // Finally, process our reply and act on the contents. Our processing logic is

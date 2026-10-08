@@ -9,7 +9,6 @@
 //!
 //! See [`Layer`] and [`Service`] for more details.
 
-use std::any::Any;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::pin::Pin;
@@ -20,9 +19,6 @@ use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
-
-use crate::services::http::AnsweredByRouter;
-use crate::services::subgraph;
 
 /// [`Layer`] for Asynchronous Checkpoints. See [`ServiceBuilderExt::checkpoint_async()`](crate::layers::ServiceBuilderExt::checkpoint_async()).
 #[allow(clippy::type_complexity)]
@@ -150,27 +146,11 @@ where
 
         Box::pin(async move {
             match (checkpoint_fn)(req).await {
-                Ok(ControlFlow::Break(mut response)) => {
-                    mark_answered_by_router(&mut response);
-                    Ok(response)
-                }
+                Ok(ControlFlow::Break(response)) => Ok(response),
                 Ok(ControlFlow::Continue(request)) => inner.call(request).await,
                 Err(error) => Err(error),
             }
         })
-    }
-}
-
-/// Marks a subgraph response a checkpoint broke with as [`AnsweredByRouter`], so the circuit
-/// breaker records no outcome for it: the subgraph was never called.
-///
-/// Coprocessors, rhai scripts and native plugins that break a subgraph request through a
-/// checkpoint all pass through here. Responses for other stages are left untouched. A plugin that
-/// answers a subgraph request without a checkpoint is not marked, and connector breaks are marked
-/// where they are built, in `error_from_request`.
-fn mark_answered_by_router(response: &mut dyn Any) {
-    if let Some(response) = response.downcast_mut::<subgraph::Response>() {
-        response.response.extensions_mut().insert(AnsweredByRouter);
     }
 }
 

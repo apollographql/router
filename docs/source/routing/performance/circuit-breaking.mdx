@@ -185,11 +185,12 @@ Everything else, including any other `4xx` response and GraphQL errors in an oth
 
 Some responses say nothing about the target's health, so the router records no outcome for them, whatever their status:
 
-- A coprocessor, rhai script, or native plugin turns the request away before it's sent: a coprocessor `break`, a rhai script that throws from a subgraph request callback, or a native plugin that breaks the request with a checkpoint or fails a connector request with `into_error_response`. For example, a coprocessor that rejects unauthenticated requests with a `401` can't change the circuit's state or its failure rate, however many requests it rejects.
-- The response cache answers the request.
+- A coprocessor or rhai script turns the request away before it's sent: a coprocessor `break`, or a rhai script that throws from a subgraph request callback. For example, a coprocessor that rejects unauthenticated requests with a `401` can't change the circuit's state or its failure rate, however many requests it rejects.
+- A native plugin fails a connector request with `into_error_response`.
+- The router answers the request itself: the response cache returns a cached response or rejects an invalid `Cache-Control` header, or demand control rejects the request as too expensive.
 - A [file upload](/graphos/routing/operations/file-upload) fails part way through because the client's upload stream failed while the router was forwarding it to the subgraph.
 
-A `5xx` or `429` from the target still counts as a failure when a coprocessor, rhai script, or native plugin let the request through or ran on its response.
+A `5xx` or `429` from the target still counts as a failure when a coprocessor, rhai script, or native plugin let the request through or ran on its response. A native plugin that answers a subgraph request itself, instead of sending it on, is judged by the status of its answer, like a response from the subgraph.
 
 Some requests end without the router recording anything, because the target might still have answered them: the client disconnects, the router-level request timeout fires, the operation stops waiting after another fetch fails, or the router shuts down. If a recovery probe ends this way, or with one of the responses above that say nothing about the target's health, the circuit stays half-open and the next request becomes the probe, without another wait.
 

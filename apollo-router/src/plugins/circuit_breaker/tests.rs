@@ -1435,14 +1435,16 @@ async fn a_connector_request_a_coprocessor_breaks_with_a_5xx_records_nothing() {
     assert_source_breaks_recorded_nothing(&responses);
 }
 
-/// The response cache in front of a connector source turns away a request whose client sent a
-/// `Cache-Control` header it can't parse, without calling the source. A burst of them records
-/// nothing: the two source failures either side of them are still consecutive, and open the
-/// circuit. This covers the cache's check beneath the circuit; it makes the same check at the
-/// connector stage, above the circuit, where a rejection never reaches the circuit at all.
+/// Sends source `products.api`, behind the connector request cache on `store` and then the
+/// source's circuit, one request past the cache, then [`BREAKS`] sent with `cache_control` for
+/// the cache to answer, then two more past the cache. The source fails every request it receives,
+/// and the circuit opens on two failures in a row, so the cache's answers record nothing only if
+/// the circuit opens on the last request and not before. Returns the cache's answers.
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-#[tokio::test]
-async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothing() {
+async fn source_around_cache_answers(
+    store: Arc<dyn fred::mocks::Mocks>,
+    cache_control: Option<&'static str>,
+) -> Vec<ConnectorResponse> {
     let plugin = harness(
         r#"
         circuit_breaker:
@@ -1463,32 +1465,41 @@ async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothin
         })
         .boxed_clone()
     };
-    let cache =
-        crate::plugins::response_cache::connectors::request_cache_for_test(source, "products.api")
-            .await;
+    let cache = crate::plugins::response_cache::connectors::request_cache_for_test(
+        source,
+        "products.api",
+        store,
+    )
+    .await;
     let service = behind_source_circuit(&plugin, "products.api", cache);
 
-    let send = |cache_control: &'static str| {
+    let send = |cache_control: Option<&'static str>| {
         let mut request = connector_request();
+        let mut supergraph_request = http::Request::builder();
+        if let Some(cache_control) = cache_control {
+            supergraph_request =
+                supergraph_request.header(http::header::CACHE_CONTROL, cache_control);
+        }
         request.supergraph_request = Arc::new(
-            http::Request::builder()
-                .header(http::header::CACHE_CONTROL, cache_control)
+            supergraph_request
                 .body(crate::graphql::Request::default())
                 .unwrap(),
         );
         service.clone().oneshot(request)
     };
     // `no-cache, no-store` sends the request past the cache to the source.
-    const PAST_THE_CACHE: &str = "no-cache, no-store";
+    const PAST_THE_CACHE: Option<&str> = Some("no-cache, no-store");
 
     send(PAST_THE_CACHE).await.expect("answered");
+    let mut answers = Vec::new();
     for _ in 0..BREAKS {
-        let response = send("max-age=notanumber").await.expect("answered");
-        assert_eq!(
+        let response = send(cache_control).await.expect("answered");
+        assert_ne!(
             connector_error_code(&response),
-            Some("INVALID_CACHE_CONTROL_HEADER"),
-            "the cache should have turned it away while the circuit is closed"
+            Some(Error::CircuitBreakerOpen.code()),
+            "the circuit should still be closed"
         );
+        answers.push(response);
     }
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -1505,9 +1516,153 @@ async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothin
     assert_eq!(
         connector_error_code(&response),
         Some(Error::CircuitBreakerOpen.code()),
-        "the failures either side of the rejections should have opened the circuit"
+        "the failures either side of the cache's answers should have opened the circuit"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+    answers
+}
+
+/// The response cache in front of a connector source turns away a request whose client sent a
+/// `Cache-Control` header it can't parse, without calling the source. A burst of them records
+/// nothing. This covers the cache's check beneath the circuit; it makes the same check at the
+/// connector stage, above the circuit, where a rejection never reaches the circuit at all.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothing() {
+    let answers =
+        source_around_cache_answers(Arc::new(fred::mocks::Echo), Some("max-age=notanumber")).await;
+    for response in answers {
+        assert_eq!(
+            connector_error_code(&response),
+            Some("INVALID_CACHE_CONTROL_HEADER")
+        );
+    }
+}
+
+/// A connector cache hit is served without calling the source, so a burst of them records
+/// nothing.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_connector_cache_hits_records_nothing() {
+    let store = crate::plugins::response_cache::AlwaysHit::new(
+        serde_json_bytes::json!({ "hello": "cached" }),
+    );
+    let answers = source_around_cache_answers(Arc::new(store), None).await;
+    for response in answers {
+        assert!(response.error().is_none(), "the cache should have answered");
+    }
+}
+
+/// A subgraph cache hit is served without calling the subgraph, so a burst of them records
+/// nothing. A request sent with `Cache-Control: no-cache, no-store` goes past the cache.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_subgraph_cache_hits_records_nothing() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    let store = crate::plugins::response_cache::AlwaysHit::new(
+        serde_json_bytes::json!({ "hello": "cached" }),
+    );
+    let schema = apollo_compiler::Schema::parse_and_validate("type Query { hello: String }", "")
+        .expect("schema is valid");
+    let document = Arc::new(
+        apollo_compiler::ExecutableDocument::parse_and_validate(
+            &schema,
+            "query Products { hello }",
+            "",
+        )
+        .expect("operation is valid"),
+    );
+    // The cache keys a lookup on the operation, so it needs the parsed document.
+    let request = || {
+        let mut request = subgraph_request("Products");
+        request.executable_document = Some(document.clone());
+        request
+    };
+    assert_router_answers_record_nothing(
+        async |subgraph| {
+            crate::plugins::response_cache::plugin::subgraph_cache_for_test(
+                subgraph,
+                "products",
+                Arc::new(store),
+            )
+            .await
+        },
+        || subgraph_request_with_cache_control(request(), "no-cache, no-store"),
+        request,
+    )
+    .await;
+}
+
+/// A subgraph request sent with `cache_control`.
+fn subgraph_request_with_cache_control(
+    request: crate::services::subgraph::Request,
+    cache_control: &'static str,
+) -> crate::services::subgraph::Request {
+    let mut request = request;
+    request.subgraph_request.headers_mut().insert(
+        http::header::CACHE_CONTROL,
+        http::HeaderValue::from_static(cache_control),
+    );
+    request
+}
+
+/// The subgraph counterpart of
+/// [`a_burst_of_connector_requests_the_response_cache_rejects_records_nothing`].
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_subgraph_requests_the_response_cache_rejects_records_nothing() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    assert_router_answers_record_nothing(
+        async |subgraph| {
+            crate::plugins::response_cache::plugin::subgraph_cache_for_test(
+                subgraph,
+                "products",
+                Arc::new(fred::mocks::Echo),
+            )
+            .await
+        },
+        || subgraph_request_with_cache_control(subgraph_request("Products"), "no-cache, no-store"),
+        || subgraph_request_with_cache_control(subgraph_request("Products"), "max-age=notanumber"),
+    )
+    .await;
+}
+
+/// A subgraph cache hit on every entity of an entity fetch is served without calling the
+/// subgraph, so a burst of them records nothing.
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+#[tokio::test]
+async fn a_burst_of_subgraph_entity_cache_hits_records_nothing() {
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    let store = crate::plugins::response_cache::AlwaysHit::new(
+        serde_json_bytes::json!({ "name": "cached" }),
+    );
+    let entity_fetch = || {
+        let mut request = subgraph_request("Products");
+        request.subgraph_request.body_mut().variables.insert(
+            "representations",
+            serde_json_bytes::json!([{ "__typename": "Product", "upc": "1" }]),
+        );
+        request
+    };
+    assert_router_answers_record_nothing(
+        async |subgraph| {
+            crate::plugins::response_cache::plugin::subgraph_cache_for_test(
+                subgraph,
+                "products",
+                Arc::new(store),
+            )
+            .await
+        },
+        || subgraph_request_with_cache_control(entity_fetch(), "no-cache, no-store"),
+        entity_fetch,
+    )
+    .await;
 }
 
 /// A caller that goes away before the subgraph answers says nothing about the subgraph: between
