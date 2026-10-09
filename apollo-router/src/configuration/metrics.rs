@@ -199,6 +199,12 @@ impl InstrumentData {
             "$.directives[?(@.enabled == true)]"
         );
         populate_config_instrument!(
+            apollo.router.config.continuous_profiling,
+            "$.experimental_continuous_profiling[?(@.heap.enabled == true)]",
+            opt.exporter.datadog,
+            "$[?(@.exporters.datadog.enabled == true)]"
+        );
+        populate_config_instrument!(
             apollo.router.config.coprocessor,
             "$.coprocessor",
             opt.router.request,

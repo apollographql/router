@@ -3190,6 +3190,81 @@ expression: "&schema"
       ],
       "description": "Configures the context"
     },
+    "ContinuousProfilingConfig": {
+      "additionalProperties": false,
+      "description": "Continuous profiling configuration",
+      "properties": {
+        "exporters": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContinuousProfilingExporters"
+            }
+          ],
+          "description": "Where to export profiles"
+        },
+        "heap": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContinuousProfilingHeapConfig"
+            }
+          ],
+          "description": "Profile in-use heap memory by allocation call stack.\n\nUses the router's jemalloc allocator, which samples allocations, so the overhead is low.\nOnly allocations made after profiling starts are attributed. Linux only."
+        },
+        "interval": {
+          "default": "1m",
+          "description": "How often profiles are collected and exported. Each collection briefly uses extra memory\nto symbolize the profile.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ContinuousProfilingDatadogConfig": {
+      "additionalProperties": false,
+      "description": "Datadog profile exporter configuration.\n\nProfiles are tagged with `DD_SERVICE` (default `router`), `DD_ENV`, and `DD_VERSION` (default\nthe router's version), as Datadog's own profilers are.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable exporting profiles to a Datadog agent",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/UriEndpoint"
+            }
+          ],
+          "description": "The Datadog agent endpoint. As with the Datadog trace exporter, `DD_TRACE_AGENT_URL`, or\n`DD_AGENT_HOST` and `DD_TRACE_AGENT_PORT`, take precedence. Defaults to\n`http://127.0.0.1:8126`."
+        }
+      },
+      "type": "object"
+    },
+    "ContinuousProfilingExporters": {
+      "additionalProperties": false,
+      "description": "Profile exporters",
+      "properties": {
+        "datadog": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ContinuousProfilingDatadogConfig"
+            }
+          ],
+          "description": "Export to a Datadog agent"
+        }
+      },
+      "type": "object"
+    },
+    "ContinuousProfilingHeapConfig": {
+      "additionalProperties": false,
+      "description": "Heap profiling configuration",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable heap profiling",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "CooperativeCancellation": {
       "additionalProperties": false,
       "properties": {
@@ -13597,6 +13672,9 @@ expression: "&schema"
         "force_schema_reload": null
       },
       "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.\nYou probably don’t want this in production!"
+    },
+    "experimental_continuous_profiling": {
+      "$ref": "#/definitions/ContinuousProfilingConfig"
     },
     "experimental_diagnostics": {
       "$ref": "#/definitions/Config5"
