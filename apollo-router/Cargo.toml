@@ -34,7 +34,13 @@ default = ["global-allocator"]
 # [dependencies]
 # apollo-router = {version = "1.20", default-features = false}
 # ```
-global-allocator = ["tikv-jemallocator/profiling", "tikv-jemalloc-ctl/stats", "tikv-jemalloc-ctl/profiling"]
+global-allocator = [
+    "tikv-jemallocator/profiling",
+    "tikv-jemalloc-ctl/stats",
+    "tikv-jemalloc-ctl/profiling",
+    "dep:jemalloc_pprof",
+    "dep:backtrace",
+]
 
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
@@ -213,6 +219,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "rustls-tls-native-roots",
     "gzip",
     "json",
+    "multipart",
     "stream",
 ] }
 
@@ -240,7 +247,13 @@ sysinfo = { version = "0.39.1", features = [
 thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net", "fs"] }
-tokio-util = { version = "0.7.11", features = ["net", "codec", "time", "compat"] }
+tokio-util = { version = "0.7.11", features = [
+    "net",
+    "codec",
+    "time",
+    "compat",
+    "rt",
+] }
 tonic = { version = "0.14.5", features = [
     "transport",
     "tls-ring",
@@ -307,6 +320,12 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
 tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Continuous heap profiling: converts jemalloc heap dumps into symbolized pprof.
+jemalloc_pprof = { version = "0.9.0", features = ["symbolize"], optional = true }
+# Releases the symbol cache that jemalloc_pprof's symbolization leaves behind.
+backtrace = { version = "0.3.75", optional = true }
 
 [dev-dependencies]
 axum = { version = "0.8.1", features = ["http2", "ws"] }

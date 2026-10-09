@@ -138,35 +138,33 @@ fn default_true() -> bool {
     true
 }
 
-impl Config {
-    /// Apply environment variable overrides for the endpoint.
-    /// Supports `DD_TRACE_AGENT_URL`, or `DD_AGENT_HOST` + `DD_TRACE_AGENT_PORT`.
-    fn endpoint_with_env_override(&self) -> Result<Uri, BoxError> {
-        // DD_TRACE_AGENT_URL takes precedence
-        if let Ok(url) = std::env::var(DD_TRACE_AGENT_URL) {
-            return url.parse::<Uri>().map_err(|e| {
-                format!("invalid URI in {}: '{}': {}", DD_TRACE_AGENT_URL, url, e).into()
-            });
-        }
-
-        // Fall back to DD_AGENT_HOST + DD_TRACE_AGENT_PORT
-        if let Ok(host) = std::env::var(DD_AGENT_HOST) {
-            let port = std::env::var(DD_TRACE_AGENT_PORT).unwrap_or_else(|_| "8126".to_string());
-            let url = format!("http://{}:{}", host, port);
-            return url.parse::<Uri>().map_err(|e| {
-                format!(
-                    "invalid URI from {} and {}: '{}': {}",
-                    DD_AGENT_HOST, DD_TRACE_AGENT_PORT, url, e
-                )
-                .into()
-            });
-        }
-
-        // Fall back to config
-        Ok(self
-            .endpoint
-            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT)))
+/// Resolve the Datadog agent endpoint: `DD_TRACE_AGENT_URL`, then `DD_AGENT_HOST` (with
+/// `DD_TRACE_AGENT_PORT`), then the configured endpoint. `env` looks up an environment variable.
+///
+/// Shared with continuous profiling, so that profiles and traces find the same agent.
+pub(crate) fn agent_endpoint(
+    endpoint: &UriEndpoint,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<Uri, BoxError> {
+    if let Some(url) = env(DD_TRACE_AGENT_URL) {
+        return url.parse::<Uri>().map_err(|e| {
+            format!("invalid URI in {}: '{}': {}", DD_TRACE_AGENT_URL, url, e).into()
+        });
     }
+
+    if let Some(host) = env(DD_AGENT_HOST) {
+        let port = env(DD_TRACE_AGENT_PORT).unwrap_or_else(|| "8126".to_string());
+        let url = format!("http://{}:{}", host, port);
+        return url.parse::<Uri>().map_err(|e| {
+            format!(
+                "invalid URI from {} and {}: '{}': {}",
+                DD_AGENT_HOST, DD_TRACE_AGENT_PORT, url, e
+            )
+            .into()
+        });
+    }
+
+    Ok(endpoint.to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT)))
 }
 
 impl TracingConfigurator for Config {
@@ -193,7 +191,7 @@ impl TracingConfigurator for Config {
         });
 
         let fixed_span_names = self.fixed_span_names;
-        let endpoint = self.endpoint_with_env_override()?;
+        let endpoint = agent_endpoint(&self.endpoint, |key| std::env::var(key).ok())?;
 
         let exporter = datadog_exporter::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))
@@ -373,5 +371,52 @@ impl SpanExporter for ExporterWrapper {
     }
     fn set_resource(&mut self, resource: &Resource) {
         self.delegate.set_resource(resource);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn resolve(configured: &str, env: &[(&str, &str)]) -> Result<String, BoxError> {
+        let env: HashMap<_, _> = env.iter().copied().collect();
+        let configured: UriEndpoint = serde_json::from_value(serde_json::json!(configured))?;
+        agent_endpoint(&configured, |key| env.get(key).map(|v| v.to_string()))
+            .map(|uri| uri.to_string())
+    }
+
+    #[test]
+    fn agent_endpoint_precedence() {
+        assert_eq!(resolve("default", &[]).unwrap(), "http://127.0.0.1:8126/");
+        assert_eq!(
+            resolve("http://configured:1234", &[]).unwrap(),
+            "http://configured:1234/"
+        );
+        assert_eq!(
+            resolve("http://configured:1234", &[(DD_AGENT_HOST, "host")]).unwrap(),
+            "http://host:8126/"
+        );
+        assert_eq!(
+            resolve(
+                "default",
+                &[(DD_AGENT_HOST, "host"), (DD_TRACE_AGENT_PORT, "9999")]
+            )
+            .unwrap(),
+            "http://host:9999/"
+        );
+        assert_eq!(
+            resolve(
+                "default",
+                &[
+                    (DD_TRACE_AGENT_URL, "http://url:7777"),
+                    (DD_AGENT_HOST, "host")
+                ]
+            )
+            .unwrap(),
+            "http://url:7777/"
+        );
+        assert!(resolve("default", &[(DD_TRACE_AGENT_URL, "not a uri")]).is_err());
     }
 }

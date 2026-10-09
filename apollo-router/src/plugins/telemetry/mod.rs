@@ -159,7 +159,7 @@ pub(crate) mod config;
 pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
-mod endpoint;
+pub(crate) mod endpoint;
 mod error_counter;
 mod fmt_layer;
 pub(crate) mod formatters;

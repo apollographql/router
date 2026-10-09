@@ -43,6 +43,7 @@ async fn test_handle_status() {
 #[cfg(target_family = "unix")]
 #[tokio::test]
 async fn test_handle_start() {
+    let _prof_lock = crate::allocator::JEMALLOC_PROF_TEST_LOCK.lock().await;
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let output_path = temp_dir.path();
 
@@ -88,6 +89,7 @@ async fn test_handle_start() {
 #[cfg(target_family = "unix")]
 #[tokio::test]
 async fn test_handle_stop() {
+    let _prof_lock = crate::allocator::JEMALLOC_PROF_TEST_LOCK.lock().await;
     let temp_dir = tempdir().expect("Failed to create temp dir");
     let output_path = temp_dir.path();
 

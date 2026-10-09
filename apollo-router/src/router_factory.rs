@@ -881,6 +881,7 @@ pub(crate) async fn create_plugins(
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("enhanced_client_awareness");
     add_mandatory_apollo_plugin!("experimental_diagnostics");
+    add_oss_apollo_plugin!("experimental_continuous_profiling");
 
     add_oss_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");

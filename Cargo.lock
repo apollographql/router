@@ -320,6 +320,7 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-types",
  "axum",
+ "backtrace",
  "base64 0.23.1",
  "blake3",
  "bloomfilter",
@@ -367,6 +368,7 @@ dependencies = [
  "insta",
  "itertools 0.15.0",
  "itoa",
+ "jemalloc_pprof",
  "jsonpath-rust",
  "jsonpath_lib",
  "jsonschema",
@@ -2351,7 +2353,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2600,7 +2602,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3970,6 +3972,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jemalloc_pprof"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bb2dfa20a68824f4c8c1aa271617d0ee0d9b707a866d56b7d7ee39c60c235a8"
+dependencies = [
+ "anyhow",
+ "libc",
+ "mappings",
+ "once_cell",
+ "pprof_util",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "jiff"
 version = "0.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4378,6 +4397,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
+name = "mappings"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bab1e61a4b76757edb59cd81fcaa7f3ba9018d43b527d9abfad877b4c6c60f2"
+dependencies = [
+ "anyhow",
+ "libc",
+ "once_cell",
+ "pprof_util",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4674,7 +4706,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -5441,6 +5473,20 @@ name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+
+[[package]]
+name = "pprof_util"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eea0cc524de808a6d98d192a3d99fe95617031ad4a52ec0a0f987ef4432e8fe1"
+dependencies = [
+ "anyhow",
+ "backtrace",
+ "flate2",
+ "num",
+ "paste",
+ "prost",
+]
 
 [[package]]
 name = "ppv-lite86"
@@ -6448,7 +6494,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7009,7 +7055,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7263,7 +7309,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -7594,6 +7640,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "slab",
@@ -8480,7 +8527,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0978bf7171b3d90bac376700cb56d606feb40f251a475a5d6634613564460b22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

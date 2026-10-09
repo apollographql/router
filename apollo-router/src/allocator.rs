@@ -529,6 +529,13 @@ extern "C" fn drop_ad_hoc_profiler() {
     }
 }
 
+/// Held by tests that toggle or depend on jemalloc's process-wide `prof.active`, so that they don't
+/// race under plain `cargo test`, which runs a binary's tests on threads of one process. (nextest
+/// runs each test in its own process, so it doesn't need this.)
+#[cfg(all(test, target_family = "unix", feature = "global-allocator"))]
+pub(crate) static JEMALLOC_PROF_TEST_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
 // Enable jemalloc profiling with default settings if using jemalloc as the global allocator, however
 // disable profiling by default to avoid overhead unless explicitly enabled at runtime.
 #[allow(non_upper_case_globals)]
