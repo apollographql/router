@@ -307,9 +307,28 @@ one key and sends another.
 `UnscopedRenamerAcrossTypes` is the one whose verdict depends on the operation rather than the
 perturbation alone, which is the point of leaving that judgement to the model.
 
+### Deferred blocks
+
+Four perturbations put the entity fetch in a deferred block whose primary block is the input
+fetches, and vary what it `depends` on. A deferred block reads what its `defer` node could read
+plus the responses of the fetches it names, or the whole primary block when it names none; every
+fetch the planner places carries an id, the base fetch `0` and the entity inputs after it.
+
+| perturbation | `depends` | correct |
+| --- | --- | --- |
+| `DeferOnEveryInput` | every input fetch | yes |
+| `DeferOnTheWholePrimary` | nothing | yes |
+| `DeferOnTheBaseFetchOnly` | the base fetch, which sends no entity input | no |
+| `DeferOnTheFirstEntityInput` | the first entity type's input | yes with one entity type, no with two |
+
+The two that are wrong are FED-1007's class: a block naming too few of the fetches whose data its
+representations need. The `legacy` lane accepts both — `interpret_defer_node` gives every
+deferred block the state after the whole primary block — so they are among its advisory
+divergences.
+
 ### Not reached yet
 
-Three shapes the model has tests for and this lane still cannot build.
+Two shapes the model has tests for and this lane still cannot build.
 
 **A `@requires` whose field set carries an argument.** The demand would be `f(x: 1)` while the
 entry, whose arguments `trim_requires_selection_set` drops, reads `f`. Writing it against a field
@@ -320,12 +339,6 @@ one is expected to alias every `@requires` selection, which keeps the two apart 
 aliased shapes above with an argument attached; the old one does not, and the collision is its bug
 rather than the checker's. Deferred until the planner's aliasing settles — at which point this is
 a fixture change, not a new field.
-
-**Deferred blocks.** The grammar builds no `defer` node, so a fetch it places can always read
-everything placed before it, and the two states the checker threads — what was fetched before a
-fetch, and what it can read — never differ here. The checker's own tests cover a deferred block
-naming too few of its dependencies, FED-1007's shape; reaching it here needs a `defer` node in the
-miniature planner and `depends` lists for the perturbations to vary.
 
 **Interface objects.** An entity fetch whose `requires` entries cover only some implementations,
 which is what `FetchNode::selected_selection_set` restricts and what the demand is restricted to.
