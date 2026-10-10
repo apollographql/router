@@ -587,6 +587,7 @@ pub(super) fn check_context_rewrites(
     path: &[FetchDataPathElement],
     condition: &[BooleanLiteral],
     available: &[Selection],
+    readable: &[Selection],
     fetch: &FetchNode,
 ) -> Result<(), ComparisonError> {
     let mut variables = context_variables(&fetch.context_rewrites);
@@ -595,6 +596,8 @@ pub(super) fn check_context_rewrites(
     if variables.is_empty() {
         return Ok(());
     }
+    // Where the fetch runs is found in everything fetched before it; the values it reads, in what
+    // it can read. The two differ only inside a deferred block.
     let positions = path_conditions(schema, root_type, available, path);
     for variable in &variables {
         let shared = context_shared_levels(path, &fetch.context_rewrites, variable);
@@ -604,7 +607,7 @@ pub(super) fn check_context_rewrites(
                     schema,
                     root_type,
                     path,
-                    available,
+                    readable,
                     &fetch.context_rewrites,
                     &runtime_types,
                     variable,
