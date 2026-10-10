@@ -20,7 +20,7 @@ pub const ALLOW_STALE_ORACLE_ENV: &str = "QUERY_PLAN_ALLOW_STALE_LEAN_ORACLE";
 
 /// The `apollo-graphql-lean` revision this harness is aligned with. The build script records what
 /// it built from beside the binary, and the runner refuses a mismatch unless the override is set.
-pub const PLAN_MODEL_COMMIT: &str = "e89c2571992d7c692e2721dfafc0f0fbab729e3e";
+pub const PLAN_MODEL_COMMIT: &str = "9d7e922aaca95d89db84dec574c05d6a8643e191";
 
 pub struct PlanOracle {
     child: Child,

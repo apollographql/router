@@ -342,6 +342,9 @@ end Case
 -- The miniature planner (mirrors `plan_model::build_plan`)
 -----------------------------------------------------------------------------------------
 
+/-! The grammar builds no `defer` node, so every fetch it places can read everything placed
+before it: the diagnostics below pass the same state as `available` and `readable`. -/
+
 def fetchOf (subgraphName : Name) (requiresItems : List RequiresSelection)
     (selectionSet : SelectionSet) (inputRewrites : List FetchDataRewrite := [])
     : FetchNode :=
@@ -575,7 +578,7 @@ partial def loop : IO Unit := do
                   PlanNode.fetch
                     (fetchOf "Subgraph1" []
                       [.field "is" "is" [] [] (entityInputBody testCase entityType)]))
-        let available := (inputs.check schema subgraphs operation [] [] []).1
+        let available := (inputs.check schema subgraphs operation [] [] [] []).1
         let cases := entityCaseTypes testCase
         let entityFetch :=
           fetchOf "Subgraph2" (requiresEntries testCase)
@@ -587,9 +590,9 @@ partial def loop : IO Unit := do
           | Option.none => []
           | Option.some variableName => [.positive variableName]
         let withCondition :=
-          checkFetch schema subgraphs operation path guarded available entityFetch
+          checkFetch schema subgraphs operation path guarded available available entityFetch
         let withoutCondition :=
-          checkFetch schema subgraphs operation path [] available entityFetch
+          checkFetch schema subgraphs operation path [] available available entityFetch
         IO.println s!"ok={flag withCondition},{flag withoutCondition}"
     (<- IO.getStdout).flush
     loop
@@ -629,7 +632,7 @@ partial def loop : IO Unit := do
                   PlanNode.fetch
                     (fetchOf "Subgraph1" []
                       [.field "is" "is" [] [] (entityInputBody testCase entityType)]))
-        let available := (inputs.check schema subgraphs operation [] [] []).1
+        let available := (inputs.check schema subgraphs operation [] [] [] []).1
         let guarded : BooleanCondition :=
           match testCase.guard with
           | Option.none => []

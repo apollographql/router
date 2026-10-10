@@ -309,7 +309,7 @@ perturbation alone, which is the point of leaving that judgement to the model.
 
 ### Not reached yet
 
-Two shapes the model has tests for and this lane still cannot build.
+Three shapes the model has tests for and this lane still cannot build.
 
 **A `@requires` whose field set carries an argument.** The demand would be `f(x: 1)` while the
 entry, whose arguments `trim_requires_selection_set` drops, reads `f`. Writing it against a field
@@ -320,6 +320,12 @@ one is expected to alias every `@requires` selection, which keeps the two apart 
 aliased shapes above with an argument attached; the old one does not, and the collision is its bug
 rather than the checker's. Deferred until the planner's aliasing settles — at which point this is
 a fixture change, not a new field.
+
+**Deferred blocks.** The grammar builds no `defer` node, so a fetch it places can always read
+everything placed before it, and the two states the checker threads — what was fetched before a
+fetch, and what it can read — never differ here. The checker's own tests cover a deferred block
+naming too few of its dependencies, FED-1007's shape; reaching it here needs a `defer` node in the
+miniature planner and `depends` lists for the perturbations to vary.
 
 **Interface objects.** An entity fetch whose `requires` entries cover only some implementations,
 which is what `FetchNode::selected_selection_set` restricts and what the demand is restricted to.
