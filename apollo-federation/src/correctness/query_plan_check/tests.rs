@@ -235,6 +235,8 @@ fn a_path_that_reaches_a_type_is_not_reported() {
     }
 }
 
+/// Parses every fetch's operation against its own subgraph, which a plan read from JSON has not
+/// done yet.
 fn init_operations(planner: &QueryPlanner, node: &mut PlanNode) {
     match node {
         PlanNode::Fetch(fetch) => {
@@ -245,18 +247,41 @@ fn init_operations(planner: &QueryPlanner, node: &mut PlanNode) {
                 .expect("valid subgraph operation");
         }
         PlanNode::Flatten(flatten) => init_operations(planner, &mut flatten.node),
-        _ => unimplemented!("not needed by the written plans"),
+        PlanNode::Sequence(sequence) => sequence
+            .nodes
+            .iter_mut()
+            .for_each(|node| init_operations(planner, node)),
+        PlanNode::Parallel(parallel) => parallel
+            .nodes
+            .iter_mut()
+            .for_each(|node| init_operations(planner, node)),
+        PlanNode::Defer(defer) => {
+            if let Some(node) = &mut defer.primary.node {
+                init_operations(planner, node);
+            }
+            for block in &mut defer.deferred {
+                if let Some(node) = &mut block.node {
+                    init_operations(planner, node);
+                }
+            }
+        }
+        PlanNode::Condition(_) => unimplemented!("not needed by the written plans"),
     }
 }
 
 fn written_plan(planner: &QueryPlanner, json: &str) -> QueryPlan {
-    let mut node: TopLevelPlanNode = serde_json::from_str(json).expect("valid plan json");
-    let TopLevelPlanNode::Sequence(sequence) = &mut node else {
-        unimplemented!("not needed by the written plans");
+    let node: TopLevelPlanNode = serde_json::from_str(json).expect("valid plan json");
+    let mut node = match node {
+        TopLevelPlanNode::Sequence(node) => PlanNode::Sequence(node),
+        TopLevelPlanNode::Defer(node) => PlanNode::Defer(node),
+        _ => unimplemented!("not needed by the written plans"),
     };
-    for node in &mut sequence.nodes {
-        init_operations(planner, node);
-    }
+    init_operations(planner, &mut node);
+    let node = match node {
+        PlanNode::Sequence(node) => TopLevelPlanNode::Sequence(node),
+        PlanNode::Defer(node) => TopLevelPlanNode::Defer(node),
+        _ => unreachable!("only the variants matched above"),
+    };
     QueryPlan {
         node: Some(node),
         statistics: Default::default(),
@@ -370,6 +395,153 @@ fn a_renamed_key_naming_a_different_field_is_rejected() {
             .contains("does not agree with the fetch's input rewrites"),
         "{error}"
     );
+}
+
+//==================================================================================================
+// What a deferred block can read
+
+/// A deferred block does not see everything its primary block fetched. The router starts it from
+/// what the `defer` node was given and merges in only what the fetches it `depends` on send it,
+/// each fetch sending its own response; a block depending on nothing waits for the whole primary
+/// response instead.
+///
+/// The primary block fetches each book's `id` (fetch 0) and then its `isbn` from that `id` (fetch
+/// 1), beside the root's `__typename` (fetch 2). The deferred block fetches `blurb`, which
+/// requires `isbn` and resolves a `Book` by `id`. `depends` is the deferred block's list.
+fn defer_plan(planner: &QueryPlanner, depends: &[u64]) -> QueryPlan {
+    let depends = depends
+        .iter()
+        .map(|id| format!(r#"{{ "id": "{id}" }}"#))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let feed = r#"[{ "Key": ["feed", null] }, { "AnyIndex": null }]"#;
+    let entities = |body: &str| {
+        format!(
+            "query($representations: [_Any!]!) \
+             {{ _entities(representations: $representations) {{ ... on Book {{ {body} }} }} }}"
+        )
+    };
+    let book_entry = |fields: &[&str]| {
+        let selections = fields
+            .iter()
+            .map(|name| format!(r#"{{ "kind": "Field", "name": "{name}" }}"#))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            r#"[{{ "kind": "InlineFragment", "typeCondition": "Book", "selections": [{selections}] }}]"#
+        )
+    };
+    let fetch = |subgraph: &str, id: Option<u64>, requires: &str, operation: &str| {
+        let id = id.map_or("null".to_string(), |id| id.to_string());
+        format!(
+            r#"{{ "Fetch": {{
+                "subgraph_name": "{subgraph}",
+                "id": {id},
+                "variable_usages": [],
+                "requires": {requires},
+                "operation_document": "{operation}",
+                "operation_kind": "query",
+                "input_rewrites": [],
+                "output_rewrites": [],
+                "context_rewrites": []
+            }} }}"#
+        )
+    };
+    let ids_fetch = fetch(
+        "locations",
+        Some(0),
+        "[]",
+        "{ feed { __typename ... on Book { __typename id } } }",
+    );
+    let isbn_fetch = fetch(
+        "locations",
+        Some(1),
+        &book_entry(&["__typename", "id"]),
+        &entities("isbn"),
+    );
+    let root_typename_fetch = fetch("locations", Some(2), "[]", "{ __typename }");
+    let blurb_fetch = fetch(
+        "reviews",
+        None,
+        &book_entry(&["__typename", "id", "isbn"]),
+        &entities("blurb"),
+    );
+    written_plan(
+        planner,
+        &format!(
+            r#"{{ "Defer": {{
+                "primary": {{
+                    "sub_selection": null,
+                    "node": {{ "Parallel": {{ "nodes": [
+                        {{ "Sequence": {{ "nodes": [
+                            {ids_fetch},
+                            {{ "Flatten": {{ "path": {feed}, "node": {isbn_fetch} }} }}
+                        ] }} }},
+                        {root_typename_fetch}
+                    ] }} }}
+                }},
+                "deferred": [{{
+                    "depends": [{depends}],
+                    "label": null,
+                    "query_path": [],
+                    "sub_selection": null,
+                    "node": {{ "Flatten": {{ "path": {feed}, "node": {blurb_fetch} }} }}
+                }}]
+            }} }}"#
+        ),
+    )
+}
+
+fn check_deferred_blurbs(depends: &[u64]) -> Result<(), CorrectnessError> {
+    let planner = planner();
+    let plan = defer_plan(&planner, depends);
+    let operation = ExecutableDocument::parse_and_validate(
+        planner.api_schema().schema(),
+        "{ feed { ... on Book { blurb } } }",
+        "operation.graphql",
+    )
+    .expect("valid operation");
+    crate::correctness::check_plan(
+        planner.api_schema(),
+        planner.supergraph_schema(),
+        planner.subgraph_schemas(),
+        &operation,
+        &plan,
+    )
+}
+
+// FED-1007: the deferred block lists fetch 1 but not fetch 0, which fetch 1 depended on. The
+// router hands it fetch 1's response alone, which has each `isbn` but no `id`, so it cannot build
+// a representation and `blurb` is never fetched.
+#[test]
+fn a_deferred_block_missing_an_indirect_dependency_is_rejected() {
+    let error = check_deferred_blurbs(&[1]).expect_err("the block cannot read `id`");
+    assert!(
+        error
+            .to_string()
+            .contains("has not fetched what the subgraph demands"),
+        "{error}"
+    );
+}
+
+// The block lists only fetch 2, which sends it no feed at all. The deferred fetch is still placed
+// at every book the plan fetched, so its requirement is stated there and none of it can be read;
+// stated only where the block can reach, it would be no requirement at all.
+#[test]
+fn a_deferred_block_that_cannot_reach_its_path_is_rejected() {
+    check_deferred_blurbs(&[2]).expect_err("the block reads no feed");
+}
+
+// Naming both fetches hands the block everything its fetch requires.
+#[test]
+fn a_deferred_block_naming_every_dependency_is_accepted() {
+    check_deferred_blurbs(&[0, 1]).unwrap();
+}
+
+// Naming none makes the block wait for the whole primary response.
+#[test]
+fn a_deferred_block_naming_no_dependency_waits_for_the_primary() {
+    check_deferred_blurbs(&[]).unwrap();
 }
 
 //==================================================================================================

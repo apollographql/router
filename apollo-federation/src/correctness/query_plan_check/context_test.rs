@@ -212,11 +212,13 @@ fn context_met(
         output_rewrites: Vec::new(),
         context_rewrites: rewrites,
     };
+    // Outside a deferred block, what a fetch can read is everything fetched before it.
     check_context_rewrites(
         &schema,
         &name!("Query"),
         path,
         condition,
+        &available,
         &available,
         &fetch,
     )

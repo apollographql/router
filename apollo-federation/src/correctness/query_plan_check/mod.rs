@@ -39,6 +39,12 @@
 //!   model alone.
 //! - **No fuel.** `conditionMatchesRequirementFuel` carries a budget that is an artifact of Lean's
 //!   termination checker; the model's own notes say an implementation should simply loop.
+//! - **What a deferred block's dependencies sent is recorded, not recomputed.** The model walks
+//!   the primary block a second time, in `PrimaryDeferBlock.dependencySelections`, to find what
+//!   the fetches a deferred block `depends` on sent it. Each fetch's response is what the walk
+//!   already returns for it, so it is recorded under the fetch's id as the walk passes, as
+//!   `FetchNode::deferred_fetches` sends it, guarded only by the condition branches inside the
+//!   primary block.
 //! - **`@context` data availability.** Every contextual value a fetch reads must already be
 //!   fetched wherever the fetch runs. The legacy checker does not check this at all: at run time
 //!   a rewrite path that reaches nothing simply drops the argument, so nothing notices.
@@ -130,6 +136,7 @@ use super::query_compare::conditions::BooleanLiteral;
 use super::response_shape_compare::ComparisonError;
 use super::subgraph_constraint::SubgraphConstraint;
 use crate::correctness::CheckerOptions;
+use crate::query_plan::DeferredDependency;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
@@ -158,6 +165,45 @@ struct Reached<'a> {
     path: &'a [FetchDataPathElement],
     /// The condition-node branches in effect, read as a conjunction.
     condition: &'a [BooleanLiteral],
+    /// Where the fetch records its own response, when it runs in the primary block of a `defer`
+    /// node whose deferred blocks may name it as a dependency.
+    deferred: Option<&'a DeferredFetches>,
+}
+
+/// What each fetch in a `defer` node's primary block sends the deferred blocks that name it.
+///
+/// Recorded as the walk passes each fetch, since `FetchNode::deferred_fetches` sends a fetch's own
+/// response rather than everything fetched before it. A nested `defer` node keeps its own, so no
+/// fetch inside one is recorded here.
+struct DeferredFetches {
+    /// The condition branches in force at the `defer` node. A response is guarded only by the
+    /// branches inside the primary block; the ones above guard the deferred blocks as well.
+    outer_conditions: usize,
+    /// Each fetch's id and response, in the order the walk passed them.
+    responses: std::cell::RefCell<Vec<(u64, Vec<Selection>)>>,
+}
+
+impl DeferredFetches {
+    fn new(outer_conditions: usize) -> Self {
+        DeferredFetches {
+            outer_conditions,
+            responses: Default::default(),
+        }
+    }
+
+    /// What the fetches a deferred block depends on sent it, in the order they ran. `depends`
+    /// holds fetch ids as strings.
+    fn responses_of(&self, depends: &[DeferredDependency]) -> Vec<Selection> {
+        self.responses
+            .borrow()
+            .iter()
+            .filter(|(id, _)| {
+                let id = id.to_string();
+                depends.iter().any(|dependency| dependency.id == id)
+            })
+            .flat_map(|(_, response)| response.iter().cloned())
+            .collect()
+    }
 }
 
 pub(crate) struct Checker<'a> {
@@ -330,21 +376,42 @@ impl<'a> Checker<'a> {
     /// no fetch site is ever collected. The threading is the model's: a sequence's children run in
     /// order, parallel children all see the same input, a defer node's deferred blocks start after
     /// its primary block.
+    ///
+    /// Two states are threaded. `available` is everything fetched before the node, and is what a
+    /// contribution or a requirement is mounted into; `readable` is what of that the node can
+    /// read, and is what a requirement is compared with. They differ only inside a deferred
+    /// block.
     fn walk_node(
         &self,
         node: &PlanNode,
         reached: Reached<'_>,
         available: &[Selection],
+        readable: &[Selection],
     ) -> Result<Vec<Selection>, ComparisonError> {
         match node {
-            PlanNode::Fetch(fetch) => self.walk_fetch(fetch, reached, available),
+            PlanNode::Fetch(fetch) => {
+                let contributed = self.walk_fetch(fetch, reached, available, readable)?;
+                if let (Some(deferred), Some(id)) = (reached.deferred, fetch.id) {
+                    deferred.responses.borrow_mut().push((
+                        id,
+                        under_condition(
+                            &reached.condition[deferred.outer_conditions..],
+                            &self.root_type,
+                            contributed.clone(),
+                        ),
+                    ));
+                }
+                Ok(contributed)
+            }
             PlanNode::Sequence(sequence) => {
-                // Each child sees what the previous ones added.
+                // Each child sees, and can read, what the previous ones added.
                 let mut added: Vec<Selection> = Vec::new();
                 for child in &sequence.nodes {
                     let mut seen = available.to_vec();
                     seen.extend(added.iter().cloned());
-                    added.extend(self.walk_node(child, reached, &seen)?);
+                    let mut seen_readable = readable.to_vec();
+                    seen_readable.extend(added.iter().cloned());
+                    added.extend(self.walk_node(child, reached, &seen, &seen_readable)?);
                 }
                 Ok(added)
             }
@@ -352,7 +419,7 @@ impl<'a> Checker<'a> {
                 // Every child sees the same input.
                 let mut added: Vec<Selection> = Vec::new();
                 for child in &parallel.nodes {
-                    added.extend(self.walk_node(child, reached, available)?);
+                    added.extend(self.walk_node(child, reached, available, readable)?);
                 }
                 Ok(added)
             }
@@ -366,24 +433,54 @@ impl<'a> Checker<'a> {
                     &flatten.node,
                     Reached {
                         path: &path,
-                        condition: reached.condition,
+                        ..reached
                     },
                     available,
+                    readable,
                 )
             }
             PlanNode::Defer(defer) => {
+                // The primary block's fetches record what they send, for the deferred blocks that
+                // name them.
+                let deferred_fetches = DeferredFetches::new(reached.condition.len());
                 let primary = match &defer.primary.node {
-                    Some(node) => self.walk_node(node, reached, available)?,
+                    Some(node) => self.walk_node(
+                        node,
+                        Reached {
+                            deferred: Some(&deferred_fetches),
+                            ..reached
+                        },
+                        available,
+                        readable,
+                    )?,
                     None => Vec::new(),
                 };
-                // Deferred blocks start after the primary block.
-                let mut seen = available.to_vec();
-                seen.extend(primary.iter().cloned());
-                let mut added = primary;
+                // Every deferred block starts after the whole primary block, so that is what was
+                // fetched before it. What it can read is less: what the `defer` node could read,
+                // and the responses of the fetches it depends on — or the whole primary block
+                // when it names none, `DeferredNode::execute` then waiting for all of it.
+                let mut block_available = available.to_vec();
+                block_available.extend(primary.iter().cloned());
+                let mut added = primary.clone();
                 for block in &defer.deferred {
-                    if let Some(node) = &block.node {
-                        added.extend(self.walk_node(node, reached, &seen)?);
+                    let Some(node) = &block.node else {
+                        continue;
+                    };
+                    let mut block_readable = readable.to_vec();
+                    if block.depends.is_empty() {
+                        block_readable.extend(primary.iter().cloned());
+                    } else {
+                        block_readable.extend(deferred_fetches.responses_of(&block.depends));
                     }
+                    added.extend(self.walk_node(
+                        node,
+                        Reached {
+                            deferred: None,
+                            ..reached
+                        },
+                        &block_available,
+                        &block_readable,
+                    )?);
                 }
                 Ok(added)
             }
@@ -408,10 +505,11 @@ impl<'a> Checker<'a> {
                     let inner = self.walk_node(
                         clause,
                         Reached {
-                            path: reached.path,
                             condition: &condition,
+                            ..reached
                         },
                         available,
+                        readable,
                     )?;
                     added.extend(under_condition(
                         std::slice::from_ref(&literal),
@@ -430,34 +528,35 @@ impl<'a> Checker<'a> {
         let reached = Reached {
             path: &[],
             condition: &[],
+            deferred: None,
         };
         let fetched = match node {
             TopLevelPlanNode::Subscription(subscription) => {
                 // The primary fetch opens the stream, so it precedes the rest of the plan.
-                let primary = self.walk_fetch(&subscription.primary, reached, &[])?;
+                let primary = self.walk_fetch(&subscription.primary, reached, &[], &[])?;
                 let mut added = primary.clone();
                 if let Some(rest) = &subscription.rest {
-                    added.extend(self.walk_node(rest, reached, &primary)?);
+                    added.extend(self.walk_node(rest, reached, &primary, &primary)?);
                 }
                 added
             }
             TopLevelPlanNode::Fetch(fetch) => {
-                self.walk_node(&PlanNode::Fetch(fetch.clone()), reached, &[])?
+                self.walk_node(&PlanNode::Fetch(fetch.clone()), reached, &[], &[])?
             }
             TopLevelPlanNode::Sequence(node) => {
-                self.walk_node(&PlanNode::Sequence(node.clone()), reached, &[])?
+                self.walk_node(&PlanNode::Sequence(node.clone()), reached, &[], &[])?
             }
             TopLevelPlanNode::Parallel(node) => {
-                self.walk_node(&PlanNode::Parallel(node.clone()), reached, &[])?
+                self.walk_node(&PlanNode::Parallel(node.clone()), reached, &[], &[])?
             }
             TopLevelPlanNode::Flatten(node) => {
-                self.walk_node(&PlanNode::Flatten(node.clone()), reached, &[])?
+                self.walk_node(&PlanNode::Flatten(node.clone()), reached, &[], &[])?
             }
             TopLevelPlanNode::Defer(node) => {
-                self.walk_node(&PlanNode::Defer(node.clone()), reached, &[])?
+                self.walk_node(&PlanNode::Defer(node.clone()), reached, &[], &[])?
             }
             TopLevelPlanNode::Condition(node) => {
-                self.walk_node(&PlanNode::Condition(node.clone()), reached, &[])?
+                self.walk_node(&PlanNode::Condition(node.clone()), reached, &[], &[])?
             }
         };
         Ok(Walked { fetched })
@@ -472,6 +571,7 @@ impl<'a> Checker<'a> {
         fetch: &FetchNode,
         reached: Reached<'_>,
         available: &[Selection],
+        readable: &[Selection],
     ) -> Result<Vec<Selection>, ComparisonError> {
         let body = self.fetch_body(fetch)?;
         // A root fetch selects its whole operation and requires nothing; an entity fetch selects
@@ -486,7 +586,7 @@ impl<'a> Checker<'a> {
             body
         } else {
             let entity_body = entity_body(fetch, &body)?;
-            self.check_fetch(fetch, &entity_body, reached, available)?;
+            self.check_fetch(fetch, &entity_body, reached, available, readable)?;
             restrict_to_entry_types(&require_types(fetch)?, entity_body)
         };
         // The entity cases were read off the fetch's own operation above; what it *contributes*
@@ -572,6 +672,7 @@ impl Checker<'_> {
         entity_body: &[Selection],
         reached: Reached<'_>,
         available: &[Selection],
+        readable: &[Selection],
     ) -> Result<(), ComparisonError> {
         let cases = entity_cases(fetch, entity_body)?;
         let require_types = require_types(fetch)?;
@@ -595,8 +696,9 @@ impl Checker<'_> {
             })?;
         let subgraph = Subgraph::new(subgraph_schema)?;
 
-        // Bound once per fetch, not per entry or per `@key`.
-        let available_doc = self.operation_with(available.to_vec());
+        // What the fetch can read, which every requirement is compared with. Bound once per
+        // fetch, not per entry or per `@key`.
+        let readable_doc = self.operation_with(readable.to_vec());
 
         // Only `key.fields` varies across the keys tried, so hoist the rest per case.
         let mut per_case = Vec::with_capacity(cases.len());
@@ -656,7 +758,7 @@ impl Checker<'_> {
                     &per_case[case],
                     reached,
                     available,
-                    &available_doc,
+                    &readable_doc,
                 )?);
             }
             Ok(is_match(&table[entry][case]))
@@ -726,6 +828,7 @@ impl Checker<'_> {
             reached.path,
             reached.condition,
             available,
+            readable,
             fetch,
         )
     }
@@ -814,7 +917,7 @@ impl Checker<'_> {
         ),
         reached: Reached<'_>,
         available: &[Selection],
-        available_doc: &Valid<ExecutableDocument>,
+        readable_doc: &Valid<ExecutableDocument>,
     ) -> Result<Option<String>, ComparisonError> {
         let (keys, requires_selections, requires_field_set) = hoisted;
         if keys.is_empty() {
@@ -896,9 +999,12 @@ impl Checker<'_> {
                 ),
             );
             let required_doc = self.operation_with(required);
+            // Mounted into what was fetched before the fetch, compared with what it can read: a
+            // deferred block that cannot read a requirement there is rejected rather than having
+            // the requirement vanish from it.
             if let Err(e) = self.comparator.includes_with_constraint(
                 &self.constraint,
-                available_doc,
+                readable_doc,
                 &required_doc,
             ) {
                 unmatched.push(format!(
