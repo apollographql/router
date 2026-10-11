@@ -11,7 +11,7 @@ rust = { version = "1.99.0", profile = "default" }
 "cargo:cargo-watch" = "8.5.3"
 "cargo:cargo-machete" = "0.9.2"
 "cargo:cargo-llvm-cov" = "0.9.1"
-"cargo:typos-cli" = "1.50.3"
+"cargo:typos-cli" = "1.51.1"
 protoc = "36.2"
 gh = "2.102.0"
 helm = "4.3.0"
