@@ -1,8 +1,6 @@
 //! Tests for the memory profiling module
 
-use std::fs;
 use std::path::Path;
-use std::path::PathBuf;
 
 use futures::TryStreamExt;
 use http::StatusCode;
@@ -13,342 +11,249 @@ use tokio::io::AsyncReadExt;
 
 use super::*;
 
-#[cfg(target_family = "unix")]
+async fn json(response: DiagnosticsResult<Response<Body>>) -> (StatusCode, Value) {
+    let response = response.expect("response");
+    let status = response.status();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).expect("JSON body"))
+}
+
+/// Writes files into `memory/`, returning the service.
+fn service_with_files(dir: &Path, files: &[(&str, &[u8])]) -> MemoryService {
+    let memory = dir.join("memory");
+    std::fs::create_dir_all(&memory).unwrap();
+    for (name, contents) in files {
+        std::fs::write(memory.join(name), contents).unwrap();
+    }
+    MemoryService::new(dir)
+}
+
 #[tokio::test]
-async fn test_handle_status() {
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
-
-    let service = MemoryService::new(output_path);
-
-    let response = service.handle_status().await;
-    assert!(response.is_ok(), "Status request should succeed");
-
-    let response = response.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Check that response is valid JSON
-    let body_bytes = response.into_body();
-    let body_data = body_bytes.collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body_data).expect("Response should be valid JSON");
-
-    // Check expected fields
-    assert!(
-        json.get("profiling_active").is_some(),
-        "Should have profiling_active field"
+async fn status_reports_availability() {
+    let temp_dir = tempdir().unwrap();
+    let (status, body) = json(MemoryService::new(temp_dir.path()).handle_status().await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["platform"], std::env::consts::OS);
+    assert_eq!(
+        body["heap_dumps_available"],
+        crate::heap_profiling::available().is_ok()
     );
-    assert!(json.get("status").is_some(), "Should have status field");
 }
 
-#[cfg(target_family = "unix")]
 #[tokio::test]
-async fn test_handle_start() {
-    let _prof_lock = crate::allocator::JEMALLOC_PROF_TEST_LOCK.lock().await;
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
-
-    let service = MemoryService::new(output_path);
-
-    let response = service.handle_start().await;
-
-    // Note: This might fail on systems without jemalloc profiling enabled
-    // but the test verifies the handler structure is correct
-    match response {
-        Ok(resp) => {
-            // With global-allocator feature: expect OK or INTERNAL_SERVER_ERROR
-            // Without global-allocator feature: expect NOT_IMPLEMENTED
-            #[cfg(all(target_family = "unix", feature = "global-allocator"))]
-            {
-                assert!(
-                    resp.status() == StatusCode::OK
-                        || resp.status() == StatusCode::INTERNAL_SERVER_ERROR,
-                    "Expected OK or INTERNAL_SERVER_ERROR, got: {}",
-                    resp.status()
-                );
-            }
-            #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
-            {
-                assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
-            }
-
-            let body_bytes = resp.into_body();
-            let body_data = body_bytes.collect().await.unwrap().to_bytes();
-            let json: Value =
-                serde_json::from_slice(&body_data).expect("Response should be valid JSON");
-
-            assert!(json.get("status").is_some(), "Should have status field");
-            assert!(json.get("message").is_some(), "Should have message field");
-        }
-        Err(_) => {
-            // This is expected on systems where jemalloc profiling is not available
-            // The test still validates that the handler doesn't panic
-        }
-    }
-}
-
-#[cfg(target_family = "unix")]
-#[tokio::test]
-async fn test_handle_stop() {
-    let _prof_lock = crate::allocator::JEMALLOC_PROF_TEST_LOCK.lock().await;
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
-
-    let service = MemoryService::new(output_path);
-
-    let response = service.handle_stop().await;
-
-    // Note: Similar to start, this might fail on systems without jemalloc profiling
-    match response {
-        Ok(resp) => {
-            // With global-allocator feature: expect OK or INTERNAL_SERVER_ERROR
-            // Without global-allocator feature: expect NOT_IMPLEMENTED
-            #[cfg(all(target_family = "unix", feature = "global-allocator"))]
-            {
-                assert!(
-                    resp.status() == StatusCode::OK
-                        || resp.status() == StatusCode::INTERNAL_SERVER_ERROR,
-                    "Expected OK or INTERNAL_SERVER_ERROR, got: {}",
-                    resp.status()
-                );
-            }
-            #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
-            {
-                assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
-            }
-
-            let body_bytes = resp.into_body();
-            let body_data = body_bytes.collect().await.unwrap().to_bytes();
-            let json: Value =
-                serde_json::from_slice(&body_data).expect("Response should be valid JSON");
-
-            assert!(json.get("status").is_some(), "Should have status field");
-            assert!(json.get("message").is_some(), "Should have message field");
-        }
-        Err(_) => {
-            // Expected on systems where jemalloc profiling is not available
-        }
-    }
-}
-
-#[cfg(target_family = "unix")]
-#[tokio::test]
-async fn test_handle_dump_creates_directory() {
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
-
-    let service = MemoryService::new(output_path);
-
-    // Ensure memory directory doesn't exist initially
-    let memory_path = output_path.join("memory");
-    assert!(
-        !memory_path.exists(),
-        "Memory directory should not exist initially"
+async fn lists_downloads_and_deletes_only_heap_dumps() {
+    let temp_dir = tempdir().unwrap();
+    let service = service_with_files(
+        temp_dir.path(),
+        &[
+            ("router_heap_dump_1.pb.gz", b"one"),
+            ("router_heap_dump_2.pb.gz", b"two"),
+            ("old_format.prof", b"jeprof"),
+        ],
     );
 
-    let response = service.handle_dump().await;
+    let (status, body) = json(service.handle_list_dumps().await).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut names: Vec<_> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|dump| dump["name"].as_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["router_heap_dump_1.pb.gz", "router_heap_dump_2.pb.gz"]
+    );
 
-    // The dump might fail due to jemalloc configuration, but directory should be created
-    // regardless of whether the actual dump succeeds
-    match response {
-        Ok(resp) => {
-            // With global-allocator feature: expect OK or INTERNAL_SERVER_ERROR
-            // Without global-allocator feature: expect NOT_IMPLEMENTED
-            #[cfg(all(target_family = "unix", feature = "global-allocator"))]
-            {
-                assert!(
-                    resp.status() == StatusCode::OK
-                        || resp.status() == StatusCode::INTERNAL_SERVER_ERROR,
-                    "Expected OK or INTERNAL_SERVER_ERROR, got: {}",
-                    resp.status()
-                );
-            }
-            #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
-            {
-                assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED);
-            }
+    let download = service
+        .handle_download_dump("router_heap_dump_1.pb.gz")
+        .await
+        .unwrap();
+    assert_eq!(download.status(), StatusCode::OK);
+    let contents = download.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(contents.as_ref(), b"one");
+    assert!(
+        service
+            .handle_download_dump("old_format.prof")
+            .await
+            .is_err()
+    );
+    assert!(
+        service
+            .handle_download_dump("../router_heap_dump_1.pb.gz")
+            .await
+            .is_err()
+    );
 
-            let status = resp.status();
-            let body_bytes = resp.into_body();
-            let body_data = body_bytes.collect().await.unwrap().to_bytes();
-            let json: Value =
-                serde_json::from_slice(&body_data).expect("Response should be valid JSON");
+    let (status, _) = json(service.handle_delete_dump("router_heap_dump_1.pb.gz").await).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = json(service.handle_clear_all_dumps().await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["deleted_count"], 1);
 
-            assert!(json.get("status").is_some(), "Should have status field");
-
-            // Only check for dump_path if global-allocator is enabled and operation succeeded
-            #[cfg(all(target_family = "unix", feature = "global-allocator"))]
-            {
-                if status == StatusCode::OK {
-                    assert!(
-                        json.get("dump_path").is_some(),
-                        "Should have dump_path field"
-                    );
-                }
-            }
-
-            // Only verify dump path details if global-allocator feature is enabled
-            #[cfg(all(target_family = "unix", feature = "global-allocator"))]
-            {
-                if status == StatusCode::OK {
-                    let dump_path = json.get("dump_path").unwrap().as_str().unwrap();
-                    assert!(
-                        dump_path.contains("/memory/"),
-                        "Dump path should be in memory subdirectory"
-                    );
-                    assert!(
-                        dump_path.contains("router_heap_dump_"),
-                        "Should have correct filename pattern"
-                    );
-                    assert!(dump_path.ends_with(".prof"), "Should have .prof extension");
-                }
-            }
-        }
-        Err(_) => {
-            // Even if dump fails, directory should be created
-        }
-    }
-
-    // Directory should exist after attempt only if global-allocator is enabled
-    #[cfg(all(target_family = "unix", feature = "global-allocator"))]
-    assert!(memory_path.exists(), "Memory directory should be created");
-
-    #[cfg(not(all(target_family = "unix", feature = "global-allocator")))]
-    {
-        // Without global-allocator, the directory won't be created
-        // This is expected behavior
-    }
+    let memory = temp_dir.path().join("memory");
+    assert!(!memory.join("router_heap_dump_2.pb.gz").exists());
+    assert!(memory.join("old_format.prof").exists(), "not a heap dump");
 }
 
-#[cfg(target_family = "unix")]
+#[tokio::test]
+async fn loads_only_heap_dumps_for_the_report() {
+    let temp_dir = tempdir().unwrap();
+    service_with_files(
+        temp_dir.path(),
+        &[
+            ("router_heap_dump_1.pb.gz", b"one"),
+            ("old_format.prof", b"jeprof"),
+        ],
+    );
+    let dumps = load_memory_dumps(&temp_dir.path().join("memory"))
+        .await
+        .unwrap();
+    assert_eq!(dumps.len(), 1);
+    assert_eq!(dumps[0].name, "router_heap_dump_1.pb.gz");
+    assert_eq!(dumps[0].data, "b25l"); // base64 of "one"
+    assert_eq!(dumps[0].size, 3);
+}
+
 #[tokio::test]
 async fn test_add_to_archive_with_files() {
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
+    let temp_dir = tempdir().unwrap();
+    service_with_files(
+        temp_dir.path(),
+        &[("router_heap_dump_1.pb.gz", b"test heap dump data")],
+    );
 
-    // Create memory subdirectory and test files
-    let memory_path = Path::new(&output_path).join("memory");
-    fs::create_dir_all(&memory_path).expect("Failed to create memory directory");
-    fs::write(memory_path.join("test_heap.prof"), b"test heap dump data")
-        .expect("Failed to write test file");
-    fs::write(memory_path.join("test_profile.prof"), b"test profile data")
-        .expect("Failed to write another test file");
-
-    // Create a tar builder using duplex stream
     let (mut reader, writer) = tokio::io::duplex(1024 * 1024);
     let mut tar = tokio_tar::Builder::new(writer);
-
-    // Add memory files to archive
-    let result = MemoryService::add_to_archive(&mut tar, output_path).await;
-    assert!(result.is_ok(), "Adding to archive should succeed");
-
-    // Finish the archive
-    tar.finish().await.expect("Should be able to finish tar");
-    drop(tar); // Close the writer side
-
-    // Read archive data
-    let mut archive_data = Vec::new();
-    reader
-        .read_to_end(&mut archive_data)
+    MemoryService::add_to_archive(&mut tar, temp_dir.path())
         .await
-        .expect("Should be able to read data");
-    assert!(!archive_data.is_empty(), "Archive should contain data");
+        .unwrap();
+    tar.finish().await.unwrap();
+    drop(tar);
 
-    // Verify archive contents
+    let mut archive_data = Vec::new();
+    reader.read_to_end(&mut archive_data).await.unwrap();
     let mut archive = tokio_tar::Archive::new(archive_data.as_slice());
-    let mut entries_stream = archive.entries().expect("Should be able to read entries");
-    let mut entries = Vec::new();
-
-    while let Some(entry) = entries_stream.try_next().await.expect("Should read entry") {
-        entries.push(entry);
-    }
-
-    assert!(!entries.is_empty(), "Archive should contain entries");
-
-    // Check that memory files are in the archive
-    let paths: Vec<String> = entries
-        .iter()
-        .map(|entry: &tokio_tar::Entry<_>| entry.path().unwrap().to_string_lossy().to_string())
-        .collect();
-
-    assert!(
-        paths.iter().any(|p| p.contains("memory/")),
-        "Should contain memory directory entries"
-    );
+    let paths: Vec<String> = archive
+        .entries()
+        .unwrap()
+        .map_ok(|entry| entry.path().unwrap().to_string_lossy().to_string())
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(paths, ["memory/router_heap_dump_1.pb.gz"]);
 }
 
-#[cfg(target_family = "unix")]
 #[tokio::test]
 async fn test_add_to_archive_empty_directory() {
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let output_path = temp_dir.path();
-
-    // Don't create the memory directory - test empty case
+    let temp_dir = tempdir().unwrap();
 
     let (mut reader, writer) = tokio::io::duplex(1024 * 1024);
     let mut tar = tokio_tar::Builder::new(writer);
-
-    let result = MemoryService::add_to_archive(&mut tar, output_path).await;
-    assert!(result.is_ok(), "Adding empty directory should succeed");
-
-    tar.finish().await.expect("Should be able to finish tar");
-    drop(tar); // Close the writer side
-
-    // Read archive data
-    let mut archive_data = Vec::new();
-    reader
-        .read_to_end(&mut archive_data)
+    MemoryService::add_to_archive(&mut tar, temp_dir.path())
         .await
-        .expect("Should be able to read data");
+        .unwrap();
+    tar.finish().await.unwrap();
+    drop(tar);
 
-    // Verify that an empty memory directory is created in the archive
+    let mut archive_data = Vec::new();
+    reader.read_to_end(&mut archive_data).await.unwrap();
     let mut archive = tokio_tar::Archive::new(archive_data.as_slice());
-    let mut entries_stream = archive.entries().expect("Should be able to read entries");
-    let mut entries = Vec::new();
+    let entries: Vec<_> = archive.entries().unwrap().try_collect().await.unwrap();
+    assert_eq!(entries.len(), 1, "just the empty memory directory");
+    assert_eq!(entries[0].path().unwrap().to_string_lossy(), "memory/");
+    assert!(entries[0].header().entry_type().is_dir());
+}
 
-    while let Some(entry) = entries_stream.try_next().await.expect("Should read entry") {
-        entries.push(entry);
+#[cfg(not(all(feature = "global-allocator", not(feature = "dhat-heap"), unix)))]
+#[tokio::test]
+async fn profiling_is_not_implemented_where_unavailable() {
+    let temp_dir = tempdir().unwrap();
+    let service = MemoryService::new(temp_dir.path());
+    for response in [
+        service.handle_start().await,
+        service.handle_stop().await,
+        service.handle_dump().await,
+    ] {
+        let (status, body) = json(response).await;
+        assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(body["status"], "not_supported");
+    }
+}
+
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
+mod supported {
+    use super::*;
+    use crate::heap_profiling;
+    use crate::heap_profiling::TEST_LOCK;
+    use crate::heap_profiling::test_pprof;
+
+    #[inline(never)]
+    fn allocate_for_profile() -> Vec<Vec<u8>> {
+        (0..64)
+            .map(|_| std::hint::black_box(vec![1u8; 1024 * 1024]))
+            .collect()
     }
 
-    assert_eq!(
-        entries.len(),
-        1,
-        "Should have exactly one entry (empty directory)"
-    );
+    /// Start a session, dump a symbolized pprof heap profile, then stop.
+    #[tokio::test]
+    async fn dumps_symbolized_pprof() {
+        let _lock = TEST_LOCK.lock().await;
+        let temp_dir = tempdir().unwrap();
+        let service = MemoryService::new(temp_dir.path());
 
-    let entry: &tokio_tar::Entry<_> = &entries[0];
-    let path = entry
-        .path()
-        .expect("Should have path")
-        .to_string_lossy()
-        .to_string();
-    assert_eq!(path, "memory/", "Should create empty memory directory");
-    assert!(
-        entry.header().entry_type().is_dir(),
-        "Should be a directory entry"
-    );
-}
+        let (status, body) = json(service.handle_start().await).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (_, body) = json(service.handle_status().await).await;
+        assert_eq!(body["profiling_active"], true);
+        assert_eq!(body["sampling_active"], true);
 
-#[cfg(target_family = "unix")]
-#[test]
-fn test_memory_service_clone() {
-    let service1 = MemoryService::new(&PathBuf::from("/tmp/test1"));
-    let service2 = service1.clone();
+        let held = allocate_for_profile();
+        let (status, body) = json(service.handle_dump().await).await;
+        drop(held);
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let dump_path = Path::new(body["dump_path"].as_str().unwrap()).to_owned();
+        assert_eq!(dump_path.parent().unwrap(), temp_dir.path().join("memory"));
+        let name = dump_path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("router_heap_dump_") && name.ends_with(".pb.gz"),
+            "{name}"
+        );
 
-    assert_eq!(service1.output_directory, service2.output_directory);
-}
+        let pprof = test_pprof::Profile::decode_gzipped(&std::fs::read(&dump_path).unwrap());
+        assert_eq!(pprof.sample_type(), ("inuse-space", "bytes"));
+        let total = pprof.total();
+        assert!(total >= 32 * 1024 * 1024, "in-use bytes: {total}");
+        assert!(
+            pprof.has_function("supported::allocate_for_profile"),
+            "profile is symbolized in-process"
+        );
 
-// Test helper function visibility
-#[cfg(target_family = "unix")]
-#[test]
-fn test_path_handling() {
-    let temp_dir = tempdir().expect("Failed to create temp dir");
-    let base_path = temp_dir.path().to_str().unwrap();
+        let (status, _) = json(service.handle_stop().await).await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, body) = json(service.handle_status().await).await;
+        assert_eq!(body["profiling_active"], false);
+        assert_eq!(body["sampling_active"], false);
+    }
 
-    // Test that memory subdirectory path is constructed correctly
-    let memory_path = Path::new(base_path).join("memory");
-    assert_eq!(memory_path, Path::new(&format!("{}/memory", base_path)));
+    /// Stopping a session leaves sampling on for continuous profiling, and vice versa.
+    #[tokio::test]
+    async fn stopping_leaves_sampling_on_for_other_users() {
+        let _lock = TEST_LOCK.lock().await;
+        let temp_dir = tempdir().unwrap();
+        let service = MemoryService::new(temp_dir.path());
 
-    // Test path display formatting
-    let display_str = format!("{}", memory_path.display());
-    assert!(display_str.ends_with("/memory"));
+        let continuous = heap_profiling::start_sampling().unwrap();
+        json(service.handle_start().await).await;
+        json(service.handle_stop().await).await;
+        assert!(heap_profiling::is_sampling().unwrap());
+
+        json(service.handle_start().await).await;
+        drop(continuous);
+        assert!(heap_profiling::is_sampling().unwrap());
+
+        json(service.handle_stop().await).await;
+        assert!(!heap_profiling::is_sampling().unwrap());
+    }
 }

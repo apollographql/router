@@ -20,7 +20,7 @@
 //! - **Export Service** (`export`): Bundles configuration, schema, system info, and memory dumps
 //!
 //! All endpoints return structured JSON or serve static resources. The memory service uses
-//! jemalloc's profiling API (Linux-only) with graceful degradation on other platforms.
+//! jemalloc's heap profiling (Linux and macOS) with graceful degradation on other platforms.
 //!
 //! ## Security
 //!
@@ -31,8 +31,8 @@
 //!
 //! ## Platform Support
 //!
-//! Available on all platforms. Memory profiling features require Linux with jemalloc allocator
-//! (enabled via `global-allocator` feature). Other diagnostic features work cross-platform.
+//! Available on all platforms. Memory profiling features require Linux or macOS with the jemalloc
+//! allocator (enabled via `global-allocator` feature). Other diagnostic features work cross-platform.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -79,10 +79,6 @@ pub(crate) enum DiagnosticsError {
 
     /// Jemalloc/memory profiling errors
     #[error("Memory profiling error: {0}")]
-    #[cfg_attr(
-        not(all(target_family = "unix", feature = "global-allocator")),
-        allow(dead_code)
-    )]
     Memory(String),
 
     /// Internal errors (catch-all)
@@ -102,7 +98,7 @@ impl From<String> for DiagnosticsError {
 /// Configuration for the diagnostics plugin
 ///
 /// **Platform Requirements**: This plugin is supported on all platforms.
-/// Heap dump functionality is only available on Linux platforms due to
+/// Heap dump functionality is only available on Linux and macOS due to
 /// jemalloc requirements. Other diagnostic features work across platforms.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -120,7 +116,7 @@ pub(crate) struct Config {
     /// Defaults to "/tmp/router-diagnostics" on Unix, or temp directory on other platforms
     ///
     /// This directory will be created automatically if it doesn't exist.
-    /// Note: Memory dumps are only generated on Linux platforms.
+    /// Note: Memory dumps are only generated on Linux and macOS.
     pub(crate) output_directory: PathBuf,
 }
 

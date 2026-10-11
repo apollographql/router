@@ -179,11 +179,7 @@ async fn persistent_export_failures_warn_once_until_recovery() {
     .unwrap();
 }
 
-#[cfg(not(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-)))]
+#[cfg(not(all(feature = "global-allocator", not(feature = "dhat-heap"), unix)))]
 #[test]
 fn unsupported_platform_disables_profiling_without_failing() {
     let collector =
@@ -191,42 +187,14 @@ fn unsupported_platform_disables_profiling_without_failing() {
     assert!(collector.is_none());
 }
 
-#[cfg(all(
-    feature = "global-allocator",
-    not(feature = "dhat-heap"),
-    target_os = "linux"
-))]
+#[cfg(all(feature = "global-allocator", not(feature = "dhat-heap"), unix))]
 mod supported {
     use std::convert::Infallible;
-    use std::io::Read;
 
     use super::*;
-    use crate::allocator::JEMALLOC_PROF_TEST_LOCK;
-
-    /// Just the parts of pprof's `Profile` message these tests look at.
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct PprofProfile {
-        #[prost(message, repeated, tag = "1")]
-        sample_type: Vec<PprofValueType>,
-        #[prost(message, repeated, tag = "2")]
-        sample: Vec<PprofSample>,
-        #[prost(string, repeated, tag = "6")]
-        string_table: Vec<String>,
-    }
-
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct PprofValueType {
-        #[prost(int64, tag = "1")]
-        r#type: i64,
-        #[prost(int64, tag = "2")]
-        unit: i64,
-    }
-
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct PprofSample {
-        #[prost(int64, repeated, tag = "2")]
-        value: Vec<i64>,
-    }
+    use crate::heap_profiling;
+    use crate::heap_profiling::TEST_LOCK;
+    use crate::heap_profiling::test_pprof;
 
     /// The multipart parts of a request received by the fake agent, as (name, bytes).
     async fn multipart_parts(request: &wiremock::Request) -> Vec<(String, Vec<u8>)> {
@@ -287,14 +255,14 @@ mod supported {
     /// The router's own jemalloc → symbolized pprof → a fake Datadog agent.
     #[tokio::test]
     async fn exports_symbolized_heap_profile_to_datadog_agent() {
-        let _lock = JEMALLOC_PROF_TEST_LOCK.lock().await;
+        let _lock = TEST_LOCK.lock().await;
         async {
             let agent = mock_agent(200).await;
             let mut collector = Collector::from_config(&datadog_config(&agent.uri()), no_env)
                 .unwrap()
                 .expect("heap profiling is supported here");
 
-            heap::set_active(true).unwrap();
+            let sampling = heap_profiling::start_sampling().unwrap();
             let held = allocate_for_profile();
             let profile = collector
                 .collect(
@@ -305,7 +273,7 @@ mod supported {
                 .expect("collected a heap profile");
             export_all(&mut collector.exporters, &profile).await;
             drop(held);
-            heap::set_active(false).unwrap();
+            drop(sampling);
 
             assert_counter!(
                 "apollo.router.profiling.collections",
@@ -340,26 +308,13 @@ mod supported {
             let tags = event["tags_profiler"].as_str().unwrap();
             assert!(tags.starts_with("service:router,"), "{tags}");
 
-            let mut pprof = Vec::new();
-            flate2::read::GzDecoder::new(parts[1].1.as_slice())
-                .read_to_end(&mut pprof)
-                .expect("gzipped pprof");
-            let pprof = <PprofProfile as prost::Message>::decode(pprof.as_slice()).unwrap();
-            let sample_type = &pprof.sample_type[0];
-            assert_eq!(
-                pprof.string_table[sample_type.r#type as usize],
-                "inuse-space"
-            );
-            assert_eq!(pprof.string_table[sample_type.unit as usize], "bytes");
-
+            let pprof = test_pprof::Profile::decode_gzipped(&parts[1].1);
+            assert_eq!(pprof.sample_type(), ("inuse-space", "bytes"));
             // The 64MiB held above (sampled, then scaled back up by jemalloc's sampling rate).
-            let total: i64 = pprof.sample.iter().map(|s| s.value[0]).sum();
+            let total = pprof.total();
             assert!(total >= 32 * 1024 * 1024, "in-use bytes: {total}");
             assert!(
-                pprof
-                    .string_table
-                    .iter()
-                    .any(|s| s.ends_with("supported::allocate_for_profile")),
+                pprof.has_function("supported::allocate_for_profile"),
                 "profile is symbolized in-process"
             );
         }
@@ -370,8 +325,7 @@ mod supported {
     /// A reload's new pipeline takes over the one loop; the old pipeline going away doesn't stop it.
     #[tokio::test]
     async fn reload_hands_over_a_single_loop() {
-        let _lock = JEMALLOC_PROF_TEST_LOCK.lock().await;
-        heap::set_active(false).unwrap();
+        let _lock = TEST_LOCK.lock().await;
         let plugin = || async {
             let init =
                 PluginInit::fake_new(datadog_config("http://agent.invalid"), Default::default());
@@ -383,7 +337,7 @@ mod supported {
         let old = plugin().await;
         old.activate();
         assert_eq!(running_owner(), Some(old.id));
-        assert!(heap::is_active().unwrap());
+        assert!(heap_profiling::is_sampling().unwrap());
 
         let new = plugin().await;
         new.activate();
@@ -391,19 +345,18 @@ mod supported {
 
         drop(old);
         assert_eq!(running_owner(), Some(new.id));
-        assert!(heap::is_active().unwrap());
+        assert!(heap_profiling::is_sampling().unwrap());
 
         drop(new);
         assert_eq!(running_owner(), None);
-        assert!(!heap::is_active().unwrap());
+        assert!(!heap_profiling::is_sampling().unwrap());
     }
 
     /// Through the real router: config → plugin → activation → uploads, then stopping with it.
     #[tokio::test]
     async fn runs_with_the_router_and_stops_with_it() {
-        let _lock = JEMALLOC_PROF_TEST_LOCK.lock().await;
+        let _lock = TEST_LOCK.lock().await;
         async {
-            heap::set_active(false).unwrap();
             let agent = mock_agent(200).await;
             let router = crate::TestHarness::builder()
                 .configuration_json(serde_json::json!({
@@ -418,7 +371,7 @@ mod supported {
                 .await
                 .unwrap();
 
-            assert!(heap::is_active().unwrap());
+            assert!(heap_profiling::is_sampling().unwrap());
             // The window advances only once a profile has been collected, exported, and counted,
             // so stopping right after can't cut an upload short.
             let first_window = window_start().expect("the loop is running");
@@ -432,7 +385,7 @@ mod supported {
                 running_owner().is_none()
             })
             .await;
-            assert!(!heap::is_active().unwrap());
+            assert!(!heap_profiling::is_sampling().unwrap());
 
             let uploads = agent.received_requests().await.unwrap().len() as u64;
             assert!(uploads >= 1);
