@@ -1997,7 +1997,7 @@ expression: "&schema"
     },
     "Config5": {
       "additionalProperties": false,
-      "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux platforms due to\njemalloc requirements. Other diagnostic features work across platforms.",
+      "description": "Configuration for the diagnostics plugin\n\n**Platform Requirements**: This plugin is supported on all platforms.\nHeap dump functionality is only available on Linux and macOS due to\njemalloc requirements. Other diagnostic features work across platforms.",
       "properties": {
         "enabled": {
           "default": false,
@@ -2015,7 +2015,7 @@ expression: "&schema"
         },
         "output_directory": {
           "default": "/tmp/router-diagnostics",
-          "description": "Directory path for memory dump files\nDefaults to \"/tmp/router-diagnostics\" on Unix, or temp directory on other platforms\n\nThis directory will be created automatically if it doesn't exist.\nNote: Memory dumps are only generated on Linux platforms.",
+          "description": "Directory path for memory dump files\nDefaults to \"/tmp/router-diagnostics\" on Unix, or temp directory on other platforms\n\nThis directory will be created automatically if it doesn't exist.\nNote: Memory dumps are only generated on Linux and macOS.",
           "type": "string"
         }
       },
@@ -3208,7 +3208,7 @@ expression: "&schema"
               "$ref": "#/definitions/ContinuousProfilingHeapConfig"
             }
           ],
-          "description": "Profile in-use heap memory by allocation call stack.\n\nUses the router's jemalloc allocator, which samples allocations, so the overhead is low.\nOnly allocations made after profiling starts are attributed. Linux only."
+          "description": "Profile in-use heap memory by allocation call stack.\n\nUses the router's jemalloc allocator, which samples allocations, so the overhead is low.\nOnly allocations made after profiling starts are attributed. Linux and macOS only."
         },
         "interval": {
           "default": "1m",

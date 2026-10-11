@@ -241,10 +241,10 @@ async fn test_memory_clear_dumps_endpoint() {
 async fn test_memory_download_dump_not_found() {
     let mut router = create_test_router();
     let (status, _, _) =
-        make_request(&mut router, Method::GET, "/memory/dumps/nonexistent.prof").await;
+        make_request(&mut router, Method::GET, "/memory/dumps/nonexistent.pb.gz").await;
 
-    // Should return 404 or NOT_IMPLEMENTED
-    assert!(status == StatusCode::NOT_FOUND || status == StatusCode::NOT_IMPLEMENTED);
+    // Should return 404
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

@@ -39,6 +39,7 @@ global-allocator = [
     "tikv-jemalloc-ctl/stats",
     "tikv-jemalloc-ctl/profiling",
     "dep:jemalloc_pprof",
+    "dep:pprof_util",
     "dep:backtrace",
 ]
 
@@ -62,7 +63,6 @@ ci = []
 snapshot = []
 
 [dependencies]
-addr2line = "0.27.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.18.0" }
@@ -320,10 +320,10 @@ hyperlocal = { version = "0.9.1", default-features = false, features = [
 tikv-jemallocator = { version = "0.7.0", features = ["profiling"], optional = true }
 tikv-jemalloc-ctl = { version = "0.7.0", features = ["stats", "profiling"], optional = true }
 tikv-jemalloc-sys = { version = "0.7.0", features = ["profiling"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# Continuous heap profiling: converts jemalloc heap dumps into symbolized pprof.
+# Heap profiling (see `heap_profiling.rs`): converts jemalloc heap dumps into symbolized pprof.
 jemalloc_pprof = { version = "0.9.0", features = ["symbolize"], optional = true }
+# Parses jemalloc heap dumps where jemalloc_pprof's own parsing would log an error (not Linux).
+pprof_util = { version = "0.8.2", optional = true }
 # Releases the symbol cache that jemalloc_pprof's symbolization leaves behind.
 backtrace = { version = "0.3.75", optional = true }
 

@@ -10,7 +10,6 @@
 //! profiling backends, so supporting another backend means adding an exporter, not a profiler.
 
 mod datadog;
-mod heap;
 #[cfg(test)]
 mod tests;
 
@@ -26,6 +25,7 @@ use serde::Deserialize;
 use tokio_util::task::AbortOnDropHandle;
 use tower::BoxError;
 
+use crate::heap_profiling;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -38,7 +38,7 @@ pub(crate) struct Config {
     /// Profile in-use heap memory by allocation call stack.
     ///
     /// Uses the router's jemalloc allocator, which samples allocations, so the overhead is low.
-    /// Only allocations made after profiling starts are attributed. Linux only.
+    /// Only allocations made after profiling starts are attributed. Linux and macOS only.
     heap: HeapConfig,
 
     /// How often profiles are collected and exported. Each collection briefly uses extra memory
@@ -141,7 +141,7 @@ impl Collector {
         }
 
         // Don't fail startup where heap profiling isn't supported (e.g. a developer's Mac).
-        if let Err(err) = heap::available() {
+        if let Err(err) = heap_profiling::available() {
             tracing::warn!(error = %err, "heap profiling is enabled but unavailable");
             return Ok(None);
         }
@@ -169,15 +169,7 @@ impl Collector {
     }
 
     async fn collect(&self, start: SystemTime, end: SystemTime) -> Option<Profile> {
-        // Something else (e.g. the diagnostics plugin) may have switched sampling off.
-        if let Ok(false) = heap::is_active() {
-            tracing::warn!("jemalloc heap profiling was switched off; switching it back on");
-            if let Err(err) = heap::set_active(true) {
-                tracing::warn!(error = %err, "failed to switch jemalloc heap profiling on");
-            }
-        }
-
-        let result = heap::collect_pprof().await;
+        let result = heap_profiling::collect_pprof().await;
         let outcome = if result.is_ok() { "success" } else { "failure" };
         u64_counter_with_unit!(
             "apollo.router.profiling.collections",
@@ -247,12 +239,11 @@ static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 struct Running {
     /// The plugin instance that owns the loop.
     owner: u64,
-    /// Whether jemalloc heap profiling was already on before we turned it on, in which case we
-    /// leave it on when we stop.
-    was_active: bool,
     /// The start of the profile being collected. Carried across reloads.
     window_start: Arc<Mutex<SystemTime>>,
     _task: AbortOnDropHandle<()>,
+    /// Carried across reloads, so sampling isn't interrupted.
+    sampling: heap_profiling::Sampling,
 }
 
 static NEXT_PLUGIN_ID: AtomicU64 = AtomicU64::new(0);
@@ -268,16 +259,18 @@ fn take_over(owner: u64, collector: Option<Collector>) {
         return;
     };
 
-    let (was_active, window_start) = match previous {
-        Some(previous) => (previous.was_active, *previous.window_start.lock()),
-        None => {
-            tracing::info!(interval = ?collector.interval, "continuous profiling started");
-            let was_active = heap::is_active().unwrap_or(false);
-            if let Err(err) = heap::set_active(true) {
-                tracing::warn!(error = %err, "failed to switch jemalloc heap profiling on");
+    let (sampling, window_start) = match previous {
+        Some(previous) => (previous.sampling, *previous.window_start.lock()),
+        None => match heap_profiling::start_sampling() {
+            Ok(sampling) => {
+                tracing::info!(interval = ?collector.interval, "continuous profiling started");
+                (sampling, SystemTime::now())
             }
-            (was_active, SystemTime::now())
-        }
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to start continuous profiling");
+                return;
+            }
+        },
     };
     let window_start = Arc::new(Mutex::new(window_start));
     let task = tokio::spawn(
@@ -287,20 +280,16 @@ fn take_over(owner: u64, collector: Option<Collector>) {
     );
     *running = Some(Running {
         owner,
-        was_active,
         window_start,
         _task: AbortOnDropHandle::new(task),
+        sampling,
     });
 }
 
+/// Dropping `running` aborts the loop and releases sampling.
 fn stop(running: Running) {
-    if !running.was_active
-        && let Err(err) = heap::set_active(false)
-    {
-        tracing::warn!(error = %err, "failed to switch jemalloc heap profiling off");
-    }
+    drop(running);
     tracing::info!("continuous profiling stopped");
-    // Dropping `running` aborts the loop.
 }
 
 struct ContinuousProfiling {
