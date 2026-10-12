@@ -417,7 +417,176 @@ impl PluginPrivate for TrafficShaping {
                     .map(|limit| RateLimitLayer::new(limit.capacity.into(), *limit.interval))
             }))
             .service(service)
+<<<<<<< HEAD
             .boxed_clone()
+=======
+            .boxed()
+    }
+
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
+        let all_config = self.config.all.as_ref();
+        let subgraph_config = self.config.subgraphs.get(name);
+        let final_config = Self::merge_config(all_config, subgraph_config);
+
+        if let Some(config) = final_config {
+            let rate_limit = config
+                .shaping
+                .global_rate_limit
+                .as_ref()
+                .map(|rate_limit_conf| {
+                    self.rate_limit_subgraphs
+                        .lock()
+                        .entry(name.to_string())
+                        .or_insert_with(|| {
+                            RateLimitLayer::new(
+                                rate_limit_conf.capacity.into(),
+                                rate_limit_conf.interval,
+                            )
+                        })
+                        .clone()
+                });
+
+            ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
+                    move |(ctx, subgraph_name), future| {
+                        async {
+                            let response: Result<SubgraphResponse, BoxError> = future.await;
+                            match response {
+                                Err(err) if err.is::<Elapsed>() => {
+                                    // TODO add metrics
+                                    Ok(SubgraphResponse::error_builder()
+                                        .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                        .subgraph_name(subgraph_name)
+                                        .error(gateway_timeout_error())
+                                        .context(ctx)
+                                        .build())
+                                }
+                                Err(err) if err.is::<Overloaded>() => {
+                                    // TODO add metrics
+                                    Ok(SubgraphResponse::error_builder()
+                                        .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                        .subgraph_name(subgraph_name)
+                                        .error(rate_limit_error())
+                                        .context(ctx)
+                                        .build())
+                                }
+                                _ => response
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .option_layer(rate_limit)
+                .option_layer(
+                    config
+                        .shaping
+                        .deduplicate_query
+                        .unwrap_or_default()
+                        .then(|| QueryDeduplicationLayer::new(name)),
+                )
+                .map_request(move |mut req: SubgraphRequest| {
+                    if let Some(compression) = config.shaping.compression {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+                    req
+                })
+                .buffered()
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        let all_config = self.config.connector.all.as_ref();
+        let source_config = self.config.connector.sources.get(&source_name).cloned();
+        let final_config = Self::merge_config(all_config, source_config.as_ref());
+
+        if let Some(config) = final_config {
+            let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
+                self.rate_limit_sources
+                    .lock()
+                    .entry(source_name.clone())
+                    .or_insert_with(|| {
+                        RateLimitLayer::new(
+                            rate_limit_conf.capacity.into(),
+                            rate_limit_conf.interval,
+                        )
+                    })
+                    .clone()
+            });
+
+            ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &Request| {
+                        (
+                            req.context.clone(),
+                            req.key.clone(),
+                            req.connector.id.subgraph_name.to_string(),
+                        )
+                    },
+                    move |(context, response_key, subgraph_name), future| {
+                        async {
+                            let response: Result<Response, BoxError> = future.await;
+                            match response {
+                                Ok(ok) => Ok(ok),
+                                Err(err) if err.is::<Elapsed>() => {
+                                    let response = Response::error_new(
+                                        context,
+                                        subgraph_name,
+                                        Error::GatewayTimeout,
+                                        "Your request has been timed out",
+                                        response_key,
+                                    );
+                                    Ok(response)
+                                }
+                                Err(err) if err.is::<Overloaded>() => {
+                                    let response = Response::error_new(
+                                        context,
+                                        subgraph_name,
+                                        Error::RateLimited,
+                                        "Your request has been rate limited",
+                                        response_key,
+                                    );
+                                    Ok(response)
+                                }
+                                Err(err) => Err(err),
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    config.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .option_layer(rate_limit)
+                .map_request(move |mut req: connector::request_service::Request| {
+                    if let Some(compression) = config.compression
+                        && let TransportRequest::Http(ref mut http_request) = req.transport_request
+                    {
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+                    req
+                })
+                .buffered()
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
+>>>>>>> origin/dev
     }
 }
 
@@ -764,12 +933,16 @@ mod test {
     use super::*;
     use crate::Configuration;
     use crate::json_ext::Object;
+<<<<<<< HEAD
     use crate::pipeline::build_apq_expander;
     use crate::pipeline::build_query_plan_cache;
     use crate::pipeline::build_supergraph_pipeline;
     use crate::pipeline::connect_apq_redis;
     use crate::pipeline::connect_query_plan_redis;
     use crate::pipeline::create_plugins;
+=======
+    use crate::metrics::FutureMetricsExt;
+>>>>>>> origin/dev
     use crate::plugin::DynPlugin;
     use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
@@ -1094,6 +1267,182 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+<<<<<<< HEAD
+=======
+    async fn it_rate_limit_subgraph_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        subgraphs:
+            test:
+                global_rate_limit:
+                    capacity: 1
+                    interval: 100ms
+                timeout: 500ms
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+
+        let test_service = MockSubgraph::new(hashmap! {
+            graphql::Request::default() => graphql::Response::default()
+        });
+
+        let mut svc = plugin.subgraph_service("test", test_service.boxed());
+
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
+        let response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(SubgraphRequest::fake_builder().build())
+            .await
+            .expect("it responded");
+
+        assert_eq!(StatusCode::SERVICE_UNAVAILABLE, response.response.status());
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deduplication_requests_are_only_counted_where_enabled() {
+        async {
+            let config = serde_yaml::from_str::<serde_json::Value>(
+                r#"
+        subgraphs:
+            deduplicated:
+                deduplicate_query: true
+            not_deduplicated:
+                deduplicate_query: false
+        "#,
+            )
+            .unwrap();
+            let plugin = get_traffic_shaping_plugin(&config).await;
+
+            for subgraph in ["deduplicated", "not_deduplicated"] {
+                let test_service = MockSubgraph::new(hashmap! {
+                    graphql::Request::default() => graphql::Response::default()
+                });
+                plugin
+                    .subgraph_service(subgraph, test_service.boxed())
+                    .ready()
+                    .await
+                    .expect("it is ready")
+                    .call(SubgraphRequest::fake_builder().build())
+                    .await
+                    .expect("it responded");
+            }
+
+            assert_counter!(
+                "apollo.router.subgraph_deduplication.requests",
+                1,
+                "subgraph.name" = "deduplicated",
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+            assert_counter_not_exists!(
+                "apollo.router.subgraph_deduplication.requests",
+                u64,
+                "subgraph.name" = "not_deduplicated",
+                "apollo.router.subgraph_deduplication.outcome" = "leader"
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_rate_limit_connector_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        connector:
+            sources:
+                test_subgraph.test_sourcename:
+                    global_rate_limit:
+                        capacity: 1
+                        interval: 100ms
+                    timeout: 500ms
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let request = get_fake_connector_request(None, "testing".to_string());
+
+        let test_service = MockConnector::new(hashmap! {
+            "test_request".into() => "test_request".into()
+        });
+
+        let mut svc = plugin.connector_request_service(
+            test_service.boxed(),
+            "test_subgraph.test_sourcename".to_string(),
+        );
+
+        assert!(matches!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(request)
+                .await
+                .unwrap()
+                .transport_outcome,
+            TransportOutcome::Response(_)
+        ));
+
+        let request = get_fake_connector_request(None, "testing".to_string());
+        let response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(request)
+            .await
+            .expect("it responded");
+
+        assert!(matches!(
+            response.transport_outcome,
+            TransportOutcome::Error(Error::RateLimited)
+        ));
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let request = get_fake_connector_request(None, "testing".to_string());
+        assert!(matches!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(request)
+                .await
+                .unwrap()
+                .transport_outcome,
+            TransportOutcome::Response(_)
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+>>>>>>> origin/dev
     async fn it_rate_limit_router_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
