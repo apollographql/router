@@ -559,9 +559,11 @@ impl Query {
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
-        let Some(input_array) = input.as_array() else {
+        // Walked in place: `as_array` would collect the elements into a
+        // `Vec` first.
+        if !input.is_array() {
             return Ok(());
-        };
+        }
         // Elements are formatted in place in this pending array. On failure
         // the slot is nulled, so a list abandoned partway through never
         // leaves half an array behind.
@@ -574,7 +576,7 @@ impl Query {
             // nullified slot reads as a null too, matching the `is_null` check
             // this replaced — that accepted any spelling of null, so this does.
             tree.set_array(output);
-            for _ in 0..input_array.len() {
+            for _ in 0..input.len().unwrap_or_default() {
                 tree.push(output);
             }
         } else {
@@ -586,14 +588,14 @@ impl Query {
             return Err(InvalidValue);
         }
         let mut element = tree.first(output);
-        let result = input_array.iter().enumerate().try_for_each(|(i, input)| {
+        let result = input.array_iter().enumerate().try_for_each(|(i, input)| {
             let slot = match element {
                 Some(slot) => slot,
                 None => parameters.output.push(output),
             };
             element = parameters.output.next(slot);
             path.push(ResponsePathElement::Index(i));
-            let res = self.format_value(parameters, inner_type, input, slot, path, selection_set);
+            let res = self.format_value(parameters, inner_type, &input, slot, path, selection_set);
             path.pop();
             // Type-aware Err handling: non-null inner type propagates (whole list
             // nullifies per spec). Nullable inner type swallows the error (element already
