@@ -62,9 +62,6 @@ pub(crate) fn detach(root: ValueRef<'_>) -> Value {
                         tasks.push(Task::Enter(value.deref_child(entry.child)));
                     }
                 }
-                Node::MutArray(_) | Node::MutObject(_) => {
-                    unreachable!("builder overlays are flattened at seal")
-                }
             },
             Task::Exit(value, start) => {
                 let node = match value.node() {

@@ -685,8 +685,8 @@ impl<'a> ValueRef<'a> {
             Node::Bool(_) => JsonKind::Bool,
             Node::Number(_) | Node::OwnedNumber(_) => JsonKind::Number,
             Node::String { .. } | Node::OwnedString(_) => JsonKind::String,
-            Node::Array(_) | Node::MutArray(_) => JsonKind::Array,
-            Node::Object(_) | Node::MutObject(_) => JsonKind::Object,
+            Node::Array(_) => JsonKind::Array,
+            Node::Object(_) => JsonKind::Object,
         }
     }
 

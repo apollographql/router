@@ -143,9 +143,6 @@ impl Chunks {
                         });
                     }
                 }
-                Node::MutArray(_) | Node::MutObject(_) => {
-                    unreachable!("builder overlays are flattened at seal")
-                }
             }
             return self.chunk_if_full();
         }

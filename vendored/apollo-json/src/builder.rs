@@ -9,12 +9,12 @@
 //! a builder's changes.
 //!
 //! Container children live in arena slabs. Replacing a child slot writes the
-//! slab in place; a container that grows (new keys, appended elements) is
-//! marked open ([`Node::MutArray`] / [`Node::MutObject`]) and its run grows
-//! in the slabs with room to spare, at the end of the chunk being filled when
-//! it is already there and in a fresh run otherwise. [`ValueBuilder::seal`]
-//! trims each open run to the members written, so the sealed document is in
-//! the packed immutable form without copying anything again.
+//! slab in place. A container that grows (new keys, appended elements) grows
+//! its run in the slabs: into room it already has, which vacant slots after
+//! its live elements mark; at the end of the chunk being filled when it is
+//! already there; or by moving to a fresh run with room to spare. A node's
+//! slab always holds exactly its live elements, so the document is readable
+//! as it stands and [`ValueBuilder::seal`] has nothing to flatten.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -245,8 +245,8 @@ enum Shape {
 
 fn shape_of(node: Node) -> Shape {
     match node {
-        Node::Object(_) | Node::MutObject(_) => Shape::Object,
-        Node::Array(_) | Node::MutArray(_) => Shape::Array,
+        Node::Object(_) => Shape::Object,
+        Node::Array(_) => Shape::Array,
         _ => Shape::Scalar,
     }
 }
@@ -273,10 +273,6 @@ fn shape_of(node: Node) -> Shape {
 pub struct ValueBuilder {
     arena: Arena,
     root: Child,
-    /// Containers opened for growth: each one's run in the arena's slabs and
-    /// how much of it is written. Seal trims each run to that length.
-    array_overlays: Vec<Grown>,
-    object_overlays: Vec<Grown>,
     /// Reused while a shared container is copied on write, so the copy goes
     /// into the arena's slabs without a buffer of its own.
     import_children: Vec<Child>,
@@ -298,18 +294,6 @@ impl ValueBuilder {
     pub fn value(&self) -> crate::BuilderRef<'_> {
         crate::peek::BuilderRef::new(self, self.root)
     }
-
-    /// The members written so far to an object opened for growth.
-    pub(crate) fn object_overlay(&self, index: usize) -> &[Entry] {
-        let grown = &self.object_overlays[index];
-        &self.arena.entries(grown.run)[..grown.len]
-    }
-
-    /// The elements written so far to an array opened for growth.
-    pub(crate) fn array_overlay(&self, index: usize) -> &[Child] {
-        let grown = &self.array_overlays[index];
-        &self.arena.children(grown.run)[..grown.len]
-    }
 }
 
 impl ValueBuilder {
@@ -320,8 +304,6 @@ impl ValueBuilder {
         ValueBuilder {
             arena,
             root: Child::local(root),
-            array_overlays: Vec::new(),
-            object_overlays: Vec::new(),
             import_children: Vec::new(),
             import_entries: Vec::new(),
             non_finite: NonFinite::Reject,
@@ -336,8 +318,6 @@ impl ValueBuilder {
         ValueBuilder {
             arena,
             root: Child::local(root),
-            array_overlays: Vec::new(),
-            object_overlays: Vec::new(),
             import_children: Vec::new(),
             import_entries: Vec::new(),
             non_finite: NonFinite::Reject,
@@ -374,8 +354,6 @@ impl ValueBuilder {
                     owned
                 },
                 root: Child::local(root),
-                array_overlays: Vec::new(),
-                object_overlays: Vec::new(),
                 import_children: Vec::new(),
                 import_entries: Vec::new(),
                 non_finite: NonFinite::Reject,
@@ -386,8 +364,6 @@ impl ValueBuilder {
                 ValueBuilder {
                     arena,
                     root,
-                    array_overlays: Vec::new(),
-                    object_overlays: Vec::new(),
                     import_children: Vec::new(),
                     import_entries: Vec::new(),
                     non_finite: NonFinite::Reject,
@@ -396,18 +372,9 @@ impl ValueBuilder {
         }
     }
 
-    /// Freezes the builder into an immutable, shareable value. Each
-    /// container that grew already lives in the arena's slabs, so sealing
-    /// trims its run to the members written rather than copying it.
-    pub fn seal(mut self) -> Value {
-        for grown in std::mem::take(&mut self.array_overlays) {
-            let slab = grown.run.prefix(grown.len);
-            self.arena.set_node(grown.id, Node::Array(slab));
-        }
-        for grown in std::mem::take(&mut self.object_overlays) {
-            let slab = grown.run.prefix(grown.len);
-            self.arena.set_node(grown.id, Node::Object(slab));
-        }
+    /// Freezes the builder into an immutable, shareable value. Containers
+    /// are already in their packed form, so this only wraps the arena.
+    pub fn seal(self) -> Value {
         match self.root.as_local() {
             Some(id) => Value::rooted(self.arena, id),
             None => {
@@ -771,17 +738,8 @@ impl ValueBuilder {
     pub fn merge_from(&mut self, other: Value, policy: &mut impl MergePolicy) {
         let source = self.take_in(other);
         let root_shape = self.child_shape(self.root);
-        let source_shape = match &source {
-            MergeSource::Local(node) => shape_of(self.arena.node(*node)),
-            MergeSource::Foreign(arena, node) => shape_of(arena.node(*node)),
-        };
-        if root_shape == Shape::Scalar || root_shape != source_shape {
-            let incoming = match &source {
-                MergeSource::Local(node) => crate::peek::BuilderRef::new(self, Child::local(*node)),
-                MergeSource::Foreign(arena, node) => {
-                    crate::peek::BuilderRef::in_arena(self, arena, *node)
-                }
-            };
+        if root_shape == Shape::Scalar || root_shape != self.source_shape(&source) {
+            let incoming = self.source_view(&source);
             if policy.replace(
                 None,
                 crate::peek::BuilderRef::new(self, self.root),
@@ -795,14 +753,256 @@ impl ValueBuilder {
             return;
         }
         let root = self.localize_root();
-        let mut stack = vec![(root, source)];
-        while let Some((target, source)) = stack.pop() {
-            match source {
-                MergeSource::Local(node) => self.merge_local(target, node, policy, &mut stack),
-                MergeSource::Foreign(arena, node) => {
-                    self.merge_foreign(target, &arena, node, policy, &mut stack);
+        // One frame per container being merged, so the stack is as deep as
+        // the documents are, not as wide.
+        let mut stack = vec![self.merge_frame(root, source)];
+        while let Some(frame) = stack.last_mut() {
+            if frame.next == frame.len {
+                stack.pop();
+                continue;
+            }
+            let index = frame.next;
+            frame.next += 1;
+            let (target, source, room) = (frame.target, &frame.source, frame.room);
+            if let Some(nested) = self.merge_member(target, source, index, room, policy) {
+                stack.push(nested);
+            }
+        }
+    }
+
+    /// Opens a frame merging `source` into the local container `target`,
+    /// reserving exactly the room the members it lacks will take. An empty
+    /// `target` has no run to hold room yet, so its frame carries the count
+    /// and the first member appended allocates the run at that size.
+    fn merge_frame(&mut self, target: NodeId, source: MergeSource) -> MergeFrame {
+        let (arena, node) = match &source {
+            MergeSource::Local(node) => (&self.arena, *node),
+            MergeSource::Foreign(arena, node) => (&**arena, *node),
+        };
+        let (len, extra, object) = match arena.node(node) {
+            Node::Object(slab) => {
+                let absent = arena
+                    .entries(slab)
+                    .iter()
+                    .filter(|entry| {
+                        let key = arena.key_unescaped(entry.key);
+                        self.find_member_bytes(target, key.as_bytes()).is_none()
+                    })
+                    .count();
+                (slab.len(), absent, true)
+            }
+            Node::Array(slab) => (
+                slab.len(),
+                slab.len().saturating_sub(self.array_len(target)),
+                false,
+            ),
+            _ => unreachable!("only containers are merged into"),
+        };
+        let empty = if object {
+            self.object_slab(target).len() == 0
+        } else {
+            self.array_len(target) == 0
+        };
+        if extra > 0 && !empty {
+            if object {
+                self.reserve_entries(target, extra);
+            } else {
+                self.reserve_children(target, extra);
+            }
+        }
+        MergeFrame {
+            target,
+            source,
+            next: 0,
+            len,
+            room: if empty { extra } else { 0 },
+        }
+    }
+
+    /// Merges member `index` of `source` into the local container `target`,
+    /// returning a frame to push when the merge descends into it.
+    fn merge_member(
+        &mut self,
+        target: NodeId,
+        source: &MergeSource,
+        index: usize,
+        room: usize,
+        policy: &mut impl MergePolicy,
+    ) -> Option<MergeFrame> {
+        match source {
+            MergeSource::Local(node) => self.merge_local_member(target, *node, index, room, policy),
+            MergeSource::Foreign(arena, node) => {
+                self.merge_foreign_member(target, arena, *node, index, room, policy)
+            }
+        }
+    }
+
+    /// [`ValueBuilder::merge_member`] for a container of this arena: a
+    /// member taken over keeps its key and child as they are.
+    fn merge_local_member(
+        &mut self,
+        target: NodeId,
+        node: NodeId,
+        index: usize,
+        room: usize,
+        policy: &mut impl MergePolicy,
+    ) -> Option<MergeFrame> {
+        match self.arena.node(node) {
+            Node::Object(slab) => {
+                let entry = self.arena.entries(slab)[index];
+                let found = {
+                    let key = self.arena.key_unescaped(entry.key);
+                    self.find_member_bytes(target, key.as_bytes())
+                };
+                let Some(j) = found else {
+                    self.push_entry_with_room(target, entry, room);
+                    return None;
+                };
+                let incoming = self.merge_source(entry.child);
+                self.merge_slot_from(
+                    target,
+                    Slot::Member(j),
+                    MergeKey::Local(entry.key),
+                    incoming,
+                    policy,
+                )
+            }
+            Node::Array(slab) => {
+                let child = self.arena.children(slab)[index];
+                if index < self.array_len(target) {
+                    let incoming = self.merge_source(child);
+                    self.merge_slot_from(
+                        target,
+                        Slot::Element(index),
+                        MergeKey::None,
+                        incoming,
+                        policy,
+                    )
+                } else {
+                    self.push_child_with_room(target, child, room);
+                    None
                 }
             }
+            _ => unreachable!("only containers are merged into"),
+        }
+    }
+
+    /// [`ValueBuilder::merge_member`] for a container of another arena: what
+    /// is taken over is adopted as [`ValueBuilder::merge`] adopts it.
+    fn merge_foreign_member(
+        &mut self,
+        target: NodeId,
+        src: &Arc<Arena>,
+        node: NodeId,
+        index: usize,
+        room: usize,
+        policy: &mut impl MergePolicy,
+    ) -> Option<MergeFrame> {
+        match src.node(node) {
+            Node::Object(slab) => {
+                let entry = src.entries(slab)[index];
+                let key = src.key_unescaped(entry.key);
+                let (owner, child) = src.resolve_owner(entry.child);
+                match self.find_member_bytes(target, key.as_bytes()) {
+                    None => {
+                        let key = KeyRef::Owned(self.arena.alloc_text(&key));
+                        let child = self.import_child(owner, child);
+                        self.push_entry_with_room(target, Entry { key, child }, room);
+                        None
+                    }
+                    Some(j) => {
+                        let key = MergeKey::Text(key.into_owned());
+                        let incoming = MergeSource::Foreign(owner, child);
+                        self.merge_slot_from(target, Slot::Member(j), key, incoming, policy)
+                    }
+                }
+            }
+            Node::Array(slab) => {
+                let (owner, child) = src.resolve_owner(src.children(slab)[index]);
+                if index < self.array_len(target) {
+                    let incoming = MergeSource::Foreign(owner, child);
+                    self.merge_slot_from(
+                        target,
+                        Slot::Element(index),
+                        MergeKey::None,
+                        incoming,
+                        policy,
+                    )
+                } else {
+                    let child = self.import_child(owner, child);
+                    self.push_child_with_room(target, child, room);
+                    None
+                }
+            }
+            _ => unreachable!("only containers are merged into"),
+        }
+    }
+
+    /// Merges `incoming` into one slot of the local container `target`:
+    /// descends when both are the same container kind, otherwise lets
+    /// `policy` decide whether `incoming` replaces what is there. Returns a
+    /// frame to push when it descends.
+    fn merge_slot_from(
+        &mut self,
+        target: NodeId,
+        slot: Slot,
+        key: MergeKey,
+        incoming: MergeSource,
+        policy: &mut impl MergePolicy,
+    ) -> Option<MergeFrame> {
+        let existing = match slot {
+            Slot::Member(j) => self.object_child(target, j),
+            Slot::Element(i) => self.array_child(target, i),
+        };
+        let shape = self.child_shape(existing);
+        if shape != Shape::Scalar && shape == self.source_shape(&incoming) {
+            let local = self.localize_child(existing);
+            self.write_slot(target, slot, Child::local(local));
+            return Some(self.merge_frame(local, incoming));
+        }
+        let replace = {
+            let key = match &key {
+                MergeKey::None => None,
+                MergeKey::Local(key) => Some(self.arena.key_unescaped(*key)),
+                MergeKey::Text(key) => Some(Cow::Borrowed(key.as_str())),
+            };
+            policy.replace(
+                key.as_deref(),
+                crate::peek::BuilderRef::new(self, existing),
+                self.source_view(&incoming),
+            )
+        };
+        if replace {
+            let child = match incoming {
+                MergeSource::Local(node) => Child::local(node),
+                // Replaced slots stay by reference, as `merge` keeps them.
+                MergeSource::Foreign(owner, node) => self.arena.push_foreign(owner, node),
+            };
+            self.write_slot(target, slot, child);
+        }
+        None
+    }
+
+    fn write_slot(&mut self, target: NodeId, slot: Slot, child: Child) {
+        match slot {
+            Slot::Member(j) => self.set_object_child(target, j, child),
+            Slot::Element(i) => self.set_array_child(target, i, child),
+        }
+    }
+
+    /// The shape of a merge source.
+    fn source_shape(&self, source: &MergeSource) -> Shape {
+        match source {
+            MergeSource::Local(node) => shape_of(self.arena.node(*node)),
+            MergeSource::Foreign(arena, node) => shape_of(arena.node(*node)),
+        }
+    }
+
+    /// A read-only view of a merge source, for a policy to inspect.
+    fn source_view<'a>(&'a self, source: &'a MergeSource) -> crate::BuilderRef<'a> {
+        match source {
+            MergeSource::Local(node) => crate::peek::BuilderRef::new(self, Child::local(*node)),
+            MergeSource::Foreign(arena, node) => crate::peek::BuilderRef::in_arena(arena, *node),
         }
     }
 
@@ -816,183 +1016,6 @@ impl ValueBuilder {
                 MergeSource::Foreign(Arc::clone(arena.expect("not absorbed")), node)
             }
         }
-    }
-
-    /// Merges the local container `source` into the local container
-    /// `target`. Members of `source` are already this arena's, so a member
-    /// taken over keeps its key and child as they are.
-    fn merge_local(
-        &mut self,
-        target: NodeId,
-        source: NodeId,
-        policy: &mut impl MergePolicy,
-        stack: &mut Vec<(NodeId, MergeSource)>,
-    ) {
-        match self.arena.node(source) {
-            Node::Object(slab) => {
-                let absent = self
-                    .arena
-                    .entries(slab)
-                    .iter()
-                    .filter(|entry| {
-                        let key = self.arena.key_unescaped(entry.key);
-                        self.find_member_bytes(target, key.as_bytes()).is_none()
-                    })
-                    .count();
-                if absent > 0 {
-                    self.reserve_entries(target, absent);
-                }
-                for index in 0..slab.len() {
-                    let entry = self.arena.entries(slab)[index];
-                    let key = self.arena.key_unescaped(entry.key);
-                    match self.find_member_bytes(target, key.as_bytes()) {
-                        None => self.push_entry(target, entry),
-                        Some(j) => {
-                            let existing = self.object_child(target, j);
-                            let key = key.into_owned();
-                            if let Some(child) = self.merge_slot_local(
-                                Some(&key),
-                                existing,
-                                entry.child,
-                                policy,
-                                stack,
-                            ) {
-                                self.set_object_child(target, j, child);
-                            }
-                        }
-                    }
-                }
-            }
-            Node::Array(slab) => {
-                let present = self.array_len(target);
-                if slab.len() > present {
-                    self.reserve_children(target, slab.len() - present);
-                }
-                for index in 0..slab.len() {
-                    let child = self.arena.children(slab)[index];
-                    if index < present {
-                        let existing = self.array_child(target, index);
-                        if let Some(child) =
-                            self.merge_slot_local(None, existing, child, policy, stack)
-                        {
-                            self.set_array_child(target, index, child);
-                        }
-                    } else {
-                        self.push_child(target, child);
-                    }
-                }
-            }
-            _ => unreachable!("only containers are merged into"),
-        }
-    }
-
-    /// Merges one local incoming child into one target slot holding
-    /// `existing`, returning what the slot should hold now, if that changed.
-    fn merge_slot_local(
-        &mut self,
-        key: Option<&str>,
-        existing: Child,
-        incoming: Child,
-        policy: &mut impl MergePolicy,
-        stack: &mut Vec<(NodeId, MergeSource)>,
-    ) -> Option<Child> {
-        let shape = self.child_shape(existing);
-        if shape != Shape::Scalar && shape == self.child_shape(incoming) {
-            let local = self.localize_child(existing);
-            let source = self.merge_source(incoming);
-            stack.push((local, source));
-            return Some(Child::local(local));
-        }
-        let replace = policy.replace(
-            key,
-            crate::peek::BuilderRef::new(self, existing),
-            crate::peek::BuilderRef::new(self, incoming),
-        );
-        replace.then_some(incoming)
-    }
-
-    /// Merges the container `source` of another arena into the local
-    /// container `target`: what is taken over is adopted as
-    /// [`ValueBuilder::merge`] adopts it.
-    fn merge_foreign(
-        &mut self,
-        target: NodeId,
-        src: &Arc<Arena>,
-        source: NodeId,
-        policy: &mut impl MergePolicy,
-        stack: &mut Vec<(NodeId, MergeSource)>,
-    ) {
-        match src.node(source) {
-            Node::Object(slab) => {
-                for entry in src.entries(slab) {
-                    let key = src.key_unescaped(entry.key);
-                    let (owner, node) = src.resolve_owner(entry.child);
-                    match self.find_member_bytes(target, key.as_bytes()) {
-                        None => {
-                            let key = KeyRef::Owned(self.arena.alloc_text(&key));
-                            let child = self.import_child(owner, node);
-                            self.push_entry(target, Entry { key, child });
-                        }
-                        Some(j) => {
-                            let existing = self.object_child(target, j);
-                            if let Some(child) = self.merge_slot_foreign(
-                                Some(&key),
-                                existing,
-                                owner,
-                                node,
-                                policy,
-                                stack,
-                            ) {
-                                self.set_object_child(target, j, child);
-                            }
-                        }
-                    }
-                }
-            }
-            Node::Array(slab) => {
-                for (index, &child) in src.children(slab).iter().enumerate() {
-                    let (owner, node) = src.resolve_owner(child);
-                    if index < self.array_len(target) {
-                        let existing = self.array_child(target, index);
-                        if let Some(child) =
-                            self.merge_slot_foreign(None, existing, owner, node, policy, stack)
-                        {
-                            self.set_array_child(target, index, child);
-                        }
-                    } else {
-                        let child = self.import_child(owner, node);
-                        self.push_child(target, child);
-                    }
-                }
-            }
-            _ => unreachable!("only containers are merged into"),
-        }
-    }
-
-    /// Merges `node` of the arena `owner` into one target slot holding
-    /// `existing`, returning what the slot should hold now, if that changed.
-    /// A replacement is adopted by reference.
-    fn merge_slot_foreign(
-        &mut self,
-        key: Option<&str>,
-        existing: Child,
-        owner: Arc<Arena>,
-        node: NodeId,
-        policy: &mut impl MergePolicy,
-        stack: &mut Vec<(NodeId, MergeSource)>,
-    ) -> Option<Child> {
-        let shape = self.child_shape(existing);
-        if shape != Shape::Scalar && shape == shape_of(owner.node(node)) {
-            let local = self.localize_child(existing);
-            stack.push((local, MergeSource::Foreign(owner, node)));
-            return Some(Child::local(local));
-        }
-        let replace = policy.replace(
-            key,
-            crate::peek::BuilderRef::new(self, existing),
-            crate::peek::BuilderRef::in_arena(self, &owner, node),
-        );
-        replace.then(|| self.arena.push_foreign(owner, node))
     }
 
     /// Brings `value` into this builder as a merge source, absorbing its
@@ -1248,102 +1271,99 @@ impl ValueBuilder {
                 self.import_entries = imported;
                 Node::Object(slab)
             }
-            Node::MutArray(_) | Node::MutObject(_) => {
-                unreachable!("sealed documents contain no overlays")
-            }
         };
         self.arena.push_node(copied)
     }
 
-    /// Marks a local object open for growth and returns its overlay index.
-    /// Its members stay where they are until a write needs more room.
-    fn open_object(&mut self, id: NodeId) -> usize {
+    /// The live run of the local object `id`.
+    fn object_slab(&self, id: NodeId) -> SlabRef {
         match self.arena.node(id) {
-            Node::MutObject(i) => i as usize,
-            Node::Object(slab) => {
-                let index = self.object_overlays.len();
-                self.arena
-                    .set_node(id, Node::MutObject(overlay_index(index)));
-                self.object_overlays.push(Grown {
-                    id,
-                    run: slab,
-                    len: slab.len(),
-                });
-                index
-            }
+            Node::Object(slab) => slab,
             _ => unreachable!("caller checked the node is an object"),
         }
     }
 
-    fn open_array(&mut self, id: NodeId) -> usize {
+    /// The live run of the local array `id`.
+    fn array_slab(&self, id: NodeId) -> SlabRef {
         match self.arena.node(id) {
-            Node::MutArray(i) => i as usize,
-            Node::Array(slab) => {
-                let index = self.array_overlays.len();
-                self.arena
-                    .set_node(id, Node::MutArray(overlay_index(index)));
-                self.array_overlays.push(Grown {
-                    id,
-                    run: slab,
-                    len: slab.len(),
-                });
-                index
-            }
+            Node::Array(slab) => slab,
             _ => unreachable!("caller checked the node is an array"),
         }
     }
 
     /// Appends a member to the local object `id`.
     fn push_entry(&mut self, id: NodeId, entry: Entry) {
-        let index = self.open_object(id);
-        let Grown { run, len, .. } = self.object_overlays[index];
-        let run = self.arena.grow_entries(run, len, 1, false);
-        self.arena.entries_mut(run)[len] = entry;
-        self.object_overlays[index].run = run;
-        self.object_overlays[index].len = len + 1;
+        self.push_entry_with_room(id, entry, 0);
+    }
+
+    /// Appends a member to the local object `id`. If the object is empty and
+    /// `room` is non-zero, its run is allocated with exactly `room` slots,
+    /// for a caller about to append that many.
+    fn push_entry_with_room(&mut self, id: NodeId, entry: Entry, room: usize) {
+        let slab = self.object_slab(id);
+        let len = slab.len();
+        let (extra, exact) = first_growth(len, room);
+        let slab = self
+            .arena
+            .grow_entries(slab, extra, exact)
+            .with_len(len + 1);
+        self.arena.entries_mut(slab)[len] = entry;
+        self.arena.set_node(id, Node::Object(slab));
     }
 
     /// Appends an element to the local array `id`.
     fn push_child(&mut self, id: NodeId, child: Child) {
-        let index = self.open_array(id);
-        let Grown { run, len, .. } = self.array_overlays[index];
-        let run = self.arena.grow_children(run, len, 1, false);
-        self.arena.children_mut(run)[len] = child;
-        self.array_overlays[index].run = run;
-        self.array_overlays[index].len = len + 1;
+        self.push_child_with_room(id, child, 0);
+    }
+
+    /// Appends an element to the local array `id`, allocating an empty
+    /// array's run with exactly `room` slots as
+    /// [`ValueBuilder::push_entry_with_room`] does.
+    fn push_child_with_room(&mut self, id: NodeId, child: Child, room: usize) {
+        let slab = self.array_slab(id);
+        let len = slab.len();
+        let (extra, exact) = first_growth(len, room);
+        let slab = self
+            .arena
+            .grow_children(slab, extra, exact)
+            .with_len(len + 1);
+        self.arena.children_mut(slab)[len] = child;
+        self.arena.set_node(id, Node::Array(slab));
     }
 
     /// Makes room in the local object `id` for `extra` more members, exactly,
     /// for a caller that knows how many it is about to append.
     fn reserve_entries(&mut self, id: NodeId, extra: usize) {
-        let index = self.open_object(id);
-        let Grown { run, len, .. } = self.object_overlays[index];
-        self.object_overlays[index].run = self.arena.grow_entries(run, len, extra, true);
+        let slab = self.arena.grow_entries(self.object_slab(id), extra, true);
+        self.arena.set_node(id, Node::Object(slab));
     }
 
     /// Makes room in the local array `id` for `extra` more elements, exactly.
     fn reserve_children(&mut self, id: NodeId, extra: usize) {
-        let index = self.open_array(id);
-        let Grown { run, len, .. } = self.array_overlays[index];
-        self.array_overlays[index].run = self.arena.grow_children(run, len, extra, true);
+        let slab = self.arena.grow_children(self.array_slab(id), extra, true);
+        self.arena.set_node(id, Node::Array(slab));
     }
 
     /// Removes member `at` of the local object `id`, keeping the order of the
-    /// rest.
+    /// rest. The freed slot becomes room for the object to grow into.
     fn remove_entry(&mut self, id: NodeId, at: usize) {
-        let index = self.open_object(id);
-        let Grown { run, len, .. } = self.object_overlays[index];
-        self.arena.entries_mut(run)[at..len].copy_within(1.., 0);
-        self.object_overlays[index].len = len - 1;
+        let slab = self.object_slab(id);
+        let entries = self.arena.entries_mut(slab);
+        entries[at..].copy_within(1.., 0);
+        entries[slab.len() - 1] = Entry::VACANT;
+        self.arena
+            .set_node(id, Node::Object(slab.with_len(slab.len() - 1)));
     }
 
     /// Removes element `at` of the local array `id`, shifting later elements
     /// left.
     fn remove_child(&mut self, id: NodeId, at: usize) {
-        let index = self.open_array(id);
-        let Grown { run, len, .. } = self.array_overlays[index];
-        self.arena.children_mut(run)[at..len].copy_within(1.., 0);
-        self.array_overlays[index].len = len - 1;
+        let slab = self.array_slab(id);
+        let children = self.arena.children_mut(slab);
+        children[at..].copy_within(1.., 0);
+        children[slab.len() - 1] = Child::VACANT;
+        self.arena
+            .set_node(id, Node::Array(slab.with_len(slab.len() - 1)));
     }
 
     /// Writes a [`NewValue`] into this builder's arena and returns the child
@@ -1363,6 +1383,21 @@ impl ValueBuilder {
         value: NewValue<'_>,
         non_finite: NonFinite,
     ) -> Result<Child, JsonError> {
+        // An empty container needs no frame, and is what a caller creating
+        // structure ahead of its contents writes most.
+        match &value {
+            NewValue::Array(items) if items.is_empty() => {
+                return Ok(Child::local(
+                    self.arena.push_node(Node::Array(SlabRef::EMPTY)),
+                ));
+            }
+            NewValue::Object(members) if members.is_empty() => {
+                return Ok(Child::local(
+                    self.arena.push_node(Node::Object(SlabRef::EMPTY)),
+                ));
+            }
+            _ => {}
+        }
         let mut stack: Vec<Frame<'_>> = Vec::new();
         let mut scratch = Scratch::default();
         // The value to write next, or `None` once it has become a `child` and
@@ -1516,7 +1551,6 @@ impl ValueBuilder {
     fn object_members(&self, obj: NodeId) -> Option<&[Entry]> {
         match self.arena.node(obj) {
             Node::Object(slab) => Some(self.arena.entries(slab)),
-            Node::MutObject(i) => Some(self.object_overlay(i as usize)),
             _ => None,
         }
     }
@@ -1528,10 +1562,6 @@ impl ValueBuilder {
     fn set_object_child(&mut self, obj: NodeId, index: usize, child: Child) {
         match self.arena.node(obj) {
             Node::Object(slab) => self.arena.entries_mut(slab)[index].child = child,
-            Node::MutObject(i) => {
-                let run = self.object_overlays[i as usize].run;
-                self.arena.entries_mut(run)[index].child = child;
-            }
             _ => unreachable!("caller checked the node is an object"),
         }
     }
@@ -1539,7 +1569,6 @@ impl ValueBuilder {
     fn array_len(&self, arr: NodeId) -> usize {
         match self.arena.node(arr) {
             Node::Array(slab) => slab.len(),
-            Node::MutArray(i) => self.array_overlays[i as usize].len,
             _ => unreachable!("caller checked the node is an array"),
         }
     }
@@ -1547,7 +1576,6 @@ impl ValueBuilder {
     fn array_child(&self, arr: NodeId, index: usize) -> Child {
         match self.arena.node(arr) {
             Node::Array(slab) => self.arena.children(slab)[index],
-            Node::MutArray(i) => self.array_overlay(i as usize)[index],
             _ => unreachable!("caller checked the node is an array"),
         }
     }
@@ -1555,10 +1583,6 @@ impl ValueBuilder {
     fn set_array_child(&mut self, arr: NodeId, index: usize, child: Child) {
         match self.arena.node(arr) {
             Node::Array(slab) => self.arena.children_mut(slab)[index] = child,
-            Node::MutArray(i) => {
-                let run = self.array_overlays[i as usize].run;
-                self.arena.children_mut(run)[index] = child;
-            }
             _ => unreachable!("caller checked the node is an array"),
         }
     }
@@ -1596,25 +1620,51 @@ pub trait MergePolicy {
     ) -> bool;
 }
 
-/// A container a merge reads from.
+/// One container being merged: members of `source` from `next` on are still
+/// to merge into `target`.
+struct MergeFrame {
+    target: NodeId,
+    source: MergeSource,
+    next: usize,
+    len: usize,
+    /// Members the merge will append to `target` when it starts out empty,
+    /// so the first append allocates exactly this much; 0 otherwise.
+    room: usize,
+}
+
+/// How far a container with `len` members grows to take one more: by the
+/// `room` its caller asked for when it is empty (an empty run owns no room,
+/// so a reservation could not be kept in it), else by one.
+fn first_growth(len: usize, room: usize) -> (usize, bool) {
+    if len == 0 && room > 0 {
+        (room, true)
+    } else {
+        (1, false)
+    }
+}
+
+/// A slot of the container a merge writes into.
+#[derive(Clone, Copy)]
+enum Slot {
+    Member(usize),
+    Element(usize),
+}
+
+/// The key of the member a merge slot holds, for the policy to see; read
+/// from the arena only when the policy is asked, so the common case copies
+/// nothing.
+enum MergeKey {
+    None,
+    Local(KeyRef),
+    Text(String),
+}
+
+/// A value a merge reads from.
 enum MergeSource {
     /// A node of the builder's own arena, absorbed or not.
     Local(NodeId),
     /// A node of another arena.
     Foreign(Arc<Arena>, NodeId),
-}
-
-/// A container opened for growth: its run in the arena's slabs, of which the
-/// first `len` elements are written.
-#[derive(Clone, Copy)]
-struct Grown {
-    id: NodeId,
-    run: SlabRef,
-    len: usize,
-}
-
-fn overlay_index(index: usize) -> u32 {
-    u32::try_from(index).expect("overlay count within range")
 }
 
 #[cfg(test)]
@@ -1661,6 +1711,39 @@ mod tests {
         let mut builder = base.edit();
         builder.merge_from(other, &mut Execution);
         builder.seal()
+    }
+
+    #[test]
+    fn room_freed_by_a_removal_is_grown_into_and_emptied_containers_share_none() {
+        let mut builder = json!({"a": [1, 2], "b": [], "c": {"x": 1}}).edit();
+        builder.get_mut("a").unwrap().remove(0);
+        builder.get_mut("a").unwrap().push(3).unwrap();
+        builder.get_mut("c").unwrap().remove("x");
+        // `a` emptied and `b` never had members: both are the empty run,
+        // and growing either must not land in the room the other has.
+        builder.get_mut("a").unwrap().remove(0);
+        builder.get_mut("a").unwrap().remove(0);
+        builder.get_mut("a").unwrap().push(4).unwrap();
+        builder.get_mut("b").unwrap().push(5).unwrap();
+        builder.get_mut("c").unwrap().set("y", 6).unwrap();
+        assert_eq!(builder.seal(), json!({"a": [4], "b": [5], "c": {"y": 6}}));
+    }
+
+    #[test]
+    fn a_merge_into_an_empty_container_allocates_its_run_once_and_exactly() {
+        let mut builder = json!({"t": {}, "u": []}).edit();
+        let before = builder.arena.slots();
+        // Held twice, so the merge adopts it by reference and appends nothing
+        // of its storage to this arena.
+        let source = json!({"t": {"a": 1, "b": 2, "c": 3}, "u": [1, 2, 3]});
+        let _held = source.clone();
+        builder.merge_from(source, &mut Execution);
+        let after = builder.arena.slots();
+        assert_eq!((after.0 - before.0, after.1 - before.1), (3, 3));
+        assert_eq!(
+            builder.seal(),
+            json!({"t": {"a": 1, "b": 2, "c": 3}, "u": [1, 2, 3]})
+        );
     }
 
     #[test]

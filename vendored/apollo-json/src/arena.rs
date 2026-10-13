@@ -267,32 +267,18 @@ impl Arena {
         self.children.get_mut(slab)
     }
 
-    /// Makes room in a container's child run for `extra` more elements past
-    /// its first `used`; see [`Slabs::grow`].
-    pub(crate) fn grow_children(
-        &mut self,
-        run: SlabRef,
-        used: usize,
-        extra: usize,
-        exact: bool,
-    ) -> SlabRef {
-        self.children.grow(run, used, extra, exact, Child::local(0))
+    /// Makes room after a container's live children for `extra` more; see
+    /// [`Slabs::grow`].
+    pub(crate) fn grow_children(&mut self, run: SlabRef, extra: usize, exact: bool) -> SlabRef {
+        self.children
+            .grow(run, extra, exact, Child::VACANT, |child| child.is_vacant())
     }
 
-    /// Makes room in an object's entry run for `extra` more members past its
-    /// first `used`; see [`Slabs::grow`].
-    pub(crate) fn grow_entries(
-        &mut self,
-        run: SlabRef,
-        used: usize,
-        extra: usize,
-        exact: bool,
-    ) -> SlabRef {
-        let filler = Entry {
-            key: KeyRef::Owned(SlabRef::EMPTY),
-            child: Child::local(0),
-        };
-        self.entries.grow(run, used, extra, exact, filler)
+    /// Makes room after an object's live members for `extra` more; see
+    /// [`Slabs::grow`].
+    pub(crate) fn grow_entries(&mut self, run: SlabRef, extra: usize, exact: bool) -> SlabRef {
+        self.entries
+            .grow(run, extra, exact, Entry::VACANT, Entry::is_vacant)
     }
 
     pub(crate) fn alloc_entries(&mut self, items: &[Entry]) -> SlabRef {
@@ -379,9 +365,10 @@ impl Arena {
     pub(crate) fn push_foreign(&mut self, arena: Arc<Arena>, node: NodeId) -> Child {
         // Foreign ids share the `Child` payload with local node ids (top bit
         // set); the same one-bit-short capacity bound applies.
+        // The last id is reserved: as a child it would read as vacant.
         let id = ForeignId::try_from(self.foreign.len())
             .ok()
-            .filter(|&id| id < crate::node::CHILD_INDEX_LIMIT)
+            .filter(|&id| id < crate::node::CHILD_INDEX_LIMIT - 1)
             .expect("foreign reference count exceeds the 2^31 foreign id space");
         self.base_bytes += mem::size_of::<ForeignRef>();
         self.foreign.push(ForeignRef {
@@ -468,7 +455,7 @@ impl Arena {
         let node_offset = self.chunks.len() * CHUNK_NODES;
         let limit = crate::node::CHILD_INDEX_LIMIT as usize;
         node_offset + (other.node_count as usize) < limit
-            && self.foreign.len() + other.foreign.len() < limit
+            && self.foreign.len() + other.foreign.len() < limit - 1
             && self.input_end as usize + other.input_end as usize <= u32::MAX as usize
             && self.children.can_absorb(&other.children)
             && self.entries.can_absorb(&other.entries)
@@ -552,6 +539,12 @@ impl Arena {
         fref.node += offset;
     }
 
+    /// Entry and child slots written so far, live or vacant.
+    #[cfg(test)]
+    pub(crate) fn slots(&self) -> (usize, usize) {
+        (self.entries.slots(), self.children.slots())
+    }
+
     /// Number of foreign entries that still point into another arena.
     #[cfg(test)]
     pub(crate) fn live_foreign(&self) -> usize {
@@ -593,6 +586,9 @@ impl Shift {
     }
 
     fn child(self, child: Child) -> Child {
+        if child.is_vacant() {
+            return child;
+        }
         match child.as_local() {
             Some(id) => Child::local(id + self.node),
             None => Child::foreign(child.as_foreign().expect("child is foreign") + self.foreign),
@@ -610,6 +606,9 @@ impl Shift {
     }
 
     fn entry(self, entry: Entry) -> Entry {
+        if entry.is_vacant() {
+            return entry;
+        }
         Entry {
             key: self.key(entry.key),
             child: self.child(entry.child),
@@ -628,9 +627,6 @@ impl Shift {
             Node::OwnedString(text) => Node::OwnedString(text.shift_chunk(self.text)),
             Node::Array(slab) => Node::Array(slab.shift_chunk(self.children)),
             Node::Object(slab) => Node::Object(slab.shift_chunk(self.entries)),
-            Node::MutArray(_) | Node::MutObject(_) => {
-                unreachable!("only sealed arenas are absorbed")
-            }
         }
     }
 }

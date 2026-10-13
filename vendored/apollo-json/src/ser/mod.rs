@@ -145,9 +145,6 @@ impl Serialize for Structural<'_> {
                 }
                 map.end()
             }
-            Node::MutArray(_) | Node::MutObject(_) => {
-                unreachable!("builder-only nodes never appear in sealed documents")
-            }
         }
     }
 }

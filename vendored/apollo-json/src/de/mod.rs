@@ -297,9 +297,6 @@ impl<'de> ValueDeserializer<'de> {
             }
             Node::Array(_) => Unexpected::Seq,
             Node::Object(_) => Unexpected::Map,
-            Node::MutArray(_) | Node::MutObject(_) => {
-                unreachable!("builder-only nodes never appear in sealed documents")
-            }
         };
         let mut message = format!("invalid type: {unexpected}, expected {exp}");
         if let Some(offset) = self.position() {
@@ -323,9 +320,6 @@ impl<'de> de::Deserializer<'de> for ValueDeserializer<'de> {
             Node::String { .. } | Node::OwnedString(_) => self.visit_string_node(visitor),
             Node::Array(slab) => self.visit_array_node(slab, visitor),
             Node::Object(slab) => self.visit_object_node(slab, visitor),
-            Node::MutArray(_) | Node::MutObject(_) => {
-                unreachable!("builder-only nodes never appear in sealed documents")
-            }
         }
     }
 

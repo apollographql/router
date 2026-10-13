@@ -1,15 +1,13 @@
 //! Reading a document that is still being built.
 //!
-//! [`ValueRef`](crate::ValueRef) reads a sealed document, where every
-//! container is a packed slab. A [`ValueBuilder`] is not sealed: a
-//! container that grows is held in a mutable overlay owned by the builder
-//! rather than by the arena, so a reader that borrows only the arena cannot
-//! see it — it reports the members absent and the length zero.
-//!
-//! [`BuilderRef`] borrows the builder as well as the arena, so it resolves
-//! overlays and answers about the document as it stands. That is what lets a
-//! caller assembling a response ask "have I written this key yet?" without
-//! sealing, rebuilding, or copying.
+//! [`ValueRef`](crate::ValueRef) reads a sealed document through the `Arc`
+//! that keeps it alive. A [`ValueBuilder`] owns its arena outright, so a
+//! document under construction is read through a borrow of the builder
+//! instead: [`BuilderRef`] answers about the document as it stands, which is
+//! what lets a caller assembling a response ask "have I written this key
+//! yet?" without sealing, rebuilding, or copying. Containers keep exactly
+//! their live members in the arena's slabs while they grow, so what it reads
+//! is what sealing would produce.
 
 use std::borrow::Cow;
 
@@ -26,13 +24,10 @@ use crate::node::{Child, Entry, Node, NodeId};
 /// [`ValueRef`](crate::ValueRef), it sees writes that have not been sealed.
 #[derive(Clone, Copy)]
 pub struct BuilderRef<'b> {
-    builder: &'b ValueBuilder,
     /// The arena owning `node`, which is the builder's own arena for a local
     /// node and another document's for an adopted one.
     arena: &'b Arena,
     node: NodeId,
-    /// Whether `arena` is the builder's, and so whether overlays apply.
-    local: bool,
 }
 
 impl<'b> BuilderRef<'b> {
@@ -41,60 +36,38 @@ impl<'b> BuilderRef<'b> {
     /// localizes it, so the root's nodes may live in the shared arena rather
     /// than the builder's.
     pub(crate) fn new(builder: &'b ValueBuilder, root: Child) -> Self {
-        let local = root.as_local().is_some();
         let (arena, node) = resolve(builder.arena(), root);
-        BuilderRef {
-            builder,
-            arena,
-            node,
-            local,
-        }
+        BuilderRef { arena, node }
     }
 
     /// Views `node` of an arena the builder does not own, such as the source
     /// of a merge it adopts by reference.
-    pub(crate) fn in_arena(builder: &'b ValueBuilder, arena: &'b Arena, node: NodeId) -> Self {
-        BuilderRef {
-            builder,
-            arena,
-            node,
-            local: false,
-        }
+    pub(crate) fn in_arena(arena: &'b Arena, node: NodeId) -> Self {
+        BuilderRef { arena, node }
     }
 
     fn node(&self) -> Node {
         self.arena.node(self.node)
     }
 
-    /// Follows a child, switching arenas when it is an adopted subtree. An
-    /// adopted subtree is sealed by construction, so overlays stop applying.
+    /// Follows a child, switching arenas when it is an adopted subtree.
     fn child(&self, child: Child) -> BuilderRef<'b> {
         let (arena, node) = resolve(self.arena, child);
-        let local = self.local && std::ptr::eq(arena, self.arena);
-        BuilderRef {
-            builder: self.builder,
-            arena,
-            node,
-            local,
-        }
+        BuilderRef { arena, node }
     }
 
-    /// The members of an object, from the overlay when one is open.
+    /// The members of an object.
     fn entries(&self) -> Option<&'b [Entry]> {
         match self.node() {
             Node::Object(slab) => Some(self.arena.entries(slab)),
-            Node::MutObject(index) if self.local => {
-                Some(self.builder.object_overlay(index as usize))
-            }
             _ => None,
         }
     }
 
-    /// The elements of an array, from the overlay when one is open.
+    /// The elements of an array.
     fn children(&self) -> Option<&'b [Child]> {
         match self.node() {
             Node::Array(slab) => Some(self.arena.children(slab)),
-            Node::MutArray(index) if self.local => Some(self.builder.array_overlay(index as usize)),
             _ => None,
         }
     }
@@ -106,8 +79,8 @@ impl<'b> BuilderRef<'b> {
             Node::Bool(_) => JsonKind::Bool,
             Node::Number(_) | Node::OwnedNumber(_) => JsonKind::Number,
             Node::String { .. } | Node::OwnedString(_) => JsonKind::String,
-            Node::Array(_) | Node::MutArray(_) => JsonKind::Array,
-            Node::Object(_) | Node::MutObject(_) => JsonKind::Object,
+            Node::Array(_) => JsonKind::Array,
+            Node::Object(_) => JsonKind::Object,
         }
     }
 
@@ -256,7 +229,7 @@ impl<'b> BuilderRef<'b> {
                         let text = arena.alloc_text(value.arena.text_str(text));
                         done.push(Child::local(arena.push_node(Node::OwnedString(text))));
                     }
-                    Node::Array(_) | Node::MutArray(_) => {
+                    Node::Array(_) => {
                         tasks.push(Task::Exit(value, done.len()));
                         // Children complete in reverse task order; push
                         // reversed so `done` receives them in document order.
@@ -264,7 +237,7 @@ impl<'b> BuilderRef<'b> {
                             tasks.push(Task::Enter(value.child(child)));
                         }
                     }
-                    Node::Object(_) | Node::MutObject(_) => {
+                    Node::Object(_) => {
                         tasks.push(Task::Exit(value, done.len()));
                         for entry in value.entries().expect("node is an object").iter().rev() {
                             tasks.push(Task::Enter(value.child(entry.child)));
@@ -273,10 +246,8 @@ impl<'b> BuilderRef<'b> {
                 },
                 Task::Exit(value, start) => {
                     let node = match value.node() {
-                        Node::Array(_) | Node::MutArray(_) => {
-                            Node::Array(arena.alloc_children(&done[start..]))
-                        }
-                        Node::Object(_) | Node::MutObject(_) => {
+                        Node::Array(_) => Node::Array(arena.alloc_children(&done[start..])),
+                        Node::Object(_) => {
                             let members: Vec<Entry> = value
                                 .entries()
                                 .expect("node is an object")

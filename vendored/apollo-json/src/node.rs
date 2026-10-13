@@ -60,6 +60,15 @@ impl Child {
     pub(crate) fn as_foreign(self) -> Option<ForeignId> {
         (self.0 & FOREIGN_BIT != 0).then_some(self.0 & !FOREIGN_BIT)
     }
+
+    /// Marks a slot a container has room for but has not filled. The id it
+    /// would carry is past the largest foreign id handed out, so no real
+    /// child is ever vacant.
+    pub(crate) const VACANT: Child = Child(u32::MAX);
+
+    pub(crate) fn is_vacant(self) -> bool {
+        self.0 == u32::MAX
+    }
 }
 
 /// An object member key. Parsed keys keep their original (possibly escaped)
@@ -76,6 +85,18 @@ pub(crate) enum KeyRef {
 pub(crate) struct Entry {
     pub(crate) key: KeyRef,
     pub(crate) child: Child,
+}
+
+impl Entry {
+    /// Marks a member slot an object has room for but has not filled.
+    pub(crate) const VACANT: Entry = Entry {
+        key: KeyRef::Owned(SlabRef::EMPTY),
+        child: Child::VACANT,
+    };
+
+    pub(crate) fn is_vacant(&self) -> bool {
+        self.child.is_vacant()
+    }
 }
 
 /// A JSON value in the arena.
@@ -100,12 +121,6 @@ pub(crate) enum Node {
     Array(SlabRef),
     /// Members in the arena's entry slab.
     Object(SlabRef),
-    /// Builder-only: children live in the builder's mutable overlay until
-    /// `seal()` flattens them into a slab. Never present in a sealed
-    /// document.
-    MutArray(u32),
-    /// Builder-only counterpart of [`Node::MutArray`] for objects.
-    MutObject(u32),
 }
 
 #[cfg(test)]

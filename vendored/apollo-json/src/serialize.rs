@@ -54,9 +54,6 @@ pub(crate) fn serialize(root: ValueRef<'_>, capacity_hint: usize) -> Vec<u8> {
                         stack.push(Frame { value, next: 0 });
                     }
                 }
-                Node::MutArray(_) | Node::MutObject(_) => {
-                    unreachable!("builder overlays are flattened at seal")
-                }
             }
             continue;
         }

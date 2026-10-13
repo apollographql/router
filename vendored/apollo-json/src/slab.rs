@@ -46,14 +46,15 @@ impl SlabRef {
         }
     }
 
-    /// The first `len` elements of this run.
-    pub(crate) fn prefix(self, len: usize) -> SlabRef {
-        debug_assert!(len <= self.len as usize, "prefix within the run");
+    /// This run with `len` live elements, for a container that grew into
+    /// its room or shrank. A container with none is the empty run, so the
+    /// room it leaves is never claimed again.
+    pub(crate) fn with_len(self, len: usize) -> SlabRef {
         if len == 0 {
             return SlabRef::EMPTY;
         }
         SlabRef {
-            len: len as u32,
+            len: u32::try_from(len).expect("slab length within the arena cap"),
             ..self
         }
     }
@@ -134,46 +135,50 @@ impl<T: Copy> Slabs<T> {
         &mut self.chunks[slab.chunk as usize][start..start + slab.len as usize]
     }
 
-    /// Makes room in `run` for at least `extra` elements past its first
-    /// `used`, returning the run to write into; elements past `used` are
-    /// `filler` until written.
+    /// Makes room in `run` for at least `extra` elements past its live
+    /// ones and returns where the run lives now, with the same live length.
+    /// Room is marked with `vacant`, which `is_vacant` recognises.
     ///
-    /// A run that ends the chunk being filled grows where it is. Any other
+    /// Vacant slots right after a run's live elements are that run's room:
+    /// nothing else is ever written there, because storage only grows at a
+    /// chunk's end. So a run with enough room already is returned as it is,
+    /// and a run that ends the chunk being filled grows where it is. Any other
     /// run moves to the end of storage. With `exact` it gets exactly the room
     /// asked for, for a caller that knows how much it will write; otherwise
     /// it gets room to double, so a container growing one element at a time
-    /// is copied O(log n) times. The run left behind is dead space in its
-    /// chunk, like any replaced slot.
+    /// moves O(log n) times. The run left behind is dead space in its chunk,
+    /// like any replaced slot.
     pub(crate) fn grow(
         &mut self,
         run: SlabRef,
-        used: usize,
         extra: usize,
         exact: bool,
-        filler: T,
+        vacant: T,
+        is_vacant: impl Fn(&T) -> bool,
     ) -> SlabRef {
-        debug_assert!(used <= run.len(), "the used prefix lies within the run");
-        let needed = used + extra;
-        if needed <= run.len() {
-            return run;
-        }
-        if used > 0 && run.chunk as usize == self.current {
-            let chunk = &mut self.chunks[self.current];
+        let used = run.len();
+        if used > 0 {
+            let current = run.chunk as usize == self.current;
+            let chunk = &mut self.chunks[run.chunk as usize];
             let end = run.start as usize + used;
-            if end == chunk.len() && chunk.capacity() - end >= extra {
-                let room = if exact { extra } else { extra.max(used.max(4)) };
-                let room = room.min(chunk.capacity() - end);
-                chunk.resize(end + room, filler);
-                return SlabRef {
-                    len: u32::try_from(used + room).expect("slab length within the arena cap"),
-                    ..run
-                };
+            let room = chunk[end..]
+                .iter()
+                .take(extra)
+                .take_while(|slot| is_vacant(slot))
+                .count();
+            if room == extra {
+                return run;
+            }
+            if current && end + room == chunk.len() && chunk.capacity() - end >= extra {
+                let grown = if exact { extra } else { extra.max(used.max(4)) };
+                chunk.resize(end + grown.min(chunk.capacity() - end), vacant);
+                return run;
             }
         }
         let capacity = if exact {
-            needed
+            used + extra
         } else {
-            (used * 2).max(used + 4).max(needed)
+            (used * 2).max(used + 4).max(used + extra)
         };
         if !self.fits_in_current(capacity) {
             self.provision(capacity);
@@ -196,12 +201,18 @@ impl<T: Copy> Slabs<T> {
                 target.extend_from_slice(&source[range]);
             }
         }
-        self.chunks[to].resize(start + capacity, filler);
+        self.chunks[to].resize(start + capacity, vacant);
         SlabRef {
             chunk: u16::try_from(to).expect("chunk count within the arena cap"),
             start: u16::try_from(start).expect("in-chunk offsets fit in u16"),
-            len: u32::try_from(capacity).expect("slab length within the arena cap"),
+            len: run.len,
         }
+    }
+
+    /// Slots written so far, live or vacant.
+    #[cfg(test)]
+    pub(crate) fn slots(&self) -> usize {
+        self.chunks.iter().map(Vec::len).sum()
     }
 
     /// Number of chunks, which is what a store absorbed into this one shifts
@@ -293,10 +304,12 @@ mod tests {
         }
     }
 
-    /// Appends one element to the used prefix of `run`, the way a builder
-    /// grows an open container.
-    fn push(slabs: &mut Slabs<u32>, run: SlabRef, used: usize, value: u32) -> SlabRef {
-        let run = slabs.grow(run, used, 1, false, u32::MAX);
+    /// Appends one element to `run`, the way a builder grows a container.
+    fn push(slabs: &mut Slabs<u32>, run: SlabRef, value: u32) -> SlabRef {
+        let used = run.len();
+        let run = slabs
+            .grow(run, 1, false, u32::MAX, |slot| *slot == u32::MAX)
+            .with_len(used + 1);
         slabs.get_mut(run)[used] = value;
         run
     }
@@ -306,9 +319,15 @@ mod tests {
         let mut slabs: Slabs<u32> = Slabs::new();
         slabs.alloc(&[0; 64]);
         let run = slabs.alloc(&[1, 2, 3]);
-        let grown = push(&mut slabs, run, 3, 4);
+        let grown = push(&mut slabs, run, 4);
         assert_eq!((grown.chunk, grown.start), (run.chunk, run.start));
-        assert_eq!(&slabs.get(grown)[..4], &[1, 2, 3, 4]);
+        assert_eq!(slabs.get(grown), &[1, 2, 3, 4]);
+        // The growth left room, so the next push stays put even with
+        // another run allocated behind it.
+        slabs.alloc(&[0]);
+        let again = push(&mut slabs, grown, 5);
+        assert_eq!((again.chunk, again.start), (run.chunk, run.start));
+        assert_eq!(slabs.get(again), &[1, 2, 3, 4, 5]);
     }
 
     #[test]
@@ -322,12 +341,12 @@ mod tests {
         for step in 1..200u32 {
             for (i, (run, expected)) in runs.iter_mut().enumerate() {
                 let value = i as u32 * 1000 + step;
-                *run = push(&mut slabs, *run, expected.len(), value);
+                *run = push(&mut slabs, *run, value);
                 expected.push(value);
             }
         }
         for (run, expected) in &runs {
-            assert_eq!(&slabs.get(*run)[..expected.len()], expected.as_slice());
+            assert_eq!(slabs.get(*run), expected.as_slice());
         }
     }
 
@@ -336,11 +355,11 @@ mod tests {
         let mut slabs: Slabs<u32> = Slabs::new();
         let mut run = SlabRef::EMPTY;
         let mut moves = 0;
-        for used in 0..10_000usize {
+        for value in 0..10_000u32 {
             // Another run allocated after this one keeps it from simply
             // extending at the chunk's end, so every regrowth is a move.
             let before = (run.chunk, run.start);
-            run = push(&mut slabs, run, used, used as u32);
+            run = push(&mut slabs, run, value);
             if (run.chunk, run.start) != before {
                 moves += 1;
                 slabs.alloc(&[0]);
@@ -348,7 +367,7 @@ mod tests {
         }
         assert!(moves <= 20, "{moves} moves");
         let expected: Vec<u32> = (0..10_000).collect();
-        assert_eq!(&slabs.get(run)[..10_000], expected.as_slice());
+        assert_eq!(slabs.get(run), expected.as_slice());
     }
 
     #[test]

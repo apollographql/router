@@ -48,9 +48,6 @@ pub(crate) fn to_legacy(root: ValueRef<'_>) -> Value {
                         tasks.push(Task::Enter(value.deref_child(entry.child)));
                     }
                 }
-                Node::MutArray(_) | Node::MutObject(_) => {
-                    unreachable!("builder overlays are flattened at seal")
-                }
             },
             Task::Exit(value, start) => {
                 let children: Vec<Value> = done.split_off(start);
