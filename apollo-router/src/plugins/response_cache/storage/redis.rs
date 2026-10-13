@@ -1609,13 +1609,13 @@ mod tests {
             let name = "graph.api";
             let subgraph_doc = Document {
                 key: "subgraph-user".to_string(),
-                cache_tags: vec![CacheTag::Type("User".to_string())],
+                cache_tags: vec![CacheTag::Type("User".into())],
                 scope: CacheScope::Subgraph,
                 ..common_document()
             };
             let connector_doc = Document {
                 key: "connector-user".to_string(),
-                cache_tags: vec![CacheTag::Type("User".to_string())],
+                cache_tags: vec![CacheTag::Type("User".into())],
                 scope: CacheScope::Connector,
                 ..common_document()
             };
@@ -1623,7 +1623,7 @@ mod tests {
             storage.insert(connector_doc, name).await?;
 
             // Subgraph type invalidation renders the subgraph-scoped internal type key.
-            let subgraph_type_key = CacheTag::Type("User".to_string())
+            let subgraph_type_key = CacheTag::Type("User".into())
                 .to_redis_key(CacheScope::Subgraph, name)
                 .strip_prefix(&format!(
                     "version:{RESPONSE_CACHE_VERSION}:cache-tag:subgraph-{name}:key-"

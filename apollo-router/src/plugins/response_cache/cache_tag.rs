@@ -12,6 +12,8 @@
 //! two. With the typed representation the distinction is structural and the storage layer
 //! has no policy of its own; it is a pure rendering step.
 
+use std::sync::Arc;
+
 use super::invalidation_endpoint::IndexMode;
 use super::plugin::RESPONSE_CACHE_VERSION;
 use crate::plugins::response_cache::INTERNAL_CACHE_TAG_PREFIX;
@@ -45,7 +47,7 @@ pub(crate) enum CacheTag {
     /// Whole-subgraph index entry. Backs `By subgraph` invalidation requests.
     Subgraph,
     /// Per-type index entry, parameterized by GraphQL type name. Backs `By type` invalidation.
-    Type(String),
+    Type(Arc<str>),
     /// Per-tag index entry, parameterized by the tag value supplied via
     /// `apolloCacheTags`, `apolloEntityCacheTags`, or a resolved `@cacheTag` directive.
     /// Backs `By cache tag` invalidation.

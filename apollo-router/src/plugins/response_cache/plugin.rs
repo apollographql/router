@@ -1830,14 +1830,14 @@ impl CacheService {
                             key: cache_entry.key.clone(),
                             invalidation_keys: InvalidationLabels {
                                 tags: ir.cdn_invalidation_tags.iter().cloned().collect(),
-                                types: HashSet::from([(self.name.clone(), ir.typename.clone())]),
+                                types: HashSet::from([(self.name.clone(), ir.typename.to_string())]),
                                 subgraphs: HashSet::from([self.name.clone()]),
                             }
                             .user_facing_only(),
                             has_tags: !ir.cdn_invalidation_tags.is_empty(),
                             cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                             kind: CacheEntryKind::Entity {
-                                typename: ir.typename.clone(),
+                                typename: ir.typename.to_string(),
                                 entity_key: debug_entity_key(ir.entity_key.as_ref()),
                             },
                             subgraph_name: self.name.clone(),
@@ -2490,7 +2490,7 @@ async fn cache_lookup_entities(
                     let has_tags = !stored_tags.is_empty();
                     let invalidation_keys = InvalidationLabels {
                         tags: stored_tags,
-                        types: HashSet::from([(name.clone(), ir.typename.clone())]),
+                        types: HashSet::from([(name.clone(), ir.typename.to_string())]),
                         subgraphs: HashSet::from([name.clone()]),
                     }
                     .user_facing_only();
@@ -2502,7 +2502,7 @@ async fn cache_lookup_entities(
                         hashed_private_id: private_id.map(ToString::to_string),
                         invalidation_keys,
                         kind: CacheEntryKind::Entity {
-                            typename: ir.typename.clone(),
+                            typename: ir.typename.to_string(),
                             entity_key: debug_entity_key(ir.entity_key.as_ref()),
                         },
                         subgraph_name: name.clone(),
@@ -2757,7 +2757,7 @@ fn extract_cache_key_root(
     // unconditional and unrelated to this index.
     let mut cache_tags: Vec<CacheTag> = Vec::new();
     if indexes.is_enabled(IndexMode::Type) {
-        cache_tags.push(CacheTag::Type(entity_type.to_string()));
+        cache_tags.push(CacheTag::Type(entity_type.into()));
     }
 
     (key, cache_tags)
@@ -2765,6 +2765,8 @@ fn extract_cache_key_root(
 
 struct CacheMetadata {
     cache_key: String,
+    /// The representation's `__typename`, shared by every entity of the type.
+    typename: Arc<str>,
     cache_tags: Vec<CacheTag>,
     // Fine-grained tag values for CDN `Cache-Tag` persistence, independent of whether
     // `cache_tags` above was populated (that one is gated on `IndexMode::CacheTag` alone). See
@@ -2820,7 +2822,9 @@ fn extract_cache_keys(
     // Get entity key to only get the right fields in representations
     let mut res = Vec::with_capacity(representations.len());
     let entities = representations.len() as u64;
-    let mut typenames = HashSet::new();
+    // Each distinct `__typename`, allocated once and shared by every entity
+    // of the type. A fetch names few types, so a scan finds them.
+    let mut typenames: Vec<Arc<str>> = Vec::new();
     for representation in representations {
         if !representation.is_object() {
             return Err(FetchError::MalformedRequest {
@@ -2835,13 +2839,19 @@ fn extract_cache_keys(
                     reason: "missing __typename in representation".to_string(),
                 })?;
 
-        let typename =
-            typename_value
-                .as_str_owned()
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: "__typename in representation is not a string".to_string(),
-                })?;
-        typenames.insert(typename.clone());
+        let typename_str = typename_value
+            .as_str()
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "__typename in representation is not a string".to_string(),
+            })?;
+        let typename = match typenames.iter().find(|known| ***known == *typename_str) {
+            Some(known) => known.clone(),
+            None => {
+                let typename: Arc<str> = typename_str.into();
+                typenames.push(typename.clone());
+                typename
+            }
+        };
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
@@ -2883,7 +2893,7 @@ fn extract_cache_keys(
         // type-tier, which is unconditional and unrelated to this index.
         let mut cache_tags: Vec<CacheTag> = Vec::new();
         if indexes.is_enabled(IndexMode::Type) {
-            cache_tags.push(CacheTag::Type(typename.to_string()));
+            cache_tags.push(CacheTag::Type(typename.clone()));
         }
 
         // Skip the schema traversal entirely when nothing would consume its result: the Redis
@@ -2921,6 +2931,7 @@ fn extract_cache_keys(
 
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
+            typename,
             cache_tags,
             cdn_invalidation_tags,
             entity_key: representation_entity_key,
@@ -3317,7 +3328,7 @@ fn get_entity_key_from_selection_set(
 pub(super) struct IntermediateResult {
     pub(super) key: String,
     pub(super) cache_tags: Vec<CacheTag>,
-    pub(super) typename: String,
+    pub(super) typename: Arc<str>,
     // See `CacheMetadata::cdn_invalidation_tags`.
     pub(super) cdn_invalidation_tags: Vec<String>,
     // Only set when debug mode is enabled
@@ -3349,6 +3360,7 @@ fn filter_representations(
             representation,
             CacheMetadata {
                 cache_key: key,
+                typename,
                 cache_tags,
                 cdn_invalidation_tags,
                 entity_key,
@@ -3360,14 +3372,13 @@ fn filter_representations(
         .zip(keys)
         .zip(cache_result.drain(..))
     {
-        let opt_type =
-            representation
-                .get(TYPENAME)
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: "missing __typename in representation".to_string(),
-                })?;
-
-        let typename = opt_type.as_str_owned().unwrap_or_else(|| "-".to_string());
+        // `extract_cache_keys` already read each representation's
+        // `__typename`, rejecting a missing or non-string one.
+        // A type's counters are keyed once; later entities of it find them.
+        let counts = match cache_hit.get_mut(&*typename) {
+            Some(counts) => counts,
+            None => cache_hit.entry(typename.to_string()).or_default(),
+        };
 
         // do not use that cache entry if it is stale
         if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
@@ -3375,12 +3386,12 @@ fn filter_representations(
         }
         match cache_entry.as_ref() {
             None => {
-                cache_hit.entry(typename.clone()).or_default().miss += 1;
+                counts.miss += 1;
 
                 new_representations.push(representation);
             }
             Some(entry) => {
-                cache_hit.entry(typename.clone()).or_default().hit += 1;
+                counts.hit += 1;
                 match cache_control.as_mut() {
                     None => cache_control = Some(entry.control.clone()),
                     Some(c) => *c = c.merge(&entry.control),
@@ -3486,7 +3497,7 @@ pub(super) struct EntityCacheMiss<'a> {
     pub(super) value: &'a Value,
     pub(super) cache_tags: Vec<CacheTag>,
     pub(super) cdn_invalidation_tags: Vec<String>,
-    pub(super) typename: String,
+    pub(super) typename: Arc<str>,
     pub(super) entity_key: Option<Value>,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) has_tags: bool,
@@ -3537,7 +3548,7 @@ pub(super) fn build_entity_debug_entry(
         has_tags: miss.has_tags,
         cdn_invalidation_enabled,
         kind: CacheEntryKind::Entity {
-            typename: miss.typename.clone(),
+            typename: miss.typename.to_string(),
             entity_key: debug_entity_key(miss.entity_key.as_ref()),
         },
         subgraph_name: subgraph_name.to_string(),
@@ -3616,7 +3627,12 @@ async fn insert_entities_in_result(
                         })?;
                 let specific_surrogate_keys = per_entity_surrogate_keys_it.next();
 
-                *inserted_types.entry(typename.clone()).or_default() += 1;
+                match inserted_types.get_mut(&*typename) {
+                    Some(count) => *count += 1,
+                    None => {
+                        inserted_types.insert(typename.to_string(), 1);
+                    }
+                }
 
                 if let Some(ref id) = update_key_private {
                     key = format!("{key}:{id}");
@@ -3663,7 +3679,7 @@ async fn insert_entities_in_result(
                 let has_tags = !cdn_invalidation_tags.is_empty();
                 let invalidation_keys = InvalidationLabels {
                     tags: cdn_invalidation_tags.iter().cloned().collect(),
-                    types: HashSet::from([(subgraph_name.to_string(), typename.clone())]),
+                    types: HashSet::from([(subgraph_name.to_string(), typename.to_string())]),
                     subgraphs: HashSet::from([subgraph_name.to_string()]),
                 }
                 .user_facing_only();

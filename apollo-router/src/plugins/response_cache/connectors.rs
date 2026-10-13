@@ -633,7 +633,7 @@ impl ConnectorCacheService {
             // subgraph path.
             let mut cache_tags: Vec<CacheTag> = Vec::new();
             if indexes.is_enabled(IndexMode::Type) {
-                cache_tags.push(CacheTag::Type(typename.clone()));
+                cache_tags.push(CacheTag::Type(typename.as_str().into()));
             }
             // Extract @cacheTag invalidation keys from the supergraph schema.
             if indexes.is_enabled(IndexMode::CacheTag)
@@ -752,7 +752,7 @@ impl ConnectorCacheService {
             intermediate_results.push(IntermediateResult {
                 key: metadata.cache_key,
                 cache_tags: metadata.cache_tags,
-                typename,
+                typename: typename.into(),
                 cdn_invalidation_tags: connector_cdn_invalidation_tags(),
                 entity_key: metadata.entity_key,
                 cache_entry: entry,
@@ -802,7 +802,7 @@ impl ConnectorCacheService {
                         cdn_invalidation_enabled: connector_cdn_invalidation_enabled(),
                         indexes,
                         kind: CacheEntryKind::Entity {
-                            typename: ir.typename.clone(),
+                            typename: ir.typename.to_string(),
                             entity_key: debug_entity_key(ir.entity_key.as_ref()),
                         },
                         subgraph_name: source_name.clone(),
@@ -1753,7 +1753,7 @@ impl ConnectorRequestCacheService {
                         // root type tag is `Type("Query")`; `Subgraph` is prepended at store time.
                         let mut cache_tags: Vec<CacheTag> = Vec::new();
                         if indexes.is_enabled(IndexMode::Type) {
-                            cache_tags.push(CacheTag::Type("Query".to_string()));
+                            cache_tags.push(CacheTag::Type("Query".into()));
                         }
                         // Extract @cacheTag invalidation keys from the supergraph schema
                         if indexes.is_enabled(IndexMode::CacheTag)
