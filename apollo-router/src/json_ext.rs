@@ -611,9 +611,10 @@ fn empty_container(shape: Shape) -> NewValue<'static> {
 
 /// Deep-merges `other` into `base` in place.
 ///
-/// One builder spans the whole walk: `base` is adopted by reference through
-/// [`apollo_json::Value::into_document`], each container is descended into
-/// rather than rebuilt, and a subtree taken from `other` is written as
+/// One builder spans the whole walk: `base` is moved into it, so a base nothing
+/// else holds is edited in its own arena rather than copied on write, each
+/// container is descended into rather than rebuilt, and a subtree taken from
+/// `other` is written as
 /// [`NewValue::Node`], which the arena stores as a reference. Rebuilding each
 /// container instead — the shape a pure walk over sealed values takes — costs
 /// an arena and a copy of every key per object node on the path.
@@ -644,7 +645,7 @@ fn merge_in_place(base: &mut Value, other: &Value, schema: Option<&Schema>) {
         }
     }
 
-    let mut builder = base.clone().edit();
+    let mut builder = std::mem::take(base).edit();
     merge_into_cursor(&mut builder.root_mut(), other, schema);
     *base = builder.seal();
 }
@@ -1901,6 +1902,43 @@ mod tests {
         let path = Path::from("obj/arr/@/obj2");
         let result = Value::from_path(&path, json);
         assert_eq!(result, json!({"obj":{"arr":null}}));
+    }
+
+    #[test]
+    fn test_deep_merge_edits_a_uniquely_owned_base_in_place() {
+        // A merge that copies the base re-interns every key on the path into a
+        // fresh arena, so the keys staying where parsing put them shows the
+        // base's own arena was edited.
+        let key_addresses = |value: &Value| -> Vec<usize> {
+            let product = value.get("product").unwrap();
+            value
+                .object_iter()
+                .chain(product.object_iter())
+                .map(|(key, _)| key.as_ptr() as usize)
+                .collect()
+        };
+        let mut base =
+            Value::parse(br#"{"product":{"upc":"1","name":"Table"},"id":1}"#.to_vec()).unwrap();
+        let before = key_addresses(&base);
+
+        base.deep_merge(json!({"product":{"name":"Chair","price":10},"id":2}));
+
+        assert_eq!(
+            base,
+            json!({"product":{"upc":"1","name":"Chair","price":10},"id":2})
+        );
+        assert_eq!(key_addresses(&base)[..4], before[..]);
+    }
+
+    #[test]
+    fn test_deep_merge_leaves_a_shared_base_untouched() {
+        let mut base = Value::parse(br#"{"product":{"upc":"1"}}"#.to_vec()).unwrap();
+        let held = base.clone();
+
+        base.deep_merge(json!({"product":{"price":10}}));
+
+        assert_eq!(base, json!({"product":{"upc":"1","price":10}}));
+        assert_eq!(held, json!({"product":{"upc":"1"}}));
     }
 
     #[test]
