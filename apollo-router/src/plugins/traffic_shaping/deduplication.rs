@@ -76,8 +76,8 @@ enum Outcome {
 impl_otel_value_from_static_str!(Outcome);
 
 /// Counts a request on `apollo.router.subgraph_deduplication.requests` once, when it finishes
-/// or is cancelled, using the last outcome it was given. A follower that retries after its
-/// leader went away is therefore counted under the role it ends with, not twice.
+/// or is cancelled. A follower stays a follower when its leader is cancelled, because the fetch
+/// it joined keeps running.
 struct OutcomeRecorder {
     subgraph_name: Arc<str>,
     outcome: Option<Outcome>,
@@ -94,8 +94,6 @@ impl OutcomeRecorder {
 
 impl Drop for OutcomeRecorder {
     fn drop(&mut self) {
-        // A request cancelled before it was classified (still waiting for the wait map lock)
-        // is not counted.
         if let Some(outcome) = self.outcome {
             u64_counter_with_unit!(
                 "apollo.router.subgraph_deduplication.requests",
@@ -226,11 +224,12 @@ where
             return service.call(request).await;
         }
 
-<<<<<<< HEAD
         let context = request.context.clone();
         let subgraph_name = request.subgraph_name.clone();
         let id = request.id.clone();
-        let response = Self::join_or_start(service, &wait_map, request).await?;
+        let (fetch, outcome) = Self::join_or_start(service, &wait_map, request);
+        recorder.outcome = Some(outcome);
+        let response = fetch.await?;
         Ok(SubgraphResponse::new_from_response(
             response.0.response,
             context,
@@ -239,12 +238,13 @@ where
         ))
     }
 
-    /// Returns the fetch in flight for this request, or starts one with `service`.
+    /// Returns the fetch in flight for this request as its [`Outcome::Follower`], or starts one
+    /// with `service` as its [`Outcome::Leader`].
     fn join_or_start(
         mut service: S,
         wait_map: &WaitMap,
         request: SubgraphRequest,
-    ) -> Shared<Fetch> {
+    ) -> (Shared<Fetch>, Outcome) {
         let key: CacheKey = (
             (&request.subgraph_request).into(),
             request.authorization.clone(),
@@ -256,88 +256,7 @@ where
             .get(&key)
             .and_then(|in_flight| in_flight.fetch.upgrade())
         {
-            return fetch;
-=======
-            match locked_wait_map.get_mut(&cache_key) {
-                Some(waiter) => {
-                    // Register interest in key
-                    let mut receiver = waiter.subscribe();
-                    drop(locked_wait_map);
-                    recorder.outcome = Some(Outcome::Follower);
-
-                    match receiver.recv().await {
-                        Ok(value) => {
-                            return value
-                                .map(|response| {
-                                    SubgraphResponse::new_from_response(
-                                        response.0.response,
-                                        request.context,
-                                        request.subgraph_name,
-                                        request.id,
-                                    )
-                                })
-                                .map_err(|e| e.into());
-                        }
-                        // there was an issue with the broadcast channel, retry fetching
-                        Err(_) => continue,
-                    }
-                }
-                None => {
-                    let (tx, _rx) = broadcast::channel(1);
-
-                    locked_wait_map.insert(cache_key, tx.clone());
-                    drop(locked_wait_map);
-                    recorder.outcome = Some(Outcome::Leader);
-
-                    let context = request.context.clone();
-                    let authorization_cache_key = request.authorization.clone();
-                    let id = request.id.clone();
-                    let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
-                    let (res, handle) = {
-                        // when _drop_signal is dropped, either by getting out of the block, returning
-                        // the error from ready_oneshot or by cancellation, the drop_sentinel future will
-                        // return with Err(), then we remove the entry from the wait map
-                        let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
-                        let handle = tokio::task::spawn(async move {
-                            let _ = drop_sentinel.await;
-                            let mut locked_wait_map = wait_map.lock().await;
-                            locked_wait_map.remove(&cache_key);
-                        });
-
-                        (
-                            service.call(request).await.map(CloneSubgraphResponse),
-                            handle,
-                        )
-                    };
-
-                    // Make sure that our spawned task has completed. Ignore the result to preserve
-                    // existing behaviour.
-                    let _ = handle.await;
-                    // At this point we have removed ourselves from the wait_map, so we won't get
-                    // any more receivers. If we have any receivers, let them know
-                    if tx.receiver_count() > 0 {
-                        // Clippy is wrong, the suggestion adds a useless clone of the error
-                        #[allow(clippy::useless_asref)]
-                        let broadcast_value = res
-                            .as_ref()
-                            .map(|response| response.clone())
-                            .map_err(|e: &BoxError| e.to_string());
-
-                        // Ignore the result of send, receivers may drop...
-                        let _ = tx.send(broadcast_value);
-                    }
-
-                    return res.map(|response| {
-                        SubgraphResponse::new_from_response(
-                            response.0.response,
-                            context,
-                            response.0.subgraph_name,
-                            id,
-                        )
-                    });
-                }
-            }
->>>>>>> origin/dev
+            return (fetch, Outcome::Follower);
         }
 
         let id = NEXT_FETCH_ID.fetch_add(1, Ordering::Relaxed);
@@ -360,7 +279,7 @@ where
             .downgrade()
             .expect("a fetch that was never polled has not completed");
         locked_wait_map.insert(key, InFlight { id, fetch: weak });
-        fetch
+        (fetch, Outcome::Leader)
     }
 }
 
@@ -401,11 +320,8 @@ where
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
-    use std::time::Duration;
-=======
     use std::sync::Arc;
->>>>>>> origin/dev
+    use std::time::Duration;
 
     use futures::FutureExt;
     use futures::future::BoxFuture;
@@ -418,13 +334,10 @@ mod tests {
     use tower_test::mock::Handle;
 
     use super::QueryDeduplicationService;
-<<<<<<< HEAD
-    use crate::plugins::traffic_shaping::timeout::SubgraphTimeoutLayer;
-=======
     use crate::batching::Batch;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::traffic_shaping::timeout::SubgraphTimeoutLayer;
     use crate::query_planner::fetch::OperationKind;
->>>>>>> origin/dev
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::subgraph;
@@ -553,12 +466,11 @@ mod tests {
         .await;
     }
 
-    // When the leader is dropped (for example by the timeout layer above), the waiting follower's
-    // broadcast closes and it retries. With no leader left it becomes the leader itself. Both the
-    // cancelled leader and the retried request are counted as leaders, and nothing is counted as a
-    // follower.
+    // When the leader is dropped (for example by a timeout above deduplication), the fetch it
+    // started keeps running for the follower, so each is counted under its own outcome and the
+    // subgraph receives one request.
     #[tokio::test(flavor = "multi_thread")]
-    async fn follower_of_a_cancelled_leader_is_counted_as_leader() {
+    async fn follower_of_a_cancelled_leader_is_counted_as_follower() {
         async {
             let (mock, mut handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
 
@@ -570,28 +482,36 @@ mod tests {
             let mut follower = svc.call(request);
 
             // One poll takes the leader through the wait map and into the subgraph call, where it
-            // waits for a response. One poll of the follower finds the leader's entry and
-            // subscribes to its broadcast.
+            // waits for a response. One poll of the follower joins the leader's fetch.
             assert!(futures::poll!(&mut leader).is_pending());
-            let (_leader_request, _leader_responder) =
+            let (leader_request, leader_responder) =
                 handle.next_request().await.expect("the leader's request");
             assert!(futures::poll!(&mut follower).is_pending());
 
             drop(leader);
 
-            // The follower retries as the new leader and sends its own request.
-            let (response, ()) = tokio::join!(follower, respond_once(&mut handle));
-            response.expect("the retried request is answered");
+            leader_responder.send_response(
+                SubgraphResponse::fake_builder()
+                    .context(leader_request.context)
+                    .build(),
+            );
+            follower
+                .await
+                .expect("the follower gets the leader's response");
+            assert!(
+                handle.next_request().now_or_never().is_none(),
+                "the follower does not send its own request"
+            );
 
             assert_counter!(
                 "apollo.router.subgraph_deduplication.requests",
-                2,
+                1,
                 "subgraph.name" = SUBGRAPH,
                 "apollo.router.subgraph_deduplication.outcome" = "leader"
             );
-            assert_counter_not_exists!(
+            assert_counter!(
                 "apollo.router.subgraph_deduplication.requests",
-                u64,
+                1,
                 "subgraph.name" = SUBGRAPH,
                 "apollo.router.subgraph_deduplication.outcome" = "follower"
             );
@@ -607,8 +527,10 @@ mod tests {
     /// Deduplication above a subgraph timeout, over a target the test answers by hand.
     fn dedup_above_timeout() -> (Dedup, Handle<SubgraphRequest, SubgraphResponse>) {
         let (target, handle) = tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
-        let service =
-            QueryDeduplicationService::new(SubgraphTimeoutLayer::new(TIMEOUT).layer(target));
+        let service = QueryDeduplicationService::new(
+            SubgraphTimeoutLayer::new(TIMEOUT).layer(target),
+            SUBGRAPH.into(),
+        );
         (service, handle)
     }
 

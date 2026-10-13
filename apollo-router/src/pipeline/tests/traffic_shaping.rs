@@ -16,6 +16,7 @@ use tower::ServiceExt;
 use super::stage_stack;
 use super::stage_stack::Handle;
 use super::stage_stack::SourceHandle;
+use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::assert_no_mock_calls;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::SubgraphRequest;
@@ -191,6 +192,42 @@ async fn identical_requests_reach_the_subgraph(deduplicate_query: bool, expected
 async fn deduplication_shares_one_in_flight_request() {
     identical_requests_reach_the_subgraph(true, 1).await;
     identical_requests_reach_the_subgraph(false, 2).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn deduplication_requests_are_only_counted_where_enabled() {
+    async {
+        for (subgraph, deduplicate_query) in [("deduplicated", true), ("not_deduplicated", false)] {
+            let (services, mut handle) = stage_stack::subgraph_services(
+                subgraph,
+                &[(
+                    APOLLO_TRAFFIC_SHAPING,
+                    serde_json::json!({ "subgraphs": { subgraph: {
+                        "deduplicate_query": deduplicate_query
+                    } } }),
+                )],
+            )
+            .await;
+            let mut service = services.get(subgraph).expect("the subgraph has a service");
+            let (response, _) = tokio::join!(send(&mut service), answer_next(&mut handle));
+            assert_eq!(response.response.status(), StatusCode::OK);
+        }
+
+        assert_counter!(
+            "apollo.router.subgraph_deduplication.requests",
+            1,
+            "subgraph.name" = "deduplicated",
+            "apollo.router.subgraph_deduplication.outcome" = "leader"
+        );
+        assert_counter_not_exists!(
+            "apollo.router.subgraph_deduplication.requests",
+            u64,
+            "subgraph.name" = "not_deduplicated",
+            "apollo.router.subgraph_deduplication.outcome" = "leader"
+        );
+    }
+    .with_metrics()
+    .await;
 }
 
 /// The timeout sits below deduplication, so a request joined to one already in flight is answered

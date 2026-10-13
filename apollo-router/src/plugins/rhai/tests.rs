@@ -848,7 +848,7 @@ async fn it_redacts_engine_errors_from_client_responses() -> Result<(), BoxError
 
         // execution_service calls a function that does not exist, so the engine fails before any
         // router function is reached.
-        let mut service = dyn_plugin.execution_service(mock_service.boxed());
+        let mut service = dyn_plugin.execution_service(mock_service.boxed_clone());
         let fake_req = http_ext::Request::fake_builder()
             .body(Request::builder().query(String::new()).build())
             .build()?;
@@ -876,7 +876,7 @@ async fn it_redacts_a_router_function_error() -> Result<(), BoxError> {
 
         // supergraph_service reads a header that is not there. The error names the header, which
         // the logs keep and the client must not see.
-        let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let mut service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let req = SupergraphRequest::fake_builder()
             .context(Context::new())
             .build()?;
@@ -983,7 +983,7 @@ async fn it_redacts_an_empty_response_stream() -> Result<(), BoxError> {
         });
 
         let dyn_plugin = create_plugin("rhai_empty_response.rhai").await?;
-        let mut service = dyn_plugin.supergraph_service(mock_service.boxed());
+        let mut service = dyn_plugin.supergraph_service(mock_service.boxed_clone());
         let req = SupergraphRequest::fake_builder()
             .context(Context::new())
             .build()?;

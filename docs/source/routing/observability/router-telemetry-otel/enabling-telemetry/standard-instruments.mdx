@@ -321,7 +321,7 @@ telemetry:
     - `bypassed_batch`: The request is a query that is part of a query batch, so it wasn't considered.
     - `bypassed_operation`: The request is a mutation or subscription, so it wasn't considered, whether or not it is part of a batch.
 
-  A cancelled request (for example, one that times out) is counted under the outcome it had when it was cancelled. If a `leader` is cancelled, a `follower` waiting on it sends the request itself and is counted as a `leader` instead.
+  A cancelled request (for example, one that times out) is counted under the outcome it had when it was cancelled. If a `leader` is cancelled, its request keeps running for any `follower` waiting on it, and each keeps its own outcome.
 
 ## Limits
 
