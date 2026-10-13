@@ -7,6 +7,7 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use apollo_json::JsonKind;
+use apollo_json::NewValue;
 use apollo_json::ValueBuilder;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -17,7 +18,7 @@ use tracing::Instrument;
 use tracing::instrument;
 
 use super::rewrites;
-use super::selection::execute_selection_set;
+use super::selection::select;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
 use crate::error::Error;
@@ -180,35 +181,54 @@ impl Variables {
         if !requires.is_empty() {
             let mut variables = used_variables(variable_usages, &body.variables);
 
-            let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
-            let mut values: IndexSet<Value> = IndexSet::default();
+            // Every representation goes into one arena, rather than one
+            // arena each.
+            let mut pending = ValueBuilder::new_array();
+            let mut paths: Vec<Path> = Vec::new();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
                 if let Some(context) = subgraph_context.as_mut() {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(&value, requires, schema, None);
-                if value.is_object() && value.is_empty() == Some(false) {
-                    rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                    match values.get_index_of(&value) {
-                        Some(index) => {
-                            inverted_paths[index].push(path.clone());
-                        }
-                        None => {
-                            inverted_paths.push(vec![path.clone()]);
-                            values.insert(value);
-                            debug_assert!(inverted_paths.len() == values.len());
-                        }
-                    }
+                let representation = select(&value, requires, schema, None);
+                if matches!(&representation, NewValue::Object(members) if !members.is_empty()) {
+                    pending
+                        .push(representation)
+                        .expect("the builder root is an array, which accepts elements");
+                    paths.push(path.clone());
                 }
             });
 
-            if values.is_empty() {
+            if paths.is_empty() {
                 return None;
             }
 
-            let representations = Value::array(values);
+            let pending = pending.seal();
+            let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
+            let mut values: IndexSet<Value> = IndexSet::with_capacity(paths.len());
+            for (mut value, path) in pending.array_iter().zip(paths) {
+                rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                match values.get_index_of(&value) {
+                    Some(index) => {
+                        inverted_paths[index].push(path);
+                    }
+                    None => {
+                        inverted_paths.push(vec![path]);
+                        values.insert(value);
+                        debug_assert!(inverted_paths.len() == values.len());
+                    }
+                }
+            }
+
+            // Without duplicates or rewrites, the pending array is already
+            // the representations list.
+            let representations = if input_rewrites.is_none() && Some(values.len()) == pending.len()
+            {
+                pending
+            } else {
+                Value::array(values)
+            };
             let contextual_arguments = match subgraph_context.as_mut() {
                 Some(context) => context.add_variables_and_get_args(&mut variables),
                 None => None,
@@ -724,6 +744,42 @@ mod tests {
 
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_path);
+    }
+
+    #[test]
+    fn representations_are_deduplicated_with_every_path_kept() {
+        let schema = test_schema();
+        let data = json!({"items": [
+            {"__typename": "T", "id": "1", "other": true},
+            {"__typename": "T", "id": "2"},
+            {"__typename": "T", "id": "1"},
+            {"__typename": "U", "id": "3"},
+        ]});
+        let request = Arc::new(http::Request::new(Request::default()));
+
+        let variables = Variables::new(
+            &make_requires(),
+            &[],
+            &data,
+            &Path::from("items/@"),
+            &request,
+            &schema,
+            &None,
+            &None,
+        )
+        .expect("two entities match the type condition");
+
+        assert_eq!(
+            variables.variables.get("representations"),
+            Some(json!([{"id": "1"}, {"id": "2"}]))
+        );
+        assert_eq!(
+            variables.inverted_paths,
+            vec![
+                vec![Path::from("items/0"), Path::from("items/2")],
+                vec![Path::from("items/1")],
+            ]
+        );
     }
 
     #[test]

@@ -1357,7 +1357,7 @@ fn rooted_document<'v>(value: impl Into<NewValue<'v>>) -> apollo_json::Value {
 }
 
 /// A standalone [`Value`] holding `value`.
-fn rooted_value<'v>(value: impl Into<NewValue<'v>>) -> Value {
+pub(crate) fn rooted_value<'v>(value: impl Into<NewValue<'v>>) -> Value {
     rooted_document(value)
 }
 

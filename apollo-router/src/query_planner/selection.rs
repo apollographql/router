@@ -1,8 +1,11 @@
+use std::borrow::Cow;
+
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::requires_selection::Field;
 use apollo_federation::query_plan::requires_selection::InlineFragment;
 use apollo_federation::query_plan::requires_selection::Selection;
 use apollo_json::JsonKind;
+use apollo_json::NewValue;
 
 use crate::json_ext;
 use crate::json_ext::Value;
@@ -10,9 +13,11 @@ use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
+type Members<'a> = Vec<(Cow<'a, str>, NewValue<'a>)>;
+
 /// The output member at `key`, for the callers that either overwrite or merge
 /// into whatever an earlier selection already wrote there.
-fn member_mut<'m>(members: &'m mut [(String, Value)], key: &str) -> Option<&'m mut Value> {
+fn member_mut<'m, 'a>(members: &'m mut Members<'a>, key: &str) -> Option<&'m mut NewValue<'a>> {
     members
         .iter_mut()
         .find(|(member, _)| member == key)
@@ -21,27 +26,49 @@ fn member_mut<'m>(members: &'m mut [(String, Value)], key: &str) -> Option<&'m m
 
 /// Writes `value` at `key`, keeping the position of an entry an earlier
 /// selection already wrote there.
-fn set_member(members: &mut Vec<(String, Value)>, key: &str, value: Value) {
+fn set_member<'a>(members: &mut Members<'a>, key: &'a str, value: NewValue<'a>) {
     match member_mut(members, key) {
         Some(existing) => *existing = value,
-        None => members.push((key.to_owned(), value)),
+        None => members.push((Cow::Borrowed(key), value)),
     }
 }
 
+/// Merges `other` into `existing`, for a member that two inline fragments both
+/// select. Both are sealed first, so the merge is the one sealed values get.
+fn merge_member<'a>(existing: &mut NewValue<'a>, other: NewValue<'a>, schema: &Schema) {
+    let mut merged = json_ext::rooted_value(std::mem::replace(existing, NewValue::Null));
+    merged.type_aware_deep_merge(json_ext::rooted_value(other), schema);
+    *existing = NewValue::Node(merged);
+}
+
+#[cfg(test)]
 pub(crate) fn execute_selection_set(
     input_content: &Value,
     selections: &[Selection],
     schema: &Schema,
     current_type: Option<&str>,
 ) -> Value {
+    json_ext::rooted_value(select(input_content, selections, schema, current_type))
+}
+
+/// Selects `selections` from `input_content` as a pending tree, so a caller
+/// building many selections writes them all into one arena. Keys borrow from
+/// `selections`, and selected leaves are adopted by reference.
+pub(crate) fn select<'a>(
+    input_content: &Value,
+    selections: &'a [Selection],
+    schema: &Schema,
+    current_type: Option<&str>,
+) -> NewValue<'a> {
     if input_content.kind() != JsonKind::Object {
-        return Value::default();
+        return NewValue::Null;
     }
 
-    let own_type = input_content.get(TYPENAME).and_then(|v| v.as_str_owned());
+    let typename = input_content.get(TYPENAME);
+    let own_type = typename.as_ref().and_then(|v| v.as_str());
     let current_type = own_type.as_deref().or(current_type);
 
-    let mut output: Vec<(String, Value)> = Vec::with_capacity(selections.len());
+    let mut output: Members<'a> = Vec::with_capacity(selections.len());
     for selection in selections {
         match selection {
             Selection::Field(Field {
@@ -71,7 +98,7 @@ pub(crate) fn execute_selection_set(
                         if name == TYPENAME {
                             // if the __typename field was missing but we can infer it, fill it
                             if let Some(ty) = current_type {
-                                set_member(&mut output, selection_name, json_ext::string(ty));
+                                set_member(&mut output, selection_name, ty.to_owned().into());
                                 continue;
                             }
                         }
@@ -85,23 +112,28 @@ pub(crate) fn execute_selection_set(
                             .map(|ty| !ty.is_non_null())
                             .unwrap_or(false)
                         {
-                            set_member(&mut output, selection_name, Value::default());
+                            set_member(&mut output, selection_name, NewValue::Null);
                         } else {
-                            return Value::default();
+                            return NewValue::Null;
                         }
                     }
                     Some(value) => {
                         let selected = if selections.is_empty() {
-                            value
+                            NewValue::Node(value)
                         } else {
                             let inner_type =
                                 field_type.as_ref().map(|ty| ty.inner_named_type().as_str());
                             if value.kind() == JsonKind::Array {
-                                json_ext::array(value.array_iter().map(|element| {
-                                    execute_selection_set(&element, selections, schema, inner_type)
-                                }))
+                                NewValue::Array(
+                                    value
+                                        .array_iter()
+                                        .map(|element| {
+                                            select(&element, selections, schema, inner_type)
+                                        })
+                                        .collect(),
+                                )
                             } else {
-                                execute_selection_set(&value, selections, schema, inner_type)
+                                select(&value, selections, schema, inner_type)
                             }
                         };
                         set_member(&mut output, selection_name, selected);
@@ -117,15 +149,15 @@ pub(crate) fn execute_selection_set(
                     if !type_condition_matches(schema, current_type, condition) {
                         continue;
                     }
-                    let selected =
-                        execute_selection_set(input_content, selections, schema, current_type);
-                    if selected.kind() != JsonKind::Object {
+                    let NewValue::Object(selected) =
+                        select(input_content, selections, schema, current_type)
+                    else {
                         continue;
-                    }
-                    for (key, value) in selected.object_iter() {
+                    };
+                    for (key, value) in selected {
                         match member_mut(&mut output, &key) {
-                            Some(existing) => existing.type_aware_deep_merge(value, schema),
-                            None => output.push((key.into_owned(), value)),
+                            Some(existing) => merge_member(existing, value, schema),
+                            None => output.push((key, value)),
                         }
                     }
                 }
@@ -133,7 +165,7 @@ pub(crate) fn execute_selection_set(
         }
     }
 
-    json_ext::object(output)
+    NewValue::Object(output)
 }
 
 /// This is similar to DoesFragmentTypeApply from the GraphQL spec, but the
