@@ -51,8 +51,8 @@ pub(crate) struct IncompleteResponseBody;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AnsweredByRouter;
 
-/// Marks a subgraph response to a fetch that failed because the client's file upload, which the
-/// router was streaming to the subgraph, failed part way through.
+/// Marks a subgraph response to a request whose file upload, which the router was streaming from
+/// the client to the subgraph, failed part way through. The file uploads plugin inserts it.
 ///
 /// The failure is the client's, not the subgraph's, so the circuit breaker records no outcome for
 /// it, whatever status the response carries.

@@ -1,5 +1,7 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use futures::FutureExt;
 use http::HeaderValue;
@@ -30,6 +32,7 @@ use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::limits::BodyLimitControl;
 use crate::services::execution;
+use crate::services::http::UploadStreamFailed;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -165,6 +168,26 @@ impl PluginPrivate for FileUploadsPlugin {
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
+            // The client's upload failing says nothing about the subgraph, whatever the subgraph
+            // or the failed fetch answered, so the circuit breaker above must not count it.
+            .map_future_with_request_data(
+                |req: &subgraph::Request| {
+                    req.subgraph_request
+                        .extensions()
+                        .get::<MultipartFormData>()
+                        .map(MultipartFormData::upload_failed)
+                },
+                |upload_failed: Option<Arc<AtomicBool>>, response| async move {
+                    let mut response: subgraph::Response = response.await?;
+                    if upload_failed.is_some_and(|failed| failed.load(Ordering::Relaxed)) {
+                        response
+                            .response
+                            .extensions_mut()
+                            .insert(UploadStreamFailed);
+                    }
+                    Ok(response)
+                },
+            )
             .service(service)
             .boxed_clone()
     }
@@ -428,4 +451,105 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
         }
     }
     req
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use futures::StreamExt;
+
+    use super::*;
+    use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
+    use crate::plugins::circuit_breaker::test_support::subgraph_request;
+
+    const BOUNDARY: &str = "boundary";
+
+    /// A request to subgraph `products` whose client upload of file `0` has no part carrying the
+    /// file, so streaming the upload on to the subgraph fails part way through.
+    async fn request_with_a_failing_upload() -> subgraph::Request {
+        let client_body = format!(
+            "--{BOUNDARY}\r\n\
+             Content-Disposition: form-data; name=\"operations\"\r\n\r\n\
+             {{\"query\":\"mutation ($file: Upload!) {{ upload(file: $file) }}\",\"variables\":{{\"file\":null}}}}\r\n\
+             --{BOUNDARY}\r\n\
+             Content-Disposition: form-data; name=\"map\"\r\n\r\n\
+             {{\"0\":[\"variables.file\"]}}\r\n\
+             --{BOUNDARY}--\r\n"
+        );
+        let mut multipart = MultipartRequest::new(
+            router::body::from_bytes(client_body),
+            BOUNDARY.to_string(),
+            MultipartRequestLimits::default(),
+            u64::MAX,
+        );
+        let operations = multipart.operations_field().await.expect("operations");
+        operations.bytes().await.expect("operations are read");
+        let map = Arc::new(multipart.map_field().await.expect("map"));
+
+        let mut request = subgraph_request("Upload");
+        request
+            .subgraph_request
+            .body_mut()
+            .variables
+            .insert("file", serde_json_bytes::Value::Null);
+        request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.insert(SupergraphLayerResult { multipart, map }));
+        request
+    }
+
+    /// Stands in for the subgraph service beneath the plugin: it streams the upload on, and when
+    /// that fails answers with a `500` without reaching `subgraph`, as the subgraph service does
+    /// for a failed fetch.
+    fn fetching_uploads(subgraph: subgraph::BoxCloneService) -> subgraph::BoxCloneService {
+        tower::service_fn(move |request: subgraph::Request| {
+            let subgraph = subgraph.clone();
+            async move {
+                let Some(form) = request
+                    .subgraph_request
+                    .extensions()
+                    .get::<MultipartFormData>()
+                    .cloned()
+                else {
+                    return subgraph.oneshot(request).await;
+                };
+                let mut upload = Box::pin(form.into_stream(router::body::empty()).await);
+                while let Some(chunk) = upload.next().await {
+                    if chunk.is_err() {
+                        return Ok(subgraph::Response::fake_builder()
+                            .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                            .context(request.context)
+                            .id(request.id)
+                            .build());
+                    }
+                }
+                subgraph.oneshot(request).await
+            }
+        })
+        .boxed_clone()
+    }
+
+    /// A client upload that fails part way through is the client's fault, so the subgraph's
+    /// circuit records nothing for it.
+    #[tokio::test]
+    async fn an_upload_that_fails_part_way_records_no_circuit_outcome() {
+        let plugin = FileUploadsPlugin {
+            enabled: true,
+            limits: MultipartRequestLimits::default(),
+        };
+        let mut uploads = Vec::new();
+        for _ in 0..10 {
+            uploads.push(request_with_a_failing_upload().await);
+        }
+        let uploads = Mutex::new(uploads);
+
+        assert_router_answers_record_nothing(
+            async |subgraph| plugin.subgraph_service("products", fetching_uploads(subgraph)),
+            || subgraph_request("Query"),
+            || uploads.lock().unwrap().pop().expect("enough uploads"),
+        )
+        .await;
+    }
 }
