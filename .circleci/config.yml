@@ -636,6 +636,29 @@ jobs:
                       }
                     ]
                   }
+  # Branch-only memory profiling of the test build (abernix/ci-memory-profile; not for merge).
+  memprofile:
+    environment:
+      <<: *common_job_environment
+      NEXTEST_PROFILE: ci
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
+      # Same cache a real test job restores: the key checksums dev's unmodified config.
+      - restore_cache:
+          keys:
+            - '{{ checksum ".circleci/memprofile/dev-config.yml" }}-v3-{{ checksum "~/.arch" }}-{{ checksum ".config/mise/config.toml" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.merge_version" }}-test-default'
+      - run:
+          name: Build test binaries while sampling memory
+          command: bash .circleci/memprofile/run.sh
+      - store_artifacts:
+          path: /tmp/memprofile
+
   pre_verify_release:
     environment:
       <<: *common_job_environment
@@ -1123,32 +1146,10 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_build >>
     jobs:
-      - fmt_check:
+      - memprofile:
           matrix:
             parameters:
-              platform: [amd_linux_helm]
-      - lint:
-          matrix:
-            parameters:
-              platform: [amd_linux_build]
-      - check_helm:
-          matrix:
-            parameters:
-              platform: [amd_linux_helm]
-      - check_compliance:
-          matrix:
-            parameters:
-              platform: [amd_linux_build]
-
-      - test:
-          # this should be changed back to true on dev after release
-          fuzz: false
-          requires:
-            - fmt_check
-          matrix:
-            parameters:
-              platform:
-                [amd_linux_test]
+              platform: [amd_linux_test, arm_linux_test]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
