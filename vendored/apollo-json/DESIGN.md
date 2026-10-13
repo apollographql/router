@@ -63,7 +63,10 @@ flowchart LR
 ```
 
 - **`input`** — the document bytes, held as `Bytes` so streaming
-  serialization can yield zero-copy slices of it.
+  serialization can yield zero-copy slices of it. An arena that has
+  [absorbed](#absorbing-a-merge-source) another keeps that arena's input
+  too: spans address the inputs as one sequence, this arena's own first and
+  each absorbed one after it, and a read finds the buffer a span falls in.
 - **Node chunks** — nodes are addressed by `NodeId` (a `u32` index);
   `chunks[id / 4096][id % 4096]`. The first chunk is sized from
   `input_len / 16` and ramps up; after that, growth is one fixed 48 KiB
@@ -90,16 +93,16 @@ what makes drop O(chunks) rather than O(nodes):
 
 | type | size | contents |
 |---|---|---|
-| `Node` | 12 B | tag + `Span` / `SlabRef` / overlay index |
+| `Node` | 12 B | tag + `Span` / `SlabRef` |
 | `Child` | 4 B | `u32`; high bit picks local `NodeId` vs foreign-table index |
 | `Entry` | 16 B | `KeyRef` (span or owned text) + `Child` |
 
 The `Node` variants: `Null`, `Bool`, `Number(Span)` /
 `OwnedNumber(SlabRef)`, `String { span, escaped }` / `OwnedString(SlabRef)`,
-`Array(SlabRef)`, `Object(SlabRef)`, and the builder-only `MutArray(u32)` /
-`MutObject(u32)` overlays (never present in a sealed document). `Owned*`
-variants hold values introduced by mutation or conversion in the arena's
-owned-text slab; everything parsed stays a span into the input.
+`Array(SlabRef)` and `Object(SlabRef)`. A container's `SlabRef` always
+covers exactly its live elements, in a builder as in a sealed document.
+`Owned*` variants hold values introduced by mutation or conversion in the
+arena's owned-text slab; everything parsed stays a span into the input.
 
 ### Worked example
 
@@ -205,7 +208,8 @@ flowchart TD
 
 **Why cycles are structurally impossible.** An arena's foreign table only
 grows while a `ValueBuilder` owns the arena *mutably*, and builders can
-only adopt subtrees of **sealed** documents. For arena X to gain a reference
+only adopt subtrees of **sealed** documents (absorbing an arena moves its
+existing references across, all to arenas sealed before it). For arena X to gain a reference
 to arena Y, Y must already exist behind an `Arc`. Could Y in turn reference
 X? Only if X was behind an `Arc` when Y was built — but then
 `Arc::try_unwrap` would have failed for X and the builder would be editing a
@@ -277,7 +281,7 @@ direction.
 ```mermaid
 flowchart TD
     S["set(segment, value) at node N"] --> Q{"is N local\nto the builder's arena?"}
-    Q -- "yes (unique take-over,\nor already localized)" --> IP["write in place:\nreplace slab slot, or append\nvia mutable overlay"]
+    Q -- "yes (unique take-over,\nabsorbed, or already localized)" --> IP["write in place:\nreplace slab slot, or append\ninto the run's room"]
     Q -- "no (foreign child)" --> PC["localize: shallow-copy N into\nbuilder arena; children become\nforeign refs to source"] --> IP
 ```
 
@@ -296,14 +300,13 @@ sequenceDiagram
     S-->>B: fails - another reference is alive
     B->>N: root = push_foreign(source root)
     U->>B: get_mut("user")
-    B->>N: localize root: shallow-copy the object into an overlay
+    B->>N: localize root: shallow-copy the object into a fresh entry run
     Note over N,S: the copy's children are foreign refs back into S - siblings stay shared
     B->>N: localize the "user" child the same way
     B-->>U: ValueMut at the local copy
     U->>B: set("id", 8)
     B->>N: write the member slot: a local OwnedNumber
     U->>B: seal()
-    B->>N: flatten overlays into packed entry slabs
     B-->>U: Value - S never observed anything
 ```
 
@@ -321,16 +324,29 @@ sequenceDiagram
     U->>B: get_mut("user")
     B-->>U: ValueMut - the node is already local, nothing is copied
     U->>B: set("id", 8)
-    B->>A: overwrite the slab slot in place (an overlay only if the object grows)
+    B->>A: overwrite the slab slot in place (the run grows only if the object does)
     U->>B: seal()
     B-->>U: Value - same arena, one Arc::new
 ```
 
-**Overlays.** Container slabs are written once, so replacing a child is an
-in-place slab write, but *growth* (new key, append) opens the container into
-a mutable overlay (`Node::MutArray` / `MutObject` pointing into the
-builder's overlay vectors). `seal()` flattens every overlay back into packed
-slabs — a sealed document is always in the immutable form.
+**Growth.** Replacing a child is an in-place slab write. *Growth* (a new
+key, an append) needs room after the container's live elements, and that
+room is marked in the slab itself: vacant slots right after a run's live
+elements belong to that run, because storage only ever grows at a chunk's
+end, so nothing else is written there. A container grows into its room if
+it has some; a run that ends the chunk being filled extends in place; any
+other run moves to the end of storage with room to double (or exactly the
+room asked for, when a caller such as the merge knows how much it will
+append). The run it leaves is dead space, like any replaced slot, and
+removal turns the freed slot back into room. A container emptied to nothing
+takes the shared empty run, so two empty containers never claim the same
+room. A vacant child carries an id no real child can have (the last foreign
+id is reserved for it), and absorption leaves vacant slots alone when it
+shifts ids.
+
+Because a node's run always holds exactly its live elements, a document under
+construction is already in its packed form: `seal()` only wraps the arena in
+an `Arc`.
 
 **Cursors** (`ValueMut`, from `builder.get_mut(...)`) navigate the
 copy-on-write spine **once**; every subsequent edit at the cursor is a local
@@ -340,17 +356,76 @@ builder or race other edits. The path-based methods (`set_path`,
 `remove_path`, `push_path`) exist for computed paths; `set`/`remove`/`push`
 plus cursors are the primary API.
 
-**Merge** (`builder.merge(&other)`) is the execution-merge workload: object
-keys union recursively, array elements merge index-wise (extras appended),
-scalars and mismatched shapes replace. Containers taken from `other` are
-adopted **by reference**; scalars a merge *inserts* (new keys, appended
-elements) are **copied** into the local arena — a few bytes of text cost
-less than a foreign-table entry plus its refcount traffic — while replaced
-slots and escaped strings stay by reference (a later chunk may overwrite a
-replaced slot again, and an escaped string's original spelling only
-survives as a span into its source input). The fold runs with an explicit
-stack; descending localizes the target spine exactly like any other
-mutation.
+**Merge** (`builder.merge(&other)`) folds a document in: object keys union
+recursively, array elements merge index-wise (extras appended), scalars and
+mismatched shapes replace. Containers taken from `other` are adopted **by
+reference**; scalars a merge *inserts* (new keys, appended elements) are
+**copied** into the local arena — a few bytes of text cost less than a
+foreign-table entry plus its refcount traffic — while replaced slots and
+escaped strings stay by reference (a later chunk may overwrite a replaced
+slot again, and an escaped string's original spelling only survives as a
+span into its source input). The fold runs with an explicit stack;
+descending localizes the target spine exactly like any other mutation.
+
+**`merge_from`** (`builder.merge_from(other, &mut policy)`) is the
+execution-merge workload: a subgraph response merged into the response
+being assembled. A slot the target lacks takes the incoming value whatever
+it is, `null` included; same-kind containers merge as above; anywhere else a
+`MergePolicy` decides whether the incoming value replaces the one in place
+(the router's keeps the target on an incoming `null`, on an object meeting
+an array, and on a less specific `__typename`). It takes `other` by value
+so that it can [absorb](#absorbing-a-merge-source) it. It reserves exactly
+the room each target container needs before appending to it; an empty
+container has no run to hold room, so its first append allocates the run at
+that size instead. It keeps one
+frame per open container, so its stack is as deep as the documents are, not
+as wide.
+
+### Absorbing a merge source
+
+Execution merges fetch after fetch into one response, and a later fetch
+merges into what an earlier one brought: an accounts fetch fills in the
+authors that a reviews fetch's entities carried. When those subtrees are
+adopted by reference they stay in the reviews response's arena, so the
+accounts merge has to copy every container on its path into the response
+before writing: the node, its entries, every key's text, and a foreign
+entry per child. That copying was nearly all of what such a merge allocated.
+
+When `other` holds the last reference to its arena, `merge_from` absorbs the
+arena instead: `Arena::absorb` moves its node chunks, slab chunks and input
+buffer into the target arena and shifts every id, slab reference and span
+in them by where they landed. Nothing is copied, and the moved chunks'
+spare capacity is filled before new chunks are allocated. The subtrees the
+merge takes are then the target's own nodes, and the next merge into them
+edits them in place.
+
+The incoming document is usually a placement: a fresh document holding
+handles into the subgraph response, one per entity. So absorption carries
+on through the foreign entries the absorbed arena brought. An arena they
+point into is absorbed too when every handle to it is one of those entries
+(its strong count equals their number, with no weak references) and the
+subtrees they name are disjoint. Each entry then becomes an **alias**: its
+arena handle is dropped and it names the local node, so the children that
+carry its foreign id resolve locally without being rewritten.
+
+Disjointness is what keeps the document a tree where it must be one. If two
+entries named the same subtree, or one named a subtree inside the other's,
+absorbing would leave one local node reached from two places, and an edit
+through one would show through the other. By reference, copy-on-write
+keeps them apart, so such an arena stays foreign. The check is cheap for a
+pristine parsed arena: the parser writes each container after its members,
+so a subtree is the contiguous id range from its leftmost descendant up to
+its root, and sorted references overlap exactly when one falls in its
+successor's range. Builders mark an arena edited when they take it over;
+for those only a single reference counts as disjoint.
+
+Absorption keeps the cycle argument below intact. It only consumes arenas
+that nothing else can reach, and what it appends to the target's foreign
+table are references the absorbed arena already held, all to arenas sealed
+before it. An absorbed arena's unreferenced nodes stay in the target until
+the target drops, as they did when the target pinned the whole arena by
+reference, and `Value::is_self_contained` reports such an arena as not
+self-contained.
 
 ### Pending trees: `NewValue::Array` and `NewValue::Object`
 
@@ -403,20 +478,14 @@ per-builder setting so that cursors handed out by the builder inherit it.
 
 ### Reading a document under construction
 
-Overlays live in the builder, not the arena, so a reader that borrows only
-the arena — `ValueRef` — cannot see them: a grown container reads as its
-pre-growth slab, members report absent and lengths stale. That is a wrong
-answer, not an error, and assembling a GraphQL response needs exactly those
-reads — "have I written this key already?" is how fragment merging decides
-between descending and inserting.
-
-`BuilderRef` is the reader for this state: it borrows the builder as well as
-the arena, resolves overlay nodes through the builder's tables, and follows
-adopted subtrees into their own (sealed) arenas where overlays stop
-applying. `ValueBuilder::value` and `ValueMut::value` hand one out.
-`ValueRef` remains the sealed-document reader; nothing that only holds an
-`&Arena` can be made overlay-aware, which is why the two readers are
-distinct types rather than one type with a flag.
+Assembling a GraphQL response needs reads in the middle of writing — "have I
+written this key already?" is how fragment merging decides between
+descending and inserting. A builder owns its arena outright, so there is no
+`Value` to read through until `seal()`. `BuilderRef` is the reader for this
+state: it borrows the builder's arena and follows adopted subtrees into
+their own arenas. `ValueBuilder::value` and `ValueMut::value` hand one out.
+Containers hold exactly their live members in the slabs while they grow, so
+what it reads is what sealing would produce.
 
 ## Serialization
 
@@ -471,7 +540,7 @@ sequenceDiagram
     R->>R: output.into_chunks(16 KiB)
     loop walk the output
         alt untouched input span of at least max(target/2, 64) bytes
-            R->>C: input_bytes().slice(span) - zero-copy Bytes chunk
+            R->>C: span_shared(span) - zero-copy Bytes slice of the span's input
         else small span or owned text
             R->>R: append to the accumulator, flush near the target size
         end
@@ -874,10 +943,36 @@ references it — unknowable without per-node liveness, which was rejected
 above, so sealed arenas never reclaim. Inside a builder the story is
 different: ownership is unique by construction, so a builder-local free
 list is provably sound — it is the designed extension point if long-lived
-builder churn ever becomes a real workload. Until then, dead runs count
-against the arena cap until `seal()` (conservative in the right direction
-for a DoS posture), and `compact()` / `into_self_contained()` is the
-defragmentation path.
+builder churn ever becomes a real workload. Until then, dead runs (including
+those a growing container moves out of) count against the arena cap
+(conservative in the right direction for a DoS posture), and `compact()` /
+`into_self_contained()` is the defragmentation path. The one reuse there
+is, a container growing into the vacant room after its own live elements,
+needs no free list: that room can belong to no other run.
+
+#### Growth in the slabs — not a per-container overlay
+
+A builder could keep each grown container in a `Vec` of its own and copy it
+back into the slabs at seal. That costs a heap allocation per grown container
+and two copies of its members. Merging the reviews and accounts fetches into
+1,000 products (router measurement harness, preliminary, one Apple silicon
+machine) allocated 2.00 MB in 8,074 allocations that way, and 1.34 MB in 68
+with growth in the slabs.
+
+#### Absorbing a uniquely held merge source — not adopting it by reference
+
+Merging the reviews and accounts fetches into 1,000 products (router
+measurement harness, preliminary, one Apple silicon machine) allocated
+1.34 MB in 68 allocations with every merged subtree adopted by reference,
+nearly all of it copy-on-write of subtrees an earlier merge had adopted.
+Absorbing a source that nothing else holds, and the response arenas only it
+referenced, took that to 403 kB. With growth room marked in the slabs and
+exact reservation, it is 134 kB in 18 allocations: the new entry chunks
+that parsed objects need to move into when they gain a member, since they
+are packed with no room. The `serde_json_bytes` merge it replaces allocated
+nothing there, because its maps happened to have spare capacity. Reaching
+that would need parsed objects to carry room, which the growth policy above
+rules out.
 
 #### Builder/sealed split — not `make_mut`-style mutation everywhere
 

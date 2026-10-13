@@ -131,11 +131,10 @@
 //!
 //! ## Reading a document under construction requires [`BuilderRef`]
 //!
-//! A container that grows inside a [`ValueBuilder`] lives in an overlay
-//! owned by the builder until [`ValueBuilder::seal`] packs it. A sealed
-//! reader ([`ValueRef`]) cannot see overlays, so reads during assembly go
+//! A [`ValueBuilder`] owns its arena outright, so there is no [`Value`] to
+//! read through until [`ValueBuilder::seal`]. Reads during assembly go
 //! through [`BuilderRef`] (from [`ValueBuilder::value`] or
-//! [`ValueMut::value`]), which resolves them.
+//! [`ValueMut::value`]), which borrows the builder.
 //!
 //! ## Serialized output can exceed in-memory size
 //!

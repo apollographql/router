@@ -187,8 +187,8 @@ impl<'b> BuilderRef<'b> {
         raw.parse().ok()
     }
 
-    /// Deep-copies this subtree into a fresh, minimal owned handle, reading
-    /// through any open overlays. The copy retains only its own bytes; see
+    /// Deep-copies this subtree, as it stands, into a fresh, minimal owned
+    /// handle. The copy retains only its own bytes; see
     /// [`Value::compact`](crate::Value::compact), which does the same for a
     /// sealed subtree.
     pub fn to_value(&self) -> Value {
@@ -294,9 +294,8 @@ mod tests {
 
     #[test]
     fn a_grown_object_reads_back_its_new_members() {
-        // Growing a container opens an overlay. A reader that saw only the
-        // arena reported these members absent, which turned a caller's
-        // read-modify-write into an overwrite.
+        // A reader that missed members a container grew while being built
+        // turned a caller's read-modify-write into an overwrite.
         let mut builder = ValueBuilder::new();
         builder.set("a", 1_i64).unwrap();
         builder.set("b", "two").unwrap();
@@ -353,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn to_value_copies_through_overlays() {
+    fn to_value_copies_grown_containers() {
         let mut builder = ValueBuilder::new();
         builder.set("kept", "yes").unwrap();
         let copy = builder

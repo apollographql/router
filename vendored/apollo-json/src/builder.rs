@@ -1547,7 +1547,7 @@ impl ValueBuilder {
             .position(|entry| self.arena.key_matches_bytes(entry.key, key))
     }
 
-    /// The members of a local object, reading through any overlay.
+    /// The members of a local object.
     fn object_members(&self, obj: NodeId) -> Option<&[Entry]> {
         match self.arena.node(obj) {
             Node::Object(slab) => Some(self.arena.entries(slab)),
