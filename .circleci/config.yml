@@ -1155,17 +1155,15 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_build >>
     jobs:
-      # arm64 links with GNU ld by default; these compare it to the toolchain's bundled rust-lld.
-      - memprofile:
-          name: memprofile-arm-32gb-j4-rustlld
-          platform: arm_linux_test
-          use_rust_lld: true
-      - memprofile:
-          name: memprofile-arm-16gb-j4-gnuld
-          platform: arm_linux_build
+      # arm64 with the toolchain's bundled rust-lld instead of GNU ld.
       - memprofile:
           name: memprofile-arm-16gb-j4-rustlld
           platform: arm_linux_build
+          use_rust_lld: true
+      - memprofile:
+          name: memprofile-arm-32gb-j8-rustlld
+          platform: arm_linux_test
+          build_jobs: 8
           use_rust_lld: true
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
