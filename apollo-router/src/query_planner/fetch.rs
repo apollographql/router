@@ -189,7 +189,7 @@ impl Variables {
                 }
 
                 let mut value = execute_selection_set(&value, requires, schema, None);
-                if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                if value.is_object() && value.is_empty() == Some(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
                         Some(index) => {
