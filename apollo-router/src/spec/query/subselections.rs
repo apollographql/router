@@ -209,7 +209,7 @@ pub(crate) fn defer_path_from_response_path(path: &crate::json_ext::Path) -> Vec
     path.0
         .iter()
         .filter_map(|element| match element {
-            crate::json_ext::PathElement::Key(key, _) => Some(key.clone()),
+            crate::json_ext::PathElement::Key(key, _) => Some(key.to_string()),
             _ => None,
         })
         .collect()

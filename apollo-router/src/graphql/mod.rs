@@ -446,7 +446,7 @@ impl From<CompilerExecutionError> for Error {
                 .into_iter()
                 .map(|element| match element {
                     ResponseDataPathSegment::Field(name) => {
-                        JsonPathElement::Key(name.as_str().to_owned(), None)
+                        JsonPathElement::Key(name.as_str().into(), None)
                     }
                     ResponseDataPathSegment::ListIndex(i) => JsonPathElement::Index(i),
                 })

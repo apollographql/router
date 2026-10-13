@@ -3437,7 +3437,7 @@ pub(super) fn non_entity_errors(errors: &[Error]) -> Vec<Error> {
             !e.path.as_ref().is_some_and(|path| {
                 matches!(
                     path.0.first(),
-                    Some(PathElement::Key(key, None)) if key == ENTITIES
+                    Some(PathElement::Key(key, None)) if &**key == ENTITIES
                 )
             })
         })
@@ -3457,7 +3457,7 @@ pub(super) fn reindex_entity_errors(
                 .as_ref()
                 .map(|path| {
                     path.starts_with(&Path(vec![
-                        PathElement::Key(ENTITIES.to_string(), None),
+                        PathElement::Key(ENTITIES.into(), None),
                         PathElement::Index(entity_idx),
                     ]))
                 })
@@ -3748,7 +3748,7 @@ pub(super) fn assemble_response_from_errors(
 
                 for mut error in graphql_errors.iter().cloned() {
                     error.path = Some(Path(vec![
-                        PathElement::Key(ENTITIES.to_string(), None),
+                        PathElement::Key(ENTITIES.into(), None),
                         PathElement::Index(new_entity_idx),
                     ]));
                     new_errors.push(error);

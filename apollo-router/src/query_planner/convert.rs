@@ -196,7 +196,10 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
                         next::QueryPathElement::Field { response_key } =>
                         // TODO: type conditioned fetching once it s available in the rust planner
                         {
-                            crate::graphql::JsonPathElement::Key(response_key.to_string(), None)
+                            crate::graphql::JsonPathElement::Key(
+                                response_key.to_string().into(),
+                                None,
+                            )
                         }
 
                         next::QueryPathElement::InlineFragment { type_condition } => {
@@ -257,7 +260,7 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
         // TODO: Go all in on Name eventually
         match value {
             next::FetchDataPathElement::Key(name, conditions) => Self::Key(
-                name.to_string(),
+                name.to_string().into(),
                 conditions
                     .as_ref()
                     .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
@@ -268,7 +271,7 @@ impl From<&'_ next::FetchDataPathElement> for crate::json_ext::PathElement {
                     .map(|conditions| conditions.iter().map(|c| c.to_string()).collect()),
             ),
             next::FetchDataPathElement::TypenameEquals(value) => Self::Fragment(value.to_string()),
-            next::FetchDataPathElement::Parent => Self::Key("..".to_owned(), None),
+            next::FetchDataPathElement::Parent => Self::Key("..".into(), None),
         }
     }
 }

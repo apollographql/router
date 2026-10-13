@@ -356,10 +356,7 @@ impl FetchNode {
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
-            let entities_path = Path(vec![json_ext::PathElement::Key(
-                "_entities".to_string(),
-                None,
-            )]);
+            let entities_path = Path(vec![json_ext::PathElement::Key("_entities".into(), None)]);
 
             // when hoist_orphan_errors is enabled, the fallback_dir is the immediate parent of
             // the current_dir when the current_dir is wildcarded (ie, @, which is PathElement::Flatten)
@@ -641,7 +638,7 @@ mod tests {
     }
 
     fn key(name: &str) -> json_ext::PathElement {
-        json_ext::PathElement::Key(name.to_string(), None)
+        json_ext::PathElement::Key(name.into(), None)
     }
 
     fn index(i: usize) -> json_ext::PathElement {

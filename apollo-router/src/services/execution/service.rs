@@ -628,7 +628,7 @@ mod tests {
     use crate::spec::query::subselections::BooleanValues;
 
     fn key(name: &str) -> PathElement {
-        PathElement::Key(name.to_string(), None)
+        PathElement::Key(name.into(), None)
     }
 
     fn index(i: usize) -> PathElement {

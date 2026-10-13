@@ -53,7 +53,7 @@ fn merge_context_path(
         match &context_path.0.get(i) {
             Some(PathElement::Key(e, _)) => {
                 let mut found = false;
-                if e == ".." {
+                if &**e == ".." {
                     while !found {
                         if j == 0 {
                             return Err(ContextBatchingError::InvalidRelativePath);

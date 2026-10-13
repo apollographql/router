@@ -346,10 +346,10 @@ async fn defer() {
                     id: "fetch1".into(),
                 }],
                 label: None,
-                query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                query_path: Path(vec![PathElement::Key("t".into(), None)]),
                 subselection: Some("{ y }".to_string()),
                 node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                    path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                    path: Path(vec![PathElement::Key("t".into(), None)]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Y".into(),
                         requires: vec![requires_selection::Selection::InlineFragment(
@@ -1923,9 +1923,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                         // Dependency fetch: gets sub.data (the deferred node depends on this)
                         PlanNode::Flatten(FlattenNode {
                             path: Path(vec![
-                                PathElement::Key("start".to_string(), None),
-                                PathElement::Key("inner".to_string(), None),
-                                PathElement::Key("sub".to_string(), None),
+                                PathElement::Key("start".into(), None),
+                                PathElement::Key("inner".into(), None),
+                                PathElement::Key("sub".into(), None),
                             ]),
                             node: Box::new(PlanNode::Fetch(FetchNode {
                                 service_name: "Y".into(),
@@ -1978,14 +1978,14 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                 ],
                 label: None,
                 query_path: Path(vec![
-                    PathElement::Key("start".to_string(), None),
-                    PathElement::Key("inner".to_string(), None),
+                    PathElement::Key("start".into(), None),
+                    PathElement::Key("inner".into(), None),
                 ]),
                 subselection: Some("{ target { x } }".to_string()),
                 node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
                     path: Path(vec![
-                        PathElement::Key("start".to_string(), None),
-                        PathElement::Key("inner".to_string(), None),
+                        PathElement::Key("start".into(), None),
+                        PathElement::Key("inner".into(), None),
                     ]),
                     node: Box::new(PlanNode::Fetch(FetchNode {
                         service_name: "Z".into(),

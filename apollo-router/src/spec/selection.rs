@@ -205,7 +205,7 @@ impl Selection {
                     ..
                 },
             ) => {
-                if alias.as_ref().unwrap_or(name).as_str() == key.as_str() {
+                if alias.as_ref().unwrap_or(name).as_str() == key.as_ref() {
                     match selection_set {
                         // if we don't select after that field, the path should stop there
                         None => 1,

@@ -77,8 +77,8 @@ impl DataRewrite {
                     split_path_last_element(&setter.path)
                 {
                     data.select_values_and_paths_mut(schema, &parent, |_path, mut obj| {
-                        if obj.value().get(k.as_str()).is_some() {
-                            let _ = obj.set(k.as_str(), setter.set_value_to.clone());
+                        if obj.value().get(k.as_ref()).is_some() {
+                            let _ = obj.set(k.as_ref(), setter.set_value_to.clone());
                         }
                     });
                 }

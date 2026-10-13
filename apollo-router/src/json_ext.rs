@@ -4,6 +4,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::sync::Arc;
 
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
@@ -547,7 +548,7 @@ fn check_writable(
 fn write_checked(mut cursor: ValueMut<'_>, elements: &[PathElement], leaf: Value) {
     let (first, rest) = split_addressing(elements).expect("the caller handles an empty path");
     let slot = match first {
-        PathElement::Key(key, _) => apollo_json::PathSegment::Key(key.as_str()),
+        PathElement::Key(key, _) => apollo_json::PathSegment::Key(key.as_ref()),
         &PathElement::Index(index) => {
             while cursor.value().len().unwrap_or(0) < index {
                 cursor
@@ -581,7 +582,7 @@ fn at_segment<'b>(
     segment: &PathElement,
 ) -> Option<apollo_json::BuilderRef<'b>> {
     match segment {
-        PathElement::Key(key, _) => value.get(key.as_str()),
+        PathElement::Key(key, _) => value.get(key.as_ref()),
         &PathElement::Index(index) => value.index(index),
         _ => unreachable!("path segments are only keys and indexes"),
     }
@@ -779,12 +780,12 @@ where
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
                     if data.kind() == JsonKind::Object {
-                        if let Some(value) = data.get(k.as_str())
+                        if let Some(value) = data.get(k.as_ref())
                             && let Some(type_name) =
                                 value.get("__typename").and_then(|v| v.as_str_owned())
                             && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                         {
-                            parent.push(PathElement::Key(k.to_string(), None));
+                            parent.push(PathElement::Key(k.clone(), None));
                             iterate_path(schema, parent, &path[1..], value, f);
                             parent.pop();
                         }
@@ -803,8 +804,8 @@ where
                     }
                 }
             } else if data.kind() == JsonKind::Object {
-                if let Some(value) = data.get(k.as_str()) {
-                    parent.push(PathElement::Key(k.to_string(), None));
+                if let Some(value) = data.get(k.as_ref()) {
+                    parent.push(PathElement::Key(k.clone(), None));
                     iterate_path(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
@@ -881,10 +882,10 @@ fn iterate_path_mut<F>(
                     if data.value().kind() == JsonKind::Object {
                         let matches = data
                             .value()
-                            .get(k.as_str())
+                            .get(k.as_ref())
                             .is_some_and(|value| value_matches_type_conditions(value, tc));
-                        if matches && let Ok(child) = data.child_mut(k.as_str()) {
-                            parent.push(PathElement::Key(k.to_string(), None));
+                        if matches && let Ok(child) = data.child_mut(k.as_ref()) {
+                            parent.push(PathElement::Key(k.clone(), None));
                             iterate_path_mut(schema, parent, &path[1..], child, f);
                             parent.pop();
                         }
@@ -904,8 +905,8 @@ fn iterate_path_mut<F>(
                     }
                 }
             } else if data.value().kind() == JsonKind::Object {
-                if let Ok(child) = data.child_mut(k.as_str()) {
-                    parent.push(PathElement::Key(k.to_string(), None));
+                if let Ok(child) = data.child_mut(k.as_ref()) {
+                    parent.push(PathElement::Key(k.clone(), None));
                     iterate_path_mut(schema, parent, &path[1..], child, f);
                     parent.pop();
                 }
@@ -981,9 +982,10 @@ pub enum PathElement {
     )]
     Fragment(String),
 
-    /// A key path element.
+    /// A key path element. The key is shared, so cloning a path (once per
+    /// entity during a fetch) does not copy its keys.
     #[serde(deserialize_with = "deserialize_key", serialize_with = "serialize_key")]
-    Key(String, Option<TypeConditions>),
+    Key(Arc<str>, Option<TypeConditions>),
 }
 
 type TypeConditions = Vec<String>;
@@ -1048,7 +1050,7 @@ where
     serializer.serialize_str(res.as_str())
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<(String, Option<TypeConditions>), D::Error>
+fn deserialize_key<'de, D>(deserializer: D) -> Result<(Arc<str>, Option<TypeConditions>), D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -1058,7 +1060,7 @@ where
 struct KeyVisitor;
 
 impl serde::de::Visitor<'_> for KeyVisitor {
-    type Value = (String, Option<TypeConditions>);
+    type Value = (Arc<str>, Option<TypeConditions>);
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -1071,12 +1073,13 @@ impl serde::de::Visitor<'_> for KeyVisitor {
     where
         E: serde::de::Error,
     {
-        Ok(split_path_element_and_type_conditions(s))
+        let (key, type_conditions) = split_path_element_and_type_conditions(s);
+        Ok((key.into(), type_conditions))
     }
 }
 
 fn serialize_key<S>(
-    key: &String,
+    key: &Arc<str>,
     type_conditions: &Option<TypeConditions>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
@@ -1135,7 +1138,7 @@ fn flatten_from_str(s: &str) -> Result<PathElement, String> {
 
 fn key_from_str(s: &str) -> Result<PathElement, String> {
     let (key, type_conditions) = split_path_element_and_type_conditions(s);
-    Ok(PathElement::Key(key, type_conditions))
+    Ok(PathElement::Key(key.into(), type_conditions))
 }
 
 /// A path into the result document.
@@ -1157,7 +1160,7 @@ impl Path {
                         flatten_from_str(s).unwrap_or(PathElement::Flatten(None))
                     } else {
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
-                            || key_from_str(s).unwrap_or(PathElement::Key(s.to_string(), None)),
+                            || key_from_str(s).unwrap_or(PathElement::Key(s.into(), None)),
                             |name| PathElement::Fragment(name.to_string()),
                         )
                     }
@@ -1171,7 +1174,7 @@ impl Path {
             s.iter()
                 .map(|x| match x {
                     ResponsePathElement::Index(index) => PathElement::Index(*index),
-                    ResponsePathElement::Key(s) => PathElement::Key(s.to_string(), None),
+                    ResponsePathElement::Key(s) => PathElement::Key((*s).into(), None),
                 })
                 .collect(),
         )
@@ -1308,7 +1311,7 @@ where
                         flatten_from_str(s).unwrap()
                     } else {
                         s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
-                            || key_from_str(s).unwrap_or(PathElement::Key(s.to_string(), None)),
+                            || key_from_str(s).unwrap_or(PathElement::Key(s.into(), None)),
                             |name| PathElement::Fragment(name.to_string()),
                         )
                     }
@@ -1820,6 +1823,26 @@ mod tests {
     }
 
     #[test]
+    fn test_path_keys_are_shared_by_clones_and_serialize_as_before() {
+        let path = Path::from("t/@|[A,B]/inner/2");
+        let copy = path.clone();
+        match (&path.0[0], &copy.0[0]) {
+            (PathElement::Key(a, _), PathElement::Key(b, _)) => assert!(Arc::ptr_eq(a, b)),
+            other => panic!("expected keys, got {other:?}"),
+        }
+
+        let serialized = serde_json::to_string(&Path(vec![
+            PathElement::Key("t".into(), Some(vec!["A".into(), "B".into()])),
+            PathElement::Index(2),
+            PathElement::Key("name".into(), None),
+        ]))
+        .unwrap();
+        assert_eq!(serialized, r#"["t|[A,B]",2,"name"]"#);
+        let back: Path = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(serde_json::to_string(&back).unwrap(), serialized);
+    }
+
+    #[test]
     fn test_from_path() {
         let json = json!([{"prop1":1},{"prop1":2}]);
         let path = Path::from("obj/arr");
@@ -2030,10 +2053,10 @@ mod tests {
         assert_eq!(
             path.0,
             vec![
-                PathElement::Key("k".to_string(), None),
+                PathElement::Key("k".into(), None),
                 PathElement::Fragment("T".to_string()),
                 PathElement::Flatten(None),
-                PathElement::Key("arr".to_string(), None),
+                PathElement::Key("arr".into(), None),
                 PathElement::Index(3),
             ]
         );
