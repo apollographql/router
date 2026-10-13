@@ -19,19 +19,20 @@ use crate::supergraph::CompositionHint;
 /// An `@deprecated` removed from an implementing field because this subgraph's
 /// copy of the interface field is not deprecated. The merged interface can
 /// differ from any one subgraph's copy, so the merger decides whether it stays
-/// removed and reports the hint.
+/// removed and reports the hint. Callers that do not merge are responsible for
+/// reporting these themselves.
 #[derive(Clone, Debug)]
-pub(crate) struct StrippedDeprecation {
-    pub(crate) type_name: Name,
-    pub(crate) field_name: Name,
-    pub(crate) directive: Node<Directive>,
-    pub(crate) range: Range<LineColumn>,
+pub struct StrippedDeprecation {
+    pub type_name: Name,
+    pub field_name: Name,
+    pub directive: Node<Directive>,
+    pub range: Range<LineColumn>,
 }
 
-#[derive(Default)]
-pub(crate) struct Fed3Upgrade {
-    pub(crate) hints: Vec<CompositionHint>,
-    pub(crate) stripped_deprecations: Vec<StrippedDeprecation>,
+#[derive(Debug, Default)]
+pub struct Fed3Upgrade {
+    pub hints: Vec<CompositionHint>,
+    pub stripped_deprecations: Vec<StrippedDeprecation>,
 }
 
 /// Upgrade a federation 2 subgraph schema so it is valid under the GraphQL
@@ -47,7 +48,7 @@ pub(crate) struct Fed3Upgrade {
 ///    field is *not* deprecated — disallowed by the 2025 spec. The directive
 ///    is stripped from the implementing field and returned in
 ///    `stripped_deprecations` rather than as a hint.
-pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Fed3Upgrade {
+pub fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Fed3Upgrade {
     let mut hints = Vec::new();
     let mut stripped = Vec::new();
 
