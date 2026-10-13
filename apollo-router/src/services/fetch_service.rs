@@ -191,7 +191,7 @@ impl FetchService {
             let (value, mut errors) = fetch_node.response_at_path(
                 &schema,
                 &current_dir,
-                paths,
+                &paths,
                 response,
                 hoist_orphan_errors,
             );
