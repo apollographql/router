@@ -16,7 +16,9 @@ mkdir -p "$out"
 } > "$out/env.txt" 2>&1
 
 # Optionally link through the rust-lld bundled with the toolchain, using only stable flags.
-if [ "${MEMPROFILE_RUST_LLD:-false}" = true ]; then
+echo "MEMPROFILE_RUST_LLD=${MEMPROFILE_RUST_LLD:-unset}" >> "$out/env.txt"
+case "$(echo "${MEMPROFILE_RUST_LLD:-false}" | tr '[:upper:]' '[:lower:]')" in true | 1 | yes) use_lld=1 ;; *) use_lld=0 ;; esac
+if [ "$use_lld" = 1 ]; then
   gccld="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | awk '/^host:/{print $2}')/bin/gcc-ld"
   export RUSTFLAGS="-Clink-arg=-fuse-ld=lld -Clink-arg=-B$gccld"
 fi
