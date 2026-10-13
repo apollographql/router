@@ -30,7 +30,7 @@ use crate::supergraph::CompositionHint;
 /// 2. `@deprecated` on an implementing field whose corresponding interface
 ///    field is *not* deprecated — disallowed by the 2025 spec. The directive
 ///    is stripped from the implementing field.
-pub fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Vec<CompositionHint> {
+pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Vec<CompositionHint> {
     let mut hints = Vec::new();
 
     // Clone the source map before mutating types — it's Arc-backed so this is cheap.
