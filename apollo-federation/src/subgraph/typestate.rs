@@ -106,6 +106,8 @@ pub struct Validated {
     /// Only warnings live here: errors abort the transition into this state, and are carried by the
     /// [`CompositionFailure`] instead. Connectors validation is the only producer today.
     hints: Vec<CompositionHint>,
+    /// `@deprecated` applications the fed3 upgrade removed from implementing fields.
+    stripped_deprecations: Vec<fed3_upgrader::StrippedDeprecation>,
 }
 
 impl Expanded {
@@ -181,7 +183,7 @@ impl HasMetadata for Validated {
 ///   metadata has been computed. The schema may be fed1 or fed2, and is *not* yet validated —
 ///   expansion is a transformation, and every validation happens on the way to `Validated`.
 ///   - Transformations that must precede *every* validation are applied in place while here, rather
-///     than on a transition out of the state: see [`Subgraph::<Expanded>::apply_fed3_upgrade`].
+///     than on a transition out of the state: see `Subgraph::<Expanded>::apply_fed3_upgrade`.
 /// - `Upgraded`: The schema has been upgraded to Federation v2 format or root type normalized.
 ///   Like `Expanded`, it is not yet validated.
 ///   - Fed v1 input schemas are always upgraded to fed v2 and may be root type normalized.
@@ -482,7 +484,8 @@ impl Subgraph<Expanded> {
     }
 
     /// Upgrades the schema for compatibility with the GraphQL September 2025 spec,
-    /// returning a hint for every transformation applied.
+    /// returning a hint for every transformation applied and the `@deprecated` applications it
+    /// removed from implementing fields, which the merger re-checks against the merged interfaces.
     ///
     /// Runs on `Expanded`, ahead of every validation: the constructs it rewrites are invalid under
     /// the 2025 spec, so a subgraph must not reach a validation before this has run.
@@ -491,7 +494,7 @@ impl Subgraph<Expanded> {
     /// after this one is fallible, and their `?`s would drop hints carried along in the state. It is
     /// the caller's job to gather them somewhere that failure cannot discard — see
     /// [`crate::schema::schema_upgrader::upgrade_subgraphs_if_necessary`].
-    pub fn apply_fed3_upgrade(&mut self) -> Vec<CompositionHint> {
+    pub(crate) fn apply_fed3_upgrade(&mut self) -> fed3_upgrader::Fed3Upgrade {
         fed3_upgrader::apply_fed3_upgrade(self.state.schema.schema_mut(), &self.name)
     }
 
@@ -613,6 +616,7 @@ impl Subgraph<Expanded> {
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata: self.state.metadata,
                 hints,
+                stripped_deprecations: Vec::new(),
             },
         })
     }
@@ -696,6 +700,7 @@ impl Subgraph<Upgraded> {
                 orphan_extension_types: self.state.orphan_extension_types,
                 metadata,
                 hints,
+                stripped_deprecations: Vec::new(),
             },
         })
     }
@@ -764,6 +769,17 @@ impl Subgraph<Validated> {
 
     pub fn take_hints(&mut self) -> Vec<CompositionHint> {
         std::mem::take(&mut self.state.hints)
+    }
+
+    pub(crate) fn set_stripped_deprecations(
+        &mut self,
+        stripped: Vec<fed3_upgrader::StrippedDeprecation>,
+    ) {
+        self.state.stripped_deprecations = stripped;
+    }
+
+    pub(crate) fn stripped_deprecations(&self) -> &[fed3_upgrader::StrippedDeprecation] {
+        &self.state.stripped_deprecations
     }
 }
 

@@ -682,6 +682,10 @@ impl Merger {
         trace!("Removing redundant @join__field directives");
         self.remove_redundant_join_fields()?;
 
+        // After interface object fields are backfilled, so their implementations are checked too.
+        trace!("Merging @deprecated on implementing fields");
+        self.merge_implementation_deprecations();
+
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
         if !errors.is_empty() {

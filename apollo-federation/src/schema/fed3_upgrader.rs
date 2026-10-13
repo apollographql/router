@@ -3,6 +3,7 @@ use std::ops::Range;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
@@ -12,13 +13,29 @@ use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::SubgraphLocation;
-use crate::merger::hints::DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE;
 use crate::merger::hints::DEPRECATED_REASON_NULL;
 use crate::supergraph::CompositionHint;
 
+/// An `@deprecated` removed from an implementing field because this subgraph's
+/// copy of the interface field is not deprecated. The merged interface can
+/// differ from any one subgraph's copy, so the merger decides whether it stays
+/// removed and reports the hint.
+#[derive(Clone, Debug)]
+pub(crate) struct StrippedDeprecation {
+    pub(crate) type_name: Name,
+    pub(crate) field_name: Name,
+    pub(crate) directive: Node<Directive>,
+    pub(crate) range: Range<LineColumn>,
+}
+
+#[derive(Default)]
+pub(crate) struct Fed3Upgrade {
+    pub(crate) hints: Vec<CompositionHint>,
+    pub(crate) stripped_deprecations: Vec<StrippedDeprecation>,
+}
+
 /// Upgrade a federation 2 subgraph schema so it is valid under the GraphQL
-/// September 2025 spec (federation 3 / Router 3). Returns composition hints
-/// describing every transformation applied.
+/// September 2025 spec (federation 3 / Router 3).
 ///
 /// Handles:
 /// 1. `@deprecated(reason: null)` — the `reason` argument became non-nullable
@@ -28,9 +45,11 @@ use crate::supergraph::CompositionHint;
 ///    enum values, input fields, and argument definitions.
 /// 2. `@deprecated` on an implementing field whose corresponding interface
 ///    field is *not* deprecated — disallowed by the 2025 spec. The directive
-///    is stripped from the implementing field.
-pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Vec<CompositionHint> {
+///    is stripped from the implementing field and returned in
+///    `stripped_deprecations` rather than as a hint.
+pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Fed3Upgrade {
     let mut hints = Vec::new();
+    let mut stripped = Vec::new();
 
     // Clone the source map before mutating types — it's Arc-backed so this is cheap.
     let sources = schema.sources.clone();
@@ -51,12 +70,11 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     &sources,
                 );
                 strip_deprecated_on_non_deprecated_interface_fields(
-                    &mut hints,
+                    &mut stripped,
                     &object.implements_interfaces,
                     &mut object.fields,
                     &object.name,
                     &iface_non_deprecated,
-                    subgraph_name,
                     &sources,
                 );
             }
@@ -70,12 +88,11 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
                     &sources,
                 );
                 strip_deprecated_on_non_deprecated_interface_fields(
-                    &mut hints,
+                    &mut stripped,
                     &interface.implements_interfaces,
                     &mut interface.fields,
                     &interface.name,
                     &iface_non_deprecated,
-                    subgraph_name,
                     &sources,
                 );
             }
@@ -112,7 +129,10 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
             _ => {}
         }
     }
-    hints
+    Fed3Upgrade {
+        hints,
+        stripped_deprecations: stripped,
+    }
 }
 
 /// Strip `@deprecated(reason: null)` from all fields and their arguments.
@@ -152,12 +172,11 @@ fn upgrade_fields_and_args(
 /// For each interface this type implements, strip `@deprecated` from fields
 /// where the corresponding interface field is not deprecated.
 fn strip_deprecated_on_non_deprecated_interface_fields(
-    hints: &mut Vec<CompositionHint>,
+    stripped: &mut Vec<StrippedDeprecation>,
     implements_interfaces: &IndexSet<Node<Name>>,
     fields: &mut IndexMap<Name, Node<FieldDefinition>>,
     type_name: &Name,
     iface_non_deprecated: &IndexMap<Name, IndexSet<Name>>,
-    subgraph_name: &str,
     sources: &SourceMap,
 ) {
     for iface_name in implements_interfaces {
@@ -167,12 +186,10 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
                 if non_deprecated_fields.contains(&field_name) {
                     let field_def = field.make_mut();
                     strip_deprecated_without_interface(
-                        hints,
+                        stripped,
                         &mut field_def.directives,
                         type_name,
                         &field_name,
-                        iface_name,
-                        subgraph_name,
                         sources,
                     );
                 }
@@ -249,35 +266,31 @@ fn strip_deprecated_reason_null(
 }
 
 /// Strip `@deprecated` from an implementing field when the corresponding
-/// interface field is not deprecated, emitting a hint for each occurrence.
+/// interface field is not deprecated, recording what was removed.
 fn strip_deprecated_without_interface(
-    hints: &mut Vec<CompositionHint>,
+    stripped: &mut Vec<StrippedDeprecation>,
     directives: &mut DirectiveList,
     type_name: &Name,
     field_name: &Name,
-    interface_name: &Name,
-    subgraph_name: &str,
     sources: &SourceMap,
 ) {
-    let deprecated = directives.0.iter().find(|d| d.name == "deprecated");
-    if let Some(directive) = deprecated {
-        let range = directive
+    let Some(directive) = directives
+        .0
+        .iter()
+        .find(|d| d.name == "deprecated")
+        .cloned()
+    else {
+        return;
+    };
+    directives.0.retain(|d| d.name != "deprecated");
+    stripped.push(StrippedDeprecation {
+        type_name: type_name.clone(),
+        field_name: field_name.clone(),
+        range: directive
             .line_column_range(sources)
-            .unwrap_or_else(default_range);
-        directives.0.retain(|d| d.name != "deprecated");
-        hints.push(CompositionHint {
-            definition: &DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE,
-            message: format!(
-                "Stripped `@deprecated` from `{type_name}.{field_name}` because \
-                 `{interface_name}.{field_name}` is not deprecated. Either deprecate \
-                 the interface field or remove `@deprecated` from the implementation."
-            ),
-            locations: vec![SubgraphLocation {
-                subgraph: subgraph_name.to_owned(),
-                range,
-            }],
-        });
-    }
+            .unwrap_or_else(default_range),
+        directive,
+    });
 }
 
 #[cfg(test)]
@@ -286,6 +299,7 @@ mod tests {
 
     use crate::composition::CompositionOptions;
     use crate::subgraph::typestate::Subgraph;
+    use crate::supergraph::CompositionHint;
     use crate::supergraph::Supergraph;
 
     fn compose_supergraph(sdl: &str) -> (Supergraph<crate::supergraph::Satisfiable>, Vec<String>) {
@@ -708,5 +722,133 @@ mod tests {
             reason_null_hints, 2,
             "Expected one DEPRECATED_REASON_NULL hint per subgraph, got: {hint_codes:?}"
         );
+    }
+
+    const MULTI_SUBGRAPH_LINK: &str = r#"extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@interfaceObject"])"#;
+
+    fn compose_subgraphs(
+        subgraphs: &[(&str, &str)],
+    ) -> (
+        Supergraph<crate::supergraph::Satisfiable>,
+        Vec<CompositionHint>,
+    ) {
+        let parsed = subgraphs
+            .iter()
+            .map(|(name, sdl)| {
+                Subgraph::parse(
+                    name,
+                    &format!("http://{name}"),
+                    &format!("{MULTI_SUBGRAPH_LINK}\n{sdl}"),
+                )
+                .expect("should parse test subgraph")
+            })
+            .collect();
+        let result = crate::composition::compose(parsed, CompositionOptions::default())
+            .unwrap_or_else(|failure| panic!("should compose: {:?}", failure.errors));
+        let hints = result
+            .hints()
+            .iter()
+            .filter(|h| h.code() == "DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE")
+            .cloned()
+            .collect();
+        (result, hints)
+    }
+
+    fn is_deprecated(
+        supergraph: &Supergraph<crate::supergraph::Satisfiable>,
+        ty: &str,
+        field: &str,
+    ) -> bool {
+        supergraph
+            .schema()
+            .schema()
+            .type_field(ty, field)
+            .expect("field should exist in supergraph")
+            .directives
+            .has("deprecated")
+    }
+
+    #[test]
+    fn strips_deprecated_when_interface_field_is_declared_by_another_subgraph() {
+        let (supergraph, hints) = compose_subgraphs(&[
+            (
+                "platform",
+                r#"
+                type Query { node(id: ID!): Node }
+                interface Node { id: ID! name: String }
+                "#,
+            ),
+            (
+                "products",
+                r#"
+                interface Node { id: ID! }
+                type Product implements Node @key(fields: "id") {
+                    id: ID!
+                    name: String @deprecated(reason: "use title")
+                }
+                "#,
+            ),
+        ]);
+        assert!(!is_deprecated(&supergraph, "Product", "name"));
+        assert_eq!(hints.len(), 1, "expected one strip hint, got: {hints:?}");
+        assert_eq!(hints[0].locations[0].subgraph, "products");
+    }
+
+    #[test]
+    fn keeps_deprecated_when_merged_interface_field_is_deprecated() {
+        let (supergraph, hints) = compose_subgraphs(&[
+            (
+                "platform",
+                r#"
+                type Query { node(id: ID!): Node }
+                interface Node { id: ID! name: String @deprecated(reason: "use title") }
+                "#,
+            ),
+            (
+                "products",
+                r#"
+                interface Node { id: ID! name: String }
+                type Product implements Node @key(fields: "id") {
+                    id: ID!
+                    name: String @deprecated(reason: "use title")
+                }
+                "#,
+            ),
+        ]);
+        assert!(is_deprecated(&supergraph, "Node", "name"));
+        assert!(is_deprecated(&supergraph, "Product", "name"));
+        assert!(hints.is_empty(), "expected no strip hint, got: {hints:?}");
+    }
+
+    #[test]
+    fn strips_deprecated_when_interface_object_field_is_not_deprecated() {
+        let (supergraph, hints) = compose_subgraphs(&[
+            (
+                "platform",
+                r#"
+                type Query { node(id: ID!): Node }
+                interface Node @key(fields: "id") { id: ID! }
+                type Product implements Node @key(fields: "id") { id: ID! }
+                "#,
+            ),
+            (
+                "legacy",
+                r#"
+                type Node @interfaceObject @key(fields: "id") { id: ID! old: String @shareable }
+                "#,
+            ),
+            (
+                "products",
+                r#"
+                type Product @key(fields: "id") {
+                    id: ID!
+                    old: String @shareable @deprecated(reason: "gone soon")
+                }
+                "#,
+            ),
+        ]);
+        assert!(!is_deprecated(&supergraph, "Product", "old"));
+        assert_eq!(hints.len(), 1, "expected one strip hint, got: {hints:?}");
+        assert_eq!(hints[0].locations[0].subgraph, "products");
     }
 }
