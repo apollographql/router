@@ -240,7 +240,7 @@ mod tests {
                         problems: vec![],
                         declared_errors: vec![],
                     },
-                    break_status: None,
+                    answered_by_router: false,
                 });
             });
 
@@ -346,7 +346,7 @@ mod tests {
                         problems: vec![],
                         declared_errors: vec![],
                     },
-                    break_status: None,
+                    answered_by_router: false,
                 });
             });
 

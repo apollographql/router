@@ -546,7 +546,7 @@ fn now() -> u64 {
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl Storage {
-    async fn mocked(
+    pub(crate) async fn mocked(
         config: &Config,
         is_cluster: bool,
         mock_storage: std::sync::Arc<dyn fred::mocks::Mocks>,
@@ -644,6 +644,53 @@ impl Storage {
 
     pub(crate) fn send_to_maintenance_queue_for_test(&self, key: String) {
         self.send_to_maintenance_queue(key);
+    }
+}
+
+/// A mock store that holds a fresh entry for every key, so every cache lookup is a hit on an
+/// entry holding `data`. Writes are accepted and dropped.
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+#[derive(Debug)]
+pub(crate) struct AlwaysHit(fred::types::Value);
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl AlwaysHit {
+    pub(crate) fn new(data: serde_json_bytes::Value) -> Self {
+        let entry = CacheValue {
+            data,
+            cache_control: CacheControl::default(),
+            cache_tags: None,
+            mapping_problems: Vec::new(),
+            status: None,
+        };
+        Self(
+            serde_json::to_string(&entry)
+                .expect("entry serializes")
+                .into(),
+        )
+    }
+}
+
+#[cfg(all(
+    test,
+    any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
+))]
+impl fred::mocks::Mocks for AlwaysHit {
+    fn process_command(
+        &self,
+        command: fred::mocks::MockCommand,
+    ) -> Result<fred::types::Value, fred::error::Error> {
+        Ok(match &*command.cmd {
+            "GET" => self.0.clone(),
+            "MGET" => fred::types::Value::Array(vec![self.0.clone(); command.args.len()]),
+            _ => fred::types::Value::Integer(1),
+        })
     }
 }
 
