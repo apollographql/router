@@ -5,7 +5,6 @@ use apollo_redaction::Redacted;
 use http::Uri;
 use opentelemetry_otlp::RetryPolicy;
 use opentelemetry_sdk::metrics::Temporality as SdkTemporality;
-use schemars::JsonSchema;
 use serde::Serialize;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
