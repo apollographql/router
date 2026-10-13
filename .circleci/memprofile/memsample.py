@@ -7,7 +7,7 @@ import os
 import sys
 import time
 
-WATCH = {"rustc", "ld", "ld.bfd", "ld.lld", "ld.gold", "mold", "collect2", "cc", "gcc", "cargo"}
+WATCH = {"rustc", "ld", "ld.bfd", "ld.lld", "rust-lld", "ld.gold", "mold", "collect2", "cc", "gcc", "cargo"}
 out = open(sys.argv[1], "w", buffering=1)
 interval = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
 
