@@ -54,6 +54,44 @@ pub(crate) enum SelectorOrValue<T> {
     Selector(T),
 }
 
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// selected condition's operands.
+impl<T> apollo_configuration::Validate for Condition<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        let (key, operands) = match self {
+            Condition::Eq(operands) => ("eq", operands),
+            Condition::Gt(operands) => ("gt", operands),
+            Condition::Lt(operands) => ("lt", operands),
+            Condition::Exists(selector) => return selector.validate(errors.nest("exists")),
+            Condition::All(conditions) => return conditions.validate(errors.nest("all")),
+            Condition::Any(conditions) => return conditions.validate(errors.nest("any")),
+            Condition::Not(condition) => return condition.validate(errors.nest("not")),
+            Condition::True | Condition::False => return,
+        };
+        let mut errors = errors.nest(key);
+        for (index, operand) in operands.iter().enumerate() {
+            operand.validate(errors.nest(index));
+        }
+    }
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// selector. The enum is untagged, so the operand keeps its own path.
+impl<T> apollo_configuration::Validate for SelectorOrValue<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            SelectorOrValue::Value(value) => value.validate(errors),
+            SelectorOrValue::Selector(selector) => selector.validate(errors),
+        }
+    }
+}
+
 impl<T> Condition<T>
 where
     T: Selector,

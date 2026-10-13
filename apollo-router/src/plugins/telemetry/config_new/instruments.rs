@@ -77,8 +77,7 @@ use crate::services::supergraph;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct InstrumentsConfig {
     /// The attributes and instruments to include by default in instruments based on their level as specified in the otel semantic conventions and Apollo documentation.
     pub(crate) default_requirement_level: DefaultAttributeRequirementLevel,
@@ -1105,8 +1104,7 @@ impl StaticInstrument {
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct ActiveRequestsAttributes {
     /// The HTTP request method
     #[serde(rename = "http.request.method")]
@@ -1139,8 +1137,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
+#[apollo_configuration::configuration]
 pub(crate) struct SubscriptionsTerminatedAttributes {
     /// The reason the subscription terminated
     reason: Option<bool>,
@@ -1289,6 +1286,19 @@ pub(crate) enum DefaultedStandardInstrument<T> {
     },
 }
 
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// instrument's attributes. The enum is untagged, so they sit directly under the instrument's key.
+impl<T> apollo_configuration::Validate for DefaultedStandardInstrument<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        if let Self::Extendable { attributes } = self {
+            attributes.validate(errors.nest("attributes"));
+        }
+    }
+}
+
 impl<T> DefaultedStandardInstrument<T> {
     pub(crate) fn is_enabled(&self) -> bool {
         match self {
@@ -1431,8 +1441,23 @@ where
     }
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// instrument's value, attributes and condition. Its other fields are scalars.
+impl<A, E, V> apollo_configuration::Validate for Instrument<A, E, V>
+where
+    A: Default + Debug + apollo_configuration::Validate,
+    E: Debug + apollo_configuration::Validate,
+    V: apollo_configuration::Validate,
+    for<'a> &'a V: Into<InstrumentValue<E>>,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        self.value.validate(errors.nest("value"));
+        self.attributes.validate(errors.nest("attributes"));
+        self.condition.validate(errors.nest("condition"));
+    }
+}
+
+#[apollo_configuration::configuration]
 pub(crate) enum InstrumentType {
     /// A monotonic counter https://opentelemetry.io/docs/specs/otel/metrics/data-model/#sums
     Counter,
@@ -1454,14 +1479,12 @@ pub(crate) enum InstrumentValue<T> {
     Custom(T),
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum StandardUnit {
     Unit,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[apollo_configuration::configuration]
 pub(crate) enum Standard {
     Duration,
     Unit,
@@ -1490,6 +1513,48 @@ pub(crate) enum Field<T> {
     /// For every field
     #[serde(rename = "field_custom")]
     Custom(T),
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// custom selector. The enum is untagged, so each value keeps its own path.
+impl<T> apollo_configuration::Validate for InstrumentValue<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, errors: apollo_configuration::ErrorCollector<'_>) {
+        match self {
+            InstrumentValue::Standard(_) => {}
+            InstrumentValue::Chunked(event) => event.validate(errors),
+            InstrumentValue::Field(field) => field.validate(errors),
+            InstrumentValue::Custom(selector) => selector.validate(errors),
+        }
+    }
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// custom selector.
+impl<T> apollo_configuration::Validate for Event<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        if let Event::Custom(selector) = self {
+            selector.validate(errors.nest("event_custom"));
+        }
+    }
+}
+
+// The configuration attribute doesn't support generic types, so this forwards validation to the
+// custom selector.
+impl<T> apollo_configuration::Validate for Field<T>
+where
+    T: apollo_configuration::Validate,
+{
+    fn validate(&self, mut errors: apollo_configuration::ErrorCollector<'_>) {
+        if let Field::Custom(selector) = self {
+            selector.validate(errors.nest("field_custom"));
+        }
+    }
 }
 
 pub(crate) trait Instrumented {
