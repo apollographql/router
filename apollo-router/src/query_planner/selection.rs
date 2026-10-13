@@ -1,44 +1,31 @@
-use std::borrow::Cow;
-
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::requires_selection::Field;
 use apollo_federation::query_plan::requires_selection::InlineFragment;
 use apollo_federation::query_plan::requires_selection::Selection;
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
+use apollo_json::PendingId;
+use apollo_json::PendingTree;
 
+#[cfg(test)]
 use crate::json_ext;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
 
-type Members<'a> = Vec<(Cow<'a, str>, NewValue<'a>)>;
-
-/// The output member at `key`, for the callers that either overwrite or merge
-/// into whatever an earlier selection already wrote there.
-fn member_mut<'m, 'a>(members: &'m mut Members<'a>, key: &str) -> Option<&'m mut NewValue<'a>> {
-    members
-        .iter_mut()
-        .find(|(member, _)| member == key)
-        .map(|(_, value)| value)
-}
-
-/// Writes `value` at `key`, keeping the position of an entry an earlier
-/// selection already wrote there.
-fn set_member<'a>(members: &mut Members<'a>, key: &'a str, value: NewValue<'a>) {
-    match member_mut(members, key) {
-        Some(existing) => *existing = value,
-        None => members.push((Cow::Borrowed(key), value)),
-    }
-}
-
-/// Merges `other` into `existing`, for a member that two inline fragments both
-/// select. Both are sealed first, so the merge is the one sealed values get.
-fn merge_member<'a>(existing: &mut NewValue<'a>, other: NewValue<'a>, schema: &Schema) {
-    let mut merged = json_ext::rooted_value(std::mem::replace(existing, NewValue::Null));
-    merged.type_aware_deep_merge(json_ext::rooted_value(other), schema);
-    *existing = NewValue::Node(merged);
+/// Merges the member at `incoming` into the one at `existing`, for a key that
+/// two inline fragments both select. Both are sealed first, so the merge is
+/// the one sealed values get.
+fn merge_member(
+    tree: &mut PendingTree<'_>,
+    existing: PendingId,
+    incoming: PendingId,
+    schema: &Schema,
+) {
+    let mut merged = tree.take(existing);
+    merged.type_aware_deep_merge(tree.take(incoming), schema);
+    tree.set(existing, NewValue::Node(merged));
 }
 
 #[cfg(test)]
@@ -48,27 +35,43 @@ pub(crate) fn execute_selection_set(
     schema: &Schema,
     current_type: Option<&str>,
 ) -> Value {
-    json_ext::rooted_value(select(input_content, selections, schema, current_type))
+    let mut tree = PendingTree::new();
+    let root = tree.root();
+    select(
+        &mut tree,
+        root,
+        input_content,
+        selections,
+        schema,
+        current_type,
+    );
+    tree.seal(root)
 }
 
-/// Selects `selections` from `input_content` as a pending tree, so a caller
-/// building many selections writes them all into one arena. Keys borrow from
-/// `selections`, and selected leaves are adopted by reference.
+/// Selects `selections` from `input_content` into the slot `output` of a
+/// pending tree, so a caller building many selections writes them all into
+/// one arena without a buffer per object. Keys borrow from `selections`, and
+/// selected leaves are adopted by reference. `output` ends up holding an
+/// object, or `null` when the input is not an object or lacks a non-null
+/// field.
 pub(crate) fn select<'a>(
+    tree: &mut PendingTree<'a>,
+    output: PendingId,
     input_content: &Value,
     selections: &'a [Selection],
     schema: &Schema,
     current_type: Option<&str>,
-) -> NewValue<'a> {
+) {
     if input_content.kind() != JsonKind::Object {
-        return NewValue::Null;
+        tree.set(output, NewValue::Null);
+        return;
     }
 
     let typename = input_content.get(TYPENAME);
     let own_type = typename.as_ref().and_then(|v| v.as_str());
     let current_type = own_type.as_deref().or(current_type);
 
-    let mut output: Members<'a> = Vec::with_capacity(selections.len());
+    tree.set_object(output);
     for selection in selections {
         match selection {
             Selection::Field(Field {
@@ -98,7 +101,8 @@ pub(crate) fn select<'a>(
                         if name == TYPENAME {
                             // if the __typename field was missing but we can infer it, fill it
                             if let Some(ty) = current_type {
-                                set_member(&mut output, selection_name, ty.to_owned().into());
+                                let member = tree.member_slot(output, selection_name);
+                                tree.set(member, ty.to_owned());
                                 continue;
                             }
                         }
@@ -112,31 +116,30 @@ pub(crate) fn select<'a>(
                             .map(|ty| !ty.is_non_null())
                             .unwrap_or(false)
                         {
-                            set_member(&mut output, selection_name, NewValue::Null);
+                            let member = tree.member_slot(output, selection_name);
+                            tree.set(member, NewValue::Null);
                         } else {
-                            return NewValue::Null;
+                            tree.set(output, NewValue::Null);
+                            return;
                         }
                     }
                     Some(value) => {
-                        let selected = if selections.is_empty() {
-                            NewValue::Node(value)
+                        let member = tree.member_slot(output, selection_name);
+                        if selections.is_empty() {
+                            tree.set(member, NewValue::Node(value));
                         } else {
                             let inner_type =
                                 field_type.as_ref().map(|ty| ty.inner_named_type().as_str());
                             if value.kind() == JsonKind::Array {
-                                NewValue::Array(
-                                    value
-                                        .array_iter()
-                                        .map(|element| {
-                                            select(&element, selections, schema, inner_type)
-                                        })
-                                        .collect(),
-                                )
+                                tree.set_array(member);
+                                for element in value.array_iter() {
+                                    let slot = tree.push(member);
+                                    select(tree, slot, &element, selections, schema, inner_type);
+                                }
                             } else {
-                                select(&value, selections, schema, inner_type)
+                                select(tree, member, &value, selections, schema, inner_type);
                             }
-                        };
-                        set_member(&mut output, selection_name, selected);
+                        }
                     }
                 }
             }
@@ -149,23 +152,25 @@ pub(crate) fn select<'a>(
                     if !type_condition_matches(schema, current_type, condition) {
                         continue;
                     }
-                    let NewValue::Object(selected) =
-                        select(input_content, selections, schema, current_type)
-                    else {
+                    let selected = tree.root();
+                    select(
+                        tree,
+                        selected,
+                        input_content,
+                        selections,
+                        schema,
+                        current_type,
+                    );
+                    if !tree.is_object(selected) {
                         continue;
-                    };
-                    for (key, value) in selected {
-                        match member_mut(&mut output, &key) {
-                            Some(existing) => merge_member(existing, value, schema),
-                            None => output.push((key, value)),
-                        }
                     }
+                    tree.merge_members(output, selected, |tree, existing, incoming| {
+                        merge_member(tree, existing, incoming, schema)
+                    });
                 }
             },
         }
     }
-
-    NewValue::Object(output)
 }
 
 /// This is similar to DoesFragmentTypeApply from the GraphQL spec, but the
@@ -430,6 +435,49 @@ mod tests {
                     }
                 ]
             })
+        );
+    }
+
+    #[test]
+    fn fragments_selecting_the_same_field_merge_it_in_first_position() {
+        let schema = with_supergraph_boilerplate(
+            "type Query @join__type(graph: TEST){ me: String @join__field(graph: TEST) }
+            type MainObject { mainObjectList: [SubObject] other: String }
+            type SubObject { key: String name: String }",
+        );
+        let schema = Schema::parse(&schema, &Default::default()).unwrap();
+        let response = bjson!({
+            "__typename": "MainObject",
+            "other": "o",
+            "mainObjectList": [{"key": "a", "name": "A"}, {"key": "b", "name": "B"}]
+        });
+        let list_of = |field: &str| {
+            json!({
+                "kind": "Field",
+                "name": "mainObjectList",
+                "selections": [{"kind": "Field", "name": field}],
+            })
+        };
+        let requires = json!([
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "MainObject",
+                "selections": [list_of("key")],
+            },
+            {"kind": "Field", "name": "other"},
+            {
+                "kind": "InlineFragment",
+                "typeCondition": "MainObject",
+                "selections": [{"kind": "Field", "name": "__typename"}, list_of("name")],
+            },
+        ]);
+        let selection: Vec<Selection> = serde_json::from_value(requires).unwrap();
+
+        let value = execute_selection_set(&response, &selection, &schema, None);
+
+        assert_eq!(
+            value.to_string(),
+            r#"{"mainObjectList":[{"key":"a","name":"A"},{"key":"b","name":"B"}],"other":"o","__typename":"MainObject"}"#
         );
     }
 

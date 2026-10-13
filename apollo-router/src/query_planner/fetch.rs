@@ -7,7 +7,7 @@ use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use apollo_json::JsonKind;
-use apollo_json::NewValue;
+use apollo_json::PendingTree;
 use apollo_json::ValueBuilder;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -284,10 +284,11 @@ impl Variables {
         if !requires.is_empty() {
             let mut variables = used_variables(variable_usages, &body.variables);
 
-            // Every representation goes into one arena, rather than one
-            // arena each, and the array is written in one pass, so the
-            // builder's working buffers are allocated once.
-            let mut pending: Vec<NewValue<'_>> = Vec::new();
+            // Every representation goes into one pending tree and then one
+            // arena, written in one pass, so the representations cost a few
+            // buffers rather than a vector per object and an arena each.
+            let mut tree = PendingTree::new();
+            let pending = tree.array();
             let mut elements: Vec<json_ext::PathElement> = Vec::new();
             let mut path_ends: Vec<usize> = Vec::new();
             data.select_values_and_paths(schema, current_dir, |path, value| {
@@ -296,9 +297,12 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let representation = select(&value, requires, schema, None);
-                if matches!(&representation, NewValue::Object(members) if !members.is_empty()) {
-                    pending.push(representation);
+                // Written as a root and appended only once it turns out to
+                // be a non-empty object.
+                let representation = tree.root();
+                select(&mut tree, representation, &value, requires, schema, None);
+                if tree.first(representation).is_some() {
+                    tree.append(pending, representation);
                     elements.extend_from_slice(&path.0);
                     path_ends.push(elements.len());
                 }
@@ -308,7 +312,7 @@ impl Variables {
                 return None;
             }
 
-            let pending = json_ext::rooted_value(NewValue::Array(pending));
+            let pending = tree.seal(pending);
             let mut values: IndexSet<Value> = IndexSet::with_capacity(path_ends.len());
             let mut group_of: Vec<usize> = Vec::with_capacity(path_ends.len());
             for mut value in pending.array_iter() {
