@@ -65,7 +65,6 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_registry::SPEC_REGISTRY;
 use crate::merger::compose_directive_manager::ComposeDirectiveManager;
 use crate::merger::error_reporter::ErrorReporter;
-use crate::merger::hints::DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE;
 use crate::merger::hints::HintCode;
 use crate::merger::merge_directive::AdditionalDirectiveSources;
 use crate::merger::merge_directive::AppliedDirectivesToMerge;
@@ -80,6 +79,7 @@ use crate::schema::FederationSchema;
 use crate::schema::GRAPHQL_BUILT_IN_DIRECTIVES;
 use crate::schema::ValidFederationSchema;
 use crate::schema::directive_location::DirectiveLocationExt;
+use crate::schema::fed3_upgrader;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::DirectiveTargetPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -683,9 +683,9 @@ impl Merger {
         trace!("Removing redundant @join__field directives");
         self.remove_redundant_join_fields()?;
 
-        // After interface object fields are backfilled, so their implementations are checked too.
+        // Remove invalid @deprecated from implementing fields (after backfilling interface object fields)
         trace!("Removing @deprecated from implementations of non-deprecated interface fields");
-        self.strip_invalid_implementation_deprecations();
+        self.remove_invalid_implementation_deprecations();
 
         // Return result
         let (mut errors, hints) = self.error_reporter.into_errors_and_hints();
@@ -2935,49 +2935,13 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
     /// Enforces the 2025 spec rule that an implementing field may only be deprecated when every
     /// interface field it implements is deprecated. Each subgraph can satisfy the rule on its own
     /// while the merged schema does not, for example when the interface field is declared in a
-    /// different subgraph, so `@deprecated` is removed from the merged field where any merged
-    /// interface field it implements is not deprecated.
-    fn strip_invalid_implementation_deprecations(&mut self) {
-        let schema = self.merged.schema();
-        let mut to_strip: Vec<(Name, Name, CompositionHint)> = Vec::new();
-        for (type_name, ty) in &schema.types {
-            let (implements, fields) = match ty {
-                ExtendedType::Object(object) => (&object.implements_interfaces, &object.fields),
-                ExtendedType::Interface(interface) => {
-                    (&interface.implements_interfaces, &interface.fields)
-                }
-                _ => continue,
-            };
-            for (field_name, field) in fields {
-                if !field.directives.has("deprecated") {
-                    continue;
-                }
-                let Some(iface) = implements.iter().find(|iface| {
-                    interface_field(schema, iface, field_name)
-                        .is_some_and(|f| !f.directives.has("deprecated"))
-                }) else {
-                    continue;
-                };
-                let hint = CompositionHint {
-                    definition: &DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE,
-                    message: format!(
-                        "Stripped `@deprecated` from `{type_name}.{field_name}` because \
-                         `{iface}.{field_name}` is not deprecated. Either deprecate \
-                         the interface field or remove `@deprecated` from the implementation."
-                    ),
-                    locations: self.deprecated_locations(type_name, field_name),
-                };
-                to_strip.push((type_name.clone(), field_name.clone(), hint));
-            }
-        }
-
-        for (type_name, field_name, hint) in to_strip {
-            if let Some(directives) =
-                field_directives_mut(self.merged.schema_mut(), &type_name, &field_name)
-            {
-                directives.0.retain(|d| d.name != "deprecated");
-            }
-            self.error_reporter.add_hint(hint);
+    /// different subgraph.
+    fn remove_invalid_implementation_deprecations(&mut self) {
+        let stripped =
+            fed3_upgrader::strip_invalid_implementation_deprecations(self.merged.schema_mut());
+        for stripped in stripped {
+            let locations = self.deprecated_locations(&stripped.type_name, &stripped.field_name);
+            self.error_reporter.add_hint(stripped.into_hint(locations));
         }
     }
 
@@ -2999,30 +2963,6 @@ format!("Field \"{field}\" of {} type \"{}\" is defined in some but not all subg
             })
             .collect()
     }
-}
-
-fn interface_field<'a>(
-    schema: &'a Schema,
-    interface_name: &Name,
-    field_name: &Name,
-) -> Option<&'a FieldDefinition> {
-    match schema.types.get(interface_name)? {
-        ExtendedType::Interface(interface) => interface.fields.get(field_name).map(|f| &**f),
-        _ => None,
-    }
-}
-
-fn field_directives_mut<'a>(
-    schema: &'a mut Schema,
-    type_name: &Name,
-    field_name: &Name,
-) -> Option<&'a mut DirectiveList> {
-    let fields = match schema.types.get_mut(type_name)? {
-        ExtendedType::Object(object) => &mut object.make_mut().fields,
-        ExtendedType::Interface(interface) => &mut interface.make_mut().fields,
-        _ => return None,
-    };
-    Some(&mut fields.get_mut(field_name)?.make_mut().directives)
 }
 
 /// Map over sources, applying a function to each element
