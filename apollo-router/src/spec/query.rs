@@ -3,7 +3,6 @@
 //! Parsing, formatting and manipulation of queries.
 #![allow(clippy::mutable_key_type)]
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -14,6 +13,8 @@ use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
 use apollo_json::JsonKind;
 use apollo_json::NewValue;
+use apollo_json::PendingId;
+use apollo_json::PendingTree;
 use apollo_json::ValueBuilder;
 use derivative::Derivative;
 use indexmap::IndexSet;
@@ -194,14 +195,15 @@ impl Query {
                             .unwrap_or_default(),
                     }) {
                         Some(subselection) => {
-                            let mut output = OutputObject::new();
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
                                 coercion_errors: include_coercion_errors.then(Vec::new),
                                 nullified: Vec::new(),
+                                output: PendingTree::new(),
                             };
+                            let root = parameters.output.object();
 
                             response.data = Some(
                                 match self.apply_root_selection_set(
@@ -209,10 +211,10 @@ impl Query {
                                     &subselection.selection_set,
                                     &mut parameters,
                                     &input,
-                                    &mut output,
+                                    root,
                                     &mut Vec::new(),
                                 ) {
-                                    Ok(()) => output.into_response_value(),
+                                    Ok(()) => parameters.seal(root),
                                     Err(InvalidValue) => json_ext::null(),
                                 },
                             );
@@ -241,8 +243,6 @@ impl Query {
                         }
                     }
                 } else {
-                    let mut output = OutputObject::new();
-
                     let all_variables: Value = if self.operation.variables.is_empty() {
                         variables
                     } else {
@@ -274,7 +274,9 @@ impl Query {
                         errors: Vec::new(),
                         coercion_errors: include_coercion_errors.then(Vec::new),
                         nullified: Vec::new(),
+                        output: PendingTree::new(),
                     };
+                    let root = parameters.output.object();
 
                     response.data = Some(
                         match self.apply_root_selection_set(
@@ -282,10 +284,10 @@ impl Query {
                             &self.operation.selection_set,
                             &mut parameters,
                             &input,
-                            &mut output,
+                            root,
                             &mut Vec::new(),
                         ) {
-                            Ok(()) => output.into_response_value(),
+                            Ok(()) => parameters.seal(root),
                             Err(InvalidValue) => json_ext::null(),
                         },
                     );
@@ -417,7 +419,7 @@ impl Query {
         parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
         input: &Value,
-        output: &mut NewValue<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -473,7 +475,7 @@ impl Query {
         parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
         input: &Value,
-        output: &mut NewValue<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -491,7 +493,7 @@ impl Query {
         let inner_result =
             self.format_value(parameters, &inner_type, input, output, path, selection_set);
 
-        if is_pending_null(output) {
+        if parameters.output.is_null(output) {
             let message = format!("Null value found for non-nullable type {inner_type}");
             match inner_result {
                 Ok(()) => {
@@ -553,42 +555,45 @@ impl Query {
         parameters: &mut FormatParameters<'a>,
         input: &Value,
         inner_type: &executable::Type,
-        output: &mut NewValue<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         let Some(input_array) = input.as_array() else {
             return Ok(());
         };
-        // Elements are formatted in place in this pending array. Taking the
-        // output leaves the slot null while the elements are formatted, so a
-        // list abandoned partway through never leaves half an array behind.
-        let mut output_array = match std::mem::replace(output, NewValue::Null) {
+        // Elements are formatted in place in this pending array. On failure
+        // the slot is nulled, so a list abandoned partway through never
+        // leaves half an array behind.
+        let tree = &mut parameters.output;
+        if tree.is_array(output) {
             // An earlier fragment already formatted this list; keep what it
             // wrote and let the selections below merge into it.
-            NewValue::Array(items) => items,
+        } else if tree.is_null(output) {
             // Nothing written here yet: one pending null per input element. A
             // nullified slot reads as a null too, matching the `is_null` check
             // this replaced — that accepted any spelling of null, so this does.
-            pending if is_pending_null(&pending) => std::iter::repeat_with(|| NewValue::Null)
-                .take(input_array.len())
-                .collect(),
+            tree.set_array(output);
+            for _ in 0..input_array.len() {
+                tree.push(output);
+            }
+        } else {
             // Some other value is already at this slot, so the list cannot be
             // formatted over it. An adopted handle cannot appear here: a
             // list-typed field only ever reaches this function, which writes a
             // pending array or a null.
-            _ => return Err(InvalidValue),
-        };
-        let result = input_array.iter().enumerate().try_for_each(|(i, element)| {
+            tree.set(output, NewValue::Null);
+            return Err(InvalidValue);
+        }
+        let mut element = tree.first(output);
+        let result = input_array.iter().enumerate().try_for_each(|(i, input)| {
+            let slot = match element {
+                Some(slot) => slot,
+                None => parameters.output.push(output),
+            };
+            element = parameters.output.next(slot);
             path.push(ResponsePathElement::Index(i));
-            let res = self.format_value(
-                parameters,
-                inner_type,
-                element,
-                &mut output_array[i],
-                path,
-                selection_set,
-            );
+            let res = self.format_value(parameters, inner_type, input, slot, path, selection_set);
             path.pop();
             // Type-aware Err handling: non-null inner type propagates (whole list
             // nullifies per spec). Nullable inner type swallows the error (element already
@@ -613,10 +618,9 @@ impl Query {
                         .build(),
                 );
             }
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             return Err(InvalidValue);
         }
-        *output = NewValue::Array(output_array);
         Ok(())
     }
 
@@ -628,7 +632,7 @@ impl Query {
         field_type: &executable::Type,
         input: &Value,
         type_name: &Name,
-        output: &mut NewValue<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -636,19 +640,20 @@ impl Query {
         // so we must pass them directly to the client
         match parameters.schema.types.get(type_name) {
             Some(ExtendedType::Scalar(_)) => {
-                *output = NewValue::Node(input.clone());
+                parameters.output.set(output, NewValue::Node(input.clone()));
                 return Ok(());
             }
             Some(ExtendedType::Enum(enum_type)) => {
                 // An enum value outside the schema's value set is nullified,
                 // exactly as the previous `unwrap_or_default()` on a value did.
-                *output = match input
+                let value = match input
                     .as_str()
                     .filter(|value| enum_type.values.contains_key(value.as_ref()))
                 {
                     Some(_) => NewValue::Node(input.clone()),
                     None => NewValue::Null,
                 };
+                parameters.output.set(output, value);
                 return Ok(());
             }
             _ => {}
@@ -673,27 +678,29 @@ impl Query {
                     parameters.schema.types.get_key_value(input_type.as_ref())
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
-                    *output = NewValue::Null;
+                    parameters.output.set(output, NewValue::Null);
                     return Ok(());
                 };
                 typename = Some(apollo_compiler::ast::Type::Named(name.clone()));
             }
 
-            // Taking the output leaves the slot null while the members are
-            // formatted, so an object abandoned partway through never leaves a
-            // half-formatted object behind.
-            let mut output_object = match std::mem::replace(output, NewValue::Null) {
-                // An earlier fragment already formatted members here; keep them
-                // and let this selection set merge into them.
-                NewValue::Object(members) => OutputObject::reopen(members),
+            // On failure the slot is nulled, so an object abandoned partway
+            // through never leaves a half-formatted object behind.
+            let tree = &mut parameters.output;
+            if tree.is_object(output) {
+                // An earlier fragment already formatted members here; keep
+                // them and let this selection set merge into them.
+            } else if tree.is_null(output) {
                 // Nothing written here yet, in any spelling of null — the
                 // `is_null` check this replaced accepted them all.
-                pending if is_pending_null(&pending) => OutputObject::new(),
+                tree.set_object(output);
+            } else {
                 // Some other value is already at this slot. An adopted handle
                 // cannot appear here: a field with a selection set only reaches
                 // this function, which writes a pending object or a null.
-                _ => return Err(InvalidValue),
-            };
+                tree.set(output, NewValue::Null);
+                return Err(InvalidValue);
+            }
 
             let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
                 Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
@@ -712,20 +719,19 @@ impl Query {
                 selection_set,
                 parameters,
                 input,
-                &mut output_object,
+                output,
                 path,
                 current_type,
                 &mut visited_fragments,
             ) {
                 parameters.nullified.push(Path::from_response_slice(path));
-                *output = NewValue::Null;
+                parameters.output.set(output, NewValue::Null);
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
-            *output = output_object.into_pending();
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             // We don't emit errors for null object value nor propagate Err.
             // Note: `format_non_nullable_value` will emit an error if this object's type is
             //       non-nullable.
@@ -740,15 +746,15 @@ impl Query {
         parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut NewValue<'_>,
+        output: PendingId,
     ) -> Result<(), InvalidValue> {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
         if input.is_valid_int_input() {
-            *output = NewValue::Node(input.clone());
+            parameters.output.set(output, NewValue::Node(input.clone()));
             Ok(())
         } else {
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             if input.is_null() {
                 Ok(())
             } else {
@@ -770,13 +776,13 @@ impl Query {
         parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut NewValue<'_>,
+        output: PendingId,
     ) -> Result<(), InvalidValue> {
         if input.is_valid_float_input() {
-            *output = NewValue::Node(input.clone());
+            parameters.output.set(output, NewValue::Node(input.clone()));
             Ok(())
         } else {
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             if input.is_null() {
                 Ok(())
             } else {
@@ -798,13 +804,13 @@ impl Query {
         parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut NewValue<'_>,
+        output: PendingId,
     ) -> Result<(), InvalidValue> {
         if input.as_bool().is_some() {
-            *output = NewValue::Node(input.clone());
+            parameters.output.set(output, NewValue::Node(input.clone()));
             Ok(())
         } else {
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             if input.is_null() {
                 Ok(())
             } else {
@@ -826,13 +832,13 @@ impl Query {
         parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut NewValue<'_>,
+        output: PendingId,
     ) -> Result<(), InvalidValue> {
         if input.kind() == JsonKind::String {
-            *output = NewValue::Node(input.clone());
+            parameters.output.set(output, NewValue::Node(input.clone()));
             Ok(())
         } else {
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             if input.is_null() {
                 Ok(())
             } else {
@@ -854,13 +860,13 @@ impl Query {
         parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
         input: &Value,
-        output: &mut NewValue<'_>,
+        output: PendingId,
     ) -> Result<(), InvalidValue> {
         if input.is_string() || input.is_number() {
-            *output = NewValue::Node(input.clone());
+            parameters.output.set(output, NewValue::Node(input.clone()));
             Ok(())
         } else {
-            *output = NewValue::Null;
+            parameters.output.set(output, NewValue::Null);
             if input.is_null() {
                 Ok(())
             } else {
@@ -882,7 +888,7 @@ impl Query {
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters<'a>,
         input: &Value,
-        output: &mut OutputObject<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
         current_type: &executable::Type,
@@ -923,7 +929,12 @@ impl Query {
                             });
 
                         if let Some(object_type) = object_type {
-                            output.insert(field_name.as_str(), object_type.name.as_str());
+                            insert(
+                                parameters,
+                                output,
+                                field_name.as_str(),
+                                object_type.name.as_str(),
+                            );
                         } else {
                             // If the __typename value does not resolve to a known object type in
                             // the schema nor the current_type is an object type, emit an error.
@@ -948,8 +959,9 @@ impl Query {
                         // constraint violation. Object-typed inputs keep their value, so
                         // input_value stays non-null even after nullification; without this guard
                         // a later fragment would re-enter format_value and overwrite the null.
-                        if let Some(existing) = output.peek(field_name.as_str())
-                            && (input_value.is_null() || is_pending_null(existing))
+                        if let Some(existing) =
+                            parameters.output.member(output, field_name.as_str())
+                            && (input_value.is_null() || parameters.output.is_null(existing))
                         {
                             continue;
                         }
@@ -959,11 +971,12 @@ impl Query {
                         // Format through the member's slot: a field seen for the
                         // first time is appended as a pending null and written in
                         // place, so nothing is moved out of the object and back.
+                        let slot = parameters.output.member_slot(output, field_name.as_str());
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
                             &input_value,
-                            output.slot(field_name.as_str()),
+                            slot,
                             path,
                             selection_set,
                         );
@@ -975,9 +988,8 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        if !output.contains_key(field_name.as_str()) {
-                            output.insert(field_name.as_str(), ());
-                        }
+                        // Appends a null only when the key is new.
+                        parameters.output.member_slot(output, field_name.as_str());
                         // Emit error for missing field
                         emit_missing_field(parameters, field_type, field_name.as_str(), path);
                         if field_type.is_non_null() {
@@ -1027,7 +1039,7 @@ impl Query {
                         if !self.is_original
                             && let Some(input_type) = input.get(TYPENAME)
                         {
-                            output.insert(TYPENAME, input_type);
+                            insert(parameters, output, TYPENAME, input_type);
                         }
 
                         // Inline fragments collect fields into the same object, so
@@ -1086,7 +1098,7 @@ impl Query {
                             if !self.is_original
                                 && let Some(input_type) = input.get(TYPENAME)
                             {
-                                output.insert(TYPENAME, input_type);
+                                insert(parameters, output, TYPENAME, input_type);
                             }
 
                             self.apply_selection_set(
@@ -1122,7 +1134,7 @@ impl Query {
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters<'a>,
         input: &Value,
-        output: &mut OutputObject<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
         // Track which named fragments have already been applied to the root object
@@ -1152,7 +1164,7 @@ impl Query {
         selection_set: &'a [Selection],
         parameters: &mut FormatParameters<'a>,
         input: &Value,
-        output: &mut OutputObject<'a>,
+        output: PendingId,
         path: &mut Vec<ResponsePathElement<'b>>,
         visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
@@ -1173,8 +1185,8 @@ impl Query {
                     let field_name_str = field_name.as_str();
 
                     if name.as_str() == TYPENAME {
-                        if !output.contains_key(field_name_str) {
-                            output.insert(field_name_str, root_type_name);
+                        if parameters.output.member(output, field_name_str).is_none() {
+                            insert(parameters, output, field_name_str, root_type_name);
                         }
                     } else if let Some(input_value) = input.get(field_name_str) {
                         // if there's already a value for that key in the output it means either:
@@ -1187,8 +1199,8 @@ impl Query {
                         // constraint violation. Object-typed inputs keep their value, so
                         // input_value stays non-null even after nullification; without this guard
                         // a later fragment would re-enter format_value and overwrite the null.
-                        if let Some(existing) = output.peek(field_name_str)
-                            && (input_value.is_null() || is_pending_null(existing))
+                        if let Some(existing) = parameters.output.member(output, field_name_str)
+                            && (input_value.is_null() || parameters.output.is_null(existing))
                         {
                             continue;
                         }
@@ -1197,11 +1209,12 @@ impl Query {
                         path.push(ResponsePathElement::Key(field_name_str));
                         // Format through the member's slot, as in
                         // `apply_selection_set`.
+                        let slot = parameters.output.member_slot(output, field_name_str);
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
                             &input_value,
-                            output.slot(field_name_str),
+                            slot,
                             path,
                             selection_set,
                         );
@@ -1213,7 +1226,7 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        output.insert(field_name_str, ());
+                        insert(parameters, output, field_name_str, ());
                         emit_missing_field(parameters, field_type, field_name_str, path);
                         if field_type.is_non_null() {
                             return Err(InvalidValue);
@@ -1513,101 +1526,16 @@ fn emit_missing_field<'b>(
     }
 }
 
-/// Whether a pending value is a JSON `null`.
-///
-/// A formatted null reaches the output either as `NewValue::Null`, written by a
-/// formatter that nullified the slot, or as an adopted handle that happens to
-/// hold a null, when the subgraph's own value passed through unchanged. Both are
-/// nulls in the response, and nullability propagation has to treat them alike.
-fn is_pending_null(value: &NewValue<'_>) -> bool {
-    match value {
-        NewValue::Null => true,
-        NewValue::Node(handle) => handle.is_null(),
-        _ => false,
-    }
-}
-
-/// One output object under construction, holding its members in the order the
-/// query requested them.
-///
-/// Members are *pending*: they live here as `NewValue`s and reach an arena only
-/// when the root of the response is sealed, once, by
-/// [`OutputObject::into_response_value`]. Nothing intermediate is allocated in
-/// an arena, so a subtree that nullability propagation later discards cost
-/// nothing to build, and a subtree that came through formatting unchanged is
-/// still adopted by reference from the arena it arrived in.
-///
-/// Keys borrow from the parsed query, so writing a member is a `Vec` push with
-/// no allocation; the only copy is the one into the arena at seal time, which
-/// the response needs regardless.
-struct OutputObject<'a> {
-    members: Vec<(Cow<'a, str>, NewValue<'a>)>,
-}
-
-impl<'a> OutputObject<'a> {
-    fn new() -> Self {
-        OutputObject {
-            members: Vec::new(),
-        }
-    }
-
-    /// Continues an object an earlier fragment already wrote members into.
-    fn reopen(members: Vec<(Cow<'a, str>, NewValue<'a>)>) -> Self {
-        OutputObject { members }
-    }
-
-    fn position(&self, key: &str) -> Option<usize> {
-        self.members.iter().position(|(member, _)| &**member == key)
-    }
-
-    fn contains_key(&self, key: &str) -> bool {
-        self.position(key).is_some()
-    }
-
-    /// The member already written at `key`, for deciding whether to format over
-    /// it.
-    fn peek(&self, key: &str) -> Option<&NewValue<'a>> {
-        let (_, member) = &self.members[self.position(key)?];
-        Some(member)
-    }
-
-    /// The slot for `key`, appended as a pending null when the key is new, so a
-    /// formatter can write through it in place instead of reading a value out
-    /// and putting it back. A key already present keeps its position.
-    fn slot(&mut self, key: impl Into<Cow<'a, str>>) -> &mut NewValue<'a> {
-        let key = key.into();
-        let index = match self.position(&key) {
-            Some(index) => index,
-            None => {
-                self.members.push((key, NewValue::Null));
-                self.members.len() - 1
-            }
-        };
-        &mut self.members[index].1
-    }
-
-    /// Writes `value` at `key`, keeping the position of a key already present.
-    fn insert(&mut self, key: impl Into<Cow<'a, str>>, value: impl Into<NewValue<'a>>) {
-        *self.slot(key) = value.into();
-    }
-
-    /// The pending object, for a parent to hold as one of its own members.
-    fn into_pending(self) -> NewValue<'a> {
-        NewValue::Object(self.members)
-    }
-
-    /// Seals the whole pending tree into one document — one arena for the entire
-    /// response, rather than one per object.
-    fn into_response_value(self) -> Value {
-        let mut builder = ValueBuilder::new();
-        for (key, member) in self.members {
-            // A fresh object root accepts any key, and formatting never emits
-            // the one failure `set` can report (a non-finite float): scalar
-            // formatters only re-adopt values that were already valid JSON.
-            let _ = builder.set(&*key, member);
-        }
-        builder.seal()
-    }
+/// Writes `value` at `key` of the pending object `object`, keeping the
+/// position of a key already present.
+fn insert<'a>(
+    parameters: &mut FormatParameters<'a>,
+    object: PendingId,
+    key: &'a str,
+    value: impl Into<NewValue<'a>>,
+) {
+    let slot = parameters.output.member_slot(object, key);
+    parameters.output.set(slot, value);
 }
 
 /// Intermediate structure for arguments passed through the entire formatting
@@ -1617,9 +1545,24 @@ struct FormatParameters<'a> {
     coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,
     schema: &'a ApiSchema,
+    /// The response under construction. Members are *pending*: they reach an
+    /// arena only when the root is sealed, once, by
+    /// [`FormatParameters::seal`]. Every object and list of the response is
+    /// held in this one tree, so formatting allocates its buffer's growth
+    /// rather than a vector per object, and a subtree that nullability
+    /// propagation later discards is never written to an arena. A subtree
+    /// that came through formatting unchanged is adopted by reference from
+    /// the arena it arrived in. Keys borrow from the parsed query.
+    output: PendingTree<'a>,
 }
 
 impl FormatParameters<'_> {
+    /// Seals the response under `root` into one document — one arena for
+    /// the entire response, rather than one per object.
+    fn seal(&mut self, root: PendingId) -> Value {
+        std::mem::take(&mut self.output).seal(root)
+    }
+
     fn insert_coercion_error(&mut self, error: Error) {
         if let Some(errors) = self.coercion_errors.as_mut() {
             errors.push(error)
