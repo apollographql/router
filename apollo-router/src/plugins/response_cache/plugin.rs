@@ -2415,6 +2415,7 @@ async fn cache_lookup_entities(
         cache_result,
         &request.context,
         !is_no_cache,
+        indexes,
     )?;
 
     // Surface cache tags from every usable hit on the supergraph response aggregator. This
@@ -2775,16 +2776,40 @@ fn extract_cache_key_root(
     (key, cache_tags)
 }
 
+/// The Redis index tags of an entity about to be stored: its type when the Type index is
+/// active, then its schema-derived tag values when the CacheTag index is. Only misses are
+/// stored, so only they pay for this list.
+///
+/// Redis-only: CacheTag::Type never reaches the CDN header (its user_value() is None), so
+/// gating it behind IndexMode::Type has no effect on Cache-Tag header completeness. Not to be
+/// confused with InvalidationLabels.types/add_type(), the CDN header's own coarse type-tier,
+/// which is unconditional and unrelated to this index.
+fn entity_index_tags(
+    typename: &Arc<str>,
+    cdn_invalidation_tags: &[String],
+    indexes: &InvalidationIndexes,
+) -> Vec<CacheTag> {
+    let mut cache_tags: Vec<CacheTag> = Vec::new();
+    if indexes.is_enabled(IndexMode::Type) {
+        cache_tags.push(CacheTag::Type(typename.clone()));
+    }
+    // `cdn_invalidation_tags` holds the schema-derived tag values whenever this index is on
+    // (`tracks_invalidation_labels`), so it is exactly what the index records.
+    if indexes.is_enabled(IndexMode::CacheTag) {
+        cache_tags.extend(cdn_invalidation_tags.iter().cloned().map(CacheTag::Tag));
+    }
+    cache_tags
+}
+
 struct CacheMetadata {
     /// Shared with the span attribute listing the fetch's keys, the
     /// intermediate result and, on a miss, the stored document.
     cache_key: Arc<str>,
     /// The representation's `__typename`, shared by every entity of the type.
     typename: Arc<str>,
-    cache_tags: Vec<CacheTag>,
-    // Fine-grained tag values for CDN `Cache-Tag` persistence, independent of whether
-    // `cache_tags` above was populated (that one is gated on `IndexMode::CacheTag` alone). See
-    // `Document::cdn_invalidation_tags`.
+    // Fine-grained tag values for CDN `Cache-Tag` persistence, independent of whether the Redis
+    // index tags are (those are gated on `IndexMode::CacheTag` alone, see `entity_index_tags`).
+    // See `Document::cdn_invalidation_tags`.
     cdn_invalidation_tags: Vec<String>,
     // Only set when debug mode is enabled
     entity_key: Option<Value>,
@@ -2904,16 +2929,6 @@ fn extract_cache_keys(
         .hash_into(&mut key_buffer);
         let key: Arc<str> = key_buffer.as_str().into();
 
-        // The by-type tag is only emitted when the Type index is active for this subgraph.
-        // Redis-only: CacheTag::Type never reaches the CDN header (its user_value() is None), so
-        // gating this behind IndexMode::Type has no effect on Cache-Tag header completeness. Not
-        // to be confused with InvalidationLabels.types/add_type(), the CDN header's own coarse
-        // type-tier, which is unconditional and unrelated to this index.
-        let mut cache_tags: Vec<CacheTag> = Vec::new();
-        if indexes.is_enabled(IndexMode::Type) {
-            cache_tags.push(CacheTag::Type(typename.clone()));
-        }
-
         // Skip the schema traversal entirely when nothing would consume its result: the Redis
         // per-tag index and the CDN `Cache-Tag` header aggregator are independent consumers —
         // mirrors the same gate in `cache_lookup_root`.
@@ -2930,15 +2945,9 @@ fn extract_cache_keys(
                 HashSet::new()
             };
 
-        // `cache_tags` feeds the intermediate result on cache misses which gets ZADDed for redis;
-        // it's not part of the CDN-invalidation path; each sink below applies its own gate
-        // independently rather than sharing one.
-        if indexes.is_enabled(IndexMode::CacheTag) {
-            cache_tags.extend(invalidation_cache_keys.iter().cloned().map(CacheTag::Tag));
-        }
-
-        // Persisted independently of `cache_tags` above (and thus of `IndexMode::CacheTag`) so
+        // Persisted independently of the Redis index tags (and thus of `IndexMode::CacheTag`) so
         // a later cache hit can rebuild the CDN header even when Redis per-tag indexing is off.
+        // `entity_index_tags` derives those index tags from this list for misses only.
         // `invalidation_cache_keys` is already empty when neither consumer wants it (see the
         // gate this was computed under), so no extra condition is needed here.
         let cdn_invalidation_tags: Vec<String> = invalidation_cache_keys.iter().cloned().collect();
@@ -2950,7 +2959,6 @@ fn extract_cache_keys(
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             typename,
-            cache_tags,
             cdn_invalidation_tags,
             entity_key: representation_entity_key,
         };
@@ -3365,6 +3373,7 @@ fn filter_representations(
     mut cache_result: Vec<Option<CacheEntry>>,
     context: &Context,
     record_metrics: bool,
+    indexes: &InvalidationIndexes,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
@@ -3379,7 +3388,6 @@ fn filter_representations(
             CacheMetadata {
                 cache_key: key,
                 typename,
-                cache_tags,
                 cdn_invalidation_tags,
                 entity_key,
             },
@@ -3421,6 +3429,12 @@ fn filter_representations(
             }
         }
 
+        // Hits are never stored, so only misses need their index tags.
+        let cache_tags = if cache_entry.is_none() {
+            entity_index_tags(&typename, &cdn_invalidation_tags, indexes)
+        } else {
+            Vec::new()
+        };
         result.push(IntermediateResult {
             key,
             cache_tags,
@@ -3889,6 +3903,42 @@ mod tests {
     use crate::plugins::response_cache::tests::create_subgraph_conf;
     use crate::services::OperationKind;
     use crate::services::subgraph;
+
+    #[test]
+    fn entity_index_tags_follow_the_active_indexes() {
+        use crate::plugins::response_cache::cache_tag::CacheTag;
+        use crate::plugins::response_cache::invalidation_endpoint::InvalidationIndexes;
+        use crate::plugins::response_cache::plugin::entity_index_tags;
+
+        let typename: Arc<str> = "Product".into();
+        let tags = ["a".to_string(), "b".to_string()];
+        let indexes = |r#type, cache_tag| InvalidationIndexes {
+            subgraph: true,
+            r#type,
+            cache_tag,
+        };
+
+        assert_eq!(
+            entity_index_tags(&typename, &tags, &indexes(true, true)),
+            vec![
+                CacheTag::Type(typename.clone()),
+                CacheTag::Tag("a".to_string()),
+                CacheTag::Tag("b".to_string()),
+            ]
+        );
+        assert_eq!(
+            entity_index_tags(&typename, &tags, &indexes(true, false)),
+            vec![CacheTag::Type(typename.clone())]
+        );
+        assert_eq!(
+            entity_index_tags(&typename, &tags, &indexes(false, true)),
+            vec![
+                CacheTag::Tag("a".to_string()),
+                CacheTag::Tag("b".to_string()),
+            ]
+        );
+        assert!(entity_index_tags(&typename, &tags, &indexes(false, false)).is_empty());
+    }
 
     const SCHEMA: &str = include_str!("../../testdata/orga_supergraph_cache_key.graphql");
 
