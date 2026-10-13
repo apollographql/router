@@ -361,8 +361,10 @@ impl ObjectExt for Value {
         // and writing to one must not be a request-triggered panic. The keys a
         // non-object could have held are none, so nothing is discarded that a
         // caller could observe.
+        // Moving the value into the builder edits it in place when nothing
+        // else holds it, and otherwise copies only the root object.
         let mut builder = if self.kind() == JsonKind::Object {
-            self.compact().edit()
+            std::mem::take(self).edit()
         } else {
             ValueBuilder::new()
         };
@@ -388,7 +390,7 @@ impl ObjectExt for Value {
 
     fn object_remove(&mut self, key: &str) -> Option<Value> {
         let previous = self.get(key)?;
-        let mut builder = self.compact().edit();
+        let mut builder = std::mem::take(self).edit();
         builder.remove(key);
         *self = builder.seal();
         Some(previous)
@@ -2056,5 +2058,24 @@ mod tests {
         );
         let error = Value::parse(b"{".to_vec()).unwrap_err();
         assert_eq!(error.http_status(), http::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_object_remove_and_insert_leave_other_holders_untouched() {
+        let original =
+            Value::parse(br#"{"data":{"a":[1,2]},"errors":[],"extensions":{"x":1}}"#.to_vec())
+                .unwrap();
+        let mut object = original.clone();
+        let data = object.object_remove("data").unwrap();
+        assert_eq!(data, json!({"a": [1, 2]}));
+        object.object_insert("added", json!(true));
+        assert_eq!(
+            object,
+            json!({"errors": [], "extensions": {"x": 1}, "added": true})
+        );
+        assert_eq!(
+            original,
+            json!({"data": {"a": [1, 2]}, "errors": [], "extensions": {"x": 1}})
+        );
     }
 }
