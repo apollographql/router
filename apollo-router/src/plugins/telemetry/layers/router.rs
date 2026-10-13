@@ -460,7 +460,7 @@ where
                             if expose_trace_id.enabled {
                                 let header_name = expose_trace_id
                                     .header_name
-                                    .as_ref()
+                                    .as_deref()
                                     .unwrap_or(&DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME);
 
                                 if let Some(value) = response.response.headers().get(header_name) {
