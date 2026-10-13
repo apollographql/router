@@ -1827,7 +1827,7 @@ impl CacheService {
                     let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                         ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                             hashed_private_id: private_id.clone(),
-                            key: ir.key.clone(),
+                            key: ir.key.to_string(),
                             invalidation_keys: InvalidationLabels {
                                 tags: ir.cdn_invalidation_tags.iter().cloned().collect(),
                                 types: HashSet::from([(self.name.clone(), ir.typename.to_string())]),
@@ -2356,15 +2356,16 @@ async fn cache_lookup_entities(
 
     let cache_keys = cache_metadata
         .iter()
-        .map(|k| k.cache_key.as_str())
+        .map(|k| &*k.cache_key)
         .collect::<Vec<&str>>();
 
+    // The attribute shares the keys rather than copying them.
     Span::current().set_span_dyn_attribute(
         "cache.keys".into(),
         opentelemetry::Value::Array(Array::String(
-            cache_keys
+            cache_metadata
                 .iter()
-                .map(|ck| StringValue::from(ck.to_string()))
+                .map(|k| StringValue::from(k.cache_key.clone()))
                 .collect(),
         )),
     );
@@ -2507,7 +2508,7 @@ async fn cache_lookup_entities(
                     .user_facing_only();
 
                     CacheKeyContext {
-                        key: ir.key.clone(),
+                        key: ir.key.to_string(),
                         has_tags,
                         cdn_invalidation_enabled,
                         hashed_private_id: private_id.map(ToString::to_string),
@@ -2602,7 +2603,7 @@ async fn cache_store_root_from_response(
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let document = Document {
-                key: cache_key,
+                key: cache_key.into(),
                 // The handle pins the response arena only until the insert has
                 // serialized it.
                 data: data.clone(),
@@ -2775,7 +2776,9 @@ fn extract_cache_key_root(
 }
 
 struct CacheMetadata {
-    cache_key: String,
+    /// Shared with the span attribute listing the fetch's keys, the
+    /// intermediate result and, on a miss, the stored document.
+    cache_key: Arc<str>,
     /// The representation's `__typename`, shared by every entity of the type.
     typename: Arc<str>,
     cache_tags: Vec<CacheTag>,
@@ -2836,6 +2839,9 @@ fn extract_cache_keys(
     // Each distinct `__typename`, allocated once and shared by every entity
     // of the type. A fetch names few types, so a scan finds them.
     let mut typenames: Vec<Arc<str>> = Vec::new();
+    // Each key is assembled here, then copied once into the `Arc` every user
+    // of it shares.
+    let mut key_buffer = String::new();
     for representation in representations {
         if !representation.is_object() {
             return Err(FetchError::MalformedRequest {
@@ -2887,7 +2893,7 @@ fn extract_cache_keys(
         // The cache key identifies the entity by its `@key` fields, so `__typename` — which the
         // subgraph still needs on the wire — is left out of the hash rather than stripped from
         // the request and put back.
-        let key = PrimaryCacheKeyEntity {
+        PrimaryCacheKeyEntity {
             subgraph_name,
             entity_type: &typename,
             representation: &representation,
@@ -2895,7 +2901,8 @@ fn extract_cache_keys(
             additional_data_hash: &additional_data_hash,
             private_id: if is_known_private { private_id } else { None },
         }
-        .hash();
+        .hash_into(&mut key_buffer);
+        let key: Arc<str> = key_buffer.as_str().into();
 
         // The by-type tag is only emitted when the Type index is active for this subgraph.
         // Redis-only: CacheTag::Type never reaches the CDN header (its user_value() is None), so
@@ -3337,7 +3344,7 @@ fn get_entity_key_from_selection_set(
 
 /// represents the result of a cache lookup for an entity type and key
 pub(super) struct IntermediateResult {
-    pub(super) key: String,
+    pub(super) key: Arc<str>,
     pub(super) cache_tags: Vec<CacheTag>,
     pub(super) typename: Arc<str>,
     // See `CacheMetadata::cdn_invalidation_tags`.
@@ -3504,7 +3511,7 @@ pub(super) fn reindex_entity_errors(
 /// `apolloEntityCacheTags` surrogate keys; connectors from schema `@cacheTag` directives) — this
 /// only unifies what happens with the result.
 pub(super) struct EntityCacheMiss<'a> {
-    pub(super) key: String,
+    pub(super) key: Arc<str>,
     pub(super) value: &'a Value,
     pub(super) cache_tags: Vec<CacheTag>,
     pub(super) cdn_invalidation_tags: Vec<String>,
@@ -3555,7 +3562,7 @@ pub(super) fn build_entity_debug_entry(
     subgraph_request: graphql::Request,
 ) -> CacheKeyContext {
     CacheKeyContext {
-        key: miss.key.clone(),
+        key: miss.key.to_string(),
         hashed_private_id,
         invalidation_keys: miss.invalidation_keys.clone(),
         has_tags: miss.has_tags,
@@ -3648,7 +3655,7 @@ async fn insert_entities_in_result(
                 }
 
                 if let Some(ref id) = update_key_private {
-                    key = format!("{key}:{id}");
+                    key = format!("{key}:{id}").into();
                 }
 
                 let reindexed_errors = reindex_entity_errors(errors, entity_idx, new_entity_idx);

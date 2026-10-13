@@ -554,7 +554,7 @@ impl CacheStorage for Storage {
             };
             let _: () = pipeline
                 .set::<(), _, _>(
-                    self.make_key(RedisKey(document.key.as_str())),
+                    self.make_key(RedisKey(&*document.key)),
                     bytes::Bytes::from(stored_entry_json(&value)?),
                     Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
                     None,
@@ -892,7 +892,7 @@ mod tests {
 
     fn common_document() -> Document {
         Document {
-            key: "key".to_string(),
+            key: "key".into(),
             data: Default::default(),
             control: Default::default(),
             cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
@@ -1069,7 +1069,7 @@ mod tests {
             let document = common_document();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
-            let document_key = document.key.clone();
+            let document_key = document.key.to_string();
             let expected_cache_tag_keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             // iterate over all the keys in the namespace and make sure we have everything we'd expect
@@ -1127,7 +1127,7 @@ mod tests {
                 cdn_invalidation_tags: vec!["cdn-only-tag".to_string()],
                 ..common_document()
             };
-            let document_key = document.key.clone();
+            let document_key = document.key.to_string();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // Only `cache_tags`-derived keys (plus the document itself) should exist — proves
@@ -1165,7 +1165,7 @@ mod tests {
             // set up two documents with a shared key and different TTLs
             let documents = vec![
                 Document {
-                    key: "key1".to_string(),
+                    key: "key1".into(),
                     cache_tags: vec![
                         CacheTag::Subgraph,
                         CacheTag::Tag("invalidation".to_string()),
@@ -1175,7 +1175,7 @@ mod tests {
                     ..common_document()
                 },
                 Document {
-                    key: "key2".to_string(),
+                    key: "key2".into(),
                     cache_tags: vec![
                         CacheTag::Subgraph,
                         CacheTag::Tag("invalidation".to_string()),
@@ -1199,7 +1199,7 @@ mod tests {
             let mut expected_document_keys = Vec::new();
             let mut expected_cache_tag_keys = Vec::new();
             for document in &documents {
-                expected_document_keys.push(document.key.clone());
+                expected_document_keys.push(document.key.to_string());
                 expected_cache_tag_keys.push(render_doc_keys(document, SUBGRAPH_NAME));
             }
 
@@ -1278,7 +1278,7 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document = Document {
-                key: "key1".to_string(),
+                key: "key1".into(),
                 expire: Duration::from_secs(60),
                 ..common_document()
             };
@@ -1296,7 +1296,7 @@ mod tests {
 
             // add another document with a very short expiry time but the same cache tags
             let document = Document {
-                key: "key2".to_string(),
+                key: "key2".into(),
                 expire: Duration::from_secs(1),
                 ..common_document()
             };
@@ -1331,7 +1331,7 @@ mod tests {
                 data: apollo_json::json!(1),
                 ..common_document()
             };
-            let document_key = document.key.clone();
+            let document_key = document.key.to_string();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
@@ -1399,7 +1399,7 @@ mod tests {
                 data: apollo_json::json!(1),
                 ..common_document()
             };
-            let document_key = document.key.clone();
+            let document_key = document.key.to_string();
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
 
             // make sure the document was stored
@@ -1475,7 +1475,7 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document = common_document();
-            let document_key = document.key.clone();
+            let document_key = document.key.to_string();
             let cache_tag_keys = render_doc_keys(&document, SUBGRAPH_NAME);
 
             let insert_invalid_cache_tag = |key: String| async {
@@ -1509,12 +1509,12 @@ mod tests {
             // documents' cache tags couldn't be updated.
             let documents = vec![
                 Document {
-                    key: "key1".to_string(),
+                    key: "key1".into(),
                     cache_tags: vec![CacheTag::Subgraph],
                     ..common_document()
                 },
                 Document {
-                    key: "key2".to_string(),
+                    key: "key2".into(),
                     cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("invalidate".to_string())],
                     ..common_document()
                 },
@@ -1567,7 +1567,7 @@ mod tests {
             .await?;
 
             let document = common_document();
-            let document_key = Value::from(storage.make_key(document.key.clone()));
+            let document_key = Value::from(storage.make_key(document.key.to_string()));
 
             let result = storage.insert(document, SUBGRAPH_NAME).await;
             let error = result.expect_err("should have timed out via redis");
@@ -1597,17 +1597,17 @@ mod tests {
         // set up two documents with a shared key and different TTLs
         let documents = vec![
             Document {
-                key: "key1".to_string(),
+                key: "key1".into(),
                 expire: Duration::from_secs(2),
                 ..common_document()
             },
             Document {
-                key: "key2".to_string(),
+                key: "key2".into(),
                 expire: Duration::from_secs(60),
                 ..common_document()
             },
             Document {
-                key: "key3".to_string(),
+                key: "key3".into(),
                 expire: Duration::from_secs(60),
                 ..common_document()
             },
@@ -1680,17 +1680,17 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document1 = Document {
-                key: "key1".to_string(),
+                key: "key1".into(),
                 ..common_document()
             };
 
             let document2 = Document {
-                key: "key2".to_string(),
+                key: "key2".into(),
                 ..common_document()
             };
 
             let document3 = Document {
-                key: "key3".to_string(),
+                key: "key3".into(),
                 ..common_document()
             };
 
@@ -1732,12 +1732,12 @@ mod tests {
 
             let name = "graph.api";
             let subgraph_doc = Document {
-                key: "subgraph-doc".to_string(),
+                key: "subgraph-doc".into(),
                 scope: CacheScope::Subgraph,
                 ..common_document()
             };
             let connector_doc = Document {
-                key: "connector-doc".to_string(),
+                key: "connector-doc".into(),
                 scope: CacheScope::Connector,
                 ..common_document()
             };
@@ -1785,13 +1785,13 @@ mod tests {
 
             let name = "graph.api";
             let subgraph_doc = Document {
-                key: "subgraph-user".to_string(),
+                key: "subgraph-user".into(),
                 cache_tags: vec![CacheTag::Type("User".into())],
                 scope: CacheScope::Subgraph,
                 ..common_document()
             };
             let connector_doc = Document {
-                key: "connector-user".to_string(),
+                key: "connector-user".into(),
                 cache_tags: vec![CacheTag::Type("User".into())],
                 scope: CacheScope::Connector,
                 ..common_document()
@@ -1837,19 +1837,19 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document1 = Document {
-                key: "key1".to_string(),
+                key: "key1".into(),
                 cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("A".to_string())],
                 ..common_document()
             };
 
             let document2 = Document {
-                key: "key2".to_string(),
+                key: "key2".into(),
                 cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("A".to_string())],
                 ..common_document()
             };
 
             let document3 = Document {
-                key: "key3".to_string(),
+                key: "key3".into(),
                 cache_tags: vec![CacheTag::Subgraph, CacheTag::Tag("B".to_string())],
                 ..common_document()
             };
@@ -1941,7 +1941,7 @@ mod tests {
             storage.truncate_namespace().await?;
 
             let document = common_document();
-            let document_key = document.key.clone();
+            let document_key = document.key.to_string();
 
             storage.insert(document, "S1").await?;
             assert!(storage.exists(&document_key).await?);

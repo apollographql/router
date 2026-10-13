@@ -3,6 +3,7 @@ mod error;
 pub(super) mod redis;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -32,7 +33,7 @@ type StorageResult<T> = Result<T, Error>;
 /// data and tag memberships. No invalidation policy lives here.
 #[derive(Debug, Clone)]
 pub(super) struct Document {
-    pub(super) key: String,
+    pub(super) key: Arc<str>,
     pub(super) data: crate::json_ext::Value,
     pub(super) control: CacheControl,
     pub(super) cache_tags: Vec<CacheTag>,

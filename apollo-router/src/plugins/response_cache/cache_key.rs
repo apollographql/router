@@ -77,7 +77,16 @@ pub(super) struct PrimaryCacheKeyEntity<'a> {
 }
 
 impl<'a> PrimaryCacheKeyEntity<'a> {
+    #[cfg(test)]
     pub(super) fn hash(&mut self) -> String {
+        let mut key = String::new();
+        self.hash_into(&mut key);
+        key
+    }
+
+    /// Writes the key into `key`, replacing its contents, so a caller making
+    /// many keys can reuse one buffer.
+    pub(super) fn hash_into(&mut self, key: &mut String) {
         let Self {
             subgraph_name,
             entity_type,
@@ -127,7 +136,8 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         let private_id = private_id.as_deref();
         let len = parts.iter().map(|part| part.len()).sum::<usize>()
             + private_id.map_or(0, |id| id.len() + 1);
-        let mut key = String::with_capacity(len);
+        key.clear();
+        key.reserve_exact(len);
         for part in parts {
             key.push_str(part);
         }
@@ -135,8 +145,6 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             key.push(':');
             key.push_str(private_id);
         }
-
-        key
     }
 }
 

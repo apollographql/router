@@ -750,7 +750,7 @@ impl ConnectorCacheService {
             }
 
             intermediate_results.push(IntermediateResult {
-                key: metadata.cache_key,
+                key: metadata.cache_key.into(),
                 cache_tags: metadata.cache_tags,
                 typename: typename.into(),
                 cdn_invalidation_tags: connector_cdn_invalidation_tags(),
@@ -788,7 +788,7 @@ impl ConnectorCacheService {
             let debug_cache_keys_ctx = intermediate_results.iter().filter_map(|ir| {
                 ir.cache_entry.as_ref().map(|cache_entry| {
                     CacheKeyContext {
-                        key: ir.key.clone(),
+                        key: ir.key.to_string(),
                         hashed_private_id: private_id.clone(),
                         invalidation_keys: ir
                             .cache_tags
@@ -1075,7 +1075,7 @@ impl ConnectorCacheService {
                         // Append private_id to cache key if response was discovered
                         // to be private mid-flight (matching subgraph pattern)
                         let key = if let Some(ref id) = update_key_private {
-                            format!("{key}:{id}")
+                            format!("{key}:{id}").into()
                         } else {
                             key
                         };
@@ -1803,7 +1803,7 @@ impl ConnectorRequestCacheService {
                         }
 
                         let document = Document {
-                            key: cache_key,
+                            key: cache_key.into(),
                             // PERF(apollo-json): legacy bridge -- apollo-federation's
                             // mapped connector response holds serde_json_bytes values
                             data: json_ext::from_legacy(data),
