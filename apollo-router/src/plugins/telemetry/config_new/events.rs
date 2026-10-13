@@ -100,56 +100,56 @@ impl Events {
         super::connector::events::new_connector_events(&self.connector)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         self.router
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.router
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         self.supergraph
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.supergraph
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         self.subgraph
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.subgraph
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         self.connector
             .attributes
             .request
-            .validate(Some(Stage::Request))?;
+            .validate_selectors(Some(Stage::Request))?;
         self.connector
             .attributes
             .response
-            .validate(Some(Stage::Response))?;
+            .validate_selectors(Some(Stage::Response))?;
         for (name, custom_event) in &self.router.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for router custom event {name:?}: {err}")
             })?;
         }
         for (name, custom_event) in &self.supergraph.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for supergraph custom event {name:?}: {err}")
             })?;
         }
         for (name, custom_event) in &self.subgraph.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for subgraph custom event {name:?}: {err}")
             })?;
         }
         for (name, custom_event) in &self.connector.custom {
-            custom_event.validate().map_err(|err| {
+            custom_event.validate_selectors().map_err(|err| {
                 format!("configuration error for connector HTTP custom event {name:?}: {err}")
             })?;
         }
@@ -181,9 +181,9 @@ pub(crate) enum StandardEventConfig<T> {
 }
 
 impl<T: Selector> StandardEventConfig<T> {
-    fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
+    fn validate_selectors(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         if let Self::Conditional { condition, .. } = self {
-            condition.validate(restricted_stage)
+            condition.validate_selectors(restricted_stage)
         } else {
             Ok(())
         }
@@ -280,10 +280,10 @@ where
     A: Selectors<Request, Response, EventResponse> + Default + Debug,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
 {
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
         let stage = Some(self.on.into());
-        self.attributes.validate(stage)?;
-        self.condition.validate(stage)?;
+        self.attributes.validate_selectors(stage)?;
+        self.condition.validate_selectors(stage)?;
         Ok(())
     }
 }

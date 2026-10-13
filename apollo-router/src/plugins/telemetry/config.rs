@@ -95,10 +95,10 @@ pub(crate) struct Instrumentation {
 }
 
 impl Instrumentation {
-    pub(crate) fn validate(&self) -> Result<(), String> {
-        self.events.validate()?;
-        self.instruments.validate()?;
-        self.spans.validate()
+    pub(crate) fn validate_selectors(&self) -> Result<(), String> {
+        self.events.validate_selectors()?;
+        self.instruments.validate_selectors()?;
+        self.spans.validate_selectors()
     }
 }
 
