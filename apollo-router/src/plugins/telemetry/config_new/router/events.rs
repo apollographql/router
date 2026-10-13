@@ -139,6 +139,7 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::json_ext::json_value as json;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
 
@@ -160,7 +161,7 @@ mod tests {
                         .header("custom-header", "val1")
                         .header(CONTENT_LENGTH, "25")
                         .header("x-log-request", HeaderValue::from_static("log"))
-                        .data(serde_json_bytes::json!({"data": "res"}))
+                        .data(json!({"data": "res"}))
                         .build()
                         .expect("expecting valid response"),
                 );
@@ -217,7 +218,7 @@ mod tests {
                     router::Response::fake_builder()
                         .header("custom-header", "val1")
                         .context(context_with_error)
-                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .data(json!({"errors": [{"message": "res"}]}))
                         .build()
                         .expect("expecting valid response"),
                 );
@@ -267,7 +268,7 @@ mod tests {
                         .header("custom-header", "val1")
                         .header(CONTENT_LENGTH, "25")
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .data(serde_json_bytes::json!({"data": "res"}))
+                        .data(json!({"data": "res"}))
                         .build()
                         .expect("expecting valid response"),
                 );

@@ -160,6 +160,7 @@ mod tests {
     use crate::assert_snapshot_subscriber;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_NAME;
+    use crate::json_ext::json_value as json;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
 
@@ -313,7 +314,7 @@ mod tests {
                         .header("custom-header", "val1")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .context(context_with_error)
-                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .data(json!({"errors": [{"message": "res"}]}))
                         .build()
                         .expect("expecting valid response"),
                 );
@@ -439,7 +440,7 @@ mod tests {
                     supergraph::Response::fake_builder()
                         .header("custom-header", "val1")
                         .header("x-log-response", HeaderValue::from_static("log"))
-                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .data(json!({"errors": [{"message": "res"}]}))
                         .build()
                         .expect("expecting valid response"),
                 );

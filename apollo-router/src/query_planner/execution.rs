@@ -20,7 +20,7 @@ use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
@@ -96,7 +96,7 @@ impl QueryPlan {
                     )
                     .await
             }
-            None => (Value::Object(Default::default()), vec![]),
+            None => (empty_object(), vec![]),
         };
         if !deferred_fetches.is_empty() {
             u64_counter!(
@@ -283,7 +283,7 @@ impl PlanNode {
                                     };
                             }
                             None => {
-                                value = Value::Object(Object::default());
+                                value = empty_object();
                                 errors = Vec::new();
                             }
                         };
@@ -297,7 +297,7 @@ impl PlanNode {
                         .extensions()
                         .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
-                        value = Value::Object(Object::default());
+                        value = empty_object();
                         errors = Vec::new();
                     } else {
                         match Variables::new(
@@ -367,7 +367,7 @@ impl PlanNode {
                                 );
                             }
                             None => {
-                                value = Value::Object(Object::default());
+                                value = empty_object();
                                 errors = Vec::new();
                             }
                         };
@@ -444,7 +444,7 @@ impl PlanNode {
                         } else {
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                             // primary response should be an empty object
-                            value.deep_merge(Value::Object(Default::default()));
+                            value.deep_merge(empty_object());
                         }
                     }
                     .instrument(tracing::info_span!(
@@ -462,15 +462,16 @@ impl PlanNode {
                     errors = Vec::new();
 
                     async {
-                        let v = parameters
+                        // the defer if clause is mandatory, and defaults to true
+                        let condition_holds = parameters
                             .query
                             .variable_value(
                                 condition.as_str(),
                                 &parameters.supergraph_request.body().variables,
                             )
-                            .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
+                            .is_none_or(|value| value.as_bool() == Some(true));
 
-                        if let &Value::Bool(true) = v {
+                        if condition_holds {
                             //FIXME: should we show an error if the if_node was not present?
                             if let Some(node) = if_clause {
                                 let (v, err) = node
@@ -490,7 +491,7 @@ impl PlanNode {
                             } else if current_dir.is_empty() {
                                 // If the condition is on the root selection set and it's the only one
                                 // For queries like {get @skip(if: true) {id name}}
-                                value.deep_merge(Value::Object(Default::default()));
+                                value.deep_merge(empty_object());
                             }
                         } else if let Some(node) = else_clause {
                             let (v, err) = node
@@ -510,7 +511,7 @@ impl PlanNode {
                         } else if current_dir.is_empty() {
                             // If the condition is on the root selection set and it's the only one
                             // For queries like {get @include(if: false) {id name}}
-                            value.deep_merge(Value::Object(Default::default()));
+                            value.deep_merge(empty_object());
                         }
                     }
                     .instrument(tracing::info_span!(

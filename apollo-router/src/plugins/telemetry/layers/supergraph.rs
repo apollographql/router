@@ -534,7 +534,6 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use http::StatusCode;
-    use serde_json_bytes::json;
     use tower::Service as _;
 
     use super::*;
@@ -560,7 +559,7 @@ mod tests {
                             .context(req.context)
                             .status_code(StatusCode::BAD_REQUEST)
                             .header("content-type", "application/json")
-                            .data(json!({"errors": [{"message": "nope"}]}))
+                            .data(apollo_json::json!({"errors": [{"message": "nope"}]}))
                             .build()
                             .unwrap(),
                     );
@@ -684,7 +683,7 @@ mod tests {
                         .context(req.context)
                         .status_code(StatusCode::OK)
                         .header("content-type", "application/json")
-                        .data(json!({"errors": [{"message": "nope"}]}))
+                        .data(apollo_json::json!({"errors": [{"message": "nope"}]}))
                         .build()
                         .unwrap(),
                 );

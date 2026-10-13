@@ -875,7 +875,7 @@ mod test {
     use std::time::Duration;
     use std::time::UNIX_EPOCH;
 
-    use serde_json_bytes::json;
+    use apollo_json::json;
 
     use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use super::Context;

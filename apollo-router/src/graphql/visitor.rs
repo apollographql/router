@@ -1,31 +1,31 @@
-use serde_json_bytes::Value;
+use apollo_json::JsonKind;
 
 use crate::graphql::Response;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 
 pub(crate) trait ResponseVisitor {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        match value {
-            Value::Array(items) => {
-                for item in items {
+        match value.kind() {
+            JsonKind::Array => {
+                for item in value.array_iter() {
                     self.visit_list_item(
                         request,
                         variables,
                         field.ty().inner_named_type(),
                         field,
-                        item,
+                        &item,
                     );
                 }
             }
-            Value::Object(children) => {
-                self.visit_selections(request, variables, &field.selection_set, children);
+            JsonKind::Object => {
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }
@@ -34,19 +34,19 @@ pub(crate) trait ResponseVisitor {
     fn visit_list_item(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
     ) {
-        match value {
-            Value::Array(items) => {
-                for item in items {
-                    self.visit_list_item(request, variables, _ty, field, item);
+        match value.kind() {
+            JsonKind::Array => {
+                for item in value.array_iter() {
+                    self.visit_list_item(request, variables, _ty, field, &item);
                 }
             }
-            Value::Object(children) => {
-                self.visit_selections(request, variables, &field.selection_set, children);
+            JsonKind::Object => {
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }
@@ -56,7 +56,7 @@ pub(crate) trait ResponseVisitor {
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
         response: &Response,
-        variables: &Object,
+        variables: &Value,
     ) {
         if response.path.is_some() {
             // TODO: In this case, we need to find the selection inside `request` corresponding to the path so we can start zipping.
@@ -64,7 +64,11 @@ pub(crate) trait ResponseVisitor {
             return;
         }
 
-        if let Some(Value::Object(children)) = &response.data {
+        if let Some(children) = response
+            .data
+            .as_ref()
+            .filter(|data| data.kind() == JsonKind::Object)
+        {
             if let Some(operation) = &request.operations.anonymous {
                 self.visit_selections(request, variables, &operation.selection_set, children);
             }
@@ -77,9 +81,9 @@ pub(crate) trait ResponseVisitor {
     fn visit_selections(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         selection_set: &apollo_compiler::executable::SelectionSet,
-        fields: &Object,
+        fields: &Value,
     ) {
         for selection in &selection_set.selections {
             match selection {
@@ -90,7 +94,7 @@ pub(crate) trait ResponseVisitor {
                             variables,
                             &selection_set.ty,
                             inner_field.as_ref(),
-                            value,
+                            &value,
                         );
                     }
                 }
@@ -203,27 +207,27 @@ mod tests {
         fn visit_field(
             &mut self,
             request: &ExecutableDocument,
-            variables: &Object,
+            variables: &Value,
             _ty: &apollo_compiler::executable::NamedType,
             field: &apollo_compiler::executable::Field,
             value: &Value,
         ) {
             let count = self.counts.entry(field.name.to_string()).or_insert(0);
             *count += 1;
-            match value {
-                Value::Array(items) => {
-                    for item in items {
+            match value.kind() {
+                JsonKind::Array => {
+                    for item in value.array_iter() {
                         self.visit_list_item(
                             request,
                             variables,
                             field.ty().inner_named_type(),
                             field,
-                            item,
+                            &item,
                         );
                     }
                 }
-                Value::Object(children) => {
-                    self.visit_selections(request, variables, &field.selection_set, children);
+                JsonKind::Object => {
+                    self.visit_selections(request, variables, &field.selection_set, value);
                 }
                 _ => {}
             }

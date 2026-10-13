@@ -166,7 +166,7 @@ async fn assemble_batch(
                 .await
                 .map_err(|err| SubgraphBatchingError::ProcessingFailed(err.to_string()))?
                 .to_bytes();
-            let request: graphql::Request = serde_json::from_slice(&bytes)
+            let request = graphql::Request::deserialize_from_bytes(&bytes)
                 .map_err(|err| SubgraphBatchingError::ProcessingFailed(err.to_string()))?;
             batch_requests.push(request);
         }
@@ -283,11 +283,12 @@ async fn process_batch(
         parts.status,
         parts.version,
     );
-    let value =
-        serde_json::from_slice(&body).map_err(|error| FetchError::SubrequestMalformedResponse {
+    let value = apollo_json::Value::parse(body).map_err(|error| {
+        FetchError::SubrequestMalformedResponse {
             service: service_name.clone(),
             reason: error.to_string(),
-        })?;
+        }
+    })?;
 
     tracing::debug!("json value from body is: {value:?}");
 
@@ -303,16 +304,9 @@ async fn process_batch(
                 reason: error.to_string(),
             })?;
 
-        // Map our Vec<u8> into Bytes
-        // Map our serde conversion error to a FetchError
-        let body = serde_json::to_vec(&object).map_err(|error| {
-            FetchError::SubrequestMalformedResponse {
-                service: service_name.clone(),
-                reason: error.to_string(),
-            }
-        })?;
-
-        exploded_bodies.push(router::body::from_bytes(body));
+        // Each element serializes back to its own body; untouched spans are
+        // emitted verbatim.
+        exploded_bodies.push(router::body::from_bytes(object.to_bytes()));
     }
 
     tracing::debug!("we have a vec of graphql_responses: {exploded_bodies:?}");
@@ -605,10 +599,10 @@ mod tests {
             let body = body::into_bytes(request.http_request.into_body())
                 .await
                 .unwrap();
-            let gql_request: graphql::Request = serde_json::from_slice(&body).unwrap();
+            let gql_request: graphql::Request = apollo_json::from_slice(&body).unwrap();
             assert_eq!(gql_request.query.as_deref(), Some("{ passthrough }"));
 
-            let data = serde_json_bytes::json!({ "passthrough": true });
+            let data = apollo_json::json!({ "passthrough": true });
             let response_body = body::from_bytes(
                 serde_json::to_vec(&graphql::Response::builder().data(data).build()).unwrap(),
             );
@@ -629,10 +623,10 @@ mod tests {
         let body = body::into_bytes(response.http_response.into_body())
             .await
             .unwrap();
-        let response: graphql::Response = serde_json::from_slice(&body).unwrap();
+        let response: graphql::Response = apollo_json::from_slice(&body).unwrap();
         assert_eq!(
             response.data,
-            Some(serde_json_bytes::json!({ "passthrough": true }))
+            Some(apollo_json::json!({ "passthrough": true }))
         );
 
         crate::plugin::test::await_mock_driver(driver).await;
@@ -654,7 +648,7 @@ mod tests {
             let body = body::into_bytes(request.http_request.into_body())
                 .await
                 .unwrap();
-            let merged: Vec<graphql::Request> = serde_json::from_slice(&body).unwrap();
+            let merged: Vec<graphql::Request> = apollo_json::from_slice(&body).unwrap();
             assert_eq!(
                 merged.iter().map(|r| r.query.clone()).collect::<Vec<_>>(),
                 (0..3)
@@ -685,10 +679,10 @@ mod tests {
             let body = body::into_bytes(response.http_response.into_body())
                 .await
                 .unwrap();
-            let response: graphql::Response = serde_json::from_slice(&body).unwrap();
+            let response: graphql::Response = apollo_json::from_slice(&body).unwrap();
             assert_eq!(
                 response.data,
-                Some(serde_json_bytes::json!({ format!("slot{index}"): index }))
+                Some(apollo_json::json!({ format!("slot{index}"): index }))
             );
         }
 

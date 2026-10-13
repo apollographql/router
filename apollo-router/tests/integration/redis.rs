@@ -39,6 +39,7 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::namespace;
+use crate::integration::json_value;
 use crate::integration::redis_monitor::Monitor as RedisMonitor;
 
 const REDIS_STANDALONE_PORT: [&str; 1] = ["6379"];
@@ -262,10 +263,10 @@ async fn apq() -> Result<(), BoxError> {
         .await
         .unwrap();
 
-    let persisted = json!({
+    let persisted = json_value(serde_json_bytes::json!({
         "version" : 1,
         "sha256Hash" : query_hash
-    });
+    }));
 
     // an APQ should fail if we do not know about the hash
     // it should not set a value in Redis

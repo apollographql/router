@@ -3,6 +3,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
+use apollo_json::JsonKind;
+use apollo_json::NewValue;
+use apollo_json::PathSegment;
 use futures::FutureExt;
 use http::HeaderValue;
 use http::StatusCode;
@@ -27,6 +30,7 @@ use self::multipart_request::MultipartRequest;
 use self::rearrange_query_plan::rearrange_query_plan;
 use crate::graphql;
 use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -327,9 +331,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
                     replace_value_at_path(
                         variables,
                         variable_path,
-                        serde_json_bytes::Value::String(
-                            format!("<Placeholder for file '{filename}'>").into(),
-                        ),
+                        format!("<Placeholder for file '{filename}'>"),
                     )
                     .map_err(|path| FileUploadError::InputValueNotFound(path.join(".")))?;
                 }
@@ -348,63 +350,85 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
 
 // Replaces value at path with the provided one.
 // Returns the provided path if the path is not valid for the given object
-fn replace_value_at_path<'a>(
-    variables: &'a mut json_ext::Object,
+fn replace_value_at_path<'v, 'a>(
+    variables: &mut json_ext::Value,
     path: &'a [String],
-    value: serde_json_bytes::Value,
+    value: impl Into<NewValue<'v>>,
 ) -> std::result::Result<(), &'a [String]> {
-    if let Some(v) = get_value_at_path(variables, path) {
-        *v = value;
-        Ok(())
-    } else {
-        Err(path)
+    match resolve_path(variables, path) {
+        Some(segments) => {
+            write_at_path(variables, &segments, value);
+            Ok(())
+        }
+        None => Err(path),
     }
 }
 
 // Removes value at path.
-fn remove_value_at_path<'a>(variables: &'a mut json_ext::Object, path: &'a [String]) {
-    if let Some(v) = get_value_at_path(variables, path) {
-        *v = serde_json_bytes::Value::Null;
+fn remove_value_at_path(variables: &mut json_ext::Value, path: &[String]) {
+    if let Some(segments) = resolve_path(variables, path) {
+        write_at_path(variables, &segments, NewValue::Null);
     }
 }
 
-fn get_value_at_path<'a>(
-    variables: &'a mut json_ext::Object,
+/// The mutation path addressing `path` inside `variables`, or `None` when a
+/// segment names a member that is absent or a container that is not there.
+fn resolve_path<'a>(
+    variables: &json_ext::Value,
     path: &'a [String],
-) -> Option<&'a mut serde_json_bytes::Value> {
-    let mut iter = path.iter();
-    let variable_name = iter.next();
-    if let Some(variable_name) = variable_name {
-        let root = variables.get_mut(variable_name.as_str());
-        if let Some(root) = root {
-            return iter.try_fold(root, |parent, segment| match parent {
-                serde_json_bytes::Value::Object(map) => map.get_mut(segment.as_str()),
-                serde_json_bytes::Value::Array(list) => segment
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(move |x| list.get_mut(x)),
-                _ => None,
-            });
-        }
+) -> Option<Vec<PathSegment<'a>>> {
+    let (variable_name, rest) = path.split_first()?;
+    let mut current = variables.get(variable_name.as_str())?;
+    let mut segments = Vec::with_capacity(path.len());
+    segments.push(PathSegment::Key(variable_name.as_str()));
+
+    for segment in rest {
+        current = match current.kind() {
+            JsonKind::Object => {
+                segments.push(PathSegment::Key(segment.as_str()));
+                current.get(segment.as_str())
+            }
+            JsonKind::Array => {
+                let index = segment.parse::<usize>().ok()?;
+                segments.push(PathSegment::Index(index));
+                current.index(index)
+            }
+            _ => None,
+        }?;
     }
-    None
+
+    Some(segments)
+}
+
+fn write_at_path<'v>(
+    variables: &mut json_ext::Value,
+    segments: &[PathSegment<'_>],
+    value: impl Into<NewValue<'v>>,
+) {
+    let mut builder = variables.compact().edit();
+    builder
+        .set_path(segments, value)
+        .expect("the segments resolved against this object");
+    *variables = builder.seal();
 }
 
 #[test]
 fn it_works_with_one_segment() {
-    let mut stuff = serde_json_bytes::json! {{
+    let mut variables = json_ext::from_legacy(&serde_json_bytes::json! {{
         "file1": null,
         "file2": null
-    }};
+    }});
 
-    let variables = stuff.as_object_mut().unwrap();
-
-    let path = &["file1".to_string()];
+    replace_value_at_path(&mut variables, &["file1".to_string()], "placeholder")
+        .expect("file1 is a member of the variables");
 
     assert_eq!(
-        &mut serde_json_bytes::Value::Null,
-        get_value_at_path(variables, path).unwrap()
+        variables
+            .get("file1")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        Some("placeholder".to_string())
     );
+    assert!(variables.get("file2").expect("file2 is present").is_null());
 }
 #[derive(Clone)]
 struct SupergraphLayerResult {
@@ -435,7 +459,12 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
         let SupergraphLayerResult { multipart, map } = supergraph_result;
 
         let variables = &mut req.subgraph_request.body_mut().variables;
-        let subgraph_map = map.sugraph_map(variables.keys());
+        let variable_names: Vec<serde_json_bytes::ByteString> = variables
+            .object_keys()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let subgraph_map = map.sugraph_map(&variable_names);
         if !subgraph_map.is_empty() {
             for variable_map in map.per_variable.values() {
                 for paths in variable_map.values() {
@@ -460,6 +489,7 @@ mod tests {
     use futures::StreamExt;
 
     use super::*;
+    use crate::json_ext::ObjectExt;
     use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
     use crate::plugins::circuit_breaker::test_support::subgraph_request;
 
@@ -492,7 +522,7 @@ mod tests {
             .subgraph_request
             .body_mut()
             .variables
-            .insert("file", serde_json_bytes::Value::Null);
+            .object_insert("file", crate::json_ext::null());
         request
             .context
             .extensions()

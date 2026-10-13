@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::Context;
 use crate::graphql;
+use crate::json_ext::Value;
 
 pub(crate) mod service;
 

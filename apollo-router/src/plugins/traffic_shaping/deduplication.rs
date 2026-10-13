@@ -7,6 +7,8 @@
 //! See [`Layer`] and [`tower::Service`] for more details.
 
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -49,6 +51,47 @@ where
 
 type CacheKey = (http_ext::Request<Request>, Arc<CacheKeyMetadata>);
 
+/// A dedup key carrying its hash, computed once at construction. Hashing the
+/// key walks the whole request — query string and variables tree included —
+/// and the wait map hashes its key on lookup, insert, and removal; this pays
+/// that walk once per request instead of once per map operation.
+#[derive(Clone)]
+struct HashedCacheKey {
+    key: CacheKey,
+    hash: u64,
+}
+
+impl HashedCacheKey {
+    fn new(request: &SubgraphRequest) -> Self {
+        let key: CacheKey = (
+            (&request.subgraph_request).into(),
+            request.authorization.clone(),
+        );
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        HashedCacheKey {
+            hash: hasher.finish(),
+            key,
+        }
+    }
+}
+
+impl PartialEq for HashedCacheKey {
+    fn eq(&self, other: &Self) -> bool {
+        // The cheap comparison first: unequal hashes prove unequal keys, so
+        // the full key comparison only runs on a genuine hash collision.
+        self.hash == other.hash && self.key == other.key
+    }
+}
+
+impl Eq for HashedCacheKey {}
+
+impl Hash for HashedCacheKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash);
+    }
+}
+
 type Fetch = BoxFuture<'static, Result<CloneSubgraphResponse, CloneFetchError>>;
 
 /// The fetch in flight for a cache key.
@@ -59,7 +102,7 @@ struct InFlight {
     fetch: WeakShared<Fetch>,
 }
 
-type WaitMap = Arc<Mutex<HashMap<CacheKey, InFlight>>>;
+type WaitMap = Arc<Mutex<HashMap<HashedCacheKey, InFlight>>>;
 
 static NEXT_FETCH_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -106,7 +149,7 @@ impl From<CloneFetchError> for BoxError {
 /// fetch for the same key has replaced it.
 struct RemoveFromWaitMap {
     wait_map: WaitMap,
-    key: CacheKey,
+    key: HashedCacheKey,
     id: u64,
 }
 
@@ -178,10 +221,7 @@ where
         wait_map: &WaitMap,
         request: SubgraphRequest,
     ) -> Shared<Fetch> {
-        let key: CacheKey = (
-            (&request.subgraph_request).into(),
-            request.authorization.clone(),
-        );
+        let key = HashedCacheKey::new(&request);
         // Don't drop a handle to a fetch while holding the lock: dropping the last handle drops
         // the fetch's `RemoveFromWaitMap`, which takes the lock.
         let mut locked_wait_map = wait_map.lock();

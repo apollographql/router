@@ -18,7 +18,7 @@ use crate::Endpoint;
 use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -310,7 +310,7 @@ impl Plugin for Subscription {
                                     .extension_code("SUBSCRIPTION_DISABLED")
                                     .build(),
                             )
-                            .extensions(Object::default())
+                            .extensions(empty_object())
                             .build()
                             .answered_by_router(),
                     ))
@@ -361,6 +361,7 @@ mod tests {
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Request;
     use crate::http_ext;
+    use crate::json_ext::json_value as json;
     use crate::plugin::DynPlugin;
     use crate::plugins::subscription::callback::create_verifier;
     use crate::plugins::subscription::notification::Notify;
@@ -455,13 +456,17 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(router::body::from_bytes(
-            serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
-                id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build()),
-                verifier: verifier.clone(),
-            }))
+            serde_json::to_vec(&callback::CallbackPayload::Subscription(
+                callback::SubscriptionPayload::Next {
+                    id: new_sub_id.clone(),
+                    payload: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                            .build(),
+                    ),
+                    verifier: verifier.clone(),
+                },
+            ))
             .unwrap(),
         ))
         .unwrap();
@@ -474,7 +479,7 @@ mod tests {
             msg,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
                 .build()
         );
         drop(handler);
@@ -484,13 +489,17 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(router::body::from_bytes(
-            serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
-                id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build()),
-                verifier: verifier.clone(),
-            }))
+            serde_json::to_vec(&callback::CallbackPayload::Subscription(
+                callback::SubscriptionPayload::Next {
+                    id: new_sub_id.clone(),
+                    payload: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                            .build(),
+                    ),
+                    verifier: verifier.clone(),
+                },
+            ))
             .unwrap(),
         ))
         .unwrap();
@@ -594,13 +603,17 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(router::body::from_bytes(
-            serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
-                id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build()),
-                verifier: verifier.clone(),
-            }))
+            serde_json::to_vec(&callback::CallbackPayload::Subscription(
+                callback::SubscriptionPayload::Next {
+                    id: new_sub_id.clone(),
+                    payload: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                            .build(),
+                    ),
+                    verifier: verifier.clone(),
+                },
+            ))
             .unwrap(),
         ))
         .unwrap();
@@ -695,13 +708,17 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(router::body::from_bytes(
-            serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
-                id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build()),
-                verifier: verifier.clone(),
-            }))
+            serde_json::to_vec(&callback::CallbackPayload::Subscription(
+                callback::SubscriptionPayload::Next {
+                    id: new_sub_id.clone(),
+                    payload: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                            .build(),
+                    ),
+                    verifier: verifier.clone(),
+                },
+            ))
             .unwrap(),
         ))
         .unwrap();
@@ -714,7 +731,7 @@ mod tests {
             msg,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
                 .build()
         );
 
@@ -757,13 +774,17 @@ mod tests {
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
         .body(router::body::from_bytes(
-            serde_json::to_vec(&callback::CallbackPayload::Subscription(callback::SubscriptionPayload::Next {
-                id: new_sub_id.clone(),
-                payload: Box::new(graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
-                    .build()),
-                verifier,
-            }))
+            serde_json::to_vec(&callback::CallbackPayload::Subscription(
+                callback::SubscriptionPayload::Next {
+                    id: new_sub_id.clone(),
+                    payload: Box::new(
+                        graphql::Response::builder()
+                            .data(json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                            .build(),
+                    ),
+                    verifier,
+                },
+            ))
             .unwrap(),
         ))
         .unwrap();
@@ -803,7 +824,8 @@ mod tests {
                             .build(),
                     )
                     .build()
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
             )
             .operation_kind(OperationKind::Subscription)
             .build();
@@ -818,7 +840,7 @@ mod tests {
         assert_response_eq_ignoring_error_id!(
             subgraph_response.response.body(),
             &graphql::Response::builder()
-                .data(serde_json_bytes::Value::Null)
+                .data(json!(null))
                 .error(
                     graphql::Error::builder()
                         .message(
@@ -827,7 +849,7 @@ mod tests {
                         .extension_code("SUBSCRIPTION_DISABLED")
                         .build()
                 )
-                .extensions(Object::default())
+                .extensions(empty_object())
                 .build()
         );
         crate::plugin::test::assert_no_mock_calls(handle).await;

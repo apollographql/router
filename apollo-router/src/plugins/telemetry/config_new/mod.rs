@@ -1,3 +1,4 @@
+use apollo_json::JsonKind;
 use events::EventOn;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
@@ -50,7 +51,7 @@ pub(crate) trait Selectors<Request, Response, EventResponse> {
         _attrs: &mut Vec<KeyValue>,
         _ty: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
-        _value: &serde_json_bytes::Value,
+        _value: &crate::json_ext::Value,
         _ctx: &Context,
     ) {
     }
@@ -110,7 +111,7 @@ pub(crate) trait Selector: std::fmt::Debug {
         &self,
         _ty: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
-        _value: &serde_json_bytes::Value,
+        _value: &crate::json_ext::Value,
         _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         None
@@ -241,6 +242,71 @@ macro_rules! impl_to_otel_value {
 }
 impl_to_otel_value!(serde_json_bytes::Value);
 impl_to_otel_value!(serde_json::Value);
+
+impl ToOtelValue for crate::json_ext::Value {
+    fn maybe_to_otel_value(&self) -> Option<opentelemetry::Value> {
+        match self.kind() {
+            JsonKind::Bool => self.as_bool().map(opentelemetry::Value::from),
+            JsonKind::Number => number_to_otel_value(self),
+            JsonKind::String => Some(opentelemetry::Value::String(
+                self.as_str()?.into_owned().into(),
+            )),
+            JsonKind::Array => {
+                let items: Vec<crate::json_ext::Value> = self.array_iter().collect();
+                // Arrays must be uniform in value
+                if items.iter().all(is_integer) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::I64(
+                        items.iter().filter_map(|v| v.as_i64()).collect(),
+                    )))
+                } else if items.iter().all(is_float) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::F64(
+                        items.iter().filter_map(|v| v.as_f64()).collect(),
+                    )))
+                } else if items.iter().all(|v| v.kind() == JsonKind::Bool) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::Bool(
+                        items.iter().filter_map(|v| v.as_bool()).collect(),
+                    )))
+                } else if items.iter().all(|v| v.kind() == JsonKind::Object) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                        items.iter().map(|v| v.to_string().into()).collect(),
+                    )))
+                } else if items.iter().all(|v| v.kind() == JsonKind::String) {
+                    Some(opentelemetry::Value::Array(opentelemetry::Array::String(
+                        items
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|v| v.into_owned().into())
+                            .collect(),
+                    )))
+                } else {
+                    Some(self.to_string().into())
+                }
+            }
+            JsonKind::Object => Some(self.to_string().into()),
+            JsonKind::Null => None,
+        }
+    }
+}
+
+/// A JSON number spelled with a fraction or an exponent, so it reads as an `f64`.
+fn is_float(value: &crate::json_ext::Value) -> bool {
+    value
+        .raw_number()
+        .is_some_and(|raw| raw.contains(['.', 'e', 'E']))
+}
+
+/// A JSON number spelled as a whole number that fits an `i64`.
+fn is_integer(value: &crate::json_ext::Value) -> bool {
+    value.raw_number().is_some() && !is_float(value) && value.as_i64().is_some()
+}
+
+fn number_to_otel_value(value: &crate::json_ext::Value) -> Option<opentelemetry::Value> {
+    if is_float(value) {
+        value.as_f64().map(opentelemetry::Value::from)
+    } else {
+        value.as_i64().map(opentelemetry::Value::from)
+    }
+}
 
 impl From<opentelemetry::Value> for AttributeValue {
     fn from(value: opentelemetry::Value) -> Self {

@@ -9,6 +9,8 @@
 //! to be future-proof by supporting all types of rewrites on both "sides".
 
 use apollo_compiler::Name;
+use apollo_json::JsonKind;
+use apollo_json::ValueMut;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -25,6 +27,17 @@ fn split_path_last_element(path: &Path) -> Option<(Path, &PathElement)> {
     path.last().map(|last| (path.parent().unwrap(), last))
 }
 
+/// Moves the member at `from` to `to`, leaving a non-object or an object
+/// without `from` untouched. A `to` that already exists keeps its position and
+/// takes the moved value.
+fn rename_member(object: &mut ValueMut<'_>, from: &str, to: &str) {
+    let Some(value) = object.value().get(from).map(|member| member.to_value()) else {
+        return;
+    };
+    object.remove(from);
+    let _ = object.set(to, value);
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase", tag = "kind")]
 pub(crate) enum DataRewrite {
@@ -36,6 +49,11 @@ pub(crate) enum DataRewrite {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DataValueSetter {
     pub(crate) path: Path,
+    /// Rebuilt on deserialize: rewrites live inside the internally tagged
+    /// [`PlanNode`](crate::query_planner::PlanNode) tree, which the
+    /// distributed query-plan cache reads back through serde -- and serde's
+    /// buffering for tagged enums cannot capture an arena value.
+    #[serde(with = "crate::json_ext::value_rebuild")]
     pub(crate) set_value_to: Value,
 }
 
@@ -58,9 +76,9 @@ impl DataRewrite {
                 if let Some((parent, PathElement::Key(k, _))) =
                     split_path_last_element(&setter.path)
                 {
-                    data.select_values_and_paths_mut(schema, &parent, |_path, obj| {
-                        if let Some(value) = obj.get_mut(k) {
-                            *value = setter.set_value_to.clone()
+                    data.select_values_and_paths_mut(schema, &parent, |_path, mut obj| {
+                        if obj.value().get(k.as_str()).is_some() {
+                            let _ = obj.set(k.as_str(), setter.set_value_to.clone());
                         }
                     });
                 }
@@ -71,21 +89,18 @@ impl DataRewrite {
                 if let Some((parent, PathElement::Key(k, _))) =
                     split_path_last_element(&renamer.path)
                 {
-                    data.select_values_and_paths_mut(schema, &parent, |_path, selected| {
-                        if let Some(obj) = selected.as_object_mut()
-                            && let Some(value) = obj.remove(k.as_str())
-                        {
-                            obj.insert(renamer.rename_key_to.as_str(), value);
-                        }
-
-                        if let Some(arr) = selected.as_array_mut() {
-                            for item in arr {
-                                if let Some(obj) = item.as_object_mut()
-                                    && let Some(value) = obj.remove(k.as_str())
-                                {
-                                    obj.insert(renamer.rename_key_to.as_str(), value);
+                    let rename_key_to = renamer.rename_key_to.as_str();
+                    data.select_values_and_paths_mut(schema, &parent, |_path, mut selected| {
+                        match selected.value().kind() {
+                            JsonKind::Array => {
+                                let len = selected.value().len().unwrap_or(0);
+                                for index in 0..len {
+                                    if let Ok(mut item) = selected.child_mut(index) {
+                                        rename_member(&mut item, k, rename_key_to);
+                                    }
                                 }
                             }
+                            _ => rename_member(&mut selected, k, rename_key_to),
                         }
                     });
                 }
@@ -109,8 +124,23 @@ pub(crate) fn apply_rewrites(
 
 #[cfg(test)]
 mod tests {
+    /// A rewrite travels through the distributed query-plan cache as JSON
+    /// read back by serde. This fails if `set_value_to` loses its rebuild
+    /// adapter: serde buffers internally tagged enums, and buffering cannot
+    /// capture an arena value.
+    #[test]
+    fn rewrites_round_trip_through_serde() {
+        let rewrite = DataRewrite::ValueSetter(DataValueSetter {
+            path: Path::from("a/b"),
+            set_value_to: crate::json_ext::json_value!({"kept": [1, {"deep": "yes"}]}),
+        });
+        let bytes = serde_json::to_string(&rewrite).expect("serializes");
+        let back: DataRewrite = serde_json::from_str(&bytes).expect("deserializes");
+        assert_eq!(rewrite, back);
+    }
+
     use apollo_compiler::name;
-    use serde_json_bytes::json;
+    use apollo_json::json;
 
     use super::*;
 

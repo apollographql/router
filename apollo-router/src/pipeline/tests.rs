@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use apollo_json::json;
 use indexmap::IndexMap;
-use serde_json_bytes::json;
 
 use super::acquire::maybe_bootstrap_telemetry;
 use super::*;

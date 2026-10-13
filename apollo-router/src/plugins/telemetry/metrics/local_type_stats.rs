@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use apollo_json::JsonKind;
+
 use crate::graphql::ResponseVisitor;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalFieldStat;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
@@ -23,13 +25,13 @@ impl ResponseVisitor for LocalTypeStatRecorder {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        value: &serde_json_bytes::Value,
+        value: &Value,
     ) {
-        match value {
-            serde_json_bytes::Value::Array(items) => {
+        match value.kind() {
+            JsonKind::Array => {
                 let stat = match self.local_type_stats.get_mut(ty.as_str()) {
                     Some(map) => map,
                     None => {
@@ -60,20 +62,20 @@ impl ResponseVisitor for LocalTypeStatRecorder {
 
                 local_field_stat
                     .list_lengths
-                    .record(Some(items.len() as u64), 1);
+                    .record(value.len().map(|len| len as u64), 1);
 
-                for item in items {
+                for item in value.array_iter() {
                     self.visit_list_item(
                         request,
                         variables,
                         field.ty().inner_named_type(),
                         field,
-                        item,
+                        &item,
                     );
                 }
             }
-            serde_json_bytes::Value::Object(children) => {
-                self.visit_selections(request, variables, &field.selection_set, children);
+            JsonKind::Object => {
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }

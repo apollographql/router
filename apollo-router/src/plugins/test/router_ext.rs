@@ -38,7 +38,7 @@ impl RequestTestExt<router::Request, router::Response> for RouterRequest {
     fn canned_result(self) -> router::ServiceResult {
         router::Response::fake_builder()
             .context(self.context.clone())
-            .data(json! ({"field": "value"}))
+            .data(crate::json_ext::json_value!({"field": "value"}))
             .build()
     }
 

@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
+assertion_line: 4965
 description: "Make sure everything is in status 'new' and we have all the entities and root fields"
 expression: cache_keys
 ---
@@ -69,8 +70,8 @@ expression: cache_keys
       "variables": {
         "representations": [
           {
-            "id": "1",
-            "__typename": "Organization"
+            "__typename": "Organization",
+            "id": "1"
           }
         ]
       }

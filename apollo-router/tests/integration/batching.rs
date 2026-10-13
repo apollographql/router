@@ -170,7 +170,8 @@ async fn it_rejects_a_batched_deferred_query() -> Result<(), BoxError> {
                 response.errors[0]
                     .extensions
                     .get("code")
-                    .and_then(|v| v.as_str()),
+                    .and_then(|v| v.as_string())
+                    .as_deref(),
                 Some("BATCHING_DEFER_UNSUPPORTED")
             );
         }
@@ -494,7 +495,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
 
     // Custom validation for subgraph B
     fn handle_b(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
+        let requests: Vec<Request> = apollo_json::from_slice(&request.body).unwrap();
 
         // We should have gotten all of the regular elements minus the second
         assert_eq!(requests.len(), REQUEST_COUNT - 1);
@@ -732,7 +733,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
 
     // We aren't expecting the whole batch anymore, so we need a handler here for it
     fn handle_a(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
+        let requests: Vec<Request> = apollo_json::from_slice(&request.body).unwrap();
 
         // We should have gotten all of the regular elements minus the third
         assert_eq!(requests.len(), REQUEST_COUNT - 1);
@@ -834,7 +835,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
 
     // We aren't expecting the whole batch anymore, so we need a handler here for it
     fn handle_a(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
+        let requests: Vec<Request> = apollo_json::from_slice(&request.body).unwrap();
 
         // We should have gotten all of the regular elements minus the third
         assert_eq!(requests.len(), REQUEST_COUNT - 1);
@@ -982,12 +983,12 @@ mod helper {
             .execute_query(Query::builder().body(request).build())
             .await;
 
-        serde_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
+        apollo_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
     }
 
     /// Subgraph handler for receiving a batch of requests
     pub fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
+        let requests: Vec<Request> = apollo_json::from_slice(&request.body).unwrap();
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
@@ -1031,7 +1032,7 @@ mod helper {
 
     /// Handler that always returns an error for the second batch field
     pub fn fail_second_batch_request(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
+        let requests: Vec<Request> = apollo_json::from_slice(&request.body).unwrap();
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
@@ -1070,7 +1071,7 @@ mod helper {
     ///
     /// Useful for testing timeouts at the batch level
     pub fn never_respond(request: &wiremock::Request) -> ResponseTemplate {
-        let requests: Vec<Request> = request.body_json().unwrap();
+        let requests: Vec<Request> = apollo_json::from_slice(&request.body).unwrap();
 
         // Extract info about this operation
         let (_, count): (String, usize) = {

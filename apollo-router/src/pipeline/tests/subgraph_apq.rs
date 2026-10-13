@@ -6,13 +6,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::body::Body;
-use bytes::Buf;
 use http::StatusCode;
 use http::Uri;
 use http::header::CONTENT_TYPE;
 use indexmap::IndexMap;
 use mime::APPLICATION_JSON;
-use serde_json_bytes::ByteString;
 use tokio::net::TcpListener;
 use tower::ServiceExt;
 
@@ -58,7 +56,7 @@ async fn parse_graphql_request(body: Body) -> crate::graphql::Request {
     let bytes = router::body::into_bytes(body)
         .await
         .expect("can read request body");
-    serde_json::from_reader(bytes.reader()).expect("valid graphql request")
+    crate::graphql::Request::deserialize_from_bytes(&bytes).expect("valid graphql request")
 }
 
 fn subgraph_request(uri: Uri, subgraph_name: &str, query: &str) -> SubgraphRequest {
@@ -95,7 +93,7 @@ async fn respects_all_enabled_config() {
                 .status(StatusCode::OK)
                 .body(
                     serde_json::to_string(&Response {
-                        data: Some(serde_json_bytes::Value::String(ByteString::from("test"))),
+                        data: Some(crate::json_ext::string("test")),
                         ..Response::default()
                     })
                     .unwrap()
@@ -124,7 +122,7 @@ async fn respects_all_enabled_config() {
 
     assert_eq!(
         resp.response.body().data,
-        Some(serde_json_bytes::Value::String(ByteString::from("test")))
+        Some(crate::json_ext::string("test"))
     );
 }
 
@@ -142,7 +140,7 @@ async fn respects_all_disabled_config() {
                 .status(StatusCode::OK)
                 .body(
                     serde_json::to_string(&Response {
-                        data: Some(serde_json_bytes::Value::String(ByteString::from("test"))),
+                        data: Some(crate::json_ext::string("test")),
                         ..Response::default()
                     })
                     .unwrap()
@@ -201,7 +199,7 @@ async fn per_subgraph_override_takes_precedence_over_all() {
                 .status(StatusCode::OK)
                 .body(
                     serde_json::to_string(&Response {
-                        data: Some(serde_json_bytes::Value::String(ByteString::from("test"))),
+                        data: Some(crate::json_ext::string("test")),
                         ..Response::default()
                     })
                     .unwrap()

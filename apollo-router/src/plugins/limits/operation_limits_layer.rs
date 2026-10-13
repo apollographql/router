@@ -177,6 +177,7 @@ mod tests {
 
     use super::*;
     use crate::Context;
+    use crate::json_ext::ValueExt;
     use crate::services::supergraph;
     use crate::spec::Query;
     use crate::spec::Schema;
@@ -196,11 +197,11 @@ mod tests {
             .unwrap()
     }
 
-    fn error_codes(response: &graphql::Response) -> Vec<&str> {
+    fn error_codes(response: &graphql::Response) -> Vec<String> {
         response
             .errors
             .iter()
-            .filter_map(|e| e.extensions.get("code")?.as_str())
+            .filter_map(|e| e.extensions.get("code")?.as_str_owned())
             .collect()
     }
 

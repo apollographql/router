@@ -442,7 +442,7 @@ mod tests {
         let bytes = router::body::into_bytes(response.response.into_body())
             .await
             .unwrap();
-        let graphql_response: graphql::Response = serde_json::from_slice(&bytes).unwrap();
+        let graphql_response: graphql::Response = apollo_json::from_slice(&bytes).unwrap();
         assert!(
             graphql_response.contains_error_code(code),
             "expected error code {code}, got {graphql_response:?}"
@@ -456,7 +456,7 @@ mod tests {
             let (_request, responder) = handle.next_request().await.unwrap();
             responder.send_response(
                 RouterResponse::fake_builder()
-                    .data(serde_json_bytes::json!({"single": true}))
+                    .data(apollo_json::json!({"single": true}))
                     .build()
                     .unwrap(),
             );
@@ -626,8 +626,8 @@ mod tests {
             let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let driver = tokio::task::spawn(async move {
                 let responses = vec![
-                    serde_json_bytes::json!({"a": true}),
-                    serde_json_bytes::json!({"b": true}),
+                    apollo_json::json!({"a": true}),
+                    apollo_json::json!({"b": true}),
                 ];
                 for data in responses {
                     let (_request, responder) = handle.next_request().await.unwrap();
@@ -693,9 +693,9 @@ mod tests {
             let (mock, mut handle) = tower_test::mock::pair::<RouterRequest, RouterResponse>();
             let driver = tokio::task::spawn(async move {
                 let responses = vec![
-                    serde_json_bytes::json!({"a": true}),
-                    serde_json_bytes::json!({"b": true}),
-                    serde_json_bytes::json!({"c": true}),
+                    apollo_json::json!({"a": true}),
+                    apollo_json::json!({"b": true}),
+                    apollo_json::json!({"c": true}),
                 ];
                 for data in responses {
                     let (_request, responder) = handle.next_request().await.unwrap();
@@ -751,9 +751,9 @@ mod tests {
                 pending.push(handle.next_request().await.unwrap());
             }
             let responses = vec![
-                serde_json_bytes::json!({"a": true}),
-                serde_json_bytes::json!({"b": true}),
-                serde_json_bytes::json!({"c": true}),
+                apollo_json::json!({"a": true}),
+                apollo_json::json!({"b": true}),
+                apollo_json::json!({"c": true}),
             ];
             for ((_request, responder), data) in pending.into_iter().zip(responses).rev() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -791,7 +791,7 @@ mod tests {
         let bytes = router::body::into_bytes(response.response.into_body())
             .await
             .unwrap();
-        let results: Vec<graphql::Response> = serde_json::from_slice(&bytes).unwrap();
+        let results: Vec<graphql::Response> = apollo_json::from_slice(&bytes).unwrap();
         let queries = results
             .into_iter()
             .map(|r| r.data.unwrap())
@@ -799,9 +799,9 @@ mod tests {
         assert_eq!(
             queries,
             vec![
-                serde_json_bytes::json!({"a": true}),
-                serde_json_bytes::json!({"b": true}),
-                serde_json_bytes::json!({"c": true}),
+                apollo_json::json!({"a": true}),
+                apollo_json::json!({"b": true}),
+                apollo_json::json!({"c": true}),
             ]
         );
     }

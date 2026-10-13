@@ -27,8 +27,6 @@ use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::server::WebPkiClientVerifier;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 #[cfg(unix)]
@@ -45,6 +43,7 @@ use crate::configuration::TlsClientAuth;
 use crate::configuration::load_certs;
 use crate::configuration::load_key;
 use crate::graphql::Response;
+use crate::json_ext::Value;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::traffic_shaping::Http2Config;
@@ -852,7 +851,7 @@ mod h2c_cleartext {
             let response = match request.version() {
                 Version::HTTP_2 => {
                     let response_body = serde_json::to_string(&Response {
-                        data: Some(Value::default()),
+                        data: Some(Value::null()),
                         ..Response::default()
                     });
                     response_builder
@@ -1026,7 +1025,7 @@ mod h2c_keep_alive {
 
             let svc = hyper::service::service_fn(|_request: Request<Incoming>| async {
                 let response_body = serde_json::to_string(&Response {
-                    data: Some(Value::default()),
+                    data: Some(Value::null()),
                     ..Response::default()
                 })
                 .unwrap();
@@ -1136,7 +1135,7 @@ mod compressed_req_res {
             );
 
             let original_body = Response {
-                data: Some(Value::String(ByteString::from("test"))),
+                data: Some(Value::from("test")),
                 ..Response::default()
             };
             let mut encoder = GzipEncoder::new(Vec::new());

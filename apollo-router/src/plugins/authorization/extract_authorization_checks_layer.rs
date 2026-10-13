@@ -151,6 +151,7 @@ mod tests {
     use super::*;
     use crate::Configuration;
     use crate::Context;
+    use crate::json_ext::json_value as json;
     use crate::plugins::authorization::REQUIRED_SCOPES_KEY;
     use crate::spec::Query;
 
@@ -252,7 +253,7 @@ mod tests {
             res.context
                 .get_json_value(AUTHENTICATION_REQUIRED_KEY)
                 .unwrap(),
-            serde_json_bytes::json!(true),
+            json!(true),
             "required scopes should have been inserted into context"
         );
 
@@ -297,7 +298,7 @@ mod tests {
 
         assert_eq!(
             res.context.get_json_value(REQUIRED_POLICIES_KEY).unwrap(),
-            serde_json_bytes::json!({ "admin": null }),
+            json!({ "admin": null }),
             "required policies should have been inserted into context"
         );
 

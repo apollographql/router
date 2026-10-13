@@ -24,6 +24,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::context::PERSISTED_QUERY_ID;
 use crate::graphql::Error as GraphQLError;
+use crate::json_ext::ObjectExt;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -174,7 +175,7 @@ impl PersistedQueryExpander {
             ) {
                 let body = request.supergraph_request.body_mut();
                 body.query = Some(persisted_query_body);
-                body.extensions.remove("persistedQuery");
+                body.extensions.object_remove("persistedQuery");
                 request.context.extensions().with_lock(|lock| {
                     // Record that we actually used our ID, so we can skip the
                     // safelist check later.
@@ -504,7 +505,6 @@ fn supergraph_err(
 mod tests {
     use std::time::Duration;
 
-    use serde_json::json;
     use tower::Service as _;
     use tower::ServiceBuilder;
     use tower::ServiceExt as _;
@@ -519,6 +519,7 @@ mod tests {
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
     use crate::graphql;
+    use crate::json_ext::json_value as json;
     use crate::metrics::FutureMetricsExt;
     use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::query_parsing;
@@ -622,7 +623,10 @@ mod tests {
         .unwrap();
 
         let incoming_request = SupergraphRequest::fake_builder()
-            .extension("persistedQuery", json!({"version": 1, "sha256Hash": &id}))
+            .extension(
+                "persistedQuery",
+                json!({"version": 1, "sha256Hash": id.as_str()}),
+            )
             .build()
             .unwrap();
 

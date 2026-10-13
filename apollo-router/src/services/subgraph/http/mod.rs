@@ -8,8 +8,6 @@ use http::response::Parts;
 use hyper_rustls::ConfigBuilderExt;
 use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
-use serde_json_bytes::Entry;
-use serde_json_bytes::json;
 use tower::BoxError;
 
 use crate::configuration::ConfigurationError;
@@ -17,6 +15,7 @@ use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::json_ext::ObjectExt;
 use crate::services::layers::content_negotiation::ContentType;
 use crate::services::layers::content_negotiation::get_graphql_content_type;
 
@@ -172,9 +171,8 @@ pub(super) fn http_response_to_graphql_response(
     // Any errors directly parsed from the response likely won't yet have the service name set,
     // but we need it for telemetry error counting
     for err in &mut graphql_response.errors {
-        if let Entry::Vacant(v) = err.extensions.entry("service") {
-            v.insert(json!(service_name));
-        }
+        err.extensions
+            .object_insert_if_absent("service", service_name);
     }
 
     // Add an error for response codes that are not 2xx
@@ -204,6 +202,7 @@ mod tests {
 
     use super::*;
     use crate::assert_response_eq_ignoring_error_id;
+    use crate::json_ext::json_value as json;
 
     #[test]
     fn it_gets_uri_details() {
@@ -227,7 +226,7 @@ mod tests {
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
-            .data(serde_json_bytes::json!({}))
+            .data(apollo_json::json!({}))
             .build();
         assert_eq!(actual, expected);
     }
@@ -244,7 +243,7 @@ mod tests {
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
-            .data(serde_json_bytes::json!({}))
+            .data(apollo_json::json!({}))
             .error(
                 super::FetchError::SubrequestHttpError {
                     status_code: Some(418),
@@ -259,7 +258,7 @@ mod tests {
 
     #[test]
     fn it_converts_http_with_body_to_graphql() {
-        let mut json = serde_json::json!({
+        let json = json!({
             "data": {
                 "some_field": "some_value"
             }
@@ -276,7 +275,7 @@ mod tests {
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
-            .data(json["data"].take())
+            .data(json.get("data").expect("fixture holds a data member"))
             .build();
         assert_eq!(actual, expected);
     }
@@ -288,12 +287,12 @@ mod tests {
             .extension_code("SOME_EXTENSION")
             .extension("service", "test_service")
             .build();
-        let mut json = serde_json::json!({
+        let json = json!({
             "data": {
                 "some_field": "some_value",
                 "error_field": null,
             },
-            "errors": [error],
+            "errors": [apollo_json::to_value(&error).expect("an error serializes")],
         });
 
         let (parts, _body) = http::Response::builder()
@@ -307,7 +306,7 @@ mod tests {
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
-            .data(json["data"].take())
+            .data(json.get("data").expect("fixture holds a data member"))
             .error(error)
             .build();
         assert_response_eq_ignoring_error_id!(actual, expected);
@@ -320,12 +319,12 @@ mod tests {
             .extension_code("SOME_EXTENSION")
             .extension("service", "test_service")
             .build();
-        let mut json = serde_json::json!({
+        let json = json!({
             "data": {
                 "some_field": "some_value",
                 "error_field": null,
             },
-            "errors": [error],
+            "errors": [apollo_json::to_value(&error).expect("an error serializes")],
         });
 
         let (parts, _body) = http::Response::builder()
@@ -339,7 +338,7 @@ mod tests {
         let actual = http_response_to_graphql_response("test_service", body, &parts);
 
         let expected = graphql::Response::builder()
-            .data(json["data"].take())
+            .data(json.get("data").expect("fixture holds a data member"))
             .error(
                 super::FetchError::SubrequestHttpError {
                     status_code: Some(418),

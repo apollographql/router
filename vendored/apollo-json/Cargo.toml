@@ -6,7 +6,8 @@
 # Do not edit here; change the source crate and re-vendor.
 #
 # This copy carries local changes that must land upstream before the next
-# re-vendor: the apollo-errors 0.8.1 bump.
+# re-vendor: the apollo-errors 0.8.1 bump, and the member-scan cursor in
+# document.rs.
 #
 # apollo-errors must be the same version the router links through
 # apollo-configuration and apollo-qos. Each version declares its own linkme

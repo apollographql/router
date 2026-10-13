@@ -356,6 +356,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-json"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "apollo-errors",
+ "bytes",
+ "itoa",
+ "memchr",
+ "ryu",
+ "serde",
+ "serde_json",
+ "serde_json_bytes",
+ "simdutf8",
+]
+
+[[package]]
 name = "apollo-opentelemetry"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -469,7 +485,9 @@ dependencies = [
  "apollo-compiler",
  "apollo-configuration",
  "apollo-environment-detector",
+ "apollo-errors",
  "apollo-federation",
+ "apollo-json",
  "apollo-qos",
  "apollo-redaction",
  "astral-tokio-tar",

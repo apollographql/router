@@ -781,8 +781,12 @@ async fn a_subgraph_circuit_opens_after_consecutive_failures_and_recovers_on_a_p
         .expect("the circuit answered");
     assert_eq!(response.response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(
-        response.response.body().errors[0].extensions["code"],
-        Error::CircuitBreakerOpen.code()
+        response.response.body().errors[0]
+            .extensions
+            .get("code")
+            .and_then(|code| code.as_string())
+            .as_deref(),
+        Some(Error::CircuitBreakerOpen.code())
     );
     assert_eq!(
         calls.load(Ordering::SeqCst),
@@ -1636,6 +1640,7 @@ async fn a_burst_of_subgraph_requests_the_response_cache_rejects_records_nothing
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 #[tokio::test]
 async fn a_burst_of_subgraph_entity_cache_hits_records_nothing() {
+    use crate::json_ext::ObjectExt;
     use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
     use crate::plugins::circuit_breaker::test_support::subgraph_request;
 
@@ -1644,9 +1649,9 @@ async fn a_burst_of_subgraph_entity_cache_hits_records_nothing() {
     );
     let entity_fetch = || {
         let mut request = subgraph_request("Products");
-        request.subgraph_request.body_mut().variables.insert(
+        request.subgraph_request.body_mut().variables.object_insert(
             "representations",
-            serde_json_bytes::json!([{ "__typename": "Product", "upc": "1" }]),
+            apollo_json::json!([{ "__typename": "Product", "upc": "1" }]),
         );
         request
     };
@@ -2959,7 +2964,7 @@ fn error_codes(response: &crate::graphql::Response) -> Vec<String> {
     response
         .errors
         .iter()
-        .filter_map(|error| error.extensions.get("code")?.as_str().map(str::to_string))
+        .filter_map(|error| error.extensions.get("code")?.as_string())
         .collect()
 }
 

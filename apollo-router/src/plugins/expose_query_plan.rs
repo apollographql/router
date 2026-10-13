@@ -4,13 +4,14 @@ use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use http::HeaderValue;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::connectors::query_plans::replace_connector_service_names;
 use super::connectors::query_plans::replace_connector_service_names_text;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt as _;
 use crate::plugin::Enabled;
@@ -95,58 +96,75 @@ impl Plugin for ExposeQueryPlan {
     ) -> supergraph::BoxCloneService {
         let conf_enabled = self.enabled;
         service
-            .map_future_with_request_data(move |req: &supergraph::Request| {
-                let setting = if conf_enabled {
-                    let header = req.supergraph_request.headers().get(EXPOSE_QUERY_PLAN_HEADER_NAME);
-                    if header == Some(&HeaderValue::from_static("true")) {
-                        Setting::Enabled
-                    } else if header == Some(&HeaderValue::from_static("dry-run")) {
-                        Setting::DryRun
+            .map_future_with_request_data(
+                move |req: &supergraph::Request| {
+                    let setting = if conf_enabled {
+                        let header = req
+                            .supergraph_request
+                            .headers()
+                            .get(EXPOSE_QUERY_PLAN_HEADER_NAME);
+                        if header == Some(&HeaderValue::from_static("true")) {
+                            Setting::Enabled
+                        } else if header == Some(&HeaderValue::from_static("dry-run")) {
+                            Setting::DryRun
+                        } else {
+                            Setting::Disabled
+                        }
                     } else {
                         Setting::Disabled
+                    };
+
+                    if !matches!(setting, Setting::Disabled) {
+                        req.context
+                            .insert(ENABLED_CONTEXT_KEY, setting.clone())
+                            .unwrap();
                     }
-                } else {
-                    Setting::Disabled
-                };
 
-                if !matches!(setting, Setting::Disabled) {
-                    req.context.insert(ENABLED_CONTEXT_KEY, setting.clone()).unwrap();
-                }
+                    setting
+                },
+                move |setting: Setting, f| async move {
+                    let mut res: supergraph::ServiceResult = f.await;
 
-                setting
-            }, move | setting: Setting, f| async move {
-                let mut res: supergraph::ServiceResult = f.await;
+                    res = match res {
+                        Ok(mut res) => {
+                            if !matches!(setting, Setting::Disabled) {
+                                let (parts, stream) = res.response.into_parts();
+                                let (mut first, rest) = StreamExt::into_future(stream).await;
 
-                res = match res {
-                    Ok(mut res) => {
-                        if !matches!(setting, Setting::Disabled) {
-                            let (parts, stream) = res.response.into_parts();
-                            let (mut first, rest) = StreamExt::into_future(stream).await;
-
-                            if let Some(first) = &mut first
-                                && let Some(plan) =
-                                    res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
+                                if let Some(first) = &mut first
+                                    && let Some(plan) =
+                                        res.context.get_json_value(QUERY_PLAN_CONTEXT_KEY)
                                 {
-                                    first
-                                        .extensions
-                                        .insert("apolloQueryPlan", json!({
-                                            "object": { "kind": "QueryPlan", "node": plan },
-                                            "text": res.context.get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY),
-                                        }));
+                                    let object = json_ext::object([
+                                        ("kind".to_string(), json_ext::string("QueryPlan")),
+                                        ("node".to_string(), plan),
+                                    ]);
+                                    let text = res
+                                        .context
+                                        .get_json_value(FORMATTED_QUERY_PLAN_CONTEXT_KEY)
+                                        .unwrap_or_default();
+                                    first.extensions.object_insert(
+                                        "apolloQueryPlan",
+                                        json_ext::object([
+                                            ("object".to_string(), object),
+                                            ("text".to_string(), text),
+                                        ]),
+                                    );
                                 }
-                            res.response = http::Response::from_parts(
-                                parts,
-                                once(ready(first.unwrap_or_default())).chain(rest).boxed(),
-                            );
+                                res.response = http::Response::from_parts(
+                                    parts,
+                                    once(ready(first.unwrap_or_default())).chain(rest).boxed(),
+                                );
+                            }
+
+                            Ok(res)
                         }
+                        Err(err) => Err(err),
+                    };
 
-                        Ok(res)
-                    }
-                    Err(err) => Err(err),
-                };
-
-                res
-            })
+                    res
+                },
+            )
             .boxed_clone()
     }
 }
@@ -155,14 +173,13 @@ register_plugin!("apollo", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Value;
     use tower::Service;
 
     use super::*;
     use crate::MockedSubgraphs;
     use crate::graphql::Response;
-    use crate::json_ext::Object;
+    use crate::graphql::json_object::is_empty_object;
+    use crate::json_ext::Value;
     use crate::plugin::test::MockSubgraph;
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
@@ -170,15 +187,14 @@ mod tests {
         r#"query NoPlanning { topProducts(first: 5) @skip(if: true) { upc } }"#;
 
     async fn build_mock_supergraph(config: serde_json::Value) -> supergraph::BoxCloneService {
-        let mut extensions = Object::new();
-        extensions.insert("test", Value::String(ByteString::from("value")));
+        let extensions = Value::object([("test", "value")]);
 
         let account_mocks = vec![
             (
                 r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"}]}}"#
             )
-        ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+        ].into_iter().map(|(query, response)| (apollo_json::from_str(query).unwrap(), apollo_json::from_str(response).unwrap())).collect();
         let account_service = MockSubgraph::new(account_mocks);
 
         let review_mocks = vec![
@@ -186,7 +202,7 @@ mod tests {
                 r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"reviews":[{"id":"1","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"1"}},{"id":"4","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"2"}}]},{"reviews":[{"id":"2","product":{"__typename":"Product","upc":"2"},"author":{"__typename":"User","id":"1"}}]}]}}"#
             )
-            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+            ].into_iter().map(|(query, response)| (apollo_json::from_str(query).unwrap(), apollo_json::from_str(response).unwrap())).collect();
         let review_service = MockSubgraph::new(review_mocks);
 
         let product_mocks = vec![
@@ -198,7 +214,7 @@ mod tests {
                 r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Table"},{"name":"Couch"}]}}"#
             )
-            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+            ].into_iter().map(|(query, response)| (apollo_json::from_str(query).unwrap(), apollo_json::from_str(response).unwrap())).collect();
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
@@ -284,12 +300,11 @@ mod tests {
         // populated (like in the following tests when we're testing that the query plan is
         // output), it's populated with _only_ the query plan (meaning we won't be experiencing
         // false positives)
-        assert!(
-            execute_supergraph_test(VALID_QUERY, supergraph)
+        assert!(is_empty_object(
+            &execute_supergraph_test(VALID_QUERY, supergraph)
                 .await
                 .extensions
-                .is_empty()
-        )
+        ))
     }
 
     #[tokio::test]
@@ -306,7 +321,7 @@ mod tests {
         // Since we're exposing the query plan, the extensions better not be empty! See the test
         // for not exposing query plans to know why the assumption that a non-empty extension means
         // we have a query plan
-        assert!(!response.extensions.is_empty());
+        assert!(!is_empty_object(&response.extensions));
 
         // Since this is a full-run (ie, not a dry-run), we should have data
         assert!(response.data.is_some());
@@ -327,7 +342,7 @@ mod tests {
         // Since we're exposing the query plan, the extensions better not be empty! See the test
         // for not exposing query plans to know why the assumption that a non-empty extension means
         // we have a query plan
-        assert!(!response.extensions.is_empty());
+        assert!(!is_empty_object(&response.extensions));
 
         // Since this is a full-run (ie, not a dry-run), we should have data
         assert!(response.data.is_some());
@@ -348,7 +363,7 @@ mod tests {
         // Since we're exposing the query plan, the extensions better not be empty! See the test
         // for not exposing query plans to know why the assumption that a non-empty extension means
         // we have a query plan
-        assert!(!response.extensions.is_empty());
+        assert!(!is_empty_object(&response.extensions));
 
         // Since this is a dry-run, we shouldn't have any data
         assert!(response.data.is_none());

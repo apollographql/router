@@ -141,7 +141,7 @@ impl Context {
     {
         self.entries
             .get(&key.into())
-            .map(|v| serde_json_bytes::from_value(v.value().clone()))
+            .map(|v| apollo_json::from_value(v.value()))
             .transpose()
             .map_err(|e| e.into())
     }
@@ -156,11 +156,11 @@ impl Context {
         K: Into<String>,
         V: for<'de> serde::Deserialize<'de> + Serialize,
     {
-        match serde_json_bytes::to_value(value) {
-            Ok(value) => self
+        match apollo_json::to_value(&value) {
+            Ok(document) => self
                 .entries
-                .insert(key.into(), value)
-                .map(|v| serde_json_bytes::from_value(v))
+                .insert(key.into(), document)
+                .map(|v| apollo_json::from_value(&v))
                 .transpose()
                 .map_err(|e| e.into()),
             Err(e) => Err(e.into()),
@@ -174,7 +174,9 @@ impl Context {
     where
         K: Into<String>,
     {
-        self.entries.insert(key.into(), value)
+        // A stored handle pins its whole source arena, so detaching stops a context entry from
+        // holding an entire response document alive for the rest of the request.
+        self.entries.insert(key.into(), value.compact())
     }
 
     /// Get a json value from the context using the provided key.
@@ -205,12 +207,13 @@ impl Context {
         let key = key.into();
         self.entries
             .entry(key.clone())
-            .or_try_insert_with(|| serde_json_bytes::to_value::<V>(Default::default()))?;
+            .or_try_insert_with(|| apollo_json::to_value(&V::default()))?;
         let mut result = Ok(());
-        self.entries
-            .alter(&key, |_, v| match serde_json_bytes::from_value(v.clone()) {
-                Ok(value) => match serde_json_bytes::to_value((upsert)(value)) {
-                    Ok(value) => value,
+        self.entries.alter(&key, |_, v| {
+            let deserialized = apollo_json::from_value(&v);
+            match deserialized {
+                Ok(value) => match apollo_json::to_value(&(upsert)(value)) {
+                    Ok(document) => document,
                     Err(e) => {
                         result = Err(e);
                         v
@@ -220,7 +223,8 @@ impl Context {
                     result = Err(e);
                     v
                 }
-            });
+            }
+        });
         result.map_err(|e| e.into())
     }
 
@@ -235,8 +239,8 @@ impl Context {
         K: Into<String>,
     {
         let key = key.into();
-        self.entries.entry(key.clone()).or_insert(Value::Null);
-        self.entries.alter(&key, |_, v| upsert(v));
+        self.entries.entry(key.clone()).or_default();
+        self.entries.alter(&key, |_, v| upsert(v).compact());
     }
 
     /// Convert the context into an iterator.
@@ -332,8 +336,7 @@ mod test {
         assert_eq!(c.iter().count(), 2);
         assert_eq!(
             c.iter()
-                // Fiddly because of the conversion from bytes to usize, but ...
-                .map(|r| serde_json_bytes::from_value::<usize>(r.value().clone()).unwrap())
+                .map(|r| apollo_json::from_value::<usize>(r.value()).unwrap())
                 .sum::<usize>(),
             3
         );
@@ -346,9 +349,8 @@ mod test {
         assert!(c.insert("two", 2usize).is_ok());
         assert_eq!(c.iter().count(), 2);
         c.iter_mut().for_each(|mut r| {
-            // Fiddly because of the conversion from bytes to usize, but ...
-            let new: usize = serde_json_bytes::from_value::<usize>(r.value().clone()).unwrap() + 1;
-            *r = new.into();
+            let new: usize = apollo_json::from_value::<usize>(r.value()).unwrap() + 1;
+            *r = crate::json_ext::from_u64(new as u64);
         });
         assert_eq!(c.get("one").unwrap(), Some(2));
         assert_eq!(c.get("two").unwrap(), Some(3));

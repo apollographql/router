@@ -839,7 +839,7 @@ mod tests {
             .await
             .expect("should read subgraph request body");
         let (body1, body2) =
-            serde_json::from_slice::<(graphql::Request, graphql::Request)>(&body.to_bytes())
+            apollo_json::from_slice::<(graphql::Request, graphql::Request)>(&body.to_bytes())
                 .expect("should have a two-element array json body");
         assert_eq!(body1.query.as_deref(), Some("{ field1 }"));
         assert_eq!(body2.query.as_deref(), Some("{ field2 }"));
@@ -865,12 +865,9 @@ mod tests {
         let response1 = body::into_bytes(response1.http_response.into_body())
             .await
             .unwrap();
-        let response1: graphql::Response = serde_json::from_slice(&response1).unwrap();
+        let response1: graphql::Response = apollo_json::from_slice(&response1).unwrap();
 
-        assert_eq!(
-            response1.data,
-            Some(serde_json_bytes::json!({ "field1": "value1" }))
-        );
+        assert_eq!(response1.data, Some(json_value!({ "field1": "value1" })));
 
         let response2 = response2
             .await
@@ -879,11 +876,8 @@ mod tests {
         let response2 = body::into_bytes(response2.http_response.into_body())
             .await
             .unwrap();
-        let response2: graphql::Response = serde_json::from_slice(&response2).unwrap();
-        assert_eq!(
-            response2.data,
-            Some(serde_json_bytes::json!({ "field2": "value2" }))
-        );
+        let response2: graphql::Response = apollo_json::from_slice(&response2).unwrap();
+        assert_eq!(response2.data, Some(json_value!({ "field2": "value2" })));
 
         // Only 1 call is expected
         drop(http_client);

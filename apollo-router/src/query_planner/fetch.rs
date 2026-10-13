@@ -6,11 +6,11 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
+use apollo_json::JsonKind;
+use apollo_json::ValueBuilder;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -26,7 +26,6 @@ use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::json_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -145,9 +144,22 @@ pub(crate) struct FetchNode {
 
 #[derive(Default)]
 pub(crate) struct Variables {
-    pub(crate) variables: Object,
+    pub(crate) variables: Value,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
     pub(crate) contextual_arguments: Option<ContextualArguments>,
+}
+
+/// A builder holding the entries of `body_variables` that this fetch declares a usage of.
+fn used_variables(variable_usages: &[Arc<str>], body_variables: &Value) -> ValueBuilder {
+    let mut builder = ValueBuilder::new();
+    for key in variable_usages {
+        if let Some(value) = body_variables.get(key.as_ref()) {
+            builder
+                .set(key.as_ref(), value)
+                .expect("the variables builder always has an object root");
+        }
+    }
+    builder
 }
 
 impl Variables {
@@ -166,13 +178,7 @@ impl Variables {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
-            let mut variables = Object::with_capacity(1 + variable_usages.len());
-
-            variables.extend(variable_usages.iter().filter_map(|key| {
-                body.variables
-                    .get_key_value(key.as_ref())
-                    .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-            }));
+            let mut variables = used_variables(variable_usages, &body.variables);
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::default();
@@ -182,7 +188,7 @@ impl Variables {
                     context.execute_on_path(path);
                 }
 
-                let mut value = execute_selection_set(value, requires, schema, None);
+                let mut value = execute_selection_set(&value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                     match values.get_index_of(&value) {
@@ -202,15 +208,17 @@ impl Variables {
                 return None;
             }
 
-            let representations = Value::Array(Vec::from_iter(values));
+            let representations = Value::array(values);
             let contextual_arguments = match subgraph_context.as_mut() {
                 Some(context) => context.add_variables_and_get_args(&mut variables),
                 None => None,
             };
 
-            variables.insert("representations", representations);
+            variables
+                .set("representations", representations)
+                .expect("the variables builder always has an object root");
             Some(Variables {
-                variables,
+                variables: variables.seal(),
                 inverted_paths,
                 contextual_arguments,
             })
@@ -222,7 +230,7 @@ impl Variables {
             // should not perform the next fetch
             if !current_dir.is_empty()
                 && data
-                    .get_path(schema, current_dir)
+                    .select_path(schema, current_dir)
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
@@ -230,14 +238,7 @@ impl Variables {
             }
 
             Some(Variables {
-                variables: variable_usages
-                    .iter()
-                    .filter_map(|key| {
-                        body.variables
-                            .get_key_value(key.as_ref())
-                            .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-                    })
-                    .collect::<Object>(),
+                variables: used_variables(variable_usages, &body.variables).seal(),
                 inverted_paths: Vec::new(),
                 contextual_arguments: None,
             })
@@ -255,7 +256,7 @@ impl FetchNode {
         schema: &Schema,
         paths: Vec<Vec<Path>>,
         operation_str: &str,
-        variables: Map<ByteString, Value>,
+        variables: Value,
         hoist_orphan_errors: bool,
     ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
@@ -404,17 +405,17 @@ impl FetchNode {
                 }
             }
 
-            // we have to nest conditions and do early returns here
-            // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data
-                && let Some(entities) = map.remove("_entities")
+            if let Some(entities) = response
+                .data
+                .as_ref()
+                .and_then(|data| data.get("_entities"))
             {
                 tracing::trace!("received entities: {:?}", &entities);
 
-                if let Value::Array(array) = entities {
+                if entities.kind() == JsonKind::Array {
                     let mut value = Value::default();
 
-                    for (index, mut entity) in array.into_iter().enumerate() {
+                    for (index, mut entity) in entities.array_iter().enumerate() {
                         rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
 
                         if let Some(paths) = inverted_paths.get(index) {
@@ -444,7 +445,7 @@ impl FetchNode {
                 );
             }
 
-            (Value::Null, errors)
+            (Value::default(), errors)
         } else {
             let current_slice =
                 if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
@@ -547,8 +548,8 @@ mod tests {
     use apollo_compiler::name;
     use apollo_federation::query_plan::requires_selection;
     use apollo_federation::query_plan::serializable_document::SerializableDocument;
+    use apollo_json::json;
     use rstest::rstest;
-    use serde_json_bytes::json;
 
     use super::*;
     use crate::Configuration;
@@ -886,7 +887,7 @@ mod tests {
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
-        let top = value.as_object().unwrap().get("topField").unwrap();
+        let top = value.get("topField").unwrap();
         let arr = top.as_array().unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[1], json!({"name": "Bob"}));
@@ -911,13 +912,7 @@ mod tests {
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
-        let arr = value
-            .as_object()
-            .unwrap()
-            .get("field")
-            .unwrap()
-            .as_array()
-            .unwrap();
+        let arr = value.get("field").unwrap().as_array().unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
         assert_eq!(arr[2], json!({"name": "Alice"}));
     }
@@ -948,7 +943,7 @@ mod tests {
                     .message("balance unavailable")
                     .path(Path::from("_entities/0/balance"))
                     .extension_code("CONNECTORS_MAPPING_ERROR")
-                    .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+                    .extension(DECLARED_ERROR_MARKER, apollo_json::json!(true))
                     .build(),
             )
             .build();
@@ -978,7 +973,7 @@ mod tests {
             ConnectorDeclaredErrors::drain(&context)
                 .as_ref()
                 .and_then(Value::as_array)
-                .map(Vec::len),
+                .map(|errors| errors.len()),
             Some(2),
         );
     }
@@ -1018,13 +1013,7 @@ mod tests {
             node.response_at_path(&schema, &current_dir, inverted_paths, response, false);
 
         assert!(errors.is_empty());
-        let arr = value
-            .as_object()
-            .unwrap()
-            .get("f")
-            .unwrap()
-            .as_array()
-            .unwrap();
+        let arr = value.get("f").unwrap().as_array().unwrap();
         assert_eq!(arr[0], json!({"name": "Alice"}));
     }
 
@@ -1214,7 +1203,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].message, "permission denied");
     }
@@ -1230,7 +1219,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert!(errors.is_empty());
     }
 
@@ -1245,7 +1234,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
     }
 
@@ -1273,7 +1262,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 3);
         for error in &errors {
             assert_eq!(
@@ -1308,7 +1297,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 2);
         for error in &errors {
             assert_eq!(
@@ -1331,7 +1320,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, false);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert!(errors.is_empty());
     }
 
@@ -1348,7 +1337,7 @@ mod tests {
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_fallback);
     }
@@ -1360,14 +1349,14 @@ mod tests {
         let current_dir = Path(vec![key("orders"), flatten(), key("items")]);
         let expected_fallback = Path(vec![key("orders")]);
         let response = graphql::Response {
-            data: Some(Value::Null),
+            data: Some(Value::default()),
             errors: vec![graphql::Error::builder().message("null data error").build()],
             ..Default::default()
         };
 
         let (value, errors) = node.response_at_path(&schema, &current_dir, vec![], response, true);
 
-        assert_eq!(value, Value::Null);
+        assert_eq!(value, Value::default());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].path.as_ref().unwrap(), &expected_fallback);
     }
@@ -1448,7 +1437,7 @@ mod tests {
         // the `requires` selection (`extra`) play no part in equality.
         assert_eq!(
             variables.variables.get("representations"),
-            Some(&json!([{ "id": "1" }, { "id": "2" }])),
+            Some(apollo_json::json!([{ "id": "1" }, { "id": "2" }])),
         );
 
         // Representation 0 (`id: 1`) came from t/0 and t/2; representation 1

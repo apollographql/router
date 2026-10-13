@@ -12,7 +12,7 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
-use serde_json_bytes::Value;
+use apollo_json::JsonKind;
 
 use super::CostBySubgraph;
 use super::DemandControlError;
@@ -23,7 +23,7 @@ use super::schema::InputDefinition;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
@@ -41,7 +41,7 @@ pub(crate) struct StaticCostCalculator {
 struct ScoringContext<'a> {
     schema: &'a DemandControlledSchema,
     query: &'a ExecutableDocument,
-    variables: &'a Object,
+    variables: &'a Value,
     should_estimate_requires: bool,
 }
 
@@ -49,7 +49,7 @@ fn score_argument(
     argument: &apollo_compiler::ast::Value,
     argument_definition: &InputDefinition,
     schema: &DemandControlledSchema,
-    variables: &Object,
+    variables: &Value,
 ) -> Result<f64, DemandControlError> {
     match (argument, argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
@@ -89,7 +89,7 @@ fn score_argument(
             // We make a best effort attempt to score the variable, but some of these may not exist in the variables
             // sent on the supergraph request, such as `$representations`.
             if let Some(variable) = variables.get(name.as_str()) {
-                score_variable(variable, argument_definition, schema)
+                score_variable(&variable, argument_definition, schema)
             } else {
                 Ok(0.0)
             }
@@ -106,7 +106,7 @@ fn score_variable(
     argument_definition: &InputDefinition,
     schema: &DemandControlledSchema,
 ) -> Result<f64, DemandControlError> {
-    match (variable, argument_definition.ty()) {
+    match (variable.kind(), argument_definition.ty()) {
         (_, ExtendedType::Interface(_))
         | (_, ExtendedType::Object(_))
         | (_, ExtendedType::Union(_)) => Err(DemandControlError::QueryParseFailure(format!(
@@ -115,32 +115,32 @@ fn score_variable(
             argument_definition.ty().name()
         ))),
 
-        (Value::Object(inner_args), ExtendedType::InputObject(_)) => {
+        (JsonKind::Object, ExtendedType::InputObject(_)) => {
             let mut cost = argument_definition
                 .cost_directive()
                 .map_or(1.0, |cost| cost.weight());
-            for (arg_name, arg_val) in inner_args {
-                let arg_def = schema.input_field_definition(argument_definition.ty().name(), arg_name.as_str()).ok_or_else(|| {
+            for (arg_name, arg_val) in variable.object_iter() {
+                let arg_def = schema.input_field_definition(argument_definition.ty().name(), &arg_name).ok_or_else(|| {
                     DemandControlError::QueryParseFailure(format!(
                         "Argument {} was found in query, but its type ({}) was not found in the schema",
                         argument_definition.name(),
                         argument_definition.ty().name()
                     ))
                 })?;
-                cost += score_variable(arg_val, arg_def, schema)?;
+                cost += score_variable(&arg_val, arg_def, schema)?;
             }
             Ok(cost)
         }
-        (Value::Array(inner_args), _) => {
+        (JsonKind::Array, _) => {
             let mut cost = argument_definition
                 .cost_directive()
                 .map_or(0.0, |cost| cost.weight());
-            for arg_val in inner_args {
-                cost += score_variable(arg_val, argument_definition, schema)?;
+            for arg_val in variable.array_iter() {
+                cost += score_variable(&arg_val, argument_definition, schema)?;
             }
             Ok(cost)
         }
-        (Value::Null, _) => Ok(0.0),
+        (JsonKind::Null, _) => Ok(0.0),
         _ => Ok(argument_definition
             .cost_directive()
             .map_or(0.0, |cost| cost.weight())),
@@ -505,7 +505,7 @@ impl StaticCostCalculator {
     fn score_plan_node(
         &self,
         plan_node: &PlanNode,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         match plan_node {
             PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes, variables),
@@ -536,7 +536,7 @@ impl StaticCostCalculator {
         &self,
         subgraph: &str,
         operation: &SerializableDocument,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
 
@@ -557,7 +557,7 @@ impl StaticCostCalculator {
         &self,
         left: &Option<Box<PlanNode>>,
         right: &Option<Box<PlanNode>>,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         match (left, right) {
             (None, None) => Ok(CostBySubgraph::default()),
@@ -575,7 +575,7 @@ impl StaticCostCalculator {
         &self,
         primary: &Primary,
         deferred: &Vec<DeferredNode>,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         let mut score = CostBySubgraph::default();
         if let Some(node) = &primary.node {
@@ -592,7 +592,7 @@ impl StaticCostCalculator {
     fn summed_score_of_nodes(
         &self,
         nodes: &Vec<PlanNode>,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         let mut sum = CostBySubgraph::default();
         for node in nodes {
@@ -606,7 +606,7 @@ impl StaticCostCalculator {
         &self,
         query: &ExecutableDocument,
         schema: &DemandControlledSchema,
-        variables: &Object,
+        variables: &Value,
         should_estimate_requires: bool,
         subgraph: &str,
     ) -> Result<f64, DemandControlError> {
@@ -630,7 +630,7 @@ impl StaticCostCalculator {
     pub(crate) fn planned(
         &self,
         query_plan: &QueryPlan,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<CostBySubgraph, DemandControlError> {
         if let Some(plan) = query_plan.root.as_ref() {
             self.score_plan_node(plan, variables)
@@ -643,7 +643,7 @@ impl StaticCostCalculator {
         &self,
         request: &ExecutableDocument,
         response: &Response,
-        variables: &Object,
+        variables: &Value,
     ) -> Result<f64, DemandControlError> {
         let mut visitor = ResponseCostCalculator::new(&self.supergraph_schema);
         visitor.visit(request, response, variables);
@@ -664,7 +664,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
     fn score_response_field(
         &mut self,
         request: &ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         parent_ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -722,22 +722,22 @@ impl<'schema> ResponseCostCalculator<'schema> {
 
         // per-instance type cost + child selections
         // NOTE: this is an upper bound as we might not know the actual returned object type
-        match value {
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+        match value.kind() {
+            JsonKind::Null | JsonKind::Bool | JsonKind::Number | JsonKind::String => {
                 response_field_cost += definition
                     .and_then(|d| d.type_cost_directive())
                     .map_or(0.0, |cost| cost.weight());
             }
-            Value::Array(items) => {
-                for item in items {
-                    self.visit_list_item(request, variables, parent_ty, field, item);
+            JsonKind::Array => {
+                for item in value.array_iter() {
+                    self.visit_list_item(request, variables, parent_ty, field, &item);
                 }
             }
-            Value::Object(children) => {
+            JsonKind::Object => {
                 response_field_cost += definition
                     .and_then(|d| d.type_cost_directive())
                     .map_or(1.0, |cost| cost.weight());
-                self.visit_selections(request, variables, &field.selection_set, children);
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
         }
 
@@ -750,7 +750,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         parent_ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -761,7 +761,7 @@ impl ResponseVisitor for ResponseCostCalculator<'_> {
     fn visit_list_item(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         parent_ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
@@ -798,11 +798,16 @@ mod tests {
         fn rust_planned(
             &self,
             query_plan: &apollo_federation::query_plan::QueryPlan,
-            variables: &Object,
+            variables: &Value,
         ) -> Result<f64, DemandControlError> {
             let js_planner_node: PlanNode = query_plan.node.as_ref().unwrap().into();
             Ok(self.score_plan_node(&js_planner_node, variables)?.total())
         }
+    }
+
+    fn parse_variables(variables_str: &str) -> Value {
+        apollo_json::Value::parse(variables_str.as_bytes().to_vec())
+            .expect("test variables are valid JSON")
     }
 
     fn parse_schema_and_operation(
@@ -822,11 +827,7 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let variables = parse_variables(variables_str);
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
         let calculator = StaticCostCalculator::new(
@@ -860,11 +861,7 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let variables = parse_variables(variables_str);
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();
         let calculator = StaticCostCalculator::new(
             Arc::new(schema),
@@ -881,11 +878,7 @@ mod tests {
     async fn planned_cost_js(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let variables = parse_variables(variables_str);
         let supergraph_schema = schema.supergraph_schema().clone();
 
         let schema_arc: Arc<crate::spec::Schema> = schema.into();
@@ -932,11 +925,7 @@ mod tests {
     fn planned_cost_rust(schema_str: &str, query_str: &str, variables_str: &str) -> f64 {
         let config: Arc<Configuration> = Arc::new(Default::default());
         let (schema, query) = parse_schema_and_operation(schema_str, query_str, &config);
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let variables = parse_variables(variables_str);
 
         let planner =
             QueryPlanner::new(schema.federation_supergraph(), Default::default()).unwrap();
@@ -973,11 +962,7 @@ mod tests {
     ) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let variables = parse_variables(variables_str);
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
         let schema =
             DemandControlledSchema::new(Arc::new(schema.supergraph_schema().clone())).unwrap();
@@ -1006,11 +991,7 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        let variables = serde_json::from_str::<Value>(variables_str)
-            .unwrap()
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let variables = parse_variables(variables_str);
         let response = Response::from_bytes(Bytes::from(response_bytes)).unwrap();
 
         let schema = DemandControlledSchema::new(Arc::new(schema)).unwrap();

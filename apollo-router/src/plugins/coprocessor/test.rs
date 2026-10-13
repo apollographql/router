@@ -65,15 +65,17 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
-    use serde_json_bytes::json;
     use services::subgraph::SubgraphRequestId;
     use tower::ServiceExt;
 
     use super::super::*;
     use crate::assert_response_eq_ignoring_error_id;
     use crate::graphql::Response;
-    use crate::json_ext::Object;
+    use crate::graphql::json_object::empty_object;
     use crate::json_ext::Value;
+    use crate::json_ext::ValueExt;
+    use crate::json_ext::json_value as json;
+    use crate::json_ext::object;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::coprocessor::BodyConf;
     use crate::plugins::coprocessor::BodyFieldsConf;
@@ -592,7 +594,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -609,7 +611,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(
                 deserialized_request.subgraph_request_id.as_deref(),
@@ -739,7 +741,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -756,7 +758,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(
                 deserialized_request.subgraph_request_id.as_deref(),
@@ -886,7 +888,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .subgraph_name(String::default())
                     .build(),
@@ -1059,7 +1061,7 @@ mod tests {
 
         assert_response_eq_ignoring_error_id!(
             actual_response,
-            serde_json_bytes::from_value::<Response>(json!({
+            apollo_json::from_value::<Response>(&json!({
                 "errors": [{
                    "message": "my error message",
                    "extensions": {
@@ -1094,7 +1096,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1111,9 +1113,9 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
             let subgraph_id = body.get("subgraphRequestId").unwrap();
-            assert_eq!(subgraph_id.as_str(), Some("5678"));
+            assert_eq!(subgraph_id.as_str().as_deref(), Some("5678"));
             let response = http::Response::builder()
                 .body(router::body::from_bytes(
                     r#"{
@@ -1224,8 +1226,8 @@ mod tests {
             assert_eq!(&*req.id, "5678");
             responder.send_response(
                 subgraph::Response::builder()
-                    .data(serde_json_bytes::Value::Null)
-                    .extensions(Object::new())
+                    .data(Value::default())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1242,9 +1244,9 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
             let subgraph_id = body.get("subgraphRequestId").unwrap();
-            assert_eq!(subgraph_id.as_str(), Some("5678"));
+            assert_eq!(subgraph_id.as_str().as_deref(), Some("5678"));
             let response = http::Response::builder()
                 .body(router::body::from_bytes(
                     r#"{
@@ -1309,7 +1311,7 @@ mod tests {
         // Let's assert that the subgraph response has been transformed as it should have.
         assert_eq!(&*response.id, "5678");
         assert_eq!(
-            serde_json_bytes::Value::Null,
+            Value::default(),
             response.response.into_body().data.unwrap()
         );
         crate::plugin::test::await_mock_driver(subgraph_driver).await;
@@ -1340,7 +1342,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name(String::default())
@@ -1357,7 +1359,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
             assert_eq!(
                 deserialized_response.subgraph_request_id,
                 Some(SubgraphRequestId("5678".to_string()))
@@ -1499,7 +1501,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .subgraph_name(String::default())
                     .build(),
@@ -1622,7 +1624,7 @@ mod tests {
             let (req, responder) = handle_supergraph.next_request().await.unwrap();
             responder.send_response(supergraph::Response::new_from_graphql_response(
                 graphql::Response::builder()
-                    .data(Value::Null)
+                    .data(Value::default())
                     .subscribed(true)
                     .build(),
                 req.context,
@@ -1668,7 +1670,7 @@ mod tests {
         let gql_response = response.response.body_mut().next().await.unwrap();
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
-        assert_eq!(gql_response.data, Some(Value::Null));
+        assert_eq!(gql_response.data, Some(Value::default()));
         crate::plugin::test::await_mock_driver(supergraph_driver).await;
         crate::plugin::test::await_mock_driver(http_driver).await;
     }
@@ -1696,7 +1698,7 @@ mod tests {
             let (req, responder) = handle_supergraph.next_request().await.unwrap();
             responder.send_response(supergraph::Response::new_from_graphql_response(
                 graphql::Response::builder()
-                    .data(Value::Null)
+                    .data(Value::default())
                     .subscribed(true)
                     .build(),
                 req.context,
@@ -1712,7 +1714,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
             let req_context = deserialized_response.context.unwrap_or_default();
             assert_eq!(
                 req_context
@@ -1782,7 +1784,7 @@ mod tests {
         let gql_response = response.response.body_mut().next().await.unwrap();
         // Let's assert that the supergraph response has been transformed as it should have.
         assert_eq!(gql_response.subscribed, Some(true));
-        assert_eq!(gql_response.data, Some(Value::Null));
+        assert_eq!(gql_response.data, Some(Value::default()));
         crate::plugin::test::await_mock_driver(supergraph_driver).await;
         crate::plugin::test::await_mock_driver(http_driver).await;
     }
@@ -1851,7 +1853,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
             assert_eq!(
@@ -1993,7 +1995,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(
                 deserialized_request
@@ -2236,7 +2238,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
             assert_eq!(
@@ -2345,7 +2347,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
             assert_eq!(
@@ -2403,7 +2405,7 @@ mod tests {
 
         assert_eq!("a value", value);
 
-        let actual_response = serde_json::from_slice::<Value>(
+        let actual_response = apollo_json::from_slice::<Value>(
             &router::body::into_bytes(response.into_body())
                 .await
                 .unwrap(),
@@ -2450,7 +2452,7 @@ mod tests {
             let context = req.context.clone();
             let req = req.http_request;
             let deserialized_request: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(req.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
             assert_eq!(
@@ -2496,7 +2498,7 @@ mod tests {
             .response;
 
         assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
-        let actual_response = serde_json::from_slice::<Value>(
+        let actual_response = apollo_json::from_slice::<Value>(
             &router::body::into_bytes(response.into_body())
                 .await
                 .unwrap(),
@@ -2556,7 +2558,7 @@ mod tests {
             let context = req.context.clone();
             let res = req.http_request;
             let deserialized_response: Externalizable<Value> =
-                serde_json::from_slice(&router::body::into_bytes(res.into_body()).await.unwrap())
+                apollo_json::from_slice(&router::body::into_bytes(res.into_body()).await.unwrap())
                     .unwrap();
             assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
             assert_eq!(
@@ -2655,7 +2657,7 @@ mod tests {
         // the body should have changed:
         assert_eq!(
             json!({ "data": { "test": 42_u32 } }),
-            serde_json::from_slice::<Value>(
+            apollo_json::from_slice::<Value>(
                 &router::body::into_bytes(res.response.into_body())
                     .await
                     .unwrap()
@@ -2740,8 +2742,13 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(body["data"]["test"], "modified_by_coprocessor");
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(
+            body.get("data")
+                .and_then(|data| data.get("test"))
+                .and_then(|test| test.as_str_owned()),
+            Some("modified_by_coprocessor".to_string())
+        );
         crate::plugin::test::await_mock_driver(http_driver).await;
         crate::plugin::test::await_mock_driver(router_driver).await;
     }
@@ -2782,8 +2789,13 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(body["data"]["test"], "valid_response");
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(
+            body.get("data")
+                .and_then(|data| data.get("test"))
+                .and_then(|test| test.as_str_owned()),
+            Some("valid_response".to_string())
+        );
         crate::plugin::test::await_mock_driver(http_driver).await;
         crate::plugin::test::await_mock_driver(router_driver).await;
     }
@@ -2820,7 +2832,7 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
         // Empty object passes through unchanged since router response doesn't validate
         assert!(body.as_object().unwrap().is_empty());
         crate::plugin::test::await_mock_driver(http_driver).await;
@@ -2859,9 +2871,12 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
         // Invalid response passes through unchanged since router response doesn't validate
-        assert_eq!(body["errors"], "this should be an array not a string");
+        assert_eq!(
+            body.get("errors").and_then(|errors| errors.as_str_owned()),
+            Some("this should be an array not a string".to_string())
+        );
         crate::plugin::test::await_mock_driver(http_driver).await;
         crate::plugin::test::await_mock_driver(router_driver).await;
     }
@@ -2898,8 +2913,13 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
-        assert_eq!(body["data"]["test"], "valid_response");
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(
+            body.get("data")
+                .and_then(|data| data.get("test"))
+                .and_then(|test| test.as_str_owned()),
+            Some("valid_response".to_string())
+        );
         crate::plugin::test::await_mock_driver(http_driver).await;
         crate::plugin::test::await_mock_driver(router_driver).await;
     }
@@ -2936,7 +2956,7 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
         // Empty object passes through unchanged
         assert!(body.as_object().unwrap().is_empty());
         crate::plugin::test::await_mock_driver(http_driver).await;
@@ -2975,9 +2995,12 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
         // Invalid response passes through unchanged
-        assert_eq!(body["errors"], "this should be an array not a string");
+        assert_eq!(
+            body.get("errors").and_then(|errors| errors.as_str_owned()),
+            Some("this should be an array not a string".to_string())
+        );
         crate::plugin::test::await_mock_driver(http_driver).await;
         crate::plugin::test::await_mock_driver(router_driver).await;
     }
@@ -3045,7 +3068,7 @@ mod tests {
                     router::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
-                        .extensions(Object::new())
+                        .extensions(empty_object())
                         .context(req.context)
                         .build()
                         .unwrap(),
@@ -3272,7 +3295,7 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
         // With validation disabled, should get empty object as response
         assert!(
             body.as_object().unwrap().is_empty()
@@ -3308,14 +3331,16 @@ mod tests {
         let body_bytes = router::body::into_bytes(res.response.into_body())
             .await
             .unwrap();
-        let body: Value = serde_json::from_slice(&body_bytes).unwrap();
+        let body: Value = apollo_json::from_slice(&body_bytes).unwrap();
         // Should contain GraphQL errors from validation failure, not the original empty object
         assert!(body.get("errors").is_some());
         // Verify it's a deserialization error (validation failed)
-        let errors = body["errors"].as_array().unwrap();
+        let errors = body.get("errors").unwrap();
         assert!(
-            errors[0]["message"]
-                .as_str()
+            errors
+                .index(0)
+                .and_then(|error| error.get("message"))
+                .and_then(|message| message.as_str_owned())
                 .unwrap()
                 .contains("couldn't deserialize coprocessor output body")
         );
@@ -3535,7 +3560,7 @@ mod tests {
                     subgraph::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
-                        .extensions(Object::new())
+                        .extensions(empty_object())
                         .subgraph_name("coprocessorMockSubgraph")
                         .context(req.context)
                         .id(req.id)
@@ -4167,10 +4192,7 @@ mod tests {
                             .extension_code("TEST_ERROR")
                             .build(),
                     )
-                    .extensions(Object::from_iter(vec![(
-                        "ext_key".into(),
-                        json!("ext_value"),
-                    )]))
+                    .extensions(object([("ext_key".to_string(), json!("ext_value"))]))
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -4187,7 +4209,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
             // Verify only errors are sent, not data or extensions
             assert!(body.get("body").is_some());
@@ -4264,10 +4286,7 @@ mod tests {
                             .extension_code("TEST_ERROR")
                             .build(),
                     )
-                    .extensions(Object::from_iter(vec![(
-                        "ext_key".into(),
-                        json!("ext_value"),
-                    )]))
+                    .extensions(object([("ext_key".to_string(), json!("ext_value"))]))
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -4284,7 +4303,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
             // Verify data and extensions are sent, but not errors
             assert!(body.get("body").is_some());
@@ -4329,7 +4348,7 @@ mod tests {
         );
         assert_eq!(
             json!("modified_value"),
-            *response.response.body().extensions.get("ext_key").unwrap()
+            response.response.body().extensions.get("ext_key").unwrap()
         );
         // Original errors should be preserved since they weren't sent to coprocessor
         assert_eq!(response.response.body().errors[0].message, "test error");
@@ -4359,7 +4378,7 @@ mod tests {
             responder.send_response(
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -4376,7 +4395,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
             // Verify no body is sent
             assert!(body.get("body").is_none());
@@ -4440,7 +4459,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::new())
+                    .extensions(empty_object())
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -4457,7 +4476,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
             // Verify errors field is sent even though it's empty
             assert!(body.get("body").is_some());
@@ -4540,10 +4559,7 @@ mod tests {
                 subgraph::Response::builder()
                     .data(json!({ "test": 5678_u32 }))
                     .errors(Vec::new())
-                    .extensions(Object::from_iter(vec![(
-                        "trace_id".into(),
-                        json!("abc123"),
-                    )]))
+                    .extensions(object([("trace_id".to_string(), json!("abc123"))]))
                     .context(req.context)
                     .id(req.id)
                     .subgraph_name("test_subgraph".to_string())
@@ -4560,7 +4576,7 @@ mod tests {
             let context = req.context.clone();
             let (_, body) = req.http_request.into_parts();
             let body: Value =
-                serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                apollo_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
 
             // Verify only extensions are sent, not data or errors
             assert!(body.get("body").is_some());
@@ -4615,11 +4631,11 @@ mod tests {
         // Extensions should be modified by coprocessor
         assert_eq!(
             response.response.body().extensions.get("trace_id"),
-            Some(&json!("abc123"))
+            Some(json!("abc123"))
         );
         assert_eq!(
             response.response.body().extensions.get("processor"),
-            Some(&json!("modified"))
+            Some(json!("modified"))
         );
         crate::plugin::test::await_mock_driver(subgraph_driver).await;
         crate::plugin::test::await_mock_driver(http_driver).await;
@@ -4744,14 +4760,11 @@ mod tests {
 
         // Test selective: only errors
         let response_with_errors = graphql::Response::builder()
-            .data(serde_json_bytes::json!({"test": "data"}))
+            .data(json!({"test": "data"}))
             .errors(vec![
                 graphql::Error::builder().message("test error").build(),
             ])
-            .extensions(serde_json_bytes::Map::from_iter([(
-                "ext_key".into(),
-                serde_json_bytes::json!("ext_value"),
-            )]))
+            .extensions(object([("ext_key".to_string(), json!("ext_value"))]))
             .build();
 
         let result = filter_graphql_response_body(
@@ -4825,7 +4838,7 @@ mod tests {
 
         // Response with data but no errors or extensions
         let response_data_only = graphql::Response::builder()
-            .data(serde_json_bytes::json!({"test": "data"}))
+            .data(json!({"test": "data"}))
             .build();
 
         // When errors are configured but not present, should send errors: []
@@ -5033,7 +5046,7 @@ mod tests {
         // Extensions should be preserved from original (not empty from copro)
         assert_eq!(
             result.extensions.get("original_ext"),
-            Some(&json!("original_value"))
+            Some(json!("original_value"))
         );
 
         // Test 2: Send only errors, coprocessor modifies errors
@@ -5066,7 +5079,7 @@ mod tests {
         // Extensions should be preserved from original
         assert_eq!(
             result.extensions.get("original_ext"),
-            Some(&json!("original_value"))
+            Some(json!("original_value"))
         );
 
         // Test 3: Send only extensions, coprocessor modifies extensions
@@ -5098,7 +5111,7 @@ mod tests {
         // Extensions should be modified from coprocessor
         assert_eq!(
             result.extensions.get("modified_ext"),
-            Some(&json!("modified_value"))
+            Some(json!("modified_value"))
         );
         assert_eq!(result.extensions.get("original_ext"), None);
 
@@ -5131,7 +5144,7 @@ mod tests {
         // Extensions should be modified from coprocessor
         assert_eq!(
             result.extensions.get("modified_ext"),
-            Some(&json!("modified_value"))
+            Some(json!("modified_value"))
         );
     }
 
@@ -5164,15 +5177,12 @@ mod tests {
         // k1 should be updated
         assert_eq!(
             target_context.get_json_value("k1"),
-            Some(serde_json_bytes::json!("v1_updated"))
+            Some(json!("v1_updated"))
         );
         // k2 should be deleted
         assert!(!target_context.contains_key("k2"));
         // k3 should remain
-        assert_eq!(
-            target_context.get_json_value("k3"),
-            Some(serde_json_bytes::json!("v3"))
-        );
+        assert_eq!(target_context.get_json_value("k3"), Some(json!("v3")));
     }
 
     #[test]
@@ -5201,13 +5211,10 @@ mod tests {
         // k1 should be updated
         assert_eq!(
             target_context.get_json_value("k1"),
-            Some(serde_json_bytes::json!("v1_updated"))
+            Some(json!("v1_updated"))
         );
         // k2 should be added
-        assert_eq!(
-            target_context.get_json_value("k2"),
-            Some(serde_json_bytes::json!("v2_new"))
-        );
+        assert_eq!(target_context.get_json_value("k2"), Some(json!("v2_new")));
     }
 
     #[test]
@@ -5237,7 +5244,7 @@ mod tests {
         // key_not_sent should be preserved (wasn't sent to coprocessor)
         assert_eq!(
             target_context.get_json_value("key_not_sent"),
-            Some(serde_json_bytes::json!("preserved_value"))
+            Some(json!("preserved_value"))
         );
     }
 
@@ -5904,9 +5911,7 @@ mod tests {
 
                 let graphql_chunks = vec![
                     // Chunk 1: successful response — condition will not fire
-                    Response::builder()
-                        .data(serde_json_bytes::json!({"hello": "world"}))
-                        .build(),
+                    Response::builder().data(json!({"hello": "world"})).build(),
                     // Chunk 2: response with errors — condition will fire
                     Response::builder()
                         .errors(vec![
@@ -6483,6 +6488,7 @@ mod tests {
         use tower::BoxError;
         use tower::ServiceExt;
 
+        use crate::json_ext::json_value as json;
         use crate::metrics::FutureMetricsExt;
         use crate::plugins::coprocessor::ContextConf;
         use crate::plugins::coprocessor::connector::ConnectorRequestConf;
@@ -6964,7 +6970,7 @@ mod tests {
 
             assert_eq!(
                 context.get_json_value("test-key"),
-                Some(serde_json_bytes::Value::String("test-value".into()))
+                Some(json!("test-value"))
             );
             crate::plugin::test::await_mock_driver(http_driver).await;
         }
@@ -7487,7 +7493,7 @@ mod tests {
 
             assert_eq!(
                 context.get_json_value("response-key"),
-                Some(serde_json_bytes::Value::String("response-value".into()))
+                Some(json!("response-value"))
             );
         }
 
@@ -7856,7 +7862,7 @@ mod tests {
                     subgraph::Response::builder()
                         .data(json!({ "test": 1234_u32 }))
                         .errors(Vec::new())
-                        .extensions(Object::new())
+                        .extensions(empty_object())
                         .context(req.context)
                         .subgraph_name("test_subgraph".to_string())
                         .build(),

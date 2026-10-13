@@ -741,7 +741,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
         processed_error.body,
         Some(
             graphql::Response::builder()
-                .data(serde_json::json!({ "name": "Ada Lovelace"}))
+                .data(crate::json_ext::json_value!({ "name": "Ada Lovelace"}))
                 .build()
         )
     );

@@ -345,26 +345,18 @@ impl<'a> SerializeStructVariant for Blake3Serializer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Number;
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Value;
-
     use super::*;
-    use crate::json_ext::Object;
+    use crate::graphql::json_object::empty_object;
+    use crate::json_ext;
+    use crate::json_ext::ObjectExt;
 
     #[test]
     fn test_bytestring_map() {
-        let mut obj = Object::new();
-        obj.insert(
-            ByteString::from("test".to_string()),
-            Value::String("test".to_string().into()),
-        );
-        obj.insert(
-            ByteString::from("representations".to_string()),
-            Value::Array(vec![
-                Value::String("test_value".to_string().into()),
-                Value::Number(Number::from_f64(1.5).unwrap()),
-            ]),
+        let mut obj = empty_object();
+        obj.object_insert("test", "test");
+        obj.object_insert(
+            "representations",
+            json_ext::array([json_ext::string("test_value"), json_ext::from_f64(1.5)]),
         );
         let mut hasher = blake3::Hasher::new();
         let serializer = Blake3Serializer::new(&mut hasher);
@@ -374,18 +366,12 @@ mod tests {
         let first_hash = hasher.finalize().to_hex().to_string();
         insta::assert_snapshot!(first_hash);
 
-        let mut obj = Object::new();
-        obj.insert(
-            ByteString::from("test".to_string()),
-            Value::String("test".to_string().into()),
-        );
-        obj.insert(
-            ByteString::from("representations".to_string()),
+        let mut obj = empty_object();
+        obj.object_insert("test", "test");
+        obj.object_insert(
+            "representations",
             // Change order
-            Value::Array(vec![
-                Value::Number(Number::from_f64(1.5).unwrap()),
-                Value::String("test_value".to_string().into()),
-            ]),
+            json_ext::array([json_ext::from_f64(1.5), json_ext::string("test_value")]),
         );
         let mut hasher = blake3::Hasher::new();
         let serializer = Blake3Serializer::new(&mut hasher);

@@ -59,7 +59,7 @@ async fn run_test_case(
     let mock_response_elements: Vec<graphql::Response> = mock_responses
         .iter()
         .map(|response| {
-            serde_json::from_str(response).expect("Failed to parse mock response bytes")
+            apollo_json::from_str(response).expect("Failed to parse mock response bytes")
         })
         .collect();
 
@@ -603,7 +603,7 @@ async fn redaction_is_wired_into_the_pipeline() {
     let error = response.errors.first().expect("one error");
     assert_eq!(error.message, REDACTED_ERROR_MESSAGE);
     assert!(
-        error.extensions.is_empty(),
+        error.extensions.is_empty().unwrap_or(true),
         "redaction clears every extension, got {:?}",
         error.extensions
     );
@@ -618,7 +618,11 @@ async fn subgraph_name_tagging_is_wired_into_the_pipeline() {
     // `service` is derived from the tag the subgraph-stage layer applied, so it is only
     // present — and only correct — if that layer ran on the `accounts` stack.
     assert_eq!(
-        error.extensions.get("service").and_then(|v| v.as_str()),
+        error
+            .extensions
+            .get("service")
+            .and_then(|v| v.as_string())
+            .as_deref(),
         Some("accounts"),
     );
     // The private tag itself must never reach a client.

@@ -2,11 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use apollo_json::Value;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -42,7 +40,7 @@ impl Recording {
 pub(crate) struct RequestDetails {
     pub(crate) query: Option<String>,
     pub(crate) operation_name: Option<String>,
-    pub(crate) variables: Map<ByteString, Value>,
+    pub(crate) variables: Value,
     pub(crate) headers: HashMap<String, Vec<String>>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) header_errors: HashMap<String, Vec<String>>,

@@ -644,7 +644,6 @@ mod test {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use serde_json::json;
     use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
@@ -652,6 +651,7 @@ mod test {
     use tracing_subscriber::layer::SubscriberExt;
 
     use crate::context::OPERATION_NAME;
+    use crate::json_ext::json_value as json;
     use crate::plugins::telemetry::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
@@ -973,7 +973,7 @@ mod test {
         let response = crate::services::RouterResponse::fake_builder()
             .header("set-cookie", "session=abc123")
             .context(context)
-            .data(serde_json_bytes::json!({}))
+            .data(apollo_json::json!({}))
             .build()
             .unwrap();
         assert_eq!(
@@ -1004,7 +1004,7 @@ mod test {
         let response = crate::services::RouterResponse::fake_builder()
             .header("set-cookie", "session=abc123")
             .context(context)
-            .data(serde_json_bytes::json!({}))
+            .data(apollo_json::json!({}))
             .build()
             .unwrap();
         assert_eq!(
@@ -1515,16 +1515,15 @@ mod test {
 
     #[test]
     fn router_on_graphql_error_on_response() {
-        use serde_json_bytes::Value;
-
         use crate::context::CONTAINS_GRAPHQL_ERROR;
+        use crate::json_ext;
 
         // on_graphql_error: true — true when errors present, false when not
         let selector_true = RouterSelector::OnGraphQLError {
             on_graphql_error: true,
         };
         let ctx_with_errors = crate::Context::default();
-        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        ctx_with_errors.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         let response_with_errors = RouterResponse::fake_builder()
             .context(ctx_with_errors)
             .build()
@@ -1550,7 +1549,7 @@ mod test {
         );
 
         let ctx_with_errors2 = crate::Context::default();
-        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        ctx_with_errors2.insert_json_value(CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         let response_with_errors2 = RouterResponse::fake_builder()
             .context(ctx_with_errors2)
             .build()
@@ -1563,9 +1562,8 @@ mod test {
 
     #[test]
     fn on_response_event_on_graphql_error_true() {
-        use serde_json_bytes::Value;
-
         use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
+        use crate::json_ext;
         use crate::plugins::telemetry::config_new::Selector;
 
         let selector = RouterSelector::OnGraphQLError {
@@ -1574,7 +1572,7 @@ mod test {
 
         // chunk with errors → returns true
         let ctx = crate::Context::default();
-        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         assert_eq!(
             selector.on_response_event(&(), &ctx),
             Some(opentelemetry::Value::Bool(true))
@@ -1582,7 +1580,7 @@ mod test {
 
         // chunk without errors → returns false
         let ctx = crate::Context::default();
-        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(false));
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(false));
         assert_eq!(
             selector.on_response_event(&(), &ctx),
             Some(opentelemetry::Value::Bool(false))
@@ -1598,9 +1596,8 @@ mod test {
 
     #[test]
     fn on_response_event_on_graphql_error_false() {
-        use serde_json_bytes::Value;
-
         use crate::context::CHUNK_CONTAINS_GRAPHQL_ERROR;
+        use crate::json_ext;
         use crate::plugins::telemetry::config_new::Selector;
 
         let selector = RouterSelector::OnGraphQLError {
@@ -1609,7 +1606,7 @@ mod test {
 
         // chunk without errors → returns true (matches "no errors" condition)
         let ctx = crate::Context::default();
-        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(false));
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(false));
         assert_eq!(
             selector.on_response_event(&(), &ctx),
             Some(opentelemetry::Value::Bool(true))
@@ -1617,7 +1614,7 @@ mod test {
 
         // chunk with errors → returns false (doesn't match "no errors" condition)
         let ctx = crate::Context::default();
-        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, Value::Bool(true));
+        ctx.insert_json_value(CHUNK_CONTAINS_GRAPHQL_ERROR, json_ext::bool_value(true));
         assert_eq!(
             selector.on_response_event(&(), &ctx),
             Some(opentelemetry::Value::Bool(false))

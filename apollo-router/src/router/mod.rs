@@ -303,15 +303,16 @@ impl TestRouterHttpServer {
         &self,
         request: crate::graphql::Request,
     ) -> Result<crate::graphql::Response, crate::error::FetchError> {
-        Ok(reqwest::Client::new()
+        let body = reqwest::Client::new()
             .post(format!("{}/", self.listen_address().await.unwrap()))
             .json(&request)
             .send()
             .await
             .expect("couldn't send request")
-            .json()
+            .bytes()
             .await
-            .expect("couldn't deserialize into json"))
+            .expect("couldn't read the response body");
+        Ok(crate::graphql::Response::from_bytes(body).expect("couldn't deserialize into json"))
     }
 
     async fn listen_address(&self) -> Option<ListenAddr> {
@@ -340,6 +341,7 @@ mod tests {
     use crate::Configuration;
     use crate::graphql;
     use crate::graphql::Request;
+    use crate::json_ext::ValueExt;
     use crate::router::Event::UpdateConfiguration;
     use crate::router::Event::UpdateLicense;
     use crate::router::Event::UpdateSchema;
@@ -381,15 +383,16 @@ mod tests {
         listen_addr: &ListenAddr,
         request: &graphql::Request,
     ) -> Result<graphql::Response, crate::error::FetchError> {
-        Ok(reqwest::Client::new()
+        let body = reqwest::Client::new()
             .post(format!("{listen_addr}/"))
             .json(request)
             .send()
             .await
             .expect("couldn't send request")
-            .json()
+            .bytes()
             .await
-            .expect("couldn't deserialize into json"))
+            .expect("couldn't read the response body");
+        Ok(graphql::Response::from_bytes(body).expect("couldn't deserialize into json"))
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -422,14 +425,13 @@ mod tests {
 
         let response = router_handle.request(request).await.unwrap();
         assert_eq!(
-            "@ada",
+            Some("@ada".to_string()),
             response
                 .data
                 .unwrap()
                 .get("me")
-                .unwrap()
-                .get("username")
-                .unwrap()
+                .and_then(|me| me.get("username"))
+                .and_then(|username| username.as_str_owned())
         );
 
         // shut the router down
@@ -469,14 +471,13 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "@ada",
+            Some("@ada".to_string()),
             response
                 .data
                 .unwrap()
                 .get("me")
-                .unwrap()
-                .get("username")
-                .unwrap()
+                .and_then(|me| me.get("username"))
+                .and_then(|username| username.as_str_owned())
         );
 
         // the name field is not present yet
@@ -490,8 +491,11 @@ mod tests {
             "{response:?}"
         );
         assert_eq!(
-            "GRAPHQL_VALIDATION_FAILED",
-            response.errors[0].extensions.get("code").unwrap()
+            Some("GRAPHQL_VALIDATION_FAILED".to_string()),
+            response.errors[0]
+                .extensions
+                .get("code")
+                .and_then(|code| code.as_str_owned())
         );
 
         // let's update the schema to add the field
@@ -511,14 +515,13 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "Ada Lovelace",
+            Some("Ada Lovelace".to_string()),
             response
                 .data
                 .unwrap()
                 .get("me")
-                .unwrap()
-                .get("name")
-                .unwrap()
+                .and_then(|me| me.get("name"))
+                .and_then(|name| name.as_str_owned())
         );
 
         // let's go back and remove the field
@@ -534,14 +537,13 @@ mod tests {
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
-            "@ada",
+            Some("@ada".to_string()),
             response
                 .data
                 .unwrap()
                 .get("me")
-                .unwrap()
-                .get("username")
-                .unwrap()
+                .and_then(|me| me.get("username"))
+                .and_then(|username| username.as_str_owned())
         );
 
         let request = Request::builder()
@@ -554,8 +556,11 @@ mod tests {
             response.errors[0].message,
         );
         assert_eq!(
-            "GRAPHQL_VALIDATION_FAILED",
-            response.errors[0].extensions.get("code").unwrap()
+            Some("GRAPHQL_VALIDATION_FAILED".to_string()),
+            response.errors[0]
+                .extensions
+                .get("code")
+                .and_then(|code| code.as_str_owned())
         );
         router_handle.shutdown().await.unwrap();
     }

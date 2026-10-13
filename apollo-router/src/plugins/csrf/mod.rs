@@ -224,6 +224,7 @@ mod csrf_tests {
 
     use super::*;
     use crate::graphql;
+    use crate::json_ext::ValueExt;
     use crate::plugins::test::PluginTestHarness;
 
     #[tokio::test]
@@ -355,8 +356,11 @@ mod csrf_tests {
             .await
             .expect("expected body");
 
-        let response: graphql::Response = serde_json::from_slice(&body.to_bytes()).unwrap();
-        assert_eq!(response.errors.len(), 0);
+        // The fake response is `{}`, which Response::from_bytes rejects (a
+        // response without data must carry an error), so look at the body
+        // directly: passing the CSRF check means no error was injected.
+        let document = apollo_json::Value::parse(body.to_bytes().to_vec()).unwrap();
+        assert!(document.get("errors").is_none());
     }
 
     async fn assert_rejected(config: &'static str, request: router::Request) {
@@ -379,15 +383,15 @@ mod csrf_tests {
             .await
             .expect("expected body");
 
-        let response: graphql::Response = serde_json::from_slice(&body.to_bytes()).unwrap();
+        let response = graphql::Response::from_bytes(body.to_bytes()).unwrap();
         assert_eq!(response.errors.len(), 1);
         assert_eq!(
             response.errors[0]
                 .extensions
                 .get("code")
                 .expect("error code")
-                .as_str(),
-            Some("CSRF_ERROR")
+                .as_str_owned(),
+            Some("CSRF_ERROR".to_string())
         );
     }
 }

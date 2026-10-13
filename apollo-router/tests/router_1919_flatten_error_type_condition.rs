@@ -31,11 +31,7 @@ use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::supergraph;
 use serde::Deserialize;
 use serde_json::json;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tower::ServiceExt;
-
-type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
 #[derive(Deserialize)]
 struct SubgraphMock {
@@ -121,12 +117,12 @@ fn setup() -> TestHarness<'static> {
 async fn test_subgraph_error_not_dropped_on_flattened_type_conditioned_fetch() {
     let harness = setup();
     let supergraph_service = harness.build_supergraph().await.unwrap();
-    let mut variables = JsonMap::new();
-    variables.insert("movieResultParam", "movieResultEnabled".into());
-    variables.insert("articleResultParam", "articleResultEnabled".into());
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
-        .variables(variables)
+        .variables(apollo_json::json!({
+            "movieResultParam": "movieResultEnabled",
+            "articleResultParam": "articleResultEnabled",
+        }))
         .build()
         .expect("expecting valid request");
 
@@ -156,7 +152,11 @@ async fn test_subgraph_error_not_dropped_on_flattened_type_conditioned_fetch() {
         .map(|error| {
             assert_eq!(error.message, "Your request has been timed out");
             assert_eq!(
-                error.extensions.get("code").and_then(|c| c.as_str()),
+                error
+                    .extensions
+                    .get("code")
+                    .and_then(|c| c.as_string())
+                    .as_deref(),
                 Some("GATEWAY_TIMEOUT")
             );
             let path = error.path.as_ref().expect("error must have a path");
@@ -182,7 +182,7 @@ async fn test_subgraph_error_not_dropped_on_flattened_type_conditioned_fetch() {
 
     // The article-batch artwork fetch was unaffected and its data must still come through
     // normally -- confirms the bug (and the fix) is scoped to the errored fetch only.
-    let data = response.data.expect("expected some data");
+    let data = response.data.expect("expected some data").to_legacy();
     let article_container = &data["containers"][1];
     assert_eq!(article_container["id"], serde_json_bytes::json!("c2"));
     assert_eq!(

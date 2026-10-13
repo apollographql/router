@@ -9,13 +9,13 @@ use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use mime::APPLICATION_JSON;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use crate::Context;
 use crate::graphql;
+use crate::json_ext::json_value as json;
 use crate::pipeline::from_supergraph_mock;
 use crate::plugin::test::assert_no_mock_calls;
 use crate::plugin::test::await_mock_driver;
@@ -267,7 +267,7 @@ async fn test_http_max_request_bytes_get() {
         ";
         supergraph::Request::fake_builder()
             .query(canned_query.to_string())
-            .variables(json!({"first": 2}).as_object().cloned().unwrap())
+            .variables(json!({"first": 2}))
             .method(Method::GET)
             .build()
             .unwrap()
@@ -359,7 +359,7 @@ async fn escaped_quotes_in_string_literal() {
                         // Replace "couldn't find mock for query" error with empty data
                         let graphql_response = response.response.body_mut();
                         graphql_response.errors.clear();
-                        graphql_response.data = Some(serde_json_bytes::json!({
+                        graphql_response.data = Some(json!({
                             "_entities": {"reviews": []},
                         }));
                     }
@@ -531,7 +531,7 @@ async fn invalid_input_object_unknown_field(
         .query("mutation($input: RegisterPartnerInput!) { registerPartner(input: $input) }")
         .variable(
             "input",
-            serde_json::json!({"email": "a@example.com", "password": "x", "invalidField": "x"}),
+            json!({"email": "a@example.com", "password": "x", "invalidField": "x"}),
         )
         .build()?
         .try_into()?;
@@ -597,7 +597,7 @@ async fn invalid_input_object_inaccessible_field(
         .query("mutation($input: RegisterPartnerInput!) { registerPartner(input: $input) }")
         .variable(
             "input",
-            serde_json::json!({"email": "a@example.com", "password": "x", "internalNotes": "leaked"}),
+            json!({"email": "a@example.com", "password": "x", "internalNotes": "leaked"}),
         )
         .build()?
         .try_into()?;

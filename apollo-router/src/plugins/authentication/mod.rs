@@ -28,6 +28,8 @@ use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
 use crate::Context;
 use crate::graphql;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -473,6 +475,10 @@ impl JwtStatus {
     }
 }
 
+fn jwt_status_value(status: JwtStatus) -> Value {
+    apollo_json::to_value(&status).expect("JwtStatus serializes to a JSON object")
+}
+
 const JWT_CONTEXT_KEY: &str = "apollo::authentication::jwt_status";
 
 fn authenticate(
@@ -503,7 +509,7 @@ fn authenticate(
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
-            serde_json_bytes::json!(JwtStatus::new_failure(source, error.as_context_object())),
+            jwt_status_value(JwtStatus::new_failure(source, error.as_context_object())),
         );
 
         // The error message is the only part of the response that varies by mode. Note that the
@@ -647,7 +653,7 @@ fn authenticate(
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
-            serde_json_bytes::json!(JwtStatus::new_success(source_of_extracted_jwt)),
+            jwt_status_value(JwtStatus::new_success(source_of_extracted_jwt)),
         );
 
         return ControlFlow::Continue(request);
@@ -680,9 +686,8 @@ pub(crate) fn has_authenticated_jwt(context: &Context) -> bool {
 pub(crate) fn jwt_scopes(context: &Context) -> Option<HashSet<String>> {
     context
         .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)?
-        .as_object()?
         .get("scope")?
-        .as_str()
+        .as_str_owned()
         .map(|s| s.split(' ').map(|s| s.to_string()).collect())
 }
 

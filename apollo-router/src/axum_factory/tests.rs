@@ -90,6 +90,11 @@ use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
 
+/// Brings a `serde_json::json!` fixture into the router's JSON representation.
+pub(super) fn json_data(value: serde_json::Value) -> crate::json_ext::Value {
+    apollo_json::to_value(&value).expect("a serde_json value serializes into a document")
+}
+
 macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
             assert_eq!(
@@ -574,7 +579,9 @@ async fn it_displays_sandbox_with_different_supergraph_path() {
 #[tokio::test]
 async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
+        .data(json_data(
+            json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"}),
+        )) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
     let (mock, mut handle) = tower_test::mock::pair::<
@@ -616,7 +623,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     decoder.write_all(&body_bytes).await.unwrap();
     decoder.shutdown().await.unwrap();
     let response = decoder.into_inner();
-    let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+    let graphql_resp: graphql::Response = apollo_json::from_slice(&response).unwrap();
     assert_eq!(graphql_resp, expected_response);
 
     // Get query
@@ -645,7 +652,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     decoder.write_all(&body_bytes).await.unwrap();
     decoder.shutdown().await.unwrap();
     let response = decoder.into_inner();
-    let graphql_resp: graphql::Response = serde_json::from_slice(&response).unwrap();
+    let graphql_resp: graphql::Response = apollo_json::from_slice(&response).unwrap();
     assert_eq!(graphql_resp, expected_response);
 
     server.shutdown().await?;
@@ -668,7 +675,9 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let original_body = json!({ "query": "query { me { name } }" });
     let compressed_body = gzip(original_body).await;
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
+        .data(json_data(
+            json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"}),
+        )) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
     let (mock, mut handle) = tower_test::mock::pair::<
@@ -702,7 +711,7 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -802,7 +811,7 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
     assert_eq!(error_code, "INVALID_GRAPHQL_REQUEST");
     assert_eq!(
         error_details,
-        "failed to deserialize the request body into JSON: expected value at line 1 column 1"
+        "failed to deserialize the request body into JSON: JSON syntax error at byte 0: expected a JSON value"
     );
     assert_eq!(error_message, "Invalid GraphQL request");
     server.shutdown().await?;
@@ -813,7 +822,7 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn response() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
+        .data(json_data(json!({"response": "yay"})))
         .build();
     let example_response = expected_response.clone();
     let (mock, mut handle) = tower_test::mock::pair::<
@@ -845,7 +854,7 @@ async fn response() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -865,7 +874,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     );
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -917,7 +926,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
+        .data(json_data(json!({"response": "yay"})))
         .build();
     let example_response = expected_response.clone();
 
@@ -963,7 +972,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -984,7 +993,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -999,7 +1008,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1011,7 +1020,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
+        .data(json_data(json!({"response": "yay"})))
         .build();
     let example_response = expected_response.clone();
 
@@ -1057,7 +1066,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1072,7 +1081,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1084,7 +1093,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
 #[tokio::test]
 async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
+        .data(json_data(json!({"response": "yay"})))
         .build();
     let example_response = expected_response.clone();
     let (mock, mut handle) = tower_test::mock::pair::<
@@ -1129,7 +1138,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1144,7 +1153,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .unwrap();
 
     assert_eq!(
-        response.json::<graphql::Response>().await.unwrap(),
+        graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
         expected_response,
     );
 
@@ -1156,7 +1165,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
 #[tokio::test]
 async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
+        .data(json_data(json!({"response": "yay"})))
         .build();
     let example_response = expected_response.clone();
 
@@ -1207,7 +1216,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
             expected_response,
         );
 
@@ -1222,7 +1231,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
             .unwrap();
 
         assert_eq!(
-            response.json::<graphql::Response>().await.unwrap(),
+            graphql::Response::from_bytes(response.bytes().await.unwrap()).unwrap(),
             expected_response,
         );
     }
@@ -1269,8 +1278,10 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .send()
         .await
         .unwrap()
-        .json::<graphql::Response>()
+        .bytes()
         .await
+        .map(graphql::Response::from_bytes)
+        .unwrap()
         .unwrap();
 
     assert_response_eq_ignoring_error_id!(
@@ -1424,7 +1435,7 @@ async fn it_validates_get_request_content_type() -> Result<(), ApolloRouterError
             let (req, responder) = handle.next_request().await.unwrap();
             responder.send_response(SupergraphResponse::new_from_graphql_response(
                 graphql::Response::builder()
-                    .data(json!({"response": "hey"}))
+                    .data(json_data(json!({"response": "hey"})))
                     .build(),
                 req.context,
             ));
@@ -2116,9 +2127,9 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
         let (req, responder) = handle.next_request().await.unwrap();
         responder.send_response(SupergraphResponse::new_from_graphql_response(
             graphql::Response::builder()
-                .data(json!({
+                .data(json_data(json!({
                     "test": "hello"
-                }))
+                })))
                 .build(),
             req.context,
         ));
@@ -2169,17 +2180,17 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         let (req, responder) = handle.next_request().await.unwrap();
         let body = stream::iter(vec![
             graphql::Response::builder()
-                .data(json!({
+                .data(json_data(json!({
                     "me": "id",
-                }))
+                })))
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
                 .incremental(vec![
                     graphql::IncrementalResponse::builder()
-                        .data(json!({
+                        .data(json_data(json!({
                             "name": "Ada"
-                        }))
+                        })))
                         .path(Path::from("me"))
                         .build(),
                 ])
@@ -2247,9 +2258,9 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
         let (req, responder) = handle.next_request().await.unwrap();
         let body = stream::iter(vec![
             graphql::Response::builder()
-                .data(json!({
+                .data(json_data(json!({
                     "me": "name",
-                }))
+                })))
                 .has_next(false)
                 .build(),
         ])
@@ -2683,7 +2694,7 @@ async fn test_defer_is_not_buffered_with_compression() {
 async fn listening_to_unix_socket() {
     let temp_dir = tempfile::tempdir().unwrap();
     let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
+        .data(json_data(json!({"response": "yay"})))
         .build();
     let example_response = expected_response.clone();
 
@@ -2712,7 +2723,7 @@ async fn listening_to_unix_socket() {
     .await;
 
     assert_eq!(
-        serde_json::from_str::<graphql::Response>(&output).unwrap(),
+        apollo_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 
@@ -2725,7 +2736,7 @@ async fn listening_to_unix_socket() {
     .await;
 
     assert_eq!(
-        serde_json::from_str::<graphql::Response>(&output).unwrap(),
+        apollo_json::from_str::<graphql::Response>(&output).unwrap(),
         expected_response,
     );
 

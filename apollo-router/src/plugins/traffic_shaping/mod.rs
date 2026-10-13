@@ -754,8 +754,6 @@ mod test {
     use bytes::Bytes;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Value;
     use serde_json_bytes::json;
     use tokio::task::JoinSet;
     use tokio::time::sleep;
@@ -763,7 +761,8 @@ mod test {
 
     use super::*;
     use crate::Configuration;
-    use crate::json_ext::Object;
+    use crate::json_ext;
+    use crate::json_ext::Value;
     use crate::pipeline::build_apq_expander;
     use crate::pipeline::build_query_plan_cache;
     use crate::pipeline::build_supergraph_pipeline;
@@ -817,15 +816,14 @@ mod test {
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
     ) -> router::BoxCloneService {
-        let mut extensions = Object::new();
-        extensions.insert("test", Value::String(ByteString::from("value")));
+        let extensions = Value::object([("test", "value")]);
 
         let account_mocks = vec![
             (
                 r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"}]}}"#
             )
-        ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+        ].into_iter().map(|(query, response)| (apollo_json::from_str(query).unwrap(), apollo_json::from_str(response).unwrap())).collect();
         let account_service = MockSubgraph::new(account_mocks);
 
         let review_mocks = vec![
@@ -833,7 +831,7 @@ mod test {
                 r#"{"query":"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}","operationName":"TopProducts__reviews__1","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"reviews":[{"id":"1","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"1"}},{"id":"4","product":{"__typename":"Product","upc":"1"},"author":{"__typename":"User","id":"2"}}]},{"reviews":[{"id":"2","product":{"__typename":"Product","upc":"2"},"author":{"__typename":"User","id":"1"}}]}]}}"#
             )
-            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+            ].into_iter().map(|(query, response)| (apollo_json::from_str(query).unwrap(), apollo_json::from_str(response).unwrap())).collect();
         let review_service = MockSubgraph::new(review_mocks);
 
         let product_mocks = vec![
@@ -845,7 +843,7 @@ mod test {
                 r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
                 r#"{"data":{"_entities":[{"name":"Table"},{"name":"Couch"}]}}"#
             )
-            ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
+            ].into_iter().map(|(query, response)| (apollo_json::from_str(query).unwrap(), apollo_json::from_str(response).unwrap())).collect();
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
@@ -1116,7 +1114,7 @@ mod test {
                 let (_req, responder) = handle.next_request().await.unwrap();
                 responder.send_response(
                     RouterResponse::fake_builder()
-                        .data(json!({ "test": 1234_u32 }))
+                        .data(json_ext::from_legacy(&json!({ "test": 1234_u32 })))
                         .build()
                         .unwrap(),
                 );
@@ -1182,7 +1180,7 @@ mod test {
             .service_fn(move |_req: router::Request| async {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 RouterResponse::fake_builder()
-                    .data(json!({ "test": 1234_u32 }))
+                    .data(json_ext::from_legacy(&json!({ "test": 1234_u32 })))
                     .build()
             })
             .boxed_clone();

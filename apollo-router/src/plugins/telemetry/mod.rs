@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use ::tracing::Span;
+use apollo_json::JsonKind;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
 use http::HeaderName;
@@ -30,8 +31,6 @@ use parking_lot::RwLock;
 use regex::Regex;
 use reload::activation::Activation;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use uuid::Uuid;
 
@@ -49,6 +48,8 @@ use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::axum_factory::Endpoint;
+use crate::json_ext::ObjectExt;
+use crate::json_ext::Value;
 use crate::metrics::meter_provider;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -314,24 +315,21 @@ impl PluginPrivate for Telemetry {
 }
 
 impl Telemetry {
-    fn filter_variables_values(
-        variables: &Map<ByteString, Value>,
-        forward_rules: &ForwardValues,
-    ) -> String {
-        let nb_var = variables.len();
-        #[allow(clippy::mutable_key_type)] // False positive lint
+    fn filter_variables_values(variables: &Value, forward_rules: &ForwardValues) -> String {
+        let nb_var = variables.len().unwrap_or(0);
         let variables = variables
-            .iter()
+            .object_entries()
+            .into_iter()
             .map(|(name, value)| {
                 if match &forward_rules {
                     ForwardValues::None => false,
                     ForwardValues::All => true,
-                    ForwardValues::Only(only) => only.contains(&name.as_str().to_string()),
-                    ForwardValues::Except(except) => !except.contains(&name.as_str().to_string()),
+                    ForwardValues::Only(only) => only.contains(&name),
+                    ForwardValues::Except(except) => !except.contains(&name),
                 } {
                     (
                         name,
-                        serde_json::to_string(value).unwrap_or_else(|_| "<unknown>".to_string()),
+                        serde_json::to_string(&value).unwrap_or_else(|_| "<unknown>".to_string()),
                     )
                 } else {
                     (name, "".to_string())
@@ -519,19 +517,24 @@ impl Telemetry {
 
     /// Returns `[(subgraph_name, trace), …]`
     fn subgraph_ftv1_traces(context: &Context) -> Vec<(ByteString, proto::reports::Trace)> {
-        if let Some(Value::Array(array)) = context.get_json_value(SUBGRAPH_FTV1) {
-            array
-                .iter()
-                .filter_map(|value| match value.as_array()?.as_slice() {
-                    [Value::String(subgraph_name), trace] => {
-                        Some((subgraph_name.clone(), decode_ftv1_trace(trace.as_str()?)?))
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        }
+        let Some(array) = context.get_json_value(SUBGRAPH_FTV1) else {
+            return Vec::new();
+        };
+        // `array_iter` yields nothing unless the entry really is an array.
+        array
+            .array_iter()
+            .filter_map(|value| {
+                if value.kind() != JsonKind::Array || value.len() != Some(2) {
+                    return None;
+                }
+                let subgraph_name = value.index(0)?.as_str()?.into_owned();
+                let trace = value.index(1)?;
+                Some((
+                    ByteString::from(subgraph_name),
+                    decode_ftv1_trace(trace.as_str()?.as_ref())?,
+                ))
+            })
+            .collect()
     }
 
     // https://github.com/apollographql/apollo-server/blob/6ff88e87c52/packages/server/src/plugin/usageReporting/stats.ts#L283
@@ -786,6 +789,7 @@ mod tests {
     use super::Telemetry;
     use crate::graphql;
     use crate::graphql::IntoGraphQLErrors;
+    use crate::json_ext;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::DynPlugin;
     use crate::plugin::PluginInit;
@@ -872,7 +876,9 @@ mod tests {
                 SupergraphResponse::fake_builder()
                     .context(req.context)
                     .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2usize}}))
+                    .data(json_ext::from_legacy(
+                        &json!({"data": {"my_value": 2usize}}),
+                    ))
                     .build()
                     .unwrap(),
             );
@@ -1457,7 +1463,7 @@ mod tests {
                 SupergraphResponse::fake_builder()
                     .context(req.context)
                     .data(
-                        serde_json::to_value(graphql::Response::builder().errors(errors).build())
+                        json_ext::to_value(&graphql::Response::builder().errors(errors).build())
                             .unwrap(),
                     )
                     .build()

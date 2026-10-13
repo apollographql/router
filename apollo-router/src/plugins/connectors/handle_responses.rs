@@ -28,6 +28,9 @@ use tracing::Span;
 
 use crate::Context;
 use crate::graphql;
+use crate::graphql::json_object::empty_object;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
 use crate::plugins::include_subgraph_errors::IncludeSubgraphErrors;
@@ -57,7 +60,9 @@ impl From<RuntimeError> for graphql::Error {
 
         let mut err = graphql::Error::builder()
             .message(&error.message)
-            .extensions(error.extensions())
+            // PERF(apollo-json): legacy bridge, revisit -- apollo-federation builds
+            // connector error extensions as a `serde_json_bytes` map.
+            .extensions(json_ext::object_from_legacy(&error.extensions()))
             .extension_code(error.code())
             .path(path)
             .build();
@@ -319,9 +324,7 @@ fn declared_error_for_client(error: RuntimeError, context: &Context) -> Option<g
     let mut error: graphql::Error = error.into();
     stamp_connector_coordinate(&mut error, coordinate);
     IncludeSubgraphErrors::process_error(&config, &mut error);
-    error
-        .extensions
-        .insert(DECLARED_ERROR_MARKER, Value::Bool(true));
+    error.extensions.object_insert(DECLARED_ERROR_MARKER, true);
     Some(error)
 }
 
@@ -358,20 +361,15 @@ fn stamp_connector_coordinate(error: &mut graphql::Error, coordinate: Option<Str
         return;
     };
 
-    let connector = error
-        .extensions
-        .entry("connector")
-        .or_insert_with(|| Value::Object(Map::new()));
-
     // A non-object `connector` is replaced rather than merged into: whatever it
     // was, it was not the report this is assembling.
-    if !connector.is_object() {
-        *connector = Value::Object(Map::new());
-    }
-
-    if let Value::Object(connector) = connector {
-        connector.insert("coordinate", Value::String(coordinate.into()));
-    }
+    let mut connector = error
+        .extensions
+        .get("connector")
+        .filter(|connector| connector.is_object())
+        .unwrap_or_else(empty_object);
+    connector.object_insert("coordinate", coordinate);
+    error.extensions.object_insert("connector", connector);
 }
 
 pub(crate) fn aggregate_responses(
@@ -389,9 +387,11 @@ pub(crate) fn aggregate_responses(
     }
 
     let data = if data.is_empty() {
-        Value::Null
+        json_ext::null()
     } else {
-        Value::Object(data)
+        // PERF(apollo-json): legacy bridge, revisit -- `MappedResponse::add_to_data` accumulates
+        // into a `serde_json_bytes::Map` owned by apollo-federation
+        json_ext::from_legacy(&Value::Object(data))
     };
 
     // The span reports the *request's* outcome, so it is failed when the
@@ -519,7 +519,6 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::name;
-    use apollo_compiler::response::JsonValue;
     use apollo_federation::connectors::ApplyToErrorKind;
     use apollo_federation::connectors::ConnectId;
     use apollo_federation::connectors::ConnectSpec;
@@ -541,6 +540,8 @@ mod tests {
 
     use crate::Context;
     use crate::graphql;
+    use crate::json_ext;
+    use crate::json_ext::ValueExt;
     use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
     use crate::plugins::connectors::declared_errors::DECLARED_ERROR_MARKER;
     use crate::plugins::connectors::handle_responses::MappedResponse;
@@ -867,7 +868,7 @@ mod tests {
                     None => report.push_str("  (nothing reported)\n"),
                     Some(errors) => {
                         for error in errors {
-                            report.push_str(&render_reported_error(error));
+                            report.push_str(&render_reported_error(&json_ext::to_legacy(&error)));
                             report.push('\n');
                         }
                     }
@@ -957,7 +958,7 @@ mod tests {
         // The field resolved with its default rather than being nulled out.
         assert_eq!(
             response.data,
-            Some(json!({ "account": { "balance": "<missing>" } })),
+            Some(apollo_json::json!({ "account": { "balance": "<missing>" } })),
         );
 
         // In transit it looks like an error, but only to the fetch service:
@@ -965,7 +966,7 @@ mod tests {
         assert_eq!(response.errors.len(), 1);
         assert_eq!(
             response.errors[0].extensions.get(DECLARED_ERROR_MARKER),
-            Some(&json!(true)),
+            Some(apollo_json::json!(true)),
         );
 
         let context = Context::new();
@@ -982,21 +983,24 @@ mod tests {
 
         assert_eq!(
             error.get("message"),
-            Some(&json!("Field 'amount' was not found"))
+            Some(apollo_json::json!("Field 'amount' was not found"))
         );
         let extensions = error.get("extensions").expect("extensions");
         assert_eq!(
             extensions.get("code"),
-            Some(&json!("INTERNAL_SERVER_ERROR")),
+            Some(apollo_json::json!("INTERNAL_SERVER_ERROR")),
         );
-        assert_eq!(extensions.get("number"), Some(&json!(210099)));
+        assert_eq!(extensions.get("number"), Some(apollo_json::json!(210099)));
 
         // The marker was private to the hand-off and does not reach the client.
         assert_eq!(extensions.get(DECLARED_ERROR_MARKER), None);
 
         // The path resolves against the data above: `account` → `balance`,
         // the field the mapping writes, not `amount`, the field it reads.
-        assert_eq!(error.get("path"), Some(&json!(["account", "balance"])));
+        assert_eq!(
+            error.get("path"),
+            Some(apollo_json::json!(["account", "balance"]))
+        );
     }
 
     /// The `connector` object is the router's to assemble, so the coordinate
@@ -1014,7 +1018,7 @@ mod tests {
             .extension_code("CONNECTORS_MAPPING_ERROR")
             .extension(
                 "connector",
-                json!({
+                apollo_json::json!({
                     "coordinate": "somewhere:Else.entirely[9]",
                     "selectionPath": "rows.0.code",
                     "note": "an author's own field",
@@ -1027,20 +1031,23 @@ mod tests {
         let connector = error
             .extensions
             .get("connector")
-            .and_then(|connector| connector.as_object())
+            .filter(|connector| connector.is_object())
             .expect("the connector extension");
 
         assert_eq!(
             connector.get("coordinate"),
-            Some(&json!("subgraph:Query.rows[0]")),
+            Some(apollo_json::json!("subgraph:Query.rows[0]")),
             "the router's coordinate wins",
         );
         assert_eq!(
             connector.get("selectionPath"),
-            Some(&json!("rows.0.code")),
+            Some(apollo_json::json!("rows.0.code")),
             "and nothing else in the object is disturbed",
         );
-        assert_eq!(connector.get("note"), Some(&json!("an author's own field")));
+        assert_eq!(
+            connector.get("note"),
+            Some(apollo_json::json!("an author's own field"))
+        );
     }
 
     /// With no `connector` extension to merge into, one is created — the
@@ -1053,7 +1060,7 @@ mod tests {
 
         assert_eq!(
             error.extensions.get("connector"),
-            Some(&json!({ "coordinate": "subgraph:Query.rows[0]" })),
+            Some(apollo_json::json!({ "coordinate": "subgraph:Query.rows[0]" })),
         );
     }
 
@@ -1090,11 +1097,14 @@ mod tests {
         assert_eq!(response.errors.len(), 1);
         let extensions = &response.errors[0].extensions;
 
-        assert_eq!(extensions.get("service"), Some(&json!("subgraph_name")));
+        assert_eq!(
+            extensions.get("service"),
+            Some(apollo_json::json!("subgraph_name"))
+        );
 
         let connector = extensions
             .get("connector")
-            .and_then(|connector| connector.as_object())
+            .filter(|connector| connector.is_object())
             .expect("the connector extension");
         assert!(
             connector.contains_key("coordinate"),
@@ -1131,7 +1141,7 @@ mod tests {
         // not change the data.
         assert_eq!(
             response.data,
-            Some(json!({ "account": { "balance": "<missing>" } })),
+            Some(apollo_json::json!({ "account": { "balance": "<missing>" } })),
         );
         // And nothing was built to carry onwards — not even a redacted row.
         assert!(response.errors.is_empty());
@@ -1181,14 +1191,14 @@ mod tests {
         // ...while what the deny list did not name survives.
         assert_eq!(
             error.extensions.get("code"),
-            Some(&json!("INTERNAL_SERVER_ERROR")),
+            Some(apollo_json::json!("INTERNAL_SERVER_ERROR")),
         );
 
         // The marker is added after redaction, so an allow list cannot strip
         // it and strand a declared error in the `errors` array.
         assert_eq!(
             error.extensions.get(DECLARED_ERROR_MARKER),
-            Some(&json!(true)),
+            Some(apollo_json::json!(true)),
         );
     }
 
@@ -1388,7 +1398,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -1396,25 +1406,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "hello": String(
-                            "world",
-                        ),
-                        "hello2": String(
-                            "world",
-                        ),
-                    }),
+                    Value({"hello":"world","hello2":"world"}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -1504,7 +1507,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -1512,31 +1515,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Object({
-                                "id": String(
-                                    "1",
-                                ),
-                            }),
-                            Object({
-                                "id": String(
-                                    "2",
-                                ),
-                            }),
-                        ]),
-                    }),
+                    Value({"_entities":[{"id":"1"},{"id":"2"}]}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -1621,7 +1611,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -1629,37 +1619,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Object({
-                                "id": String(
-                                    "1",
-                                ),
-                                "name": String(
-                                    "A",
-                                ),
-                            }),
-                            Object({
-                                "id": String(
-                                    "2",
-                                ),
-                                "name": String(
-                                    "B",
-                                ),
-                            }),
-                        ]),
-                    }),
+                    Value({"_entities":[{"id":"1","name":"A"},{"id":"2","name":"B"}]}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     /// Batch responses are aligned to representations by key value, never by
@@ -1755,27 +1726,7 @@ mod tests {
 
         assert_debug_snapshot!(res.response.body().data, @r#"
         Some(
-            Object({
-                "_entities": Array([
-                    Object({
-                        "id": String(
-                            "1",
-                        ),
-                        "name": String(
-                            "A",
-                        ),
-                    }),
-                    Object({
-                        "id": String(
-                            "2",
-                        ),
-                        "name": String(
-                            "B",
-                        ),
-                    }),
-                    Null,
-                ]),
-            }),
+            Value({"_entities":[{"id":"1","name":"A"},{"id":"2","name":"B"},null]}),
         )
         "#);
     }
@@ -1871,7 +1822,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -1879,37 +1830,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Object({
-                                "__typename": String(
-                                    "User",
-                                ),
-                                "field": String(
-                                    "value1",
-                                ),
-                            }),
-                            Object({
-                                "__typename": String(
-                                    "User",
-                                ),
-                                "field": String(
-                                    "value2",
-                                ),
-                            }),
-                        ]),
-                    }),
+                    Value({"_entities":[{"__typename":"User","field":"value1"},{"__typename":"User","field":"value2"}]}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -2049,7 +1981,7 @@ mod tests {
         let body = res.response.body_mut();
         body.errors = body.errors.iter_mut().map(|e| e.with_null_id()).collect();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -2057,18 +1989,7 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "_entities": Array([
-                            Null,
-                            Null,
-                            Object({
-                                "id": String(
-                                    "2",
-                                ),
-                            }),
-                            Null,
-                        ]),
-                    }),
+                    Value({"_entities":[null,null,{"id":"2"},null]}),
                 ),
                 path: None,
                 errors: [
@@ -2088,25 +2009,7 @@ mod tests {
                                 ],
                             ),
                         ),
-                        extensions: {
-                            "code": String(
-                                "CONNECTOR_RESPONSE_INVALID",
-                            ),
-                            "service": String(
-                                "subgraph_name",
-                            ),
-                            "connector": Object({
-                                "coordinate": String(
-                                    "subgraph_name:Query.user[0]",
-                                ),
-                            }),
-                            "http": Object({
-                                "status": Number(200),
-                            }),
-                            "apollo.private.subgraph.name": String(
-                                "subgraph_name",
-                            ),
-                        },
+                        extensions: Value({"code":"CONNECTOR_RESPONSE_INVALID","service":"subgraph_name","connector":{"coordinate":"subgraph_name:Query.user[0]"},"http":{"status":200},"apollo.private.subgraph.name":"subgraph_name"}),
                         apollo_id: 00000000-0000-0000-0000-000000000000,
                         span_event_emitted: true,
                     },
@@ -2126,25 +2029,7 @@ mod tests {
                                 ],
                             ),
                         ),
-                        extensions: {
-                            "code": String(
-                                "CONNECTOR_FETCH",
-                            ),
-                            "service": String(
-                                "subgraph_name",
-                            ),
-                            "connector": Object({
-                                "coordinate": String(
-                                    "subgraph_name:Query.user[0]",
-                                ),
-                            }),
-                            "http": Object({
-                                "status": Number(404),
-                            }),
-                            "apollo.private.subgraph.name": String(
-                                "subgraph_name",
-                            ),
-                        },
+                        extensions: Value({"code":"CONNECTOR_FETCH","service":"subgraph_name","connector":{"coordinate":"subgraph_name:Query.user[0]"},"http":{"status":404},"apollo.private.subgraph.name":"subgraph_name"}),
                         apollo_id: 00000000-0000-0000-0000-000000000000,
                         span_event_emitted: true,
                     },
@@ -2164,37 +2049,19 @@ mod tests {
                                 ],
                             ),
                         ),
-                        extensions: {
-                            "code": String(
-                                "CONNECTOR_FETCH",
-                            ),
-                            "service": String(
-                                "subgraph_name",
-                            ),
-                            "connector": Object({
-                                "coordinate": String(
-                                    "subgraph_name:Query.user[0]",
-                                ),
-                            }),
-                            "http": Object({
-                                "status": Number(500),
-                            }),
-                            "apollo.private.subgraph.name": String(
-                                "subgraph_name",
-                            ),
-                        },
+                        extensions: Value({"code":"CONNECTOR_FETCH","service":"subgraph_name","connector":{"coordinate":"subgraph_name:Query.user[0]"},"http":{"status":500},"apollo.private.subgraph.name":"subgraph_name"}),
                         apollo_id: 00000000-0000-0000-0000-000000000000,
                         span_event_emitted: true,
                     },
                 ],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -2265,7 +2132,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(res.response, @r#"
+        assert_debug_snapshot!(res.response, @r###"
         Response {
             status: 200,
             version: HTTP/1.1,
@@ -2273,20 +2140,18 @@ mod tests {
             body: Response {
                 label: None,
                 data: Some(
-                    Object({
-                        "hello": Number(201),
-                    }),
+                    Value({"hello":201}),
                 ),
                 path: None,
                 errors: [],
-                extensions: {},
+                extensions: Value({}),
                 has_next: None,
                 subscribed: None,
                 created_at: None,
                 incremental: [],
             },
         }
-        "#);
+        "###);
     }
 
     #[tokio::test]
@@ -2377,7 +2242,7 @@ mod tests {
         )
         .unwrap()
         .response;
-        assert_eq!(res_expect_fail.body().data, Some(JsonValue::Null));
+        assert_eq!(res_expect_fail.body().data, Some(json_ext::null()));
         assert_eq!(res_expect_fail.body().errors.len(), 1);
 
         // Make succeeding request
@@ -2403,7 +2268,7 @@ mod tests {
         assert!(res_expect_success.body().errors.is_empty());
         assert_eq!(
             &res_expect_success.body().data,
-            &Some(json!({"hello": json!(400)}))
+            &Some(json_ext::from_legacy(&json!({"hello": 400})))
         );
     }
 
@@ -2685,7 +2550,7 @@ mod tests {
         let code = error
             .extensions
             .get("code")
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_str_owned())
             .unwrap_or_default();
         assert_eq!(
             code, "BAD_THING",
@@ -2695,7 +2560,7 @@ mod tests {
         let hint = error
             .extensions
             .get("hint")
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_str_owned())
             .unwrap_or_default();
         assert_eq!(
             hint, "try again",
@@ -2705,8 +2570,7 @@ mod tests {
         let http_status = error
             .extensions
             .get("http")
-            .and_then(|v| v.as_object())
-            .and_then(|m| m.get("status"))
+            .and_then(|v| v.get("status"))
             .and_then(|v| v.as_i64());
         assert_eq!(
             http_status,
@@ -2807,11 +2671,13 @@ mod tests {
         let http = errors[0]
             .extensions
             .get("http")
-            .and_then(|v| v.as_object())
+            .filter(|http| http.is_object())
             .expect("extensions.http should be an object");
 
         assert_eq!(
-            http.get("myField").and_then(|v| v.as_str()),
+            http.get("myField")
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("literal Value"),
             "user-supplied extensions.http.myField should appear in the response"
         );
@@ -2913,7 +2779,7 @@ mod tests {
         let http = errors[0]
             .extensions
             .get("http")
-            .and_then(|v| v.as_object())
+            .filter(|http| http.is_object())
             .expect("extensions.http should be an object");
 
         assert_eq!(
@@ -2922,12 +2788,16 @@ mod tests {
             "default extensions.http.status should be preserved alongside source- and connect-supplied siblings"
         );
         assert_eq!(
-            http.get("fromSource").and_then(|v| v.as_str()),
+            http.get("fromSource")
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("a"),
             "source_extensions sibling under extensions.http should survive the connect_extensions merge"
         );
         assert_eq!(
-            http.get("fromConnect").and_then(|v| v.as_str()),
+            http.get("fromConnect")
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("b"),
             "connect_extensions sibling under extensions.http should appear alongside the source sibling"
         );

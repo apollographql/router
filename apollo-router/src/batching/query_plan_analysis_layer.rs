@@ -6,7 +6,7 @@ use tower::BoxError;
 
 use crate::batching::BatchQuery;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::query_planner::PlanNode;
 use crate::query_planner::QueryPlan;
 use crate::services::execution;
@@ -121,7 +121,7 @@ struct BatchingUnsupportedError;
 fn query_hashes(
     plan: &QueryPlan,
     batching_config: &crate::configuration::Batching,
-    variables: &Object,
+    variables: &Value,
 ) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
     match &plan.root {
         Some(root) => plan_node_query_hashes(root, batching_config, variables, &plan.query),
@@ -145,7 +145,7 @@ fn query_hashes(
 fn plan_node_query_hashes(
     root_node: &PlanNode,
     batching_config: &crate::configuration::Batching,
-    variables: &Object,
+    variables: &Value,
     query: &Query,
 ) -> Result<Vec<Arc<QueryHash>>, BatchingUnsupportedError> {
     let mut query_hashes = vec![];
@@ -181,7 +181,7 @@ fn plan_node_query_hashes(
                 } => {
                     if query
                         .variable_value(condition.as_str(), variables)
-                        .map(|v| *v == serde_json_bytes::Value::Bool(true))
+                        .map(|v| v.as_bool() == Some(true))
                         .unwrap_or(true)
                     {
                         if let Some(node) = if_clause {
@@ -213,6 +213,7 @@ mod tests {
     use crate::batching::BatchQuery;
     use crate::compute_job::ComputeJobType;
     use crate::graphql;
+    use crate::json_ext::json_value as json;
     use crate::query_planner::QueryPlan;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerRequest;
@@ -340,7 +341,7 @@ mod tests {
             // Succeed the request
             responder.send_response(
                 execution::Response::builder()
-                    .data(serde_json_bytes::json!({
+                    .data(json!({
                         "entryA": [{ "index": 20 }],
                         "entryB": [{ "index": 30 }],
                     }))

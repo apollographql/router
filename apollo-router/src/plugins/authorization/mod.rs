@@ -9,7 +9,6 @@ use apollo_federation::link::spec::Identity;
 use http::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -27,6 +26,8 @@ use crate::Configuration;
 use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::graphql;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -168,15 +169,13 @@ impl UnauthorizedPaths {
                 response.errors.extend(unauthorized_path_errors);
             }
             ErrorLocation::Extensions => {
-                let serialized_auth_errors = unauthorized_path_errors
-                    .map(|err| {
-                        serde_json_bytes::to_value(err)
-                            .expect("error serialization should not fail")
-                    })
-                    .collect();
-                response
-                    .extensions
-                    .insert("authorizationErrors", Value::Array(serialized_auth_errors));
+                let serialized_auth_errors = unauthorized_path_errors.map(|err| {
+                    apollo_json::to_value(&err).expect("error serialization should not fail")
+                });
+                response.extensions.object_insert(
+                    "authorizationErrors",
+                    json_ext::array(serialized_auth_errors),
+                );
             }
             ErrorLocation::Disabled => {}
         }
@@ -280,11 +279,11 @@ impl AuthorizationPlugin {
         let mut policies = context
             .get_json_value(REQUIRED_POLICIES_KEY)
             .and_then(|v| {
-                v.as_object().map(|v| {
-                    v.iter()
-                        .filter_map(|(policy, result)| match result {
-                            Value::Bool(true) => Some(policy.as_str().to_string()),
-                            _ => None,
+                v.as_object().map(|entries| {
+                    entries
+                        .into_iter()
+                        .filter_map(|(policy, result)| {
+                            (result.as_bool() == Some(true)).then_some(policy)
                         })
                         .collect::<Vec<String>>()
                 })
@@ -593,7 +592,7 @@ impl Plugin for AuthorizationPlugin {
                     // responding with execution errors and a fake/incorrect `data: null`. We
                     // maintain backwards compatibility for the time being.
                     // Tracked in ROUTER-2063.
-                    let mut response = graphql::Response::builder().data(Value::Null).build();
+                    let mut response = graphql::Response::builder().data(json_ext::null()).build();
                     unauthorized.update_response_with_unauthorized_path_errors(&mut response);
 
                     return Ok(ControlFlow::Break(

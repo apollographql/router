@@ -5,7 +5,6 @@ use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use regex::Regex;
-use serde_json_bytes::json;
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
@@ -14,6 +13,7 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
+use crate::json_ext::json_value as json;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -120,12 +120,7 @@ async fn authenticated_request() {
         .unwrap();
     let request = supergraph::Request::fake_builder()
         .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-        .variables(
-            json! {{ "isAuthenticated": true }}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json! {{ "isAuthenticated": true }})
         .context(context)
         .build()
         .unwrap();
@@ -186,12 +181,7 @@ async fn unauthenticated_request() {
     let context = Context::new();
     let request = supergraph::Request::fake_builder()
         .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-        .variables(
-            json! {{ "isAuthenticated": false }}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json! {{ "isAuthenticated": false }})
         .context(context)
         // Request building here
         .build()
@@ -318,10 +308,7 @@ async fn authenticated_directive() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
+        variables: json! {{ "isAuthenticated": false }},
         ..Default::default()
     };
 
@@ -438,10 +425,7 @@ async fn authenticated_directive_reject_unauthorized() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
+        variables: json! {{ "isAuthenticated": false }},
         ..Default::default()
     };
 
@@ -491,7 +475,7 @@ async fn overfetched_unauthorized_field_is_not_returned() {
                     responder.send_response(
                         subgraph::Response::fake_builder()
                             .context(req.context)
-                            .data(serde_json::json! {{
+                            .data(apollo_json::json! {{
                                 "currentUser": { "name": "Ada", "phone": "1234" }
                             }})
                             .build(),
@@ -526,11 +510,11 @@ async fn overfetched_unauthorized_field_is_not_returned() {
 
     assert_eq!(
         current_user.get("phone"),
-        Some(&serde_json_bytes::Value::Null),
+        Some(apollo_json::Value::null()),
         "the subgraph returned `phone` outside the filtered operation, so it must reach \
          the client as null rather than as its value"
     );
-    assert_eq!(current_user.get("name"), Some(&json!("Ada")));
+    assert_eq!(current_user.get("name"), Some(apollo_json::json!("Ada")));
 
     // `phone` is null because it errored, and the error names it.
     let phone_error = response
@@ -542,7 +526,7 @@ async fn overfetched_unauthorized_field_is_not_returned() {
         .expect("an execution error nullified `phone`");
     assert_eq!(
         phone_error.extensions.get("code"),
-        Some(&json!("UNAUTHORIZED_FIELD_OR_TYPE"))
+        Some(apollo_json::json!("UNAUTHORIZED_FIELD_OR_TYPE"))
     );
 }
 
@@ -933,7 +917,7 @@ mod whole_operation_authorization {
                         responder.send_response(
                             subgraph::Response::fake_builder()
                                 .context(req.context)
-                                .data(serde_json::json! {{ "currentUser": { "name": "Ada" } }})
+                                .data(apollo_json::json! {{ "currentUser": { "name": "Ada" } }})
                                 .build(),
                         );
                     }
@@ -1080,10 +1064,7 @@ async fn authenticated_directive_dry_run() {
 
     let req = graphql::Request {
         query: Some("query { orga(id: 1) { id creatorUser { id name phone } } }".to_string()),
-        variables: json! {{ "isAuthenticated": false }}
-            .as_object()
-            .unwrap()
-            .clone(),
+        variables: json! {{ "isAuthenticated": false }},
         ..Default::default()
     };
 
@@ -1698,7 +1679,7 @@ async fn cache_key_metadata() {
                     responder.send_response(
                         subgraph::Response::fake_builder()
                             .context(req.context)
-                            .data(serde_json::json! {{
+                            .data(json! {{
                                 "currentUser": {
                                     "id": 1,
                                     "name": "A",

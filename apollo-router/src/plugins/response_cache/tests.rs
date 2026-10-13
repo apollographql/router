@@ -28,6 +28,8 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugin::test::MockSubgraph;
@@ -139,7 +141,7 @@ async fn get_cdn_invalidation_debug(
         .extensions
         .get(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)?;
     let cdn_invalidation = debugging.get("cdnInvalidation")?;
-    serde_json_bytes::from_value(cdn_invalidation.clone()).ok()
+    apollo_json::from_value(&cdn_invalidation).ok()
 }
 
 fn get_cache_control_header(response: &supergraph::Response) -> Option<Vec<String>> {
@@ -194,7 +196,7 @@ fn cache_control_contains_max_age(cache_control_header: &[String]) -> bool {
 fn remove_debug_extensions_key(response: &mut graphql::Response) -> bool {
     response
         .extensions
-        .remove(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)
+        .object_remove(super::plugin::CACHE_DEBUG_EXTENSIONS_KEY)
         .is_some()
 }
 
@@ -459,7 +461,7 @@ async fn insert_with_custom_key() {
     let context = Context::new();
     context.insert_json_value(
         CONTEXT_CACHE_KEY,
-        serde_json_bytes::json!({
+        apollo_json::json!({
             "all": {
               "locale": "be"
             },
@@ -1768,7 +1770,7 @@ async fn private_only() {
             .unwrap();
 
         let context = Context::new();
-        context.insert_json_value("sub", "1234".into());
+        context.insert_json_value("sub", json_ext::string("1234"));
 
         let request = supergraph::Request::fake_builder()
             .query(query)
@@ -1813,7 +1815,7 @@ async fn private_only() {
             .unwrap();
 
         let context = Context::new();
-        context.insert_json_value("sub", "1234".into());
+        context.insert_json_value("sub", json_ext::string("1234"));
 
         let request = supergraph::Request::fake_builder()
             .query(query)
@@ -1850,7 +1852,7 @@ async fn private_only() {
         "#);
 
         let context = Context::new();
-        context.insert_json_value("sub", "5678".into());
+        context.insert_json_value("sub", json_ext::string("5678"));
         let request = supergraph::Request::fake_builder()
             .query(query)
             .context(context)
@@ -1977,7 +1979,7 @@ async fn private_and_public() {
         .unwrap();
 
     let context = Context::new();
-    context.insert_json_value("sub", "1234".into());
+    context.insert_json_value("sub", json_ext::string("1234"));
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -2023,7 +2025,7 @@ async fn private_and_public() {
         .unwrap();
 
     let context = Context::new();
-    context.insert_json_value("sub", "1234".into());
+    context.insert_json_value("sub", json_ext::string("1234"));
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -2063,7 +2065,7 @@ async fn private_and_public() {
     "#);
 
     let context = Context::new();
-    context.insert_json_value("sub", "5678".into());
+    context.insert_json_value("sub", json_ext::string("5678"));
     let request = supergraph::Request::fake_builder()
         .query(query)
         .context(context)
@@ -2187,7 +2189,7 @@ async fn polymorphic_private_and_public() {
             .unwrap();
 
         let context = Context::new();
-        context.insert_json_value("sub", "1234".into());
+        context.insert_json_value("sub", json_ext::string("1234"));
 
         let request = supergraph::Request::fake_builder()
             .query(query)
@@ -2320,7 +2322,7 @@ async fn polymorphic_private_and_public() {
             .unwrap();
 
         let context = Context::new();
-        context.insert_json_value("sub", "1234".into());
+        context.insert_json_value("sub", json_ext::string("1234"));
         let request = supergraph::Request::fake_builder()
             .query(query)
             .context(context)
@@ -2409,7 +2411,7 @@ async fn polymorphic_private_and_public() {
 
         // Test again with public subgraph but with a private_id set, it should be private because this query is private once we have private_id set, even if the subgraph is public, it's coming from the cache
         let context = Context::new();
-        context.insert_json_value("sub", "1234".into());
+        context.insert_json_value("sub", json_ext::string("1234"));
         let request = supergraph::Request::fake_builder()
             .query(query)
             .context(context)
@@ -5346,7 +5348,9 @@ async fn create_connector_cache_factory_with_schema(
     });
 
     if let Some(extra) = extra_config {
-        config.deep_merge(extra);
+        let mut merged = json_ext::from_legacy(&config);
+        merged.deep_merge(json_ext::from_legacy(&extra));
+        config = json_ext::to_legacy(&merged);
     }
 
     let config: Configuration = serde_json_bytes::from_value(config).unwrap();

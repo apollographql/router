@@ -25,6 +25,7 @@ use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::common::graph_os_enabled;
+use crate::integration::json_value;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_validation_error_emits_metric() {
@@ -178,7 +179,7 @@ async fn test_subgraph_layer_error_emits_metric() {
         .responder(
             ResponseTemplate::new(200).set_body_json(
                 graphql::Response::builder()
-                    .data(json!({"data": null}))
+                    .data(json_value(serde_json_bytes::json!({"data": null})))
                     .errors(vec![
                         graphql::Error::builder()
                             .message("error in subgraph layer")
@@ -257,7 +258,9 @@ async fn test_subgraph_layer_entities_error_emits_metric() {
         .responder(
             ResponseTemplate::new(200).set_body_json(
                 graphql::Response::builder()
-                    .data(json!({"data": {"_entities": [{"name": null}]}}))
+                    .data(json_value(
+                        serde_json_bytes::json!({"data": {"_entities": [{"name": null}]}}),
+                    ))
                     .errors(vec![
                         graphql::Error::builder()
                             .message("error in subgraph layer")
@@ -339,7 +342,7 @@ async fn test_include_subgraph_error_disabled_does_not_redact_error_metrics() {
         .responder(
             ResponseTemplate::new(200).set_body_json(
                 graphql::Response::builder()
-                    .data(json!({"data": null}))
+                    .data(json_value(serde_json_bytes::json!({"data": null})))
                     .errors(vec![
                         graphql::Error::builder()
                             .message("error in subgraph layer")

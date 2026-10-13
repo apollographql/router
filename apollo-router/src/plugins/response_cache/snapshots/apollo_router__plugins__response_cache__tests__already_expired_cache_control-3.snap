@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
+assertion_line: 700
 description: "Make sure only root field query is in status 'cached' and entities are not cached"
 expression: cache_keys
 ---
@@ -70,8 +71,8 @@ expression: cache_keys
       "variables": {
         "representations": [
           {
-            "id": "1",
-            "__typename": "Organization"
+            "__typename": "Organization",
+            "id": "1"
           }
         ]
       }

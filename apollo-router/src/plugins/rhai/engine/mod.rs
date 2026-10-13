@@ -24,6 +24,7 @@ use uuid::Uuid;
 use super::Rhai;
 use super::ServiceStep;
 use super::execution;
+use super::json_from_rhai;
 use super::router;
 use super::subgraph;
 use super::supergraph;
@@ -61,7 +62,6 @@ mod rhai_imports {
     pub(super) use rhai::exported_module;
     pub(super) use rhai::module_resolvers::FileModuleResolver;
     pub(super) use rhai::plugin::export_module;
-    pub(super) use rhai::serde::from_dynamic;
     pub(super) use rhai::serde::to_dynamic;
 }
 
@@ -141,13 +141,7 @@ mod router_base64 {
 
 #[export_module]
 mod router_json {
-    pub(crate) type Object = crate::json_ext::Object;
     pub(crate) type Value = crate::json_ext::Value;
-
-    #[rhai_fn(name = "to_string", pure)]
-    pub(crate) fn object_to_string(x: &mut Object) -> String {
-        format!("{x:?}")
-    }
 
     #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn value_to_string(x: &mut Value) -> String {
@@ -1061,7 +1055,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.variables = from_dynamic(&om.into())?;
+        x.variables = json_from_rhai(&om.into())?;
         Ok(())
     }
 
@@ -1076,7 +1070,7 @@ mod router_plugin {
         x: &mut Request,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = json_from_rhai(&om.into())?;
         Ok(())
     }
 
@@ -1197,7 +1191,7 @@ mod router_plugin {
 
     #[rhai_fn(set = "data", return_raw)]
     pub(crate) fn response_data_set(x: &mut Response, om: Map) -> Result<(), Box<EvalAltResult>> {
-        x.data = from_dynamic(&om.into())?;
+        x.data = json_from_rhai(&om.into())?;
         Ok(())
     }
 
@@ -1213,7 +1207,7 @@ mod router_plugin {
         x: &mut Response,
         value: Dynamic,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.errors = from_dynamic(&value)?;
+        x.errors = json_from_rhai(&value)?;
         Ok(())
     }
 
@@ -1228,7 +1222,7 @@ mod router_plugin {
         x: &mut Response,
         om: Map,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.extensions = from_dynamic(&om.into())?;
+        x.extensions = json_from_rhai(&om.into())?;
         Ok(())
     }
 

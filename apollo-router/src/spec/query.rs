@@ -3,6 +3,7 @@
 //! Parsing, formatting and manipulation of queries.
 #![allow(clippy::mutable_key_type)]
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -11,12 +12,13 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
+use apollo_json::NewValue;
+use apollo_json::ValueBuilder;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Entry;
 use tracing::level_filters::LevelFilter;
 
 use self::subselections::BooleanValues;
@@ -30,10 +32,13 @@ use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
+use crate::graphql::json_object::insert_member;
+use crate::json_ext;
 use crate::json_ext::Path;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
 use crate::services::query_parsing::ParsedDocument;
@@ -139,7 +144,7 @@ impl Query {
     pub(crate) fn format_response_filtered_then_original(
         &self,
         response: &mut Response,
-        variables: Object,
+        variables: Value,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
         include_coercion_errors: bool,
@@ -167,7 +172,7 @@ impl Query {
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
-        variables: Object,
+        variables: Value,
         schema: &ApiSchema,
         defer_conditions: BooleanValues,
         include_coercion_errors: bool,
@@ -175,7 +180,7 @@ impl Query {
         let data = std::mem::take(&mut response.data);
 
         match data {
-            Some(Value::Object(mut input)) => {
+            Some(input) if input.is_object() => {
                 if self.is_deferred(defer_conditions) {
                     // Get subselection from hashmap
                     match self.subselections.get(&SubSelectionKey {
@@ -188,8 +193,7 @@ impl Query {
                             .unwrap_or_default(),
                     }) {
                         Some(subselection) => {
-                            let mut output =
-                                Object::with_capacity(subselection.selection_set.len());
+                            let mut output = OutputObject::new();
                             let mut parameters = FormatParameters {
                                 variables: &variables,
                                 schema,
@@ -203,21 +207,23 @@ impl Query {
                                     &subselection.type_name,
                                     &subselection.selection_set,
                                     &mut parameters,
-                                    &mut input,
+                                    &input,
                                     &mut output,
                                     &mut Vec::new(),
                                 ) {
-                                    Ok(()) => output.into(),
-                                    Err(InvalidValue) => Value::Null,
+                                    Ok(()) => output.into_response_value(),
+                                    Err(InvalidValue) => json_ext::null(),
                                 },
                             );
 
                             if !parameters.errors.is_empty()
-                                && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                                && let Ok(document) = apollo_json::to_value(&parameters.errors)
                             {
-                                response
-                                    .extensions
-                                    .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+                                response.extensions = insert_member(
+                                    std::mem::take(&mut response.extensions),
+                                    EXTENSIONS_VALUE_COMPLETION_KEY,
+                                    document,
+                                );
                             }
 
                             if let Some(errors) = parameters.coercion_errors.as_mut()
@@ -229,25 +235,32 @@ impl Query {
                             return parameters.nullified;
                         }
                         None => {
-                            response.data = Some(Value::Object(Object::default()));
+                            response.data = Some(empty_object());
                             return vec![];
                         }
                     }
                 } else {
-                    let mut output = Object::with_capacity(self.operation.selection_set.len());
+                    let mut output = OutputObject::new();
 
-                    let all_variables = if self.operation.variables.is_empty() {
+                    let all_variables: Value = if self.operation.variables.is_empty() {
                         variables
                     } else {
-                        self.operation
-                            .variables
-                            .iter()
-                            .filter_map(|(k, Variable { default_value, .. })| {
-                                default_value.as_ref().map(|v| (k, v))
-                            })
-                            .chain(variables.iter())
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect()
+                        let mut builder = ValueBuilder::new();
+                        for (name, Variable { default_value, .. }) in
+                            self.operation.variables.iter()
+                        {
+                            if let Some(value) = default_value {
+                                // Writing a handle at a key of an object root
+                                // cannot fail; only a non-finite float can, and
+                                // a handle is not one.
+                                let _ = builder.set(name.as_str(), value.clone());
+                            }
+                        }
+                        for (name, value) in variables.object_iter() {
+                            // Infallible for the same reason as above.
+                            let _ = builder.set(&*name, value);
+                        }
+                        builder.seal()
                     };
 
                     let operation_type_name = schema
@@ -267,20 +280,22 @@ impl Query {
                             operation_type_name,
                             &self.operation.selection_set,
                             &mut parameters,
-                            &mut input,
+                            &input,
                             &mut output,
                             &mut Vec::new(),
                         ) {
-                            Ok(()) => output.into(),
-                            Err(InvalidValue) => Value::Null,
+                            Ok(()) => output.into_response_value(),
+                            Err(InvalidValue) => json_ext::null(),
                         },
                     );
                     if !parameters.errors.is_empty()
-                        && let Ok(value) = serde_json_bytes::to_value(&parameters.errors)
+                        && let Ok(document) = apollo_json::to_value(&parameters.errors)
                     {
-                        response
-                            .extensions
-                            .insert(EXTENSIONS_VALUE_COMPLETION_KEY, value);
+                        response.extensions = insert_member(
+                            std::mem::take(&mut response.extensions),
+                            EXTENSIONS_VALUE_COMPLETION_KEY,
+                            document,
+                        );
                     }
 
                     if let Some(errors) = parameters.coercion_errors.as_mut()
@@ -292,17 +307,17 @@ impl Query {
                     return parameters.nullified;
                 }
             }
-            Some(Value::Null) => {
-                response.data = Some(Value::Null);
+            Some(value) if value.is_null() => {
+                response.data = Some(json_ext::null());
                 return vec![];
             }
-            _ => {
+            other => {
                 // XXX(@goto-bus-stop): this should raise an execution error?
-                tracing::debug!("invalid type for data in response. data: {data:#?}");
+                tracing::debug!("invalid type for data in response. data: {other:#?}");
             }
         }
 
-        response.data = Some(Value::Null);
+        response.data = Some(json_ext::null());
 
         vec![]
     }
@@ -398,10 +413,10 @@ impl Query {
     /// - Returns Err(InvalidValue) if formatting fails and error(s) have been emitted.
     fn format_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -454,10 +469,10 @@ impl Query {
     #[inline]
     fn format_non_nullable_value<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -475,7 +490,7 @@ impl Query {
         let inner_result =
             self.format_value(parameters, &inner_type, input, output, path, selection_set);
 
-        if output.is_null() {
+        if is_pending_null(output) {
             let message = format!("Null value found for non-nullable type {inner_type}");
             match inner_result {
                 Ok(()) => {
@@ -534,44 +549,55 @@ impl Query {
     #[inline]
     fn format_list<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
-        input: &mut Value,
+        parameters: &mut FormatParameters<'a>,
+        input: &Value,
         inner_type: &executable::Type,
-        output: &mut Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
-        let Value::Array(input_array) = input else {
+        let Some(input_array) = input.as_array() else {
             return Ok(());
         };
-        if output.is_null() {
-            *output = Value::Array(vec![Value::Null; input_array.len()]);
-        }
-        let output_array = output.as_array_mut().ok_or(InvalidValue)?;
-        if let Err(InvalidValue) =
-            input_array
-                .iter_mut()
-                .enumerate()
-                .try_for_each(|(i, element)| {
-                    path.push(ResponsePathElement::Index(i));
-                    let res = self.format_value(
-                        parameters,
-                        inner_type,
-                        element,
-                        &mut output_array[i],
-                        path,
-                        selection_set,
-                    );
-                    path.pop();
-                    // Type-aware Err handling: non-null inner type propagates (whole list
-                    // nullifies per spec). Nullable inner type swallows the error (element already
-                    // nullified by child).
-                    if res.is_err() && inner_type.is_non_null() {
-                        return Err(InvalidValue);
-                    }
-                    Ok(())
-                })
-        {
+        // Elements are formatted in place in this pending array. Taking the
+        // output leaves the slot null while the elements are formatted, so a
+        // list abandoned partway through never leaves half an array behind.
+        let mut output_array = match std::mem::replace(output, NewValue::Null) {
+            // An earlier fragment already formatted this list; keep what it
+            // wrote and let the selections below merge into it.
+            NewValue::Array(items) => items,
+            // Nothing written here yet: one pending null per input element. A
+            // nullified slot reads as a null too, matching the `is_null` check
+            // this replaced — that accepted any spelling of null, so this does.
+            pending if is_pending_null(&pending) => std::iter::repeat_with(|| NewValue::Null)
+                .take(input_array.len())
+                .collect(),
+            // Some other value is already at this slot, so the list cannot be
+            // formatted over it. An adopted handle cannot appear here: a
+            // list-typed field only ever reaches this function, which writes a
+            // pending array or a null.
+            _ => return Err(InvalidValue),
+        };
+        let result = input_array.iter().enumerate().try_for_each(|(i, element)| {
+            path.push(ResponsePathElement::Index(i));
+            let res = self.format_value(
+                parameters,
+                inner_type,
+                element,
+                &mut output_array[i],
+                path,
+                selection_set,
+            );
+            path.pop();
+            // Type-aware Err handling: non-null inner type propagates (whole list
+            // nullifies per spec). Nullable inner type swallows the error (element already
+            // nullified by child).
+            if res.is_err() && inner_type.is_non_null() {
+                return Err(InvalidValue);
+            }
+            Ok(())
+        });
+        if let Err(InvalidValue) = result {
             parameters.nullified.push(Path::from_response_slice(path));
             // Emit only at the innermost list level (when inner_type is not a list).
             // We don't want to emit multiple errors for a nested list type like [[Int!]!]!.
@@ -586,9 +612,10 @@ impl Query {
                         .build(),
                 );
             }
-            *output = Value::Null;
+            *output = NewValue::Null;
             return Err(InvalidValue);
         }
+        *output = NewValue::Array(output_array);
         Ok(())
     }
 
@@ -596,11 +623,11 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn format_named_type<'a: 'b, 'b>(
         &'a self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'a>,
         field_type: &executable::Type,
-        input: &mut Value,
+        input: &Value,
         type_name: &Name,
-        output: &mut Value,
+        output: &mut NewValue<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
@@ -608,22 +635,29 @@ impl Query {
         // so we must pass them directly to the client
         match parameters.schema.types.get(type_name) {
             Some(ExtendedType::Scalar(_)) => {
-                *output = input.clone();
+                *output = NewValue::Node(input.clone());
                 return Ok(());
             }
             Some(ExtendedType::Enum(enum_type)) => {
-                *output = input
-                    .as_str()
-                    .filter(|s| enum_type.values.contains_key(*s))
-                    .map(|_| input.clone())
-                    .unwrap_or_default();
+                // An enum value outside the schema's value set is nullified,
+                // exactly as the previous `unwrap_or_default()` on a value did.
+                *output = match input
+                    .as_str_owned()
+                    .filter(|value| enum_type.values.contains_key(value.as_str()))
+                {
+                    Some(_) => NewValue::Node(input.clone()),
+                    None => NewValue::Null,
+                };
                 return Ok(());
             }
             _ => {}
         }
 
-        if let Value::Object(input_object) = input {
-            if let Some(input_type) = input_object.get(TYPENAME).and_then(|val| val.as_str()) {
+        if input.is_object() {
+            // One member scan and one owned string for both uses below: the
+            // schema check here and the concrete-type resolution that follows.
+            let input_typename = input.get(TYPENAME).and_then(|val| val.as_str_owned());
+            if let Some(input_type) = &input_typename {
                 // If there is a __typename, make sure the pointed type is a valid type of the
                 // schema. Otherwise, something is wrong, and in case we might be inadvertently
                 // leaking some data for an @inacessible type or something, nullify the whole
@@ -633,23 +667,32 @@ impl Query {
                 // as long as it's not returned, having it in the internal data is ok and sometimes
                 // expected).
                 let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                    parameters.schema.types.get(input_type)
+                    parameters.schema.types.get(input_type.as_str())
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
-                    *output = Value::Null;
+                    *output = NewValue::Null;
                     return Ok(());
                 };
             }
 
-            if output.is_null() {
-                *output = Value::Object(Object::with_capacity(selection_set.len()));
-            }
-            let output_object = output.as_object_mut().ok_or(InvalidValue)?;
+            // Taking the output leaves the slot null while the members are
+            // formatted, so an object abandoned partway through never leaves a
+            // half-formatted object behind.
+            let mut output_object = match std::mem::replace(output, NewValue::Null) {
+                // An earlier fragment already formatted members here; keep them
+                // and let this selection set merge into them.
+                NewValue::Object(members) => OutputObject::reopen(members),
+                // Nothing written here yet, in any spelling of null — the
+                // `is_null` check this replaced accepted them all.
+                pending if is_pending_null(&pending) => OutputObject::new(),
+                // Some other value is already at this slot. An adopted handle
+                // cannot appear here: a field with a selection set only reaches
+                // this function, which writes a pending object or a null.
+                _ => return Err(InvalidValue),
+            };
 
-            let typename = input_object
-                .get(TYPENAME)
-                .and_then(|val| val.as_str())
-                .and_then(|s| apollo_compiler::ast::NamedType::new(s).ok())
+            let typename = input_typename
+                .and_then(|s| apollo_compiler::ast::NamedType::new(&s).ok())
                 .map(apollo_compiler::ast::Type::Named);
 
             let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
@@ -668,20 +711,21 @@ impl Query {
             if let Err(err) = self.apply_selection_set(
                 selection_set,
                 parameters,
-                input_object,
-                output_object,
+                input,
+                &mut output_object,
                 path,
                 current_type,
                 &mut visited_fragments,
             ) {
                 parameters.nullified.push(Path::from_response_slice(path));
-                *output = Value::Null;
+                *output = NewValue::Null;
                 // Propagate the Err, since `apply_selection_set` already emitted an error.
                 return Err(err);
             }
+            *output = output_object.into_pending();
         } else {
             parameters.nullified.push(Path::from_response_slice(path));
-            *output = Value::Null;
+            *output = NewValue::Null;
             // We don't emit errors for null object value nor propagate Err.
             // Note: `format_non_nullable_value` will emit an error if this object's type is
             //       non-nullable.
@@ -693,20 +737,18 @@ impl Query {
     #[inline]
     fn format_integer(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         // if the value is invalid, we do not insert it in the output object
         // which is equivalent to inserting null
-        if input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
-            || input.as_i64().is_some_and(|i| i32::try_from(i).is_ok())
-        {
-            *output = input.clone();
+        if input.is_valid_int_input() {
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -725,16 +767,16 @@ impl Query {
     #[inline]
     fn format_float(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
-        if input.as_f64().is_some() {
-            *output = input.clone();
+        if input.is_valid_float_input() {
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -753,16 +795,16 @@ impl Query {
     #[inline]
     fn format_boolean(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         if input.as_bool().is_some() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -781,16 +823,16 @@ impl Query {
     #[inline]
     fn format_string(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
         if input.as_str().is_some() {
-            *output = input.clone();
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -809,16 +851,16 @@ impl Query {
     #[inline]
     fn format_id(
         &self,
-        parameters: &mut FormatParameters,
+        parameters: &mut FormatParameters<'_>,
         path: &[ResponsePathElement<'_>],
-        input: &mut Value,
-        output: &mut Value,
+        input: &Value,
+        output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
-        if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-            *output = input.clone();
+        if input.is_string() || input.is_number() {
+            *output = NewValue::Node(input.clone());
             Ok(())
         } else {
-            *output = Value::Null;
+            *output = NewValue::Null;
             if input.is_null() {
                 Ok(())
             } else {
@@ -838,9 +880,9 @@ impl Query {
     fn apply_selection_set<'a: 'b, 'b>(
         &'a self,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
-        input: &mut Object,
-        output: &mut Object,
+        parameters: &mut FormatParameters<'a>,
+        input: &Value,
+        output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         // the type under which we apply selections
         current_type: &executable::Type,
@@ -850,6 +892,10 @@ impl Query {
         // `format_named_type`.
         visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
+        // Subgraphs usually return fields in the order the query selected
+        // them, so member lookups resume from the previous hit instead of
+        // rescanning the object from the start for every field.
+        let mut member_cursor = 0;
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
         // the variable is present and it is of the correct type
@@ -872,12 +918,12 @@ impl Query {
                             .schema
                             .get_object(current_type.inner_named_type())
                             .or_else(|| {
-                                let input_value = input.get(field_name.as_str())?.as_str()?;
-                                parameters.schema.get_object(input_value)
+                                let input_value = input.get(field_name.as_str())?.as_str_owned()?;
+                                parameters.schema.get_object(&input_value)
                             });
 
                         if let Some(object_type) = object_type {
-                            output.insert((*field_name).clone(), object_type.name.as_str().into());
+                            output.insert(field_name.as_str(), object_type.name.as_str());
                         } else {
                             // If the __typename value does not resolve to a known object type in
                             // the schema nor the current_type is an object type, emit an error.
@@ -889,35 +935,35 @@ impl Query {
                         continue;
                     }
 
-                    if let Some(input_value) = input.get_mut(field_name.as_str()) {
-                        let output_value = match output.entry((*field_name).clone()) {
-                            Entry::Occupied(entry) => {
-                                // if there's already a value for that key in the output it means either:
-                                // - the value is a scalar and was moved into output using take(), replacing
-                                // the input value with Null
-                                // - the value was already null and is already present in output
-                                // if we expect an object or list at that key, output will already contain
-                                // an object or list and then input_value cannot be null
+                    if let Some(input_value) =
+                        input.get_with_cursor(field_name.as_str(), &mut member_cursor)
+                    {
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was already copied into output
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
 
-                                // A prior fragment spread may have nullified this field due to a non-null
-                                // constraint violation.  Object-typed inputs are never take()n so
-                                // input_value stays non-null even after nullification; without this guard
-                                // a later fragment would re-enter format_value and overwrite the null.
-                                if input_value.is_null() || entry.get().is_null() {
-                                    continue;
-                                }
-                                entry.into_mut()
-                            }
-                            Entry::Vacant(entry) => entry.insert(Value::Null),
-                        };
+                        // A prior fragment spread may have nullified this field due to a non-null
+                        // constraint violation. Object-typed inputs keep their value, so
+                        // input_value stays non-null even after nullification; without this guard
+                        // a later fragment would re-enter format_value and overwrite the null.
+                        if let Some(existing) = output.peek(field_name.as_str())
+                            && (input_value.is_null() || is_pending_null(existing))
+                        {
+                            continue;
+                        }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         path.push(ResponsePathElement::Key(field_name.as_str()));
+                        // Format through the member's slot: a field seen for the
+                        // first time is appended as a pending null and written in
+                        // place, so nothing is moved out of the object and back.
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
-                            input_value,
-                            output_value,
+                            &input_value,
+                            output.slot(field_name.as_str()),
                             path,
                             selection_set,
                         );
@@ -930,7 +976,7 @@ impl Query {
                         }
                     } else {
                         if !output.contains_key(field_name.as_str()) {
-                            output.insert((*field_name).clone(), Value::Null);
+                            output.insert(field_name.as_str(), ());
                         }
                         // Emit error for missing field
                         emit_missing_field(parameters, field_type, field_name.as_str(), path);
@@ -981,7 +1027,7 @@ impl Query {
                         if !self.is_original
                             && let Some(input_type) = input.get(TYPENAME)
                         {
-                            output.insert(TYPENAME, input_type.clone());
+                            output.insert(TYPENAME, input_type);
                         }
 
                         // Inline fragments collect fields into the same object, so
@@ -1040,7 +1086,7 @@ impl Query {
                             if !self.is_original
                                 && let Some(input_type) = input.get(TYPENAME)
                             {
-                                output.insert(TYPENAME, input_type.clone());
+                                output.insert(TYPENAME, input_type);
                             }
 
                             self.apply_selection_set(
@@ -1072,11 +1118,11 @@ impl Query {
 
     fn apply_root_selection_set<'a: 'b, 'b>(
         &'a self,
-        root_type_name: &str,
+        root_type_name: &'a str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
-        input: &mut Object,
-        output: &mut Object,
+        parameters: &mut FormatParameters<'a>,
+        input: &Value,
+        output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
     ) -> Result<(), InvalidValue> {
         // Track which named fragments have already been applied to the root object
@@ -1102,11 +1148,11 @@ impl Query {
     #[allow(clippy::too_many_arguments)]
     fn apply_root_selection_set_cached<'a: 'b, 'b>(
         &'a self,
-        root_type_name: &str,
+        root_type_name: &'a str,
         selection_set: &'a [Selection],
-        parameters: &mut FormatParameters,
-        input: &mut Object,
-        output: &mut Object,
+        parameters: &mut FormatParameters<'a>,
+        input: &Value,
+        output: &mut OutputObject<'a>,
         path: &mut Vec<ResponsePathElement<'b>>,
         visited_fragments: &mut HashSet<&'a str>,
     ) -> Result<(), InvalidValue> {
@@ -1128,37 +1174,34 @@ impl Query {
 
                     if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
-                            output.insert(field_name.clone(), Value::String(root_type_name.into()));
+                            output.insert(field_name_str, root_type_name);
                         }
-                    } else if let Some(input_value) = input.get_mut(field_name_str) {
-                        let output_value = match output.entry((*field_name).clone()) {
-                            Entry::Occupied(entry) => {
-                                // if there's already a value for that key in the output it means either:
-                                // - the value is a scalar and was moved into output using take(), replacing
-                                // the input value with Null
-                                // - the value was already null and is already present in output
-                                // if we expect an object or list at that key, output will already contain
-                                // an object or list and then input_value cannot be null
+                    } else if let Some(input_value) = input.get(field_name_str) {
+                        // if there's already a value for that key in the output it means either:
+                        // - the value is a scalar and was already copied into output
+                        // - the value was already null and is already present in output
+                        // if we expect an object or list at that key, output will already contain
+                        // an object or list and then input_value cannot be null
 
-                                // A prior fragment spread may have nullified this field due to a non-null
-                                // constraint violation.  Object-typed inputs are never take()n so
-                                // input_value stays non-null even after nullification; without this guard
-                                // a later fragment would re-enter format_value and overwrite the null.
-                                if input_value.is_null() || entry.get().is_null() {
-                                    continue;
-                                }
-                                entry.into_mut()
-                            }
-                            Entry::Vacant(entry) => entry.insert(Value::Null),
-                        };
+                        // A prior fragment spread may have nullified this field due to a non-null
+                        // constraint violation. Object-typed inputs keep their value, so
+                        // input_value stays non-null even after nullification; without this guard
+                        // a later fragment would re-enter format_value and overwrite the null.
+                        if let Some(existing) = output.peek(field_name_str)
+                            && (input_value.is_null() || is_pending_null(existing))
+                        {
+                            continue;
+                        }
 
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         path.push(ResponsePathElement::Key(field_name_str));
+                        // Format through the member's slot, as in
+                        // `apply_selection_set`.
                         let res = self.format_value(
                             parameters,
                             &field_type.0,
-                            input_value,
-                            output_value,
+                            &input_value,
+                            output.slot(field_name_str),
                             path,
                             selection_set,
                         );
@@ -1170,7 +1213,7 @@ impl Query {
                             return Err(InvalidValue);
                         }
                     } else {
-                        output.insert(field_name.clone(), Value::Null);
+                        output.insert(field_name_str, ());
                         emit_missing_field(parameters, field_type, field_name_str, path);
                         if field_type.is_non_null() {
                             return Err(InvalidValue);
@@ -1284,14 +1327,12 @@ impl Query {
                 .variables
                 .keys()
                 .map(|k| k.as_str())
-                .collect();
-            let provided_variables = request
-                .variables
-                .keys()
-                .map(|k| k.as_str())
                 .collect::<HashSet<_>>();
-            let unknown_variables = provided_variables
-                .difference(&known_variables)
+            let unknown_variables = request
+                .variables
+                .object_iter()
+                .map(|(name, _)| name)
+                .filter(|name| !known_variables.contains(&**name))
                 .collect::<Vec<_>>();
             if !unknown_variables.is_empty() {
                 tracing::debug!(
@@ -1316,19 +1357,24 @@ impl Query {
                     let value = request
                         .variables
                         .get(name.as_str())
-                        .or(default_value.as_ref());
+                        .or_else(|| default_value.clone());
                     let path = super::JsonValuePath::Variable {
                         name: name.as_str(),
                     };
-                    ty.validate_input_value(value, schema, &path, strict_variable_validation)
-                        .err()
-                        .map(|message| {
-                            FetchError::ValidationInvalidTypeVariable {
-                                name: name.clone(),
-                                message,
-                            }
-                            .to_graphql_error(None)
-                        })
+                    ty.validate_input_value(
+                        value.as_ref(),
+                        schema,
+                        &path,
+                        strict_variable_validation,
+                    )
+                    .err()
+                    .map(|message| {
+                        FetchError::ValidationInvalidTypeVariable {
+                            name: name.clone(),
+                            message,
+                        }
+                        .to_graphql_error(None)
+                    })
                 },
             )
             .collect::<Vec<_>>();
@@ -1340,14 +1386,13 @@ impl Query {
         }
     }
 
-    pub(crate) fn variable_value<'a>(
-        &'a self,
-        variable_name: &str,
-        variables: &'a Object,
-    ) -> Option<&'a Value> {
+    /// The value a variable holds for this request, falling back to the operation's
+    /// declared default. An apollo-json value is a handle rather than a place, so
+    /// this hands back an owned handle sharing the caller's arena.
+    pub(crate) fn variable_value(&self, variable_name: &str, variables: &Value) -> Option<Value> {
         variables
             .get(variable_name)
-            .or_else(|| self.default_variable_value(variable_name))
+            .or_else(|| self.default_variable_value(variable_name).cloned())
     }
 
     pub(crate) fn default_variable_value(&self, variable_name: &str) -> Option<&Value> {
@@ -1391,7 +1436,7 @@ impl Query {
             .unwrap_or(0)
     }
 
-    pub(crate) fn defer_variables_set(&self, variables: &Object) -> BooleanValues {
+    pub(crate) fn defer_variables_set(&self, variables: &Value) -> BooleanValues {
         let mut bits = 0_u32;
         for (i, variable) in self
             .defer_stats
@@ -1399,11 +1444,9 @@ impl Query {
             .iter()
             .enumerate()
         {
-            let value = variables
-                .get(variable.as_str())
-                .or_else(|| self.default_variable_value(variable));
+            let value = self.variable_value(variable.as_str(), variables);
 
-            if matches!(value, Some(serde_json_bytes::Value::Bool(true))) {
+            if value.and_then(|value| value.as_bool()) == Some(true) {
                 bits |= 1 << i;
             }
         }
@@ -1470,9 +1513,106 @@ fn emit_missing_field<'b>(
     }
 }
 
+/// Whether a pending value is a JSON `null`.
+///
+/// A formatted null reaches the output either as `NewValue::Null`, written by a
+/// formatter that nullified the slot, or as an adopted handle that happens to
+/// hold a null, when the subgraph's own value passed through unchanged. Both are
+/// nulls in the response, and nullability propagation has to treat them alike.
+fn is_pending_null(value: &NewValue<'_>) -> bool {
+    match value {
+        NewValue::Null => true,
+        NewValue::Node(handle) => handle.is_null(),
+        _ => false,
+    }
+}
+
+/// One output object under construction, holding its members in the order the
+/// query requested them.
+///
+/// Members are *pending*: they live here as `NewValue`s and reach an arena only
+/// when the root of the response is sealed, once, by
+/// [`OutputObject::into_response_value`]. Nothing intermediate is allocated in
+/// an arena, so a subtree that nullability propagation later discards cost
+/// nothing to build, and a subtree that came through formatting unchanged is
+/// still adopted by reference from the arena it arrived in.
+///
+/// Keys borrow from the parsed query, so writing a member is a `Vec` push with
+/// no allocation; the only copy is the one into the arena at seal time, which
+/// the response needs regardless.
+struct OutputObject<'a> {
+    members: Vec<(Cow<'a, str>, NewValue<'a>)>,
+}
+
+impl<'a> OutputObject<'a> {
+    fn new() -> Self {
+        OutputObject {
+            members: Vec::new(),
+        }
+    }
+
+    /// Continues an object an earlier fragment already wrote members into.
+    fn reopen(members: Vec<(Cow<'a, str>, NewValue<'a>)>) -> Self {
+        OutputObject { members }
+    }
+
+    fn position(&self, key: &str) -> Option<usize> {
+        self.members.iter().position(|(member, _)| &**member == key)
+    }
+
+    fn contains_key(&self, key: &str) -> bool {
+        self.position(key).is_some()
+    }
+
+    /// The member already written at `key`, for deciding whether to format over
+    /// it.
+    fn peek(&self, key: &str) -> Option<&NewValue<'a>> {
+        let (_, member) = &self.members[self.position(key)?];
+        Some(member)
+    }
+
+    /// The slot for `key`, appended as a pending null when the key is new, so a
+    /// formatter can write through it in place instead of reading a value out
+    /// and putting it back. A key already present keeps its position.
+    fn slot(&mut self, key: impl Into<Cow<'a, str>>) -> &mut NewValue<'a> {
+        let key = key.into();
+        let index = match self.position(&key) {
+            Some(index) => index,
+            None => {
+                self.members.push((key, NewValue::Null));
+                self.members.len() - 1
+            }
+        };
+        &mut self.members[index].1
+    }
+
+    /// Writes `value` at `key`, keeping the position of a key already present.
+    fn insert(&mut self, key: impl Into<Cow<'a, str>>, value: impl Into<NewValue<'a>>) {
+        *self.slot(key) = value.into();
+    }
+
+    /// The pending object, for a parent to hold as one of its own members.
+    fn into_pending(self) -> NewValue<'a> {
+        NewValue::Object(self.members)
+    }
+
+    /// Seals the whole pending tree into one document — one arena for the entire
+    /// response, rather than one per object.
+    fn into_response_value(self) -> Value {
+        let mut builder = ValueBuilder::new();
+        for (key, member) in self.members {
+            // A fresh object root accepts any key, and formatting never emits
+            // the one failure `set` can report (a non-finite float): scalar
+            // formatters only re-adopt values that were already valid JSON.
+            let _ = builder.set(&*key, member);
+        }
+        builder.seal()
+    }
+}
+
 /// Intermediate structure for arguments passed through the entire formatting
 struct FormatParameters<'a> {
-    variables: &'a Object,
+    variables: &'a Value,
     errors: Vec<Error>,
     coercion_errors: Option<Vec<Error>>,
     nullified: Vec<Path>,
@@ -1565,17 +1705,28 @@ impl Operation {
 pub(crate) fn parse_hir_value(value: &executable::Value) -> Option<Value> {
     match value {
         executable::Value::Variable(_) => None,
-        executable::Value::Int(value) => Some(value.as_str().parse::<i64>().ok()?.into()),
-        executable::Value::Float(value) => Some(value.try_to_f64().ok()?.into()),
-        executable::Value::Null => Some(Value::Null),
-        executable::Value::String(value) => Some(value.as_str().into()),
-        executable::Value::Boolean(value) => Some((*value).into()),
-        executable::Value::Enum(value) => Some(value.as_str().into()),
-        executable::Value::List(value) => value.iter().map(|v| parse_hir_value(v)).collect(),
-        executable::Value::Object(value) => value
-            .iter()
-            .map(|(k, v)| Some((k.as_str(), parse_hir_value(v)?)))
-            .collect(),
+        executable::Value::Int(value) => {
+            Some(json_ext::from_i64(value.as_str().parse::<i64>().ok()?))
+        }
+        executable::Value::Float(value) => Some(json_ext::from_f64(value.try_to_f64().ok()?)),
+        executable::Value::Null => Some(json_ext::null()),
+        executable::Value::String(value) => Some(json_ext::string(value.as_str())),
+        executable::Value::Boolean(value) => Some(json_ext::bool_value(*value)),
+        executable::Value::Enum(value) => Some(json_ext::string(value.as_str())),
+        executable::Value::List(value) => {
+            let items = value
+                .iter()
+                .map(|v| parse_hir_value(v))
+                .collect::<Option<Vec<_>>>()?;
+            Some(json_ext::array(items))
+        }
+        executable::Value::Object(value) => {
+            let entries = value
+                .iter()
+                .map(|(k, v)| Some((k.as_str().to_owned(), parse_hir_value(v)?)))
+                .collect::<Option<Vec<_>>>()?;
+            Some(json_ext::object(entries))
+        }
     }
 }
 

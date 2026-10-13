@@ -19,7 +19,8 @@ use tower::ServiceExt;
 
 use crate::error::Error;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
+use crate::json_ext::ObjectExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::fetch::AddSubgraphNameExt;
@@ -235,7 +236,7 @@ impl IncludeSubgraphErrors {
                 );
                 // Redact fully if errors should not be included
                 error.message = REDACTED_ERROR_MESSAGE.to_string();
-                error.extensions = Object::new(); // Clear all extensions
+                error.extensions = empty_object(); // Clear all extensions
             } else {
                 tracing::debug!(
                     "Processing errors for subgraph '{}' based on config: {:?}",
@@ -262,16 +263,18 @@ impl IncludeSubgraphErrors {
                 if !is_service_denied && is_service_allowed {
                     error
                         .extensions
-                        .entry(service_key)
-                        .or_insert(subgraph_name.clone().into());
+                        .object_insert_if_absent(service_key, subgraph_name.clone());
                 }
 
                 // 3. Filter extensions based on allow list
                 if let Some(allow_keys) = &effective_config.allow_extensions_keys {
-                    let mut original_extensions = std::mem::take(&mut error.extensions);
+                    let mut original_extensions =
+                        std::mem::replace(&mut error.extensions, empty_object());
                     for key in allow_keys {
-                        if let Some((key, value)) = original_extensions.remove_entry(key.as_str()) {
-                            error.extensions.insert(key, value);
+                        if let Some((key, value)) =
+                            original_extensions.object_remove_entry(key.as_str())
+                        {
+                            error.extensions.object_insert(key, value);
                         }
                     }
                 }
@@ -279,7 +282,7 @@ impl IncludeSubgraphErrors {
                 // 4. Remove extensions based on deny list (applied *after* allow list)
                 if let Some(deny_keys) = &effective_config.deny_extensions_keys {
                     for key in deny_keys {
-                        error.extensions.remove(key.as_str());
+                        error.extensions.object_remove(key.as_str());
                     }
                 }
             }

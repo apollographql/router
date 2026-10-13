@@ -57,6 +57,7 @@ use crate::assert_errors_eq_ignoring_id;
 use crate::assert_response_eq_ignoring_error_id;
 use crate::assert_snapshot_subscriber;
 use crate::graphql;
+use crate::json_ext::Value;
 use crate::plugins::authentication::Issuers;
 use crate::plugins::authentication::jwks::Audiences;
 use crate::plugins::authentication::jwks::JWTCriteria;
@@ -106,24 +107,15 @@ fn spawn_mock_driver(mut handle: MockHandle) -> tokio::task::JoinHandle<()> {
 }
 
 async fn parse_next_graphql_response(service_response: &mut router::Response) -> graphql::Response {
-    serde_json::from_slice(
-        service_response
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
-    )
-    .unwrap()
+    graphql::Response::from_bytes(service_response.next_response().await.unwrap().unwrap()).unwrap()
 }
 
 fn assert_mock_success(service_response: &router::Response, response: &graphql::Response) {
     assert_eq!(response.errors, vec![]);
     assert_eq!(StatusCode::OK, service_response.response.status());
     assert_eq!(
-        "response created within the mock",
-        response.data.as_ref().unwrap()
+        response.data,
+        Some(Value::from("response created within the mock"))
     );
 }
 
@@ -1098,8 +1090,8 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &router::body::into_bytes(res.response.into_body())
+            let response = graphql::Response::from_bytes(
+                router::body::into_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )
@@ -1142,8 +1134,8 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &router::body::into_bytes(res.response.into_body())
+            let response = graphql::Response::from_bytes(
+                router::body::into_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )
@@ -1180,8 +1172,8 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &router::body::into_bytes(res.response.into_body())
+            let response = graphql::Response::from_bytes(
+                router::body::into_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )
@@ -1334,8 +1326,8 @@ async fn audience_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &router::body::into_bytes(res.response.into_body())
+            let response = graphql::Response::from_bytes(
+                router::body::into_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )

@@ -8,7 +8,6 @@ use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use futures::StreamExt;
 use http::Method;
-use serde_json_bytes::json;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
 
@@ -29,6 +28,7 @@ use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::json_ext::json_value as json;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
@@ -402,9 +402,9 @@ async fn defer() {
         let (_req, responder) = handle_x.next_request().await.unwrap();
         responder.send_response(
             SubgraphResponse::fake_builder()
-                .data(serde_json::json! {{
+                .data(json!({
                     "t": {"id": 1234, "__typename": "T", "x": "X"}
-                }})
+                }))
                 .build(),
         );
     });
@@ -417,9 +417,9 @@ async fn defer() {
         let (_req, responder) = handle_y.next_request().await.unwrap();
         responder.send_response(
             SubgraphResponse::fake_builder()
-                .data(serde_json::json! {{
+                .data(json!({
                     "_entities": [{"y": "Y", "__typename": "T"}]
-                }})
+                }))
                 .build(),
         );
     });
@@ -551,7 +551,7 @@ async fn defer_if_condition() {
                 http::Request::builder()
                     .body(
                         graphql::Request::fake_builder()
-                            .variables(json!({ "shouldDefer": true }).as_object().unwrap().clone())
+                            .variables(json!({ "shouldDefer": true }))
                             .build(),
                     )
                     .unwrap(),
@@ -606,7 +606,7 @@ async fn defer_if_condition() {
                 http::Request::builder()
                     .body(
                         graphql::Request::fake_builder()
-                            .variables(json!({ "shouldDefer": false }).as_object().unwrap().clone())
+                            .variables(json!({ "shouldDefer": false }))
                             .build(),
                     )
                     .unwrap(),
@@ -891,12 +891,7 @@ async fn alias_renaming() {
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "tId": "1"}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json!({ "tId": "1"}))
         .build()
         .unwrap();
 
@@ -907,12 +902,7 @@ async fn alias_renaming() {
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "tId": "2"}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json!({ "tId": "2"}))
         .build()
         .unwrap();
 
@@ -1050,12 +1040,7 @@ async fn missing_fields_in_requires() {
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "tId": "1"}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json!({ "tId": "1"}))
         .build()
         .unwrap();
 
@@ -1186,12 +1171,7 @@ async fn missing_typename_and_fragments_in_requires() {
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "tId": "1"}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json!({ "tId": "1"}))
         .build()
         .unwrap();
 
@@ -1340,12 +1320,7 @@ async fn missing_typename_and_fragments_in_requires2() {
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "tId": "1"}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json!({ "tId": "1"}))
         .build()
         .unwrap();
 
@@ -1479,12 +1454,7 @@ async fn null_in_requires() {
     let request = supergraph::Request::fake_builder()
         .context(Context::new())
         .query(query)
-        .variables(
-            serde_json_bytes::json! {{ "tId": "1"}}
-                .as_object()
-                .unwrap()
-                .clone(),
-        )
+        .variables(json!({ "tId": "1"}))
         .build()
         .unwrap();
 
@@ -2092,7 +2062,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         let (_req, responder) = handle_x.next_request().await.unwrap();
         responder.send_response(
             SubgraphResponse::fake_builder()
-                .data(serde_json::json! {{
+                .data(json!({
                     "start": {
                         "__typename": "T",
                         "id": "1",
@@ -2105,7 +2075,7 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
                             }
                         }
                     }
-                }})
+                }))
                 .build(),
         );
     });
@@ -2119,9 +2089,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         let (_req, responder) = handle_y.next_request().await.unwrap();
         responder.send_response(
             SubgraphResponse::fake_builder()
-                .data(serde_json::json! {{
+                .data(json!({
                     "_entities": [{"data": "d1"}]
-                }})
+                }))
                 .build(),
         );
     });
@@ -2136,9 +2106,9 @@ async fn defer_depends_skips_fetch_when_typename_missing() {
         let (_req, responder) = handle_z.next_request().await.unwrap();
         responder.send_response(
             SubgraphResponse::fake_builder()
-                .data(serde_json::json! {{
+                .data(json!({
                     "_entities": [{"target": {"x": "42"}}]
-                }})
+                }))
                 .build(),
         );
     });

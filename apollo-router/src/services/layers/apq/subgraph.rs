@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -14,6 +13,9 @@ use tower::ServiceExt;
 
 use super::calculate_hash_for_query;
 use crate::graphql;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
+use crate::json_ext::ValueExt;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 
@@ -40,10 +42,14 @@ fn get_apq_error(gql_response: &graphql::Response) -> ApqError {
             PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE => return ApqError::PersistedQueryNotSupported,
             _ => {}
         }
-        if let Some(value) = error.extensions.get(CODE_STRING) {
-            if value == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
+        if let Some(code) = error
+            .extensions
+            .get(CODE_STRING)
+            .and_then(|value| value.as_str_owned())
+        {
+            if code == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
                 return ApqError::PersistedQueryNotFound;
-            } else if value == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
+            } else if code == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
                 return ApqError::PersistedQueryNotSupported;
             }
         }
@@ -126,12 +132,15 @@ where
             let original_query = body.query.take();
             let hash_value =
                 calculate_hash_for_query(original_query.as_deref().unwrap_or_default());
-            body.extensions.insert(
+            body.extensions.object_insert(
                 PERSISTED_QUERY_KEY,
-                json!({
-                    HASH_VERSION_KEY: HASH_VERSION_VALUE,
-                    HASH_KEY: hash_value
-                }),
+                json_ext::object([
+                    (
+                        HASH_VERSION_KEY.to_string(),
+                        json_ext::from_i64(HASH_VERSION_VALUE.into()),
+                    ),
+                    (HASH_KEY.to_string(), json_ext::string(hash_value)),
+                ]),
             );
 
             let response = inner.call(request.clone()).await?;
@@ -141,7 +150,7 @@ where
                     enabled.store(false, Relaxed);
                     let body = request.subgraph_request.body_mut();
                     body.query = original_query;
-                    body.extensions.remove(PERSISTED_QUERY_KEY);
+                    body.extensions.object_remove(PERSISTED_QUERY_KEY);
                     inner.ready().await?.call(request).await
                 }
                 ApqError::PersistedQueryNotFound => {
@@ -159,13 +168,12 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::Relaxed;
 
-    use serde_json_bytes::ByteString;
-    use serde_json_bytes::Value;
     use tower::ServiceExt;
 
     use super::*;
     use crate::Context;
     use crate::graphql::Error;
+    use crate::graphql::json_object::empty_object;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
 
@@ -182,7 +190,7 @@ mod tests {
 
     fn success_response(context: Context) -> SubgraphResponse {
         SubgraphResponse::fake_builder()
-            .data(Value::String(ByteString::from("test")))
+            .data(json_ext::string("test"))
             .context(context)
             .build()
     }
@@ -255,10 +263,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(false).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -283,10 +288,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -314,10 +316,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -335,10 +334,7 @@ mod tests {
         let svc = SubgraphApqLayer::new(true).layer(mock);
         let resp = svc.oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
     }
 
     #[tokio::test]
@@ -369,10 +365,7 @@ mod tests {
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         assert!(
             !svc.enabled.load(Relaxed),
             "APQ should be disabled after PQNS"
@@ -403,14 +396,25 @@ mod tests {
 
         let resp = svc.clone().oneshot(make_request()).await.unwrap();
         crate::plugin::test::await_mock_driver(driver).await;
-        assert_eq!(
-            resp.response.body().data,
-            Some(Value::String(ByteString::from("test")))
-        );
+        assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         assert!(!svc.enabled.load(Relaxed));
     }
 
     const APQ_TEST_QUERY: &str = "query MyOp($id: ID!) { thing(id: $id) { name } }";
+
+    /// A request body carrying every field the APQ layer must preserve.
+    fn apq_test_body() -> crate::graphql::Request {
+        let mut variables = empty_object();
+        variables.object_insert("id", "42");
+        let mut extensions = empty_object();
+        extensions.object_insert("myExt", "value");
+        crate::graphql::Request {
+            query: Some(APQ_TEST_QUERY.to_string()),
+            operation_name: Some("MyOp".to_string()),
+            variables,
+            extensions,
+        }
+    }
 
     #[tokio::test]
     async fn test_apq_body_preserves_all_fields() {
@@ -423,10 +427,7 @@ mod tests {
                 "APQ body should omit query on first attempt"
             );
             assert_eq!(body.operation_name.as_deref(), Some("MyOp"));
-            assert_eq!(
-                body.variables.get("id"),
-                Some(&serde_json_bytes::json!("42"))
-            );
+            assert_eq!(body.variables.get("id"), Some(json_ext::string("42")));
             assert!(body.extensions.contains_key(PERSISTED_QUERY_KEY));
             assert!(
                 body.extensions.contains_key("myExt"),
@@ -435,21 +436,8 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let gql_body = crate::graphql::Request {
-            query: Some(APQ_TEST_QUERY.to_string()),
-            operation_name: Some("MyOp".to_string()),
-            variables: serde_json_bytes::json!({"id": "42"})
-                .as_object()
-                .unwrap()
-                .clone(),
-            extensions: serde_json_bytes::json!({"myExt": "value"})
-                .as_object()
-                .unwrap()
-                .clone(),
-        };
-
         let request = SubgraphRequest::fake_builder()
-            .subgraph_request(http::Request::builder().body(gql_body).unwrap())
+            .subgraph_request(http::Request::builder().body(apq_test_body()).unwrap())
             .context(Context::new())
             .build();
 
@@ -491,27 +479,14 @@ mod tests {
             );
             assert_eq!(
                 body.variables.get("id"),
-                Some(&serde_json_bytes::json!("42")),
+                Some(json_ext::string("42")),
                 "variables should be preserved on retry"
             );
             responder.send_response(success_response(req.context));
         });
 
-        let gql_body = crate::graphql::Request {
-            query: Some(APQ_TEST_QUERY.to_string()),
-            operation_name: Some("MyOp".to_string()),
-            variables: serde_json_bytes::json!({"id": "42"})
-                .as_object()
-                .unwrap()
-                .clone(),
-            extensions: serde_json_bytes::json!({"myExt": "value"})
-                .as_object()
-                .unwrap()
-                .clone(),
-        };
-
         let request = SubgraphRequest::fake_builder()
-            .subgraph_request(http::Request::builder().body(gql_body).unwrap())
+            .subgraph_request(http::Request::builder().body(apq_test_body()).unwrap())
             .context(Context::new())
             .build();
 
@@ -546,21 +521,8 @@ mod tests {
             responder.send_response(success_response(req.context));
         });
 
-        let gql_body = crate::graphql::Request {
-            query: Some(APQ_TEST_QUERY.to_string()),
-            operation_name: Some("MyOp".to_string()),
-            variables: serde_json_bytes::json!({"id": "42"})
-                .as_object()
-                .unwrap()
-                .clone(),
-            extensions: serde_json_bytes::json!({"myExt": "value"})
-                .as_object()
-                .unwrap()
-                .clone(),
-        };
-
         let request = SubgraphRequest::fake_builder()
-            .subgraph_request(http::Request::builder().body(gql_body).unwrap())
+            .subgraph_request(http::Request::builder().body(apq_test_body()).unwrap())
             .context(Context::new())
             .build();
 
@@ -576,12 +538,10 @@ mod tests {
         use std::sync::Arc;
 
         use axum::body::Body;
-        use bytes::Buf;
         use http::StatusCode;
         use http::Uri;
         use http::header::CONTENT_TYPE;
         use mime::APPLICATION_JSON;
-        use serde_json_bytes::ByteString;
         use tokio::net::TcpListener;
         use tower::ServiceExt;
 
@@ -622,11 +582,15 @@ mod tests {
             }
         }
 
+        /// Deserializes through apollo-json, the only deserializer a
+        /// [`crate::json_ext::Value`] field can be captured from.
         async fn parse_graphql_request(body: Body) -> crate::graphql::Request {
             let bytes = router::body::into_bytes(body)
                 .await
                 .expect("can read request body");
-            serde_json::from_reader(bytes.reader()).expect("valid graphql request")
+            let document =
+                apollo_json::Value::parse(bytes.to_vec()).expect("valid JSON request body");
+            apollo_json::from_value(&document).expect("valid graphql request")
         }
 
         fn success_response() -> http::Response<Body> {
@@ -635,7 +599,7 @@ mod tests {
                 .status(StatusCode::OK)
                 .body(
                     serde_json::to_string(&Response {
-                        data: Some(Value::String(ByteString::from("test"))),
+                        data: Some(json_ext::string("test")),
                         ..Response::default()
                     })
                     .expect("always valid")
@@ -699,10 +663,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(
-                resp.response.body().data,
-                Some(Value::String(ByteString::from("test")))
-            );
+            assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -732,10 +693,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            assert_eq!(
-                resp.response.body().data,
-                Some(Value::String(ByteString::from("test")))
-            );
+            assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         }
 
         #[tokio::test(flavor = "multi_thread")]
@@ -787,10 +745,7 @@ mod tests {
                 .unwrap();
 
             assert_eq!(call_count.load(Relaxed), 2);
-            assert_eq!(
-                resp.response.body().data,
-                Some(Value::String(ByteString::from("test")))
-            );
+            assert_eq!(resp.response.body().data, Some(json_ext::string("test")));
         }
     }
 }

@@ -13,8 +13,6 @@ use http::Uri;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
-use serde_json_bytes::Value;
-use serde_json_bytes::json;
 use tower::Service as _;
 use tower::ServiceBuilder;
 use tower::ServiceExt as _;
@@ -26,6 +24,7 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::json_ext::json_value as json;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
@@ -164,7 +163,7 @@ async fn test_count_connector_errors_counts_declared_errors() {
                 }),
                 answered_by_router: false,
                 mapped_response: MappedResponse::Data {
-                    data: json!({ "account": { "balance": 0 } }),
+                    data: serde_json_bytes::json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
                         name: "account".to_string(),
                         inputs: Default::default(),
@@ -265,7 +264,7 @@ async fn declared_errors_are_protected_from_double_counting_by_the_lift_not_the_
                 }),
                 answered_by_router: false,
                 mapped_response: MappedResponse::Data {
-                    data: json!({ "account": { "balance": 0 } }),
+                    data: serde_json_bytes::json!({ "account": { "balance": 0 } }),
                     key: ResponseKey::RootField {
                         name: "account".to_string(),
                         inputs: Default::default(),
@@ -941,7 +940,7 @@ async fn test_count_operation_errors_with_all_json_types_and_extended_config_ena
             json!("VALID_ERROR_CODE"),
             json!(400),
             json!(true),
-            Value::Null,
+            json!(null),
             json!(["code1", "code2"]),
             json!({"inner": "myCode"}),
         ];
@@ -1034,9 +1033,9 @@ async fn test_count_operation_errors_with_duplicate_errors_and_extended_config_e
 
         let codes = [
             json!("VALID_ERROR_CODE"),
-            Value::Null,
+            json!(null),
             json!("VALID_ERROR_CODE"),
-            Value::Null,
+            json!(null),
         ];
 
         let errors = codes.map(|code| {
@@ -1630,7 +1629,7 @@ async fn test_operation_errors_emitted_when_config_is_enabled() {
                 .data(json!({"data": null}))
                 .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
                         "message": "Cannot return null for non-nullable field SomeType.someField",
-                        "path": Path::from("someType/someField")
+                        "path": apollo_json::to_value(&Path::from("someType/someField")).expect("a path serializes")
                     }]))
                 .errors(vec![
                     graphql::Error::builder()

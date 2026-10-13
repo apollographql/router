@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/plugins/response_cache/tests.rs
+assertion_line: 2857
 expression: cache_keys
 ---
 [
@@ -88,8 +89,8 @@ expression: cache_keys
       "variables": {
         "representations": [
           {
-            "id": "2",
-            "__typename": "Organization"
+            "__typename": "Organization",
+            "id": "2"
           }
         ]
       }
@@ -133,8 +134,8 @@ expression: cache_keys
       "variables": {
         "representations": [
           {
-            "id": "2",
-            "__typename": "Organization"
+            "__typename": "Organization",
+            "id": "2"
           }
         ]
       }

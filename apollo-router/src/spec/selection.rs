@@ -4,8 +4,8 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 
 use super::Fragments;
-use crate::json_ext::Object;
 use crate::json_ext::PathElement;
+use crate::json_ext::Value;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -362,7 +362,7 @@ impl IncludeSkip {
         matches!(self.skip, Condition::Yes) || matches!(self.include, Condition::No)
     }
 
-    pub(crate) fn should_skip(&self, variables: &Object) -> bool {
+    pub(crate) fn should_skip(&self, variables: &Value) -> bool {
         // Using .unwrap_or is legit here because
         // validate_variables should have already checked that
         // the variable is present and it is of the correct type
@@ -382,7 +382,7 @@ impl Condition {
         }
     }
 
-    pub(crate) fn eval(&self, variables: &Object) -> Option<bool> {
+    pub(crate) fn eval(&self, variables: &Value) -> Option<bool> {
         match self {
             Condition::Yes => Some(true),
             Condition::No => Some(false),

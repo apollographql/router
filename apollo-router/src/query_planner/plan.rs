@@ -13,7 +13,6 @@ use super::subscription::SubscriptionNode;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
 use crate::error::ValidationErrors;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -72,7 +71,7 @@ impl QueryPlan {
 }
 
 impl QueryPlan {
-    pub(crate) fn is_deferred(&self, variables: &Object) -> bool {
+    pub(crate) fn is_deferred(&self, variables: &Value) -> bool {
         self.root
             .as_ref()
             .is_some_and(|node| node.is_deferred(variables, &self.query))
@@ -164,7 +163,7 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn is_deferred(&self, variables: &Object, query: &Query) -> bool {
+    pub(crate) fn is_deferred(&self, variables: &Value, query: &Query) -> bool {
         match self {
             Self::Sequence { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.is_deferred(variables, query)),
@@ -179,7 +178,7 @@ impl PlanNode {
             } => {
                 if query
                     .variable_value(condition.as_str(), variables)
-                    .map(|v| *v == Value::Bool(true))
+                    .map(|v| v.as_bool() == Some(true))
                     .unwrap_or(true)
                 {
                     // right now ConditionNode is only used with defer, but it might be used

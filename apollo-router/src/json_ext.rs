@@ -2,26 +2,24 @@
 
 #![allow(missing_docs)] // FIXME
 
-use std::cmp::min;
+use std::borrow::Cow;
 use std::fmt;
 
+use apollo_json::JsonKind;
+use apollo_json::NewValue;
+pub(crate) use apollo_json::Value;
+use apollo_json::ValueBuilder;
+use apollo_json::ValueMut;
 use num_traits::ToPrimitive;
 use once_cell::sync::Lazy;
 use regex::Captures;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Entry;
-use serde_json_bytes::Map;
-pub(crate) use serde_json_bytes::Value;
 
 use crate::error::FetchError;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
-
-/// A JSON object.
-pub(crate) type Object = Map<ByteString, Value>;
 
 const FRAGMENT_PREFIX: &str = "... on ";
 
@@ -46,42 +44,16 @@ fn split_path_element_and_type_conditions(s: &str) -> (String, Option<TypeCondit
     (path_element.to_string(), type_conditions)
 }
 
-macro_rules! extract_key_value_from_object {
-    ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
-        match $object.remove($key) {
-            Some($pattern) => Ok(Some($var)),
-            None | Some(crate::json_ext::Value::Null) => Ok(None),
-            _ => Err(concat!("invalid type for key: ", $key)),
-        }
-    }};
-    ($object:expr, $key:literal) => {{
-        match $object.remove($key) {
-            None | Some(crate::json_ext::Value::Null) => None,
-            Some(value) => Some(value),
-        }
-    }};
-}
-
-macro_rules! ensure_array {
-    ($value:expr) => {{
-        match $value {
-            crate::json_ext::Value::Array(a) => Ok(a),
-            _ => Err("invalid type, expected an array"),
-        }
-    }};
-}
-
-macro_rules! ensure_object {
-    ($value:expr) => {{
-        match $value {
-            crate::json_ext::Value::Object(o) => Ok(o),
-            _ => Err("invalid type, expected an object"),
-        }
-    }};
+/// Converts a borrowed value into a [`NewValue`] for writing into a
+/// document under construction. Containers are adopted by reference — the
+/// source arena stays alive, nothing is copied — matching apollo-json's
+/// own merge semantics.
+fn to_new_value(value: Value) -> NewValue<'static> {
+    NewValue::Node(value)
 }
 
 #[doc(hidden)]
-/// Extension trait for [`serde_json::Value`].
+/// Extension trait for [`Value`].
 pub(crate) trait ValueExt {
     /// Deep merge the JSON objects, array and override the values in `&mut self` if they already
     /// exists.
@@ -120,24 +92,24 @@ pub(crate) trait ValueExt {
 
     /// Get a `Value` from a `Path`
     #[track_caller]
-    fn get_path<'a>(&'a self, schema: &Schema, path: &'a Path) -> Result<&'a Value, FetchError>;
+    fn select_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError>;
 
     /// Select all values matching a `Path`.
     ///
     /// the function passed as argument will be called with the values found and their Path
     /// if it encounters an invalid value, it will ignore it and continue
     #[track_caller]
-    fn select_values_and_paths<'a, F>(&'a self, schema: &Schema, path: &'a Path, f: F)
+    fn select_values_and_paths<F>(&self, schema: &Schema, path: &Path, f: F)
     where
-        F: FnMut(&Path, &'a Value);
+        F: FnMut(&Path, Value);
 
     /// Select all values matching a `Path`, and allows to mutate those values.
     ///
     /// The behavior of the method is otherwise the same as it's non-mutable counterpart
     #[track_caller]
-    fn select_values_and_paths_mut<'a, F>(&'a mut self, schema: &Schema, path: &'a Path, f: F)
+    fn select_values_and_paths_mut<F>(&mut self, schema: &Schema, path: &Path, f: F)
     where
-        F: FnMut(&Path, &'a mut Value);
+        F: FnMut(&Path, ValueMut<'_>);
 
     #[track_caller]
     fn is_valid_float_input(&self) -> bool;
@@ -169,306 +141,93 @@ pub(crate) trait ValueExt {
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
 
     fn as_i32(&self) -> Option<i32>;
+
+    /// The array's elements. This materializes a `Vec` of handles;
+    /// [`Value::array_iter`] walks the same elements without one.
+    fn as_array(&self) -> Option<Vec<Value>>;
+
+    /// The string value, owned. [`Value::as_str`] borrows from `self`, so it
+    /// cannot be used on a temporary — `v.get(k).and_then(|v| v.as_str())`
+    /// does not compile; this copies the string instead.
+    fn as_str_owned(&self) -> Option<String>;
 }
 
 impl ValueExt for Value {
     fn deep_merge(&mut self, other: Self) {
-        match (self, other) {
-            (Value::Object(a), Value::Object(b)) => {
-                for (key, value) in b.into_iter() {
-                    match a.entry(key) {
-                        Entry::Vacant(e) => {
-                            e.insert(value);
-                        }
-                        Entry::Occupied(e) => {
-                            e.into_mut().deep_merge(value);
-                        }
-                    }
-                }
-            }
-            (Value::Array(a), Value::Array(mut b)) => {
-                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
-                    a_value.deep_merge(b_value);
-                }
-
-                a.extend(b);
-            }
-            (_, Value::Null) => {}
-            (Value::Object(_), Value::Array(_)) => {
-                // XXX(@goto-bus-stop): this should be fallible..?
-                tracing::debug!("trying to replace an object with an array");
-            }
-            (Value::Array(_), Value::Object(_)) => {
-                // XXX(@goto-bus-stop): this should be fallible..?
-                tracing::debug!("trying to replace an array with an object");
-            }
-            (a, b) => {
-                if b != Value::Null {
-                    *a = b;
-                }
-            }
-        }
+        merge_in_place(self, &other, None);
     }
 
     fn type_aware_deep_merge(&mut self, other: Self, schema: &Schema) {
-        match (self, other) {
-            (Value::Object(a), Value::Object(b)) => {
-                for (key, value) in b.into_iter() {
-                    let k = key.clone();
-                    match a.entry(key) {
-                        Entry::Vacant(e) => {
-                            e.insert(value);
-                        }
-                        Entry::Occupied(e) => match (e.into_mut(), value) {
-                            (Value::String(type1), Value::String(type2))
-                                if k.as_str() == TYPENAME =>
-                            {
-                                // If type1 is a subtype of type2, we skip this overwrite to preserve the more specific `__typename`
-                                // in the response. Ideally, we could use `Schema::is_implementation`, but that looks to be buggy
-                                // and does not catch the problem we are trying to resolve.
-                                if !schema.is_subtype(type2.as_str(), type1.as_str()) {
-                                    *type1 = type2;
-                                }
-                            }
-                            (t, s) => t.type_aware_deep_merge(s, schema),
-                        },
-                    }
-                }
-            }
-            (Value::Array(a), Value::Array(mut b)) => {
-                for (b_value, a_value) in b.drain(..min(a.len(), b.len())).zip(a.iter_mut()) {
-                    a_value.type_aware_deep_merge(b_value, schema);
-                }
-
-                a.extend(b);
-            }
-            (_, Value::Null) => {}
-            (Value::Object(_), Value::Array(_)) => {
-                // XXX(@goto-bus-stop): this should be fallible..?
-                tracing::debug!("trying to replace an object with an array");
-            }
-            (Value::Array(_), Value::Object(_)) => {
-                // XXX(@goto-bus-stop): this should be fallible..?
-                tracing::debug!("trying to replace an array with an object");
-            }
-            (a, b) => {
-                if b != Value::Null {
-                    *a = b;
-                }
-            }
-        }
+        merge_in_place(self, &other, Some(schema));
     }
 
     #[cfg(test)]
     fn eq_and_ordered(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::Object(a), Value::Object(b)) => {
-                let mut it_a = a.iter();
-                let mut it_b = b.iter();
-
-                loop {
-                    match (it_a.next(), it_b.next()) {
-                        (Some(_), None) | (None, Some(_)) => break false,
-                        (None, None) => break true,
-                        (Some((field_a, value_a)), Some((field_b, value_b)))
-                            if field_a == field_b && ValueExt::eq_and_ordered(value_a, value_b) =>
-                        {
-                            continue;
-                        }
-                        (Some(_), Some(_)) => break false,
-                    }
-                }
+        match (self.kind(), other.kind()) {
+            (JsonKind::Object, JsonKind::Object) => {
+                self.len() == other.len()
+                    && self
+                        .object_iter()
+                        .zip(other.object_iter())
+                        .all(|((ka, va), (kb, vb))| ka == kb && va.eq_and_ordered(&vb))
             }
-            (Value::Array(a), Value::Array(b)) => {
-                let mut it_a = a.iter();
-                let mut it_b = b.iter();
-
-                loop {
-                    match (it_a.next(), it_b.next()) {
-                        (Some(_), None) | (None, Some(_)) => break false,
-                        (None, None) => break true,
-                        (Some(value_a), Some(value_b))
-                            if ValueExt::eq_and_ordered(value_a, value_b) =>
-                        {
-                            continue;
-                        }
-                        (Some(_), Some(_)) => break false,
-                    }
-                }
+            (JsonKind::Array, JsonKind::Array) => {
+                self.len() == other.len()
+                    && self
+                        .array_iter()
+                        .zip(other.array_iter())
+                        .all(|(a, b)| a.eq_and_ordered(&b))
             }
-            (a, b) => a == b,
+            _ => self == other,
         }
     }
 
     #[cfg(test)]
     fn is_subset(&self, superset: &Value) -> bool {
-        match (self, superset) {
-            (Value::Object(subset), Value::Object(superset)) => {
-                subset.iter().all(|(key, value)| {
-                    if let Some(other) = superset.get(key) {
-                        value.is_subset(other)
-                    } else {
-                        false
-                    }
-                })
+        match (self.kind(), superset.kind()) {
+            (JsonKind::Object, JsonKind::Object) => self.object_iter().all(|(key, value)| {
+                superset
+                    .get(&key)
+                    .is_some_and(|other| value.is_subset(&other))
+            }),
+            (JsonKind::Array, JsonKind::Array) => {
+                self.len() == superset.len()
+                    && self
+                        .array_iter()
+                        .zip(superset.array_iter())
+                        .all(|(value, other)| value.is_subset(&other))
             }
-            (Value::Array(subset), Value::Array(superset)) => {
-                subset.len() == superset.len()
-                    && subset.iter().enumerate().all(|(index, value)| {
-                        if let Some(other) = superset.get(index) {
-                            value.is_subset(other)
-                        } else {
-                            false
-                        }
-                    })
-            }
-            (a, b) => a == b,
+            _ => self == superset,
         }
     }
 
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
-        let mut res_value = Value::default();
-        let mut current_node = &mut res_value;
-
-        for p in path.iter() {
-            match p {
-                // Type conditions don't matter here since we're just creating a default value.
-                PathElement::Flatten(_) => {
-                    return res_value;
-                }
-
-                &PathElement::Index(index) => match current_node {
-                    Value::Array(a) => {
-                        for _ in 0..index {
-                            a.push(Value::default());
-                        }
-                        a.push(Value::default());
-                        current_node = a
-                            .get_mut(index)
-                            .expect("we just created the value at that index");
-                    }
-                    Value::Null => {
-                        let mut a = Vec::new();
-                        for _ in 0..index {
-                            a.push(Value::default());
-                        }
-                        a.push(Value::default());
-
-                        *current_node = Value::Array(a);
-                        current_node = current_node
-                            .as_array_mut()
-                            .expect("current_node was just set to a Value::Array")
-                            .get_mut(index)
-                            .expect("we just created the value at that index");
-                    }
-                    other => unreachable!("unreachable node: {:?}", other),
-                },
-                // Type conditions don't matter here since we're just creating a default value.
-                PathElement::Key(k, _) => {
-                    let mut m = Map::new();
-                    m.insert(k.as_str(), Value::default());
-
-                    *current_node = Value::Object(m);
-                    current_node = current_node
-                        .as_object_mut()
-                        .expect("current_node was just set to a Value::Object")
-                        .get_mut(k.as_str())
-                        .expect("the value at that key was just inserted");
-                }
-                PathElement::Fragment(_) => {}
-            }
-        }
-
-        *current_node = value;
-        res_value
+        let (segments, truncated) = addressing_segments(path);
+        // A flatten cuts the path short: the walk left a null placeholder at
+        // each key and returned before writing, so the deepest key it reached
+        // holds null rather than `value`.
+        let leaf = if truncated { Value::default() } else { value };
+        value_with_path(&Value::default(), &segments, leaf)
+            .expect("a value built from nothing has no conflicting shape")
     }
 
-    /// Insert a `Value` at a `Path`
     #[track_caller]
-    fn insert(&mut self, path: &Path, mut value: Value) -> Result<(), FetchError> {
-        let mut current_node = self;
-
-        for p in path.iter() {
-            match p {
-                PathElement::Flatten(type_conditions) => {
-                    value = filter_type_conditions(value, type_conditions);
-                    if current_node.is_null() {
-                        let a = Vec::new();
-                        *current_node = Value::Array(a);
-                    } else if !current_node.is_array() {
-                        return Err(FetchError::ExecutionPathNotFound {
-                            reason: "expected an array".to_string(),
-                        });
-                    }
-                }
-
-                &PathElement::Index(index) => match current_node {
-                    Value::Array(a) => {
-                        // add more elements if the index is after the end
-                        for _ in a.len()..index + 1 {
-                            a.push(Value::default());
-                        }
-                        current_node = a
-                            .get_mut(index)
-                            .expect("we just created the value at that index");
-                    }
-                    Value::Null => {
-                        let mut a = Vec::new();
-                        for _ in 0..index + 1 {
-                            a.push(Value::default());
-                        }
-
-                        *current_node = Value::Array(a);
-                        current_node = current_node
-                            .as_array_mut()
-                            .expect("current_node was just set to a Value::Array")
-                            .get_mut(index)
-                            .expect("we just created the value at that index");
-                    }
-                    _other => {
-                        return Err(FetchError::ExecutionPathNotFound {
-                            reason: "expected an array".to_string(),
-                        });
-                    }
-                },
-                PathElement::Key(k, type_conditions) => {
-                    value = filter_type_conditions(value, type_conditions);
-                    match current_node {
-                        Value::Object(o) => {
-                            current_node = o
-                                .get_mut(k.as_str())
-                                .expect("the value at that key was just inserted");
-                        }
-                        Value::Null => {
-                            let mut m = Map::new();
-                            m.insert(k.as_str(), Value::default());
-
-                            *current_node = Value::Object(m);
-                            current_node = current_node
-                                .as_object_mut()
-                                .expect("current_node was just set to a Value::Object")
-                                .get_mut(k.as_str())
-                                .expect("the value at that key was just inserted");
-                        }
-                        _other => {
-                            return Err(FetchError::ExecutionPathNotFound {
-                                reason: "expected an object".to_string(),
-                            });
-                        }
-                    }
-                }
-                PathElement::Fragment(_) => {}
+    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
+        // Flattens and keys carrying type conditions filter the incoming value
+        // as the walk passes them, so fold them all before writing.
+        let mut value = value;
+        for element in path.iter() {
+            if let PathElement::Flatten(conditions) | PathElement::Key(_, conditions) = element {
+                value = filter_type_conditions(value, conditions);
             }
         }
-
-        *current_node = value;
+        *self = value_with_path(self, &insert_segments(path), value)?;
         Ok(())
     }
 
-    /// Get a `Value` from a `Path`
     #[track_caller]
-    fn get_path<'a>(&'a self, schema: &Schema, path: &'a Path) -> Result<&'a Value, FetchError> {
+    fn select_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError> {
         let mut res = Err(FetchError::ExecutionPathNotFound {
             reason: "value not found".to_string(),
         });
@@ -476,7 +235,7 @@ impl ValueExt for Value {
             schema,
             &mut Path::default(),
             &path.0,
-            self,
+            self.clone(),
             &mut |_path, value| {
                 res = Ok(value);
             },
@@ -485,28 +244,31 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
-    fn select_values_and_paths<'a, F>(&'a self, schema: &Schema, path: &'a Path, mut f: F)
+    fn select_values_and_paths<F>(&self, schema: &Schema, path: &Path, mut f: F)
     where
-        F: FnMut(&Path, &'a Value),
+        F: FnMut(&Path, Value),
     {
-        iterate_path(schema, &mut Path::default(), &path.0, self, &mut f)
+        iterate_path(schema, &mut Path::default(), &path.0, self.clone(), &mut f)
     }
 
     #[track_caller]
-    fn select_values_and_paths_mut<'a, F>(&'a mut self, schema: &Schema, path: &'a Path, mut f: F)
+    fn select_values_and_paths_mut<F>(&mut self, schema: &Schema, path: &Path, mut f: F)
     where
-        F: FnMut(&Path, &'a mut Value),
+        F: FnMut(&Path, ValueMut<'_>),
     {
-        iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f)
+        let mut builder = self.compact().edit();
+        let root = builder.root_mut();
+        iterate_path_mut(schema, &mut Path::default(), &path.0, root, &mut f);
+        *self = builder.seal();
     }
 
     #[track_caller]
     fn is_valid_id_input(&self) -> bool {
         // https://spec.graphql.org/October2021/#sec-ID.Input-Coercion
-        match self {
+        match self.kind() {
             // Any string and integer values are accepted
-            Value::String(_) => true,
-            Value::Number(n) => n.is_i64() || n.is_u64(),
+            JsonKind::String => true,
+            JsonKind::Number => self.as_i64().is_some() || self.as_u64().is_some(),
             _ => false,
         }
     }
@@ -514,14 +276,10 @@ impl ValueExt for Value {
     #[track_caller]
     fn is_valid_float_input(&self) -> bool {
         // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
-        match self {
-            // When expected as an input type, both integer and float input values are accepted.
-            Value::Number(n) if n.is_f64() => true,
-            // Integer input values are coerced to Float by adding an empty fractional part, for example 1.0 for the integer input value 1.
-            Value::Number(n) => n.is_i64(),
-            // All other input values, including strings with numeric content, must raise a request error indicating an incorrect type.
-            _ => false,
-        }
+        // When expected as an input type, both integer and float input values are accepted.
+        // All other input values, including strings with numeric content, must raise a request
+        // error indicating an incorrect type.
+        self.kind() == JsonKind::Number && self.as_f64().is_some()
     }
 
     #[track_caller]
@@ -536,36 +294,422 @@ impl ValueExt for Value {
 
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool {
-        self.is_object()
+        self.kind() == JsonKind::Object
             && self
                 .get(TYPENAME)
-                .and_then(|v| v.as_str())
+                .and_then(|v| v.as_str().map(|s| s.into_owned()))
                 .is_none_or(|typename| {
-                    typename == maybe_type || schema.is_subtype(maybe_type, typename)
+                    typename == maybe_type || schema.is_subtype(maybe_type, &typename)
                 })
     }
 
     fn as_i32(&self) -> Option<i32> {
         self.as_i64()?.to_i32()
     }
+
+    fn as_array(&self) -> Option<Vec<Value>> {
+        (self.kind() == JsonKind::Array).then(|| self.array_iter().collect())
+    }
+
+    fn as_str_owned(&self) -> Option<String> {
+        self.as_str().map(|value| value.into_owned())
+    }
+}
+
+/// Keyed operations on an object-shaped [`Value`], for the small metadata
+/// objects the router passes around: GraphQL `extensions`, request
+/// `variables`, coprocessor payloads.
+///
+/// Each mutating method rebuilds the object through a
+/// [`ValueBuilder`], so a sequence of writes costs one rebuild per
+/// write. That suits objects of a handful of keys; response bodies build
+/// through a single long-lived builder instead.
+///
+/// The names carry an `object_` prefix because [`ValueExt::insert`] already
+/// means "insert at a [`Path`]", and a bare `insert` would resolve to it
+/// with a confusing type error rather than the keyed write intended here.
+pub(crate) trait ObjectExt {
+    /// Writes `value` at `key`, returning the previous value if the key was
+    /// present.
+    fn object_insert<'v>(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue<'v>>,
+    ) -> Option<Value>;
+
+    /// Writes `value` at `key` only when absent. Returns whether it wrote.
+    fn object_insert_if_absent<'v>(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue<'v>>,
+    ) -> bool;
+
+    /// Removes `key`, returning its value if it was present.
+    fn object_remove(&mut self, key: &str) -> Option<Value>;
+
+    /// Removes `key`, returning the pair if it was present.
+    fn object_remove_entry(&mut self, key: &str) -> Option<(String, Value)>;
+
+    /// The keys, in insertion order.
+    fn object_keys(&self) -> Vec<String>;
+
+    /// The members, in insertion order.
+    fn object_entries(&self) -> Vec<(String, Value)>;
+
+    /// Reorders the members by key, shallowly.
+    fn object_sort_keys(&mut self);
+}
+
+impl ObjectExt for Value {
+    fn object_insert<'v>(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue<'v>>,
+    ) -> Option<Value> {
+        let key = key.into();
+        let previous = self.get(&key);
+        // A non-object receiver is coerced to an object rather than refused:
+        // these fields are `null` whenever a client sends `"extensions": null`,
+        // and writing to one must not be a request-triggered panic. The keys a
+        // non-object could have held are none, so nothing is discarded that a
+        // caller could observe.
+        let mut builder = if self.kind() == JsonKind::Object {
+            self.compact().edit()
+        } else {
+            ValueBuilder::new()
+        };
+        builder
+            .set(key.as_str(), value)
+            .expect("an object root accepts any key");
+        *self = builder.seal();
+        previous
+    }
+
+    fn object_insert_if_absent<'v>(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<NewValue<'v>>,
+    ) -> bool {
+        let key = key.into();
+        if self.get(&key).is_some() {
+            return false;
+        }
+        self.object_insert(key, value);
+        true
+    }
+
+    fn object_remove(&mut self, key: &str) -> Option<Value> {
+        let previous = self.get(key)?;
+        let mut builder = self.compact().edit();
+        builder.remove(key);
+        *self = builder.seal();
+        Some(previous)
+    }
+
+    fn object_remove_entry(&mut self, key: &str) -> Option<(String, Value)> {
+        let value = self.object_remove(key)?;
+        Some((key.to_owned(), value))
+    }
+
+    fn object_keys(&self) -> Vec<String> {
+        self.object_iter()
+            .map(|(key, _)| key.into_owned())
+            .collect()
+    }
+
+    fn object_entries(&self) -> Vec<(String, Value)> {
+        self.object_iter()
+            .map(|(key, value)| (key.into_owned(), value))
+            .collect()
+    }
+
+    fn object_sort_keys(&mut self) {
+        let mut members: Vec<(Cow<'_, str>, Value)> = self.object_iter().collect();
+        members.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let mut builder = ValueBuilder::new();
+        for (key, value) in members {
+            builder
+                .set(&*key, to_new_value(value))
+                .expect("a fresh object root accepts any key");
+        }
+        *self = builder.seal();
+    }
+}
+
+/// Whether a path element addresses a member of an object or an element of an
+/// array, which decides the shape its container has to have.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Object,
+    Array,
+}
+
+/// The path elements that address a position, and whether a flatten cut the
+/// walk short. Fragments narrow a type rather than addressing a position, so
+/// they contribute nothing.
+fn addressing_segments(path: &Path) -> (Vec<&PathElement>, bool) {
+    let mut segments = Vec::with_capacity(path.len());
+    for element in path.iter() {
+        match element {
+            PathElement::Flatten(_) => return (segments, true),
+            PathElement::Fragment(_) => {}
+            addressing => segments.push(addressing),
+        }
+    }
+    (segments, false)
+}
+
+/// The path elements that address a position, for a walk that writes through a
+/// flatten rather than stopping at it.
+///
+/// A flatten asserts that the value at that position is a list; the element
+/// after it (an index) is what addresses a member of that list, so the flatten
+/// itself contributes no step. [`addressing_segments`] stops at the first one
+/// instead, which is what building a fresh value from a path does.
+fn insert_segments(path: &Path) -> Vec<&PathElement> {
+    path.iter()
+        .filter(|element| !matches!(element, PathElement::Flatten(_) | PathElement::Fragment(_)))
+        .collect()
+}
+
+/// The error a path walk reports when an existing value is the wrong shape to
+/// descend into.
+fn shape_mismatch(shape: Shape) -> FetchError {
+    FetchError::ExecutionPathNotFound {
+        reason: match shape {
+            Shape::Object => "expected an object".to_string(),
+            Shape::Array => "expected an array".to_string(),
+        },
+    }
+}
+
+/// Returns `base` with `leaf` written at `segments`.
+///
+/// Every read here is on a sealed value. Writing through a
+/// [`ValueBuilder`] would mean reading the document back as it is built,
+/// and a container that has grown is a `MutObject`/`MutArray` overlay that
+/// `ValueRef`'s `get`, `index` and `len` do not see -- lookups report members
+/// absent and lengths zero, so a write overwrites a sibling or pads an array
+/// that was already populated.
+///
+/// A missing container is created with the shape its segment addresses, an
+/// array grows with nulls up to an index past its end, and a scalar where a
+/// container is needed is an error.
+fn value_with_path(
+    base: &Value,
+    segments: &[&PathElement],
+    leaf: Value,
+) -> Result<Value, FetchError> {
+    let Some((&first, rest)) = segments.split_first() else {
+        return Ok(leaf);
+    };
+    match first {
+        PathElement::Key(key, _) => match base.kind() {
+            JsonKind::Object => {
+                let child = base.get(key.as_str()).unwrap_or_default();
+                let mut written = Some(value_with_path(&child, rest, leaf)?);
+                let mut members = Vec::with_capacity(base.len().unwrap_or(0) + 1);
+                for (existing, value) in base.object_iter() {
+                    if existing == key.as_str() {
+                        members.push((existing, written.take().expect("a key matches once")));
+                    } else {
+                        members.push((existing, value));
+                    }
+                }
+                if let Some(appended) = written {
+                    members.push((Cow::Borrowed(key.as_str()), appended));
+                }
+                Ok(object(members))
+            }
+            JsonKind::Null => Ok(object([(
+                key.clone(),
+                value_with_path(&Value::default(), rest, leaf)?,
+            )])),
+            _ => Err(shape_mismatch(Shape::Object)),
+        },
+        &PathElement::Index(index) => match base.kind() {
+            JsonKind::Array | JsonKind::Null => {
+                let mut items: Vec<Value> = base.array_iter().collect();
+                if items.len() <= index {
+                    items.resize_with(index + 1, Value::default);
+                }
+                let child = items[index].clone();
+                items[index] = value_with_path(&child, rest, leaf)?;
+                Ok(array(items))
+            }
+            _ => Err(shape_mismatch(Shape::Array)),
+        },
+        _ => unreachable!("addressing_segments yields only keys and indexes"),
+    }
+}
+
+/// Deep-merges `other` into `base` in place.
+///
+/// One builder spans the whole walk: `base` is adopted by reference through
+/// [`apollo_json::Value::into_document`], each container is descended into
+/// rather than rebuilt, and a subtree taken from `other` is written as
+/// [`NewValue::Node`], which the arena stores as a reference. Rebuilding each
+/// container instead — the shape a pure walk over sealed values takes — costs
+/// an arena and a copy of every key per object node on the path.
+///
+/// Object keys union, keeping `base`'s order and appending keys only `other`
+/// has; array elements merge index-wise with extras appended; a `null` in
+/// `other` leaves `base` alone; a container meeting the other container kind
+/// keeps `base`.
+fn merge_in_place(base: &mut Value, other: &Value, schema: Option<&Schema>) {
+    match (base.kind(), other.kind()) {
+        (JsonKind::Object, JsonKind::Object) | (JsonKind::Array, JsonKind::Array) => {}
+        (_, JsonKind::Null) => return,
+        (JsonKind::Object, JsonKind::Array) => {
+            // XXX(@goto-bus-stop): this should be fallible..?
+            tracing::debug!("trying to replace an object with an array");
+            return;
+        }
+        (JsonKind::Array, JsonKind::Object) => {
+            // XXX(@goto-bus-stop): this should be fallible..?
+            tracing::debug!("trying to replace an array with an object");
+            return;
+        }
+        // Scalars, and any container meeting a scalar, take the incoming value
+        // whole -- adopted by reference, not copied.
+        _ => {
+            *base = other.clone();
+            return;
+        }
+    }
+
+    let mut builder = base.clone().edit();
+    merge_into_cursor(&mut builder.root_mut(), other, schema);
+    *base = builder.seal();
+}
+
+/// Merges `other` into the container the cursor addresses. Both sides are the
+/// same container kind; the caller has already settled that.
+fn merge_into_cursor(cursor: &mut ValueMut<'_>, other: &Value, schema: Option<&Schema>) {
+    match other.kind() {
+        JsonKind::Object => {
+            for (key, incoming) in other.object_iter() {
+                merge_one(cursor, MergeSlot::Key(&key), &incoming, schema);
+            }
+        }
+        JsonKind::Array => {
+            for (index, incoming) in other.array_iter().enumerate() {
+                merge_one(cursor, MergeSlot::Index(index), &incoming, schema);
+            }
+        }
+        _ => unreachable!("caller settled that both sides are containers"),
+    }
+}
+
+/// One slot of the container a cursor addresses.
+#[derive(Clone, Copy)]
+enum MergeSlot<'a> {
+    Key(&'a str),
+    Index(usize),
+}
+
+impl<'a> From<MergeSlot<'a>> for apollo_json::PathSegment<'a> {
+    fn from(slot: MergeSlot<'a>) -> Self {
+        match slot {
+            MergeSlot::Key(key) => apollo_json::PathSegment::Key(key),
+            MergeSlot::Index(index) => apollo_json::PathSegment::Index(index),
+        }
+    }
+}
+
+/// Merges one incoming value into one slot: descend when both sides are the
+/// same container kind, otherwise write the incoming value by reference.
+fn merge_one(
+    cursor: &mut ValueMut<'_>,
+    slot: MergeSlot<'_>,
+    incoming: &Value,
+    schema: Option<&Schema>,
+) {
+    let existing = match slot {
+        MergeSlot::Key(key) => cursor.value().get(key).map(|value| value.kind()),
+        MergeSlot::Index(index) => cursor.value().index(index).map(|value| value.kind()),
+    };
+    match (existing, incoming.kind()) {
+        // An absent slot takes the incoming value whatever its shape,
+        // including a null: a subgraph reporting a field as null still has to
+        // land, because value completion reads it back to decide whether the
+        // field or its parent is the one nullified. This arm therefore comes
+        // before the null case, which only protects a value already present.
+        (None, _) => {
+            let _ = cursor.set(slot, NewValue::Node(incoming.clone()));
+        }
+        // A null in `other` never overwrites what `base` already holds.
+        (_, JsonKind::Null) => {}
+        (Some(JsonKind::Object), JsonKind::Object) | (Some(JsonKind::Array), JsonKind::Array) => {
+            if let Ok(mut child) = cursor.child_mut(slot) {
+                merge_into_cursor(&mut child, incoming, schema);
+            }
+        }
+        (Some(JsonKind::Object), JsonKind::Array) => {
+            // XXX(@goto-bus-stop): this should be fallible..?
+            tracing::debug!("trying to replace an object with an array");
+        }
+        (Some(JsonKind::Array), JsonKind::Object) => {
+            // XXX(@goto-bus-stop): this should be fallible..?
+            tracing::debug!("trying to replace an array with an object");
+        }
+        (Some(_), _) => {
+            if keeps_more_specific_typename(cursor, slot, incoming, schema) {
+                return;
+            }
+            let _ = cursor.set(slot, NewValue::Node(incoming.clone()));
+        }
+    }
+}
+
+/// Whether a `__typename` already in place names a subtype of the incoming
+/// one, in which case the incoming value is the less specific of the two and
+/// the response keeps what it has.
+fn keeps_more_specific_typename(
+    cursor: &ValueMut<'_>,
+    slot: MergeSlot<'_>,
+    incoming: &Value,
+    schema: Option<&Schema>,
+) -> bool {
+    let MergeSlot::Key(TYPENAME) = slot else {
+        return false;
+    };
+    let Some(schema) = schema else {
+        return false;
+    };
+    let (Some(existing), Some(incoming)) = (
+        cursor
+            .value()
+            .get(TYPENAME)
+            .and_then(|value| value.as_str().map(|text| text.into_owned())),
+        incoming.as_str_owned(),
+    ) else {
+        return false;
+    };
+    schema.is_subtype(&incoming, &existing)
 }
 
 fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>) -> Value {
     if let Some(tc) = type_conditions {
-        match value {
-            Value::Object(ref o) => {
-                if let Some(Value::String(type_name)) = &o.get("__typename")
+        match value.kind() {
+            JsonKind::Object => {
+                if let Some(type_name) = value.get("__typename").and_then(|v| v.as_str_owned())
                     && !tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                 {
-                    return Value::Null;
+                    return Value::default();
                 }
             }
-            Value::Array(v) => {
-                return Value::Array(
-                    v.into_iter()
-                        .map(|v| filter_type_conditions(v, type_conditions))
-                        .collect(),
-                );
+            JsonKind::Array => {
+                let mut builder = ValueBuilder::new();
+                builder.remove(0usize);
+                let doc = apollo_json::Value::parse(b"[]".to_vec()).expect("`[]` is valid JSON");
+                let mut inner = doc.edit();
+                for item in value.array_iter() {
+                    let filtered = filter_type_conditions(item, type_conditions);
+                    let _ = inner.push(to_new_value(filtered));
+                }
+                let _ = builder;
+                return inner.seal();
             }
             _ => {}
         }
@@ -573,35 +717,32 @@ fn filter_type_conditions(value: Value, type_conditions: &Option<TypeConditions>
     value
 }
 
-fn iterate_path<'a, F>(
-    schema: &Schema,
-    parent: &mut Path,
-    path: &'a [PathElement],
-    data: &'a Value,
-    f: &mut F,
-) where
-    F: FnMut(&Path, &'a Value),
+fn iterate_path<F>(schema: &Schema, parent: &mut Path, path: &[PathElement], data: Value, f: &mut F)
+where
+    F: FnMut(&Path, Value),
 {
     match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten(type_conditions)) => {
-            if let Some(array) = data.as_array() {
-                for (i, value) in array.iter().enumerate() {
+            if data.kind() == JsonKind::Array {
+                for (i, value) in data.array_iter().enumerate() {
                     if let Some(tc) = type_conditions {
                         if !tc.is_empty() {
-                            if let Value::Object(o) = value
-                                && let Some(Value::String(type_name)) = o.get("__typename")
+                            if value.kind() == JsonKind::Object
+                                && let Some(type_name) =
+                                    value.get("__typename").and_then(|v| v.as_str_owned())
                                 && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                             {
                                 parent.push(PathElement::Index(i));
-                                iterate_path(schema, parent, &path[1..], value, f);
+                                iterate_path(schema, parent, &path[1..], value.clone(), f);
                                 parent.pop();
                             }
 
-                            if let Value::Array(array) = value {
-                                for (i, value) in array.iter().enumerate() {
-                                    if let Value::Object(o) = value
-                                        && let Some(Value::String(type_name)) = o.get("__typename")
+                            if value.kind() == JsonKind::Array {
+                                for (i, value) in value.array_iter().enumerate() {
+                                    if value.kind() == JsonKind::Object
+                                        && let Some(type_name) =
+                                            value.get("__typename").and_then(|v| v.as_str_owned())
                                         && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                                     {
                                         parent.push(PathElement::Index(i));
@@ -620,8 +761,8 @@ fn iterate_path<'a, F>(
             }
         }
         Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data
-                && let Some(value) = a.get(*i)
+            if data.kind() == JsonKind::Array
+                && let Some(value) = data.index(*i)
             {
                 parent.push(PathElement::Index(*i));
                 iterate_path(schema, parent, &path[1..], value, f);
@@ -631,19 +772,21 @@ fn iterate_path<'a, F>(
         Some(PathElement::Key(k, type_conditions)) => {
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
-                    if let Value::Object(o) = data {
-                        if let Some(value) = o.get(k.as_str())
-                            && let Some(Value::String(type_name)) = value.get("__typename")
+                    if data.kind() == JsonKind::Object {
+                        if let Some(value) = data.get(k.as_str())
+                            && let Some(type_name) =
+                                value.get("__typename").and_then(|v| v.as_str_owned())
                             && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                         {
                             parent.push(PathElement::Key(k.to_string(), None));
                             iterate_path(schema, parent, &path[1..], value, f);
                             parent.pop();
                         }
-                    } else if let Value::Array(array) = data {
-                        for (i, value) in array.iter().enumerate() {
-                            if let Value::Object(o) = value
-                                && let Some(Value::String(type_name)) = o.get("__typename")
+                    } else if data.kind() == JsonKind::Array {
+                        for (i, value) in data.array_iter().enumerate() {
+                            if value.kind() == JsonKind::Object
+                                && let Some(type_name) =
+                                    value.get("__typename").and_then(|v| v.as_str_owned())
                                 && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
                             {
                                 parent.push(PathElement::Index(i));
@@ -653,14 +796,14 @@ fn iterate_path<'a, F>(
                         }
                     }
                 }
-            } else if let Value::Object(o) = data {
-                if let Some(value) = o.get(k.as_str()) {
+            } else if data.kind() == JsonKind::Object {
+                if let Some(value) = data.get(k.as_str()) {
                     parent.push(PathElement::Key(k.to_string(), None));
                     iterate_path(schema, parent, &path[1..], value, f);
                     parent.pop();
                 }
-            } else if let Value::Array(array) = data {
-                for (i, value) in array.iter().enumerate() {
+            } else if data.kind() == JsonKind::Array {
+                for (i, value) in data.array_iter().enumerate() {
                     parent.push(PathElement::Index(i));
                     iterate_path(schema, parent, path, value, f);
                     parent.pop();
@@ -675,8 +818,8 @@ fn iterate_path<'a, F>(
                 // `parent` is a direct path to a specific position in the value and do not need
                 // fragments.
                 iterate_path(schema, parent, &path[1..], data, f);
-            } else if let Value::Array(array) = data {
-                for (i, value) in array.iter().enumerate() {
+            } else if data.kind() == JsonKind::Array {
+                for (i, value) in data.array_iter().enumerate() {
                     parent.push(PathElement::Index(i));
                     iterate_path(schema, parent, path, value, f);
                     parent.pop();
@@ -686,103 +829,128 @@ fn iterate_path<'a, F>(
     }
 }
 
-fn iterate_path_mut<'a, F>(
+fn iterate_path_mut<F>(
     schema: &Schema,
     parent: &mut Path,
-    path: &'a [PathElement],
-    data: &'a mut Value,
+    path: &[PathElement],
+    mut data: ValueMut<'_>,
     f: &mut F,
 ) where
-    F: FnMut(&Path, &'a mut Value),
+    F: FnMut(&Path, ValueMut<'_>),
 {
     match path.first() {
         None => f(parent, data),
         Some(PathElement::Flatten(type_conditions)) => {
-            if let Some(array) = data.as_array_mut() {
-                for (i, value) in array.iter_mut().enumerate() {
-                    if let Some(tc) = type_conditions {
-                        if !tc.is_empty()
-                            && let Value::Object(o) = value
-                            && let Some(Value::String(type_name)) = o.get("__typename")
-                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                        {
-                            parent.push(PathElement::Index(i));
-                            iterate_path_mut(schema, parent, &path[1..], value, f);
-                            parent.pop();
-                        }
-                    } else {
+            if data.value().kind() == JsonKind::Array {
+                let len = data.value().len().unwrap_or(0);
+                for i in 0..len {
+                    let matches = match type_conditions {
+                        Some(tc) if !tc.is_empty() => data
+                            .value()
+                            .index(i)
+                            .is_some_and(|value| value_matches_type_conditions(value, tc)),
+                        Some(_) => false,
+                        None => true,
+                    };
+                    if matches && let Ok(child) = data.child_mut(i) {
                         parent.push(PathElement::Index(i));
-                        iterate_path_mut(schema, parent, &path[1..], value, f);
+                        iterate_path_mut(schema, parent, &path[1..], child, f);
                         parent.pop();
                     }
                 }
             }
         }
         Some(PathElement::Index(i)) => {
-            if let Value::Array(a) = data
-                && let Some(value) = a.get_mut(*i)
+            if data.value().kind() == JsonKind::Array
+                && let Ok(child) = data.child_mut(*i)
             {
                 parent.push(PathElement::Index(*i));
-                iterate_path_mut(schema, parent, &path[1..], value, f);
+                iterate_path_mut(schema, parent, &path[1..], child, f);
                 parent.pop();
             }
         }
         Some(PathElement::Key(k, type_conditions)) => {
             if let Some(tc) = type_conditions {
                 if !tc.is_empty() {
-                    if let Value::Object(o) = data {
-                        if let Some(value) = o.get_mut(k.as_str())
-                            && let Some(Value::String(type_name)) = value.get("__typename")
-                            && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                        {
+                    if data.value().kind() == JsonKind::Object {
+                        let matches = data
+                            .value()
+                            .get(k.as_str())
+                            .is_some_and(|value| value_matches_type_conditions(value, tc));
+                        if matches && let Ok(child) = data.child_mut(k.as_str()) {
                             parent.push(PathElement::Key(k.to_string(), None));
-                            iterate_path_mut(schema, parent, &path[1..], value, f);
+                            iterate_path_mut(schema, parent, &path[1..], child, f);
                             parent.pop();
                         }
-                    } else if let Value::Array(array) = data {
-                        for (i, value) in array.iter_mut().enumerate() {
-                            if let Value::Object(o) = value
-                                && let Some(Value::String(type_name)) = o.get("__typename")
-                                && tc.iter().any(|tc| tc.as_str() == type_name.as_str())
-                            {
+                    } else if data.value().kind() == JsonKind::Array {
+                        let len = data.value().len().unwrap_or(0);
+                        for i in 0..len {
+                            let matches = data
+                                .value()
+                                .index(i)
+                                .is_some_and(|value| value_matches_type_conditions(value, tc));
+                            if matches && let Ok(child) = data.child_mut(i) {
                                 parent.push(PathElement::Index(i));
-                                iterate_path_mut(schema, parent, path, value, f);
+                                iterate_path_mut(schema, parent, path, child, f);
                                 parent.pop();
                             }
                         }
                     }
                 }
-            } else if let Value::Object(o) = data {
-                if let Some(value) = o.get_mut(k.as_str()) {
+            } else if data.value().kind() == JsonKind::Object {
+                if let Ok(child) = data.child_mut(k.as_str()) {
                     parent.push(PathElement::Key(k.to_string(), None));
-                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    iterate_path_mut(schema, parent, &path[1..], child, f);
                     parent.pop();
                 }
-            } else if let Value::Array(array) = data {
-                for (i, value) in array.iter_mut().enumerate() {
-                    parent.push(PathElement::Index(i));
-                    iterate_path_mut(schema, parent, path, value, f);
-                    parent.pop();
+            } else if data.value().kind() == JsonKind::Array {
+                let len = data.value().len().unwrap_or(0);
+                for i in 0..len {
+                    if let Ok(child) = data.child_mut(i) {
+                        parent.push(PathElement::Index(i));
+                        iterate_path_mut(schema, parent, path, child, f);
+                        parent.pop();
+                    }
                 }
             }
         }
         Some(PathElement::Fragment(name)) => {
-            if data.is_object_of_type(schema, name) {
-                // Note that (not unlike `Flatten`) we do not include the fragment in the `parent`
-                // path, because we want that path to be a "pure" response path. Fragments in path
-                // are used to essentially create a type-based choice in a "selection" path, but
-                // `parent` is a direct path to a specific position in the value and do not need
-                // fragments.
+            if is_value_ref_object_of_type(data.value(), schema, name) {
                 iterate_path_mut(schema, parent, &path[1..], data, f);
-            } else if let Value::Array(array) = data {
-                for (i, value) in array.iter_mut().enumerate() {
-                    parent.push(PathElement::Index(i));
-                    iterate_path_mut(schema, parent, path, value, f);
-                    parent.pop();
+            } else if data.value().kind() == JsonKind::Array {
+                let len = data.value().len().unwrap_or(0);
+                for i in 0..len {
+                    if let Ok(child) = data.child_mut(i) {
+                        parent.push(PathElement::Index(i));
+                        iterate_path_mut(schema, parent, path, child, f);
+                        parent.pop();
+                    }
                 }
             }
         }
     }
+}
+
+fn value_matches_type_conditions(value: apollo_json::BuilderRef<'_>, tc: &[String]) -> bool {
+    value.kind() == JsonKind::Object
+        && value
+            .get("__typename")
+            .and_then(|v| v.as_str())
+            .is_some_and(|type_name| tc.iter().any(|tc| tc.as_str() == type_name.as_ref()))
+}
+
+fn is_value_ref_object_of_type(
+    value: apollo_json::BuilderRef<'_>,
+    schema: &Schema,
+    maybe_type: &str,
+) -> bool {
+    value.kind() == JsonKind::Object
+        && value
+            .get(TYPENAME)
+            .and_then(|v| v.as_str().map(|s| s.into_owned()))
+            .is_none_or(|typename| {
+                typename == maybe_type || schema.is_subtype(maybe_type, &typename)
+            })
 }
 
 /// A GraphQL path element that is composes of strings or numbers.
@@ -1171,9 +1339,235 @@ impl fmt::Display for Path {
     }
 }
 
+/// A document whose root is `value`. A container passed as
+/// [`NewValue::Node`] is adopted by reference, sharing its arena rather than
+/// being copied.
+fn rooted_document<'v>(value: impl Into<NewValue<'v>>) -> apollo_json::Value {
+    let mut builder = ValueBuilder::new();
+    builder
+        .set_path(&[], value)
+        .expect("an empty path replaces the builder root");
+    builder.seal()
+}
+
+/// A standalone [`Value`] holding `value`.
+fn rooted_value<'v>(value: impl Into<NewValue<'v>>) -> Value {
+    rooted_document(value)
+}
+
+/// A JSON `null`.
+#[allow(dead_code)]
+pub(crate) fn null() -> Value {
+    Value::default()
+}
+
+/// A JSON string.
+#[allow(dead_code)]
+pub(crate) fn string(value: impl Into<String>) -> Value {
+    rooted_value(NewValue::String(value.into().into()))
+}
+
+/// A JSON boolean.
+#[allow(dead_code)]
+pub(crate) fn bool_value(value: bool) -> Value {
+    rooted_value(NewValue::Bool(value))
+}
+
+/// A JSON number holding a signed integer.
+#[allow(dead_code)]
+pub(crate) fn from_i64(value: i64) -> Value {
+    rooted_value(NewValue::Int(value))
+}
+
+/// A JSON number holding an unsigned integer, keeping every digit of values
+/// above [`i64::MAX`].
+#[allow(dead_code)]
+pub(crate) fn from_u64(value: u64) -> Value {
+    match i64::try_from(value) {
+        Ok(value) => from_i64(value),
+        Err(_) => apollo_json::Value::parse(value.to_string().into_bytes())
+            .expect("a decimal integer literal is valid JSON"),
+    }
+}
+
+/// A JSON number holding a float. Infinity and NaN have no JSON form and come
+/// back as `null`.
+#[allow(dead_code)]
+pub(crate) fn from_f64(value: f64) -> Value {
+    if value.is_finite() {
+        rooted_value(NewValue::Float(value))
+    } else {
+        null()
+    }
+}
+
+/// A JSON array of `items`, each adopted by reference.
+#[allow(dead_code)]
+pub(crate) fn array(items: impl IntoIterator<Item = Value>) -> Value {
+    let mut builder = ValueBuilder::new_array();
+    for item in items {
+        builder
+            .push(item)
+            .expect("the builder root is an array, which accepts elements");
+    }
+    builder.seal()
+}
+
+/// A JSON object of `entries`, each value adopted by reference. A repeated key
+/// keeps the value that came last.
+#[allow(dead_code)]
+pub(crate) fn object<K: AsRef<str>>(entries: impl IntoIterator<Item = (K, Value)>) -> Value {
+    let mut builder = ValueBuilder::new();
+    for (key, value) in entries {
+        builder
+            .set(key.as_ref(), value)
+            .expect("a fresh object root accepts any key");
+    }
+    builder.seal()
+}
+
+/// Converts to `serde_json_bytes::Value` for the call sites that still speak
+/// the legacy type. This walks and copies the whole value, so it belongs on
+/// cold paths only — never on the response path.
+#[allow(dead_code)]
+pub(crate) fn to_legacy(value: &Value) -> serde_json_bytes::Value {
+    rooted_document(value.clone()).to_legacy()
+}
+
+/// Converts from `serde_json_bytes::Value`. This walks and copies the whole
+/// value, so it belongs on cold paths only — never on the response path.
+#[allow(dead_code)]
+pub(crate) fn from_legacy(value: &serde_json_bytes::Value) -> Value {
+    apollo_json::Value::from_legacy(value)
+}
+
+/// The members of `object` as a `serde_json_bytes` map, for the call sites that
+/// still speak the legacy type. This walks and copies every member, so it
+/// belongs on cold paths only — never on the response path.
+#[allow(dead_code)]
+pub(crate) fn object_to_legacy(object: &Value) -> LegacyMap {
+    object
+        .object_iter()
+        .map(|(key, value)| (key.into_owned().into(), to_legacy(&value)))
+        .collect()
+}
+
+/// An object-shaped [`Value`] holding the members of a `serde_json_bytes` map.
+/// This walks and copies every member, so it belongs on cold paths only — never
+/// on the response path.
+pub(crate) fn object_from_legacy(map: &LegacyMap) -> Value {
+    object(
+        map.iter()
+            .map(|(key, value)| (key.as_str().to_string(), from_legacy(value))),
+    )
+}
+
+/// Serde field adapter for an arena [`Value`] stored inside a type that
+/// round-trips through a foreign serde deserializer -- the distributed
+/// query-plan cache reads plans back with `serde_json`. Capture is
+/// impossible there (serde's data model cannot carry an arena reference),
+/// so deserialization rebuilds the value structurally through the legacy
+/// tree and pays a copy. Serialization streams the value as plain data.
+///
+/// Reach for this only at a boundary like a cache codec; response-path
+/// values parse with apollo-json and never need it.
+pub(crate) mod value_rebuild {
+    use serde::Deserialize as _;
+    use serde::Deserializer;
+    use serde::Serialize as _;
+    use serde::Serializer;
+
+    use super::Value;
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &Value,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Value, D::Error> {
+        serde_json_bytes::Value::deserialize(deserializer).map(|value| super::from_legacy(&value))
+    }
+}
+
+/// The `serde_json_bytes` spelling of a JSON object, as the legacy call sites
+/// name it.
+pub(crate) type LegacyMap =
+    serde_json_bytes::Map<serde_json_bytes::ByteString, serde_json_bytes::Value>;
+
+/// Serializes any [`Serialize`] type into a [`Value`], the counterpart of
+/// [`apollo_json::from_value`]. Nested [`Value`]s are adopted by reference.
+///
+/// # Errors
+/// Returns [`apollo_json::JsonError`] when the type serializes something JSON
+/// cannot hold, such as a non-string map key.
+#[allow(dead_code)]
+pub(crate) fn to_value<T>(value: &T) -> Result<Value, apollo_json::JsonError>
+where
+    T: Serialize + ?Sized,
+{
+    apollo_json::to_value(value)
+}
+
+/// The value if it is object-shaped, or a message naming the expected shape.
+macro_rules! ensure_object {
+    ($value:expr) => {{
+        match $value {
+            value if value.kind() == ::apollo_json::JsonKind::Object => Ok(value),
+            _ => Err("invalid type, expected an object"),
+        }
+    }};
+}
+
+/// The value's elements, or a message naming the expected shape.
+macro_rules! ensure_array {
+    ($value:expr) => {{
+        let value = &$value;
+        $crate::json_ext::ValueExt::as_array(value).ok_or("invalid type, expected an array")
+    }};
+}
+
+/// Removes `$key` from `$object`. An absent key and an explicit `null` are both
+/// `None`; with a [`JsonKind`](apollo_json::JsonKind) given, any other shape is
+/// an error naming the key.
+macro_rules! extract_key_value_from_object {
+    ($object:expr, $key:literal, $kind:expr) => {{
+        match $crate::json_ext::ObjectExt::object_remove(&mut $object, $key) {
+            None => Ok(None),
+            Some(value) if value.is_null() => Ok(None),
+            Some(value) if value.kind() == $kind => Ok(Some(value)),
+            Some(_) => Err(concat!("invalid type for key: ", $key)),
+        }
+    }};
+    ($object:expr, $key:literal) => {{
+        match $crate::json_ext::ObjectExt::object_remove(&mut $object, $key) {
+            None => None,
+            Some(value) if value.is_null() => None,
+            Some(value) => Some(value),
+        }
+    }};
+}
+
+/// Builds a [`Value`] from `serde_json_bytes::json!` syntax, for test fixtures.
+///
+/// Import it under the name the fixtures already use:
+/// `use crate::json_ext::json_value as json;`
+#[cfg(test)]
+macro_rules! json_value {
+    ($($tokens:tt)*) => {
+        ::apollo_json::json!($($tokens)*)
+    };
+}
+
+#[cfg(test)]
+pub(crate) use json_value;
+
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::json;
+    use apollo_json::json;
 
     use super::*;
 
@@ -1236,11 +1630,7 @@ mod tests {
         .unwrap()
     }
 
-    fn select_values<'a>(
-        schema: &Schema,
-        path: &'a Path,
-        data: &'a Value,
-    ) -> Result<Vec<&'a Value>, FetchError> {
+    fn select_values(schema: &Schema, path: &Path, data: &Value) -> Result<Vec<Value>, FetchError> {
         let mut v = Vec::new();
         data.select_values_and_paths(schema, path, |_path, value| {
             v.push(value);
@@ -1254,7 +1644,7 @@ mod tests {
         let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/1/prop1");
         let result = select_values(&schema, &path, &json).unwrap();
-        assert_eq!(result, vec![&Value::Number(2.into())]);
+        assert_eq!(result, vec![json!(2)]);
     }
 
     #[test]
@@ -1263,7 +1653,7 @@ mod tests {
         let json = json!({"obj":{"arr":[{"prop1":1},{"prop1":2}]}});
         let path = Path::from("obj/arr/@");
         let result = select_values(&schema, &path, &json).unwrap();
-        assert_eq!(result, vec![&json!({"prop1":1}), &json!({"prop1":2})]);
+        assert_eq!(result, vec![json!({"prop1":1}), json!({"prop1":2})]);
     }
 
     #[test]
@@ -1292,10 +1682,10 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                &json!({"prop3":1}),
-                &json!({"prop3":2}),
-                &json!({"prop3":3}),
-                &json!({"prop3":4}),
+                json!({"prop3":1}),
+                json!({"prop3":2}),
+                json!({"prop3":3}),
+                json!({"prop3":4}),
             ],
         );
     }
@@ -1522,11 +1912,11 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                &json!({
+                json!({
                     "__typename": "A",
                     "x": 0,
                 }),
-                &json!({
+                json!({
                     "__typename": "A",
                     "x": 3,
                 }),
@@ -1561,5 +1951,21 @@ mod tests {
             serde_json::to_string(&path).unwrap(),
             "[\"k\",\"... on T\",\"@\",\"arr\",3]",
         );
+    }
+
+    /// apollo-json registers its errors in apollo-errors' linkme registry. If two
+    /// apollo-errors versions are linked, both declare `ERROR_REGISTRY` and every
+    /// registry read panics with a duplicate distributed_slice error.
+    #[test]
+    fn test_apollo_json_errors_read_the_error_registry() {
+        use apollo_errors::ErrorExt;
+
+        assert!(
+            apollo_errors::private::error_metadata()
+                .iter()
+                .any(|entry| entry.type_name.ends_with("JsonError"))
+        );
+        let error = Value::parse(b"{".to_vec()).unwrap_err();
+        assert_eq!(error.http_status(), http::StatusCode::BAD_REQUEST);
     }
 }

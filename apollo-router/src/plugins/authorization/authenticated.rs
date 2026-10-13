@@ -507,7 +507,6 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_compiler::ast;
     use multimap::MultiMap;
-    use serde_json_bytes::json;
     use tower::ServiceExt;
 
     use crate::Context;
@@ -516,6 +515,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderName;
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
+    use crate::json_ext::json_value as json;
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
@@ -1547,12 +1547,7 @@ mod tests {
             .unwrap();
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-            .variables(
-                json! {{ "isAuthenticated": true }}
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            )
+            .variables(json! {{ "isAuthenticated": true }})
             .context(context)
             // Request building here
             .build()
@@ -1628,12 +1623,7 @@ mod tests {
         .unwrap();*/
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
-            .variables(
-                json! {{ "isAuthenticated": false }}
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            )
+            .variables(json! {{ "isAuthenticated": false }})
             .context(context)
             // Request building here
             .build()
@@ -1713,12 +1703,7 @@ mod tests {
         });
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id } ... @defer { nonNullId } } }")
-            .variables(
-                json! {{ "isAuthenticated": false }}
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            )
+            .variables(json! {{ "isAuthenticated": false }})
             .context(context)
             .build()
             .unwrap();

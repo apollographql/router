@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -19,6 +18,7 @@ use crate::configuration::HoistOrphanErrors;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
+use crate::json_ext::Value;
 use crate::plugins::connectors::declared_errors::ConnectorDeclaredErrors;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::fetch_service_handle_subscription;
@@ -285,7 +285,8 @@ impl FetchService {
                             .build(),
                     )
                     .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
+                    .expect("it won't fail because the url is correct and already checked; qed")
+                    .into(),
             )
             .subgraph_name(service_name.to_string())
             .operation_kind(*operation_kind)

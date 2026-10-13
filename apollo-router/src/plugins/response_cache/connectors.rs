@@ -14,7 +14,6 @@ use opentelemetry::Array;
 use opentelemetry::Key;
 use opentelemetry::StringValue;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tokio::sync::RwLock;
 use tower::BoxError;
 use tower_service::Service;
@@ -43,6 +42,7 @@ use super::plugin::Ttl;
 use super::plugin::assemble_response_from_errors;
 use super::plugin::build_entity_debug_entry;
 use super::plugin::build_entity_store_document;
+use super::plugin::debug_entity_key;
 use super::plugin::get_invalidation_entity_keys_from_schema;
 use super::plugin::hash_private_id;
 use super::plugin::non_entity_errors;
@@ -57,7 +57,10 @@ use crate::Context;
 use crate::context::OPERATION_KIND;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::connectors::query_plans::get_connectors;
 use crate::plugins::response_cache::cache_key::ConnectorCacheKeyEntity;
@@ -411,7 +414,7 @@ impl ConnectorCacheService {
                 Some(
                     graphql::Request::builder()
                         .query(operation_str.clone())
-                        .variables(request.variables.variables.clone().into_iter().collect())
+                        .variables(request.variables.variables.clone())
                         .build(),
                 )
             } else {
@@ -515,7 +518,7 @@ impl ConnectorCacheService {
         is_known_private: bool,
         private_query_key: PrivateQueryKey,
         indexes: InvalidationIndexes,
-        key_inputs: Value,
+        key_inputs: serde_json_bytes::Value,
     ) -> Result<connect::Response, BoxError> {
         // Get auth metadata from context
         let auth_metadata = request
@@ -544,49 +547,51 @@ impl ConnectorCacheService {
             Some(
                 graphql::Request::builder()
                     .query(operation_str.clone())
-                    .variables(request.variables.variables.clone().into_iter().collect())
+                    .variables(request.variables.variables.clone())
                     .build(),
             )
         } else {
             None
         };
 
-        let representations = request
+        let Some(representations) = request
             .variables
             .variables
-            .get_mut(REPRESENTATIONS)
-            .and_then(|value| value.as_array_mut());
-
-        let Some(representations) = representations else {
+            .get(REPRESENTATIONS)
+            .and_then(|value| value.as_array())
+        else {
             // No representations found, pass through
             return self.service.call(request).await;
         };
 
         // Build cache keys for each representation
         let mut cache_keys = Vec::with_capacity(representations.len());
-        for representation in representations.iter_mut() {
-            let representation_obj =
-                representation
-                    .as_object_mut()
-                    .ok_or_else(|| FetchError::MalformedRequest {
-                        reason: "representation variable should be an array of objects".to_string(),
-                    })?;
+        for representation in &representations {
+            if !representation.is_object() {
+                return Err(FetchError::MalformedRequest {
+                    reason: "representation variable should be an array of objects".to_string(),
+                }
+                .into());
+            }
 
-            let typename_value = representation_obj
+            let typename = representation
                 .get(TYPENAME)
                 .ok_or_else(|| FetchError::MalformedRequest {
                     reason: "missing __typename in representation".to_string(),
                 })?
-                .clone();
-
-            let typename = typename_value
-                .as_str()
+                .as_str_owned()
                 .ok_or_else(|| FetchError::MalformedRequest {
                     reason: "__typename in representation is not a string".to_string(),
                 })?;
 
-            // Temporarily remove __typename for hashing (same as subgraph flow)
-            representation_obj.remove(TYPENAME);
+            // The cache key identifies the entity without `__typename` (same as the subgraph
+            // flow), which the connector still needs on the wire, so it is excluded here rather
+            // than stripped from the request and put back.
+            let entity_fields = json_ext::object(
+                representation
+                    .object_iter()
+                    .filter(|(key, _)| key != TYPENAME),
+            );
 
             // Get the entity key from `representation`, only needed in debug for the cache debugger.
             // Connectors don't use @key directives — their key fields are derived from variable
@@ -596,14 +601,14 @@ impl ConnectorCacheService {
             let representation_entity_key = if self.debug {
                 request.keys.as_ref().map(|keys| {
                     let default_document = Default::default();
-                    let mut entity_key = serde_json_bytes::Map::new();
-                    for field in keys.selection_set.root_fields(&default_document) {
-                        let key = field.name.as_str();
-                        if let Some(val) = representation_obj.get(key) {
-                            entity_key.insert(ByteString::from(key), val.clone());
-                        }
-                    }
-                    entity_key
+                    json_ext::object(
+                        keys.selection_set
+                            .root_fields(&default_document)
+                            .filter_map(|field| {
+                                let key = field.name.as_str();
+                                entity_fields.get(key).map(|value| (key, value))
+                            }),
+                    )
                 })
             } else {
                 None
@@ -611,8 +616,8 @@ impl ConnectorCacheService {
 
             let cache_key = ConnectorCacheKeyEntity {
                 source_name: &source_name,
-                entity_type: typename,
-                representation: representation_obj,
+                entity_type: &typename,
+                representation: &entity_fields,
                 operation_hash: &operation_hash,
                 additional_data_hash: &additional_data_hash,
                 private_id: if is_known_private {
@@ -628,7 +633,7 @@ impl ConnectorCacheService {
             // subgraph path.
             let mut cache_tags: Vec<CacheTag> = Vec::new();
             if indexes.is_enabled(IndexMode::Type) {
-                cache_tags.push(CacheTag::Type(typename.to_string()));
+                cache_tags.push(CacheTag::Type(typename.clone()));
             }
             // Extract @cacheTag invalidation keys from the supergraph schema.
             if indexes.is_enabled(IndexMode::CacheTag)
@@ -636,15 +641,12 @@ impl ConnectorCacheService {
                     &self.supergraph_schema,
                     &connector_synthetic_name,
                     &self.subgraph_enums,
-                    typename,
-                    representation_obj,
+                    &typename,
+                    &entity_fields,
                 )
             {
                 cache_tags.extend(cache_tag_keys.into_iter().map(CacheTag::Tag));
             }
-
-            // Restore __typename
-            representation_obj.insert(TYPENAME, typename_value);
 
             cache_keys.push(CacheMetadata {
                 cache_key,
@@ -708,23 +710,11 @@ impl ConnectorCacheService {
         let mut cache_control: Option<CacheControl> = None;
         let mut cache_hit_miss: HashMap<String, CacheHitMiss> = HashMap::new();
 
-        let representations = request
-            .variables
-            .variables
-            .get_mut(REPRESENTATIONS)
-            .and_then(|value| value.as_array_mut())
-            .expect("representations should exist");
-
         // Record graphql.types on the lookup span (deduplicated typenames)
-        let typenames_for_span: HashSet<String> = representations
-            .iter()
-            .filter_map(|r| {
-                r.as_object()
-                    .and_then(|o| o.get(TYPENAME))
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect();
+        let typename_of =
+            |representation: &Value| representation.get(TYPENAME).and_then(|v| v.as_str_owned());
+        let typenames_for_span: HashSet<String> =
+            representations.iter().filter_map(typename_of).collect();
         Span::current().set_span_dyn_attribute(
             Key::from_static_str("graphql.types"),
             opentelemetry::Value::Array(
@@ -736,15 +726,12 @@ impl ConnectorCacheService {
             ),
         );
 
-        for ((representation, metadata), entry) in
-            representations.drain(..).zip(cache_keys).zip(cache_result)
+        for ((representation, metadata), entry) in representations
+            .into_iter()
+            .zip(cache_keys)
+            .zip(cache_result)
         {
-            let typename = representation
-                .as_object()
-                .and_then(|o| o.get(TYPENAME))
-                .and_then(|v| v.as_str())
-                .unwrap_or("-")
-                .to_string();
+            let typename = typename_of(&representation).unwrap_or_else(|| "-".to_string());
 
             match &entry {
                 Some(cache_entry) => {
@@ -816,7 +803,7 @@ impl ConnectorCacheService {
                         indexes,
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
-                            entity_key: ir.entity_key.clone().unwrap_or_default(),
+                            entity_key: debug_entity_key(ir.entity_key.as_ref()),
                         },
                         subgraph_name: source_name.clone(),
                         subgraph_request: debug_req.clone(),
@@ -839,7 +826,7 @@ impl ConnectorCacheService {
             request
                 .variables
                 .variables
-                .insert(REPRESENTATIONS, new_representations.into());
+                .object_insert(REPRESENTATIONS, json_ext::array(new_representations));
 
             // Store cached results for merging on response
             let mut cached_entities = ConnectorCachedEntities {
@@ -875,8 +862,7 @@ impl ConnectorCacheService {
                         &mut cached_entities.results,
                     );
 
-                    let mut data = Object::default();
-                    data.insert(ENTITIES, new_entities.into());
+                    let data = json_ext::object([(ENTITIES, json_ext::array(new_entities))]);
 
                     let response = connect::Response {
                         response: http::Response::builder()
@@ -919,14 +905,14 @@ impl ConnectorCacheService {
             Ok(response)
         } else {
             // All entities cached - build response directly
-            let entities: Vec<Value> = intermediate_results
+            let entities = intermediate_results
                 .iter()
                 .filter_map(|r| r.cache_entry.as_ref())
-                .map(|entry| entry.data.clone())
-                .collect();
+                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+                // serde_json_bytes values
+                .map(|entry| json_ext::from_legacy(&entry.data));
 
-            let mut data = Object::default();
-            data.insert(ENTITIES, entities.into());
+            let data = json_ext::object([(ENTITIES, json_ext::array(entities))]);
 
             let response = connect::Response {
                 response: http::Response::builder()
@@ -1017,25 +1003,21 @@ impl ConnectorCacheService {
         let mut response_data = response.response.body_mut().data.take();
 
         let entities = response_data
-            .as_mut()
-            .and_then(|v| v.as_object_mut())
-            .and_then(|o| o.remove(ENTITIES))
-            .and_then(|v| match v {
-                Value::Array(arr) => Some(arr),
-                _ => None,
-            });
+            .as_ref()
+            .and_then(|v| v.get(ENTITIES))
+            .and_then(|v| v.as_array());
 
-        let Some(mut entities) = entities else {
+        let Some(entities) = entities else {
             // No _entities in response (e.g., connector returned HTTP error).
             // Build a partial response with cached entities + null/errors for misses,
             // matching the subgraph path in cache_store_entities_from_response.
             let (new_entities, new_errors) =
                 assemble_response_from_errors(&response.response.body().errors, &mut results);
 
-            let mut data = Object::default();
-            data.insert(ENTITIES, new_entities.into());
-
-            response.response.body_mut().data = Some(Value::Object(data));
+            response.response.body_mut().data = Some(json_ext::object([(
+                ENTITIES,
+                json_ext::array(new_entities),
+            )]));
             response.response.body_mut().errors = new_errors;
 
             update_cache_control(context, &CacheControl::default_no_store());
@@ -1054,7 +1036,7 @@ impl ConnectorCacheService {
         let mut new_errors = Vec::new();
         let mut to_insert: Vec<Document> = Vec::new();
         let mut debug_ctx_entries: Vec<CacheKeyContext> = Vec::new();
-        let mut entities_iter = entities.drain(..).enumerate();
+        let mut entities_iter = entities.into_iter().enumerate();
 
         for (
             new_entity_idx,
@@ -1071,7 +1053,9 @@ impl ConnectorCacheService {
             match cache_entry {
                 Some(entry) => {
                     // Was cached - use cached value
-                    new_entities.push(entry.data);
+                    // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+                    // serde_json_bytes values
+                    new_entities.push(json_ext::from_legacy(&entry.data));
                 }
                 None => {
                     // Was not cached - take from response and store. A response with fewer
@@ -1171,8 +1155,8 @@ impl ConnectorCacheService {
         }
 
         // Put the merged entities back into the response data
-        if let Some(data_obj) = response_data.as_mut().and_then(|v| v.as_object_mut()) {
-            data_obj.insert(ENTITIES, new_entities.into());
+        if let Some(data_obj) = response_data.as_mut().filter(|v| v.is_object()) {
+            data_obj.object_insert(ENTITIES, json_ext::array(new_entities));
         }
         response.response.body_mut().data = response_data;
 
@@ -1499,13 +1483,15 @@ impl ConnectorRequestCacheService {
         // Build a variables object from the request inputs for hashing
         let inputs = request.key.inputs();
         let cache_tag_args = inputs.args.clone();
-        let mut variables = Object::default();
+        let mut variables = json_ext::LegacyMap::new();
         for (k, v) in inputs.args.iter() {
             variables.insert(k.clone(), v.clone());
         }
         for (k, v) in inputs.this.iter() {
             variables.insert(k.clone(), v.clone());
         }
+        // PERF(apollo-json): legacy bridge -- connector inputs are serde_json_bytes maps
+        let variables = json_ext::object_from_legacy(&variables);
         let additional_data_hash = hash_connector_additional_data(
             &self.source_name,
             &variables,
@@ -1545,7 +1531,7 @@ impl ConnectorRequestCacheService {
             Some(
                 graphql::Request::builder()
                     .query(query_str)
-                    .variables(variables.into_iter().collect())
+                    .variables(variables)
                     .build(),
             )
         } else {
@@ -1978,7 +1964,7 @@ fn get_connector_root_cache_tags(
     subgraph_enums: &HashMap<String, String>,
     connector_synthetic_name: &str,
     field_name: &str,
-    args: &serde_json_bytes::Map<ByteString, Value>,
+    args: &json_ext::LegacyMap,
 ) -> Result<HashSet<String>, anyhow::Error> {
     let root_query_type = supergraph_schema
         .root_operation(apollo_compiler::ast::OperationType::Query)
@@ -2033,7 +2019,10 @@ fn get_connector_root_cache_tags(
         });
 
     let mut vars = IndexMap::default();
-    vars.insert("$args".to_string(), Value::Object(args.clone()));
+    vars.insert(
+        "$args".to_string(),
+        serde_json_bytes::Value::Object(args.clone()),
+    );
 
     let mut keys = HashSet::new();
     for template in templates {
@@ -2086,7 +2075,7 @@ struct CacheMetadata {
     cache_key: String,
     cache_tags: Vec<CacheTag>,
     // Only set when debug mode is enabled
-    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+    entity_key: Option<Value>,
 }
 
 /// Build the request-scoped inputs (referenced `$context` keys + the operator-selected request
@@ -2104,11 +2093,11 @@ fn connector_key_inputs(
     context: &Context,
     headers: &http::HeaderMap,
     cache_key_headers: &[Arc<str>],
-) -> Value {
+) -> serde_json_bytes::Value {
     use apollo_federation::connectors::Namespace;
 
     let Some(connector) = connector else {
-        return Value::Object(Default::default());
+        return serde_json_bytes::Value::Object(Default::default());
     };
 
     // Referenced $context keys (union of request- and response-mapping references). A referenced
@@ -2124,7 +2113,12 @@ fn connector_key_inputs(
     }
     let mut context_obj = serde_json_bytes::Map::new();
     for key in context_keys {
-        let value = context.get_json_value(key).unwrap_or(Value::Null);
+        // PERF(apollo-json): legacy bridge -- the key inputs hash as serde_json_bytes values, as
+        // before the port, so existing cache keys stay valid.
+        let value = context
+            .get_json_value(key)
+            .map(|value| json_ext::to_legacy(&value))
+            .unwrap_or(serde_json_bytes::Value::Null);
         context_obj.insert(ByteString::from(key), value);
     }
 
@@ -2145,19 +2139,25 @@ fn connector_key_inputs(
         values.sort();
         headers_obj.insert(
             ByteString::from(name.as_str()),
-            Value::Array(
+            serde_json_bytes::Value::Array(
                 values
                     .into_iter()
-                    .map(|v| Value::String(v.into()))
+                    .map(|v| serde_json_bytes::Value::String(v.into()))
                     .collect(),
             ),
         );
     }
 
     let mut root = serde_json_bytes::Map::new();
-    root.insert(ByteString::from("context"), Value::Object(context_obj));
-    root.insert(ByteString::from("headers"), Value::Object(headers_obj));
-    Value::Object(root)
+    root.insert(
+        ByteString::from("context"),
+        serde_json_bytes::Value::Object(context_obj),
+    );
+    root.insert(
+        ByteString::from("headers"),
+        serde_json_bytes::Value::Object(headers_obj),
+    );
+    serde_json_bytes::Value::Object(root)
 }
 
 /// The connector request cache for `source_name` in front of `service`, as the response cache

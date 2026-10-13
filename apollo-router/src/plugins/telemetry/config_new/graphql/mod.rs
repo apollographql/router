@@ -1,16 +1,16 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
+use apollo_json::JsonKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
 use super::instruments::CustomInstruments;
 use crate::Context;
 use crate::graphql::ResponseVisitor;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -171,7 +171,7 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
-        variables: &Object,
+        variables: &Value,
         ty: &NamedType,
         field: &Field,
         value: &Value,
@@ -179,20 +179,20 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
         self.instruments
             .on_response_field(ty, field, value, self.ctx);
 
-        match value {
-            Value::Array(items) => {
-                for item in items {
+        match value.kind() {
+            JsonKind::Array => {
+                for item in value.array_iter() {
                     self.visit_list_item(
                         request,
                         variables,
                         field.ty().inner_named_type(),
                         field,
-                        item,
+                        &item,
                     );
                 }
             }
-            Value::Object(children) => {
-                self.visit_selections(request, variables, &field.selection_set, children);
+            JsonKind::Object => {
+                self.visit_selections(request, variables, &field.selection_set, value);
             }
             _ => {}
         }
@@ -208,6 +208,7 @@ pub(crate) mod test {
 
     use super::*;
     use crate::Configuration;
+    use crate::json_ext;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
@@ -243,7 +244,7 @@ pub(crate) mod test {
                 .unwrap();
                 responder.send_response(
                     supergraph::Response::builder()
-                        .data(response["data"].clone())
+                        .data(response_data(&response))
                         .context(req.context)
                         .build()
                         .unwrap(),
@@ -306,7 +307,7 @@ pub(crate) mod test {
                 .unwrap();
                 responder.send_response(
                     supergraph::Response::builder()
-                        .data(response["data"].clone())
+                        .data(response_data(&response))
                         .context(req.context)
                         .build()
                         .unwrap(),
@@ -377,7 +378,7 @@ pub(crate) mod test {
                 .unwrap();
                 responder.send_response(
                     supergraph::Response::builder()
-                        .data(response["data"].clone())
+                        .data(response_data(&response))
                         .context(req.context)
                         .build()
                         .unwrap(),
@@ -435,7 +436,7 @@ pub(crate) mod test {
                 .unwrap();
                 responder.send_response(
                     supergraph::Response::builder()
-                        .data(response["data"].clone())
+                        .data(response_data(&response))
                         .context(req.context)
                         .build()
                         .unwrap(),
@@ -460,6 +461,10 @@ pub(crate) mod test {
         }
         .with_metrics()
         .await;
+    }
+
+    fn response_data(response: &serde_json::Value) -> json_ext::Value {
+        json_ext::from_legacy(&serde_json_bytes::Value::from(response["data"].clone()))
     }
 
     fn context(schema_str: &str, query_str: &str) -> Context {

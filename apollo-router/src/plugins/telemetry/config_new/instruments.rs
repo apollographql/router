@@ -16,7 +16,6 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -40,6 +39,7 @@ use super::subgraph::instruments::SubgraphInstrumentsConfig;
 use super::supergraph::instruments::SupergraphCustomInstruments;
 use super::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::Context;
+use crate::json_ext::Value;
 use crate::metrics;
 use crate::plugins::subscription::SUBSCRIPTION_SUBGRAPH_NAME_CONTEXT_KEY;
 use crate::plugins::telemetry::CLIENT_NAME;
@@ -2093,7 +2093,7 @@ where
         &self,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        value: &serde_json_bytes::Value,
+        value: &Value,
         ctx: &Context,
     ) {
         let mut inner = self.inner.lock();
@@ -2517,7 +2517,7 @@ where
         &self,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        value: &serde_json_bytes::Value,
+        value: &Value,
         ctx: &Context,
     ) {
         let mut inner = self.inner.lock();
@@ -2669,6 +2669,7 @@ mod tests {
     use crate::graphql;
     use crate::http_ext::TryIntoHeaderName;
     use crate::http_ext::TryIntoHeaderValue;
+    use crate::json_ext;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::limits::operation_limits::OperationLimits;
@@ -2691,6 +2692,12 @@ mod tests {
     use crate::services::connector::request_service::TransportOutcome;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
+
+    /// Bridges a fixture built with `serde_json`/`serde_json_bytes` into the
+    /// crate's JSON representation.
+    fn json_value(value: impl Into<Value>) -> json_ext::Value {
+        json_ext::from_legacy(&value.into())
+    }
 
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
@@ -2740,7 +2747,6 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
-            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
@@ -2784,7 +2790,6 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
-            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
@@ -3043,7 +3048,7 @@ mod tests {
                                         .context(context.clone())
                                         .status_code(StatusCode::from_u16(status).expect("status"))
                                         .headers(convert_headers(headers))
-                                        .data(body)
+                                        .data(json_value(body))
                                         .build()
                                         .unwrap();
                                     router_instruments
@@ -3098,8 +3103,8 @@ mod tests {
                                         .and_label(label)
                                         .and_path(path)
                                         .errors(errors)
-                                        .extensions(extensions)
-                                        .and_data(data)
+                                        .extensions(json_value(extensions))
+                                        .and_data(data.map(json_value))
                                         .headers(convert_headers(headers))
                                         .build()
                                         .unwrap();
@@ -3134,8 +3139,8 @@ mod tests {
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)
-                                        .variables(variables)
-                                        .extensions(extensions)
+                                        .variables(json_value(variables))
+                                        .extensions(json_value(extensions))
                                         .build();
                                     let mut http_request = http::Request::new(graphql_request);
                                     *http_request.headers_mut() = convert_http_headers(headers);
@@ -3178,9 +3183,9 @@ mod tests {
                                             .status_code(
                                                 StatusCode::from_u16(status).expect("status"),
                                             )
-                                            .and_data(data)
+                                            .and_data(data.map(json_value))
                                             .errors(errors)
-                                            .extensions(extensions)
+                                            .extensions(json_value(extensions))
                                             .headers(convert_headers(headers))
                                             .build()
                                             .unwrap();
@@ -3218,10 +3223,10 @@ mod tests {
                                     extensions,
                                 } => {
                                     let response = graphql::Response::builder()
-                                        .and_data(data)
+                                        .and_data(data.map(json_value))
                                         .and_path(path)
                                         .errors(errors)
-                                        .extensions(extensions)
+                                        .extensions(json_value(extensions))
                                         .build();
                                     supergraph_instruments
                                         .as_mut()
@@ -3234,7 +3239,9 @@ mod tests {
                                     graphql_instruments.on_response_field(
                                         &typed_value.ty().expect("type should exist"),
                                         &typed_value.field().expect("field should exist"),
-                                        &typed_value.value().expect("value should exist"),
+                                        &json_value(
+                                            typed_value.value().expect("value should exist"),
+                                        ),
                                         &context,
                                     );
                                 }
@@ -3621,7 +3628,7 @@ mod tests {
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
                 .header("x-my-header", "TEST")
-                .data(json!({"errors": [{"message": "nope"}]}))
+                .data(json_value(json!({"errors": [{"message": "nope"}]})))
                 .build()
                 .unwrap();
             router_instruments.on_response(&router_response);
@@ -3657,7 +3664,7 @@ mod tests {
                 .context(router_req.context.clone())
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
-                .data(json!({"errors": [{"message": "nope"}]}))
+                .data(json_value(json!({"errors": [{"message": "nope"}]})))
                 .build()
                 .unwrap();
             router_instruments.on_response(&router_response);
@@ -3697,7 +3704,7 @@ mod tests {
                 .context(router_req.context.clone())
                 .status_code(StatusCode::OK)
                 .header("content-type", "application/json")
-                .data(json!({"errors": [{"message": "nope"}]}))
+                .data(json_value(json!({"errors": [{"message": "nope"}]})))
                 .build()
                 .unwrap();
             router_instruments.on_response(&router_response);
@@ -3893,9 +3900,9 @@ mod tests {
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_response_event(
                 &graphql::Response::builder()
-                    .data(json!({
+                    .data(json_value(json!({
                         "price": 500
-                    }))
+                    })))
                     .errors(vec![
                         graphql::Error::builder()
                             .message("nope")
@@ -3954,9 +3961,9 @@ mod tests {
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_response_event(
                 &graphql::Response::builder()
-                    .data(json!({
+                    .data(json_value(json!({
                         "price": 500
-                    }))
+                    })))
                     .errors(vec![
                         graphql::Error::builder()
                             .message("nope")
@@ -4003,13 +4010,13 @@ mod tests {
                 .status_code(StatusCode::OK)
                 .header("content-type", "application/json")
                 .header("content-length", "35")
-                .data(serde_json_bytes::json!({"foo": "bar"}))
+                .data(json_value(serde_json_bytes::json!({"foo": "bar"})))
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
             custom_instruments.on_response_event(
                 &graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"foo": "bar"}))
+                    .data(json_value(serde_json_bytes::json!({"foo": "bar"})))
                     .build(),
                 &supergraph_req.context,
             );

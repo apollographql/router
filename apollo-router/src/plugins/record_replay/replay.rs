@@ -4,14 +4,12 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 
+use apollo_json::Value;
 use console::style;
 use http::Method;
 use http::Uri;
 use multimap::MultiMap;
 use parking_lot::Mutex;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 use tokio::fs;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -266,8 +264,8 @@ pub(crate) enum ReplayReport {
     },
     VariablesDifference {
         name: String,
-        recorded: Map<ByteString, Value>,
-        runtime: Map<ByteString, Value>,
+        recorded: Value,
+        runtime: Value,
     },
 }
 

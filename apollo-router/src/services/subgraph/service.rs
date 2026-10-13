@@ -20,7 +20,7 @@ use super::http::get_uri_details;
 use super::http::http_response_to_graphql_response;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
 use crate::layers::unconstrained_buffer::UnconstrainedBuffer;
 use crate::plugins::limits::response_size_limit::ResponseSizeLimitError;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -230,7 +230,7 @@ async fn call_http(
                 .error(err.to_graphql_error(None))
                 .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                 .context(context)
-                .extensions(Object::default())
+                .extensions(empty_object())
                 .build());
         }
     };
@@ -359,7 +359,6 @@ mod tests {
     use axum::extract::ws::Message;
     use axum::response::IntoResponse;
     use axum::routing::get;
-    use bytes::Buf;
     use futures::StreamExt;
     use http::HeaderValue;
     use http::StatusCode;
@@ -368,7 +367,6 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::header::HOST;
     use mime::APPLICATION_JSON;
-    use serde_json_bytes::Value;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
@@ -383,6 +381,8 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::json_ext::Value;
+    use crate::json_ext::ValueExt;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::limits::response_size_limit::SubgraphResponseSizeLimit;
     use crate::plugins::subscription::CallbackMode;
@@ -643,7 +643,7 @@ mod tests {
             // we can customize the callback by sending additional info such as address.
             let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                let ack_msg: ClientMessage = crate::protocols::websocket::parse_client_message(connection_ack.as_bytes()).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
@@ -653,7 +653,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = crate::protocols::websocket::parse_client_message(new_message.as_bytes()).unwrap();
                 assert!(matches!(subscribe_msg, ClientMessage::Subscribe { .. }));
                 let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
                     assert_eq!(
@@ -670,7 +670,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -712,7 +712,7 @@ mod tests {
         ) -> Result<impl IntoResponse, Infallible> {
             let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                let ack_msg: ClientMessage = crate::protocols::websocket::parse_client_message(connection_ack.as_bytes()).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
@@ -722,7 +722,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = crate::protocols::websocket::parse_client_message(new_message.as_bytes()).unwrap();
                 let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
                     assert_eq!(
                         payload,
@@ -737,7 +737,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id.clone(), payload: graphql::Response::builder().data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -777,16 +777,12 @@ mod tests {
             let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
-                .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
+                .and_then(|bytes| graphql::Request::deserialize_from_bytes(&bytes).map_err(|_| ()))
                 .map_err(|_| "failed to parse the request body as JSON");
             let graphql_request = graphql_request.unwrap();
             assert!(graphql_request.extensions.contains_key("subscription"));
-            let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = serde_json_bytes::from_value(
-                graphql_request
-                    .extensions
-                    .get("subscription")
-                    .unwrap()
-                    .clone(),
+            let subscription_extension: crate::plugins::subscription::subgraph::SubscriptionExtension = apollo_json::from_value(
+                &graphql_request.extensions.get("subscription").unwrap(),
             )
             .unwrap();
             assert_eq!(
@@ -802,7 +798,7 @@ mod tests {
                 .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .status(StatusCode::OK)
                 .body(
-                    serde_json::to_string(&Response::builder().data(Value::Null).build())
+                    serde_json::to_string(&Response::builder().data(Value::default()).build())
                         .expect("always valid")
                         .into(),
                 )
@@ -1041,7 +1037,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "response was malformed: expected value at line 1 column 1"
+            "response was malformed: JSON syntax error at byte 0: expected a JSON value"
         );
     }
 
@@ -1082,7 +1078,11 @@ mod tests {
             errors[0].message
         );
         assert_eq!(
-            errors[0].extensions.get("code").and_then(|v| v.as_str()),
+            errors[0]
+                .extensions
+                .get("code")
+                .and_then(|value| value.as_str_owned())
+                .as_deref(),
             Some("SUBREQUEST_HTTP_ERROR")
         );
         // The router cut this body off itself, so it must not be counted against the subgraph.
@@ -1127,7 +1127,8 @@ mod tests {
             response.response.body().errors[0]
                 .extensions
                 .get("code")
-                .and_then(|v| v.as_str()),
+                .and_then(|v| v.as_str_owned())
+                .as_deref(),
             Some("SUBREQUEST_HTTP_ERROR")
         );
         assert!(
@@ -1241,7 +1242,7 @@ mod tests {
         );
         assert_eq!(
             response.response.body().errors[1].message,
-            "response was malformed: expected value at line 1 column 1"
+            "response was malformed: JSON syntax error at byte 0: expected a JSON value"
         );
     }
 
@@ -1284,7 +1285,9 @@ mod tests {
             message,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .data(crate::json_ext::from_legacy(
+                    &serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}),
+                ))
                 .build()
         );
         spawned_task.abort();
@@ -1376,7 +1379,9 @@ mod tests {
                 message,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(crate::json_ext::from_legacy(
+                        &serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}),
+                    ))
                     .build()
             );
 
@@ -1410,7 +1415,7 @@ mod tests {
         ) -> Result<impl IntoResponse, Infallible> {
             let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
+                let ack_msg: ClientMessage = crate::protocols::websocket::parse_client_message(connection_ack.as_bytes()).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
@@ -1420,7 +1425,7 @@ mod tests {
                     .await
                     .unwrap();
                 let new_message = socket.recv().await.unwrap().unwrap().into_text().unwrap();
-                let subscribe_msg: ClientMessage = serde_json::from_str(&new_message).unwrap();
+                let subscribe_msg: ClientMessage = crate::protocols::websocket::parse_client_message(new_message.as_bytes()).unwrap();
                 let client_id = if let ClientMessage::Subscribe { payload, id } = subscribe_msg {
                     assert_eq!(
                         payload,
@@ -1436,7 +1441,7 @@ mod tests {
 
                 socket
                     .send(Message::text(
-                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
+                        serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
@@ -1560,7 +1565,7 @@ mod tests {
                 message,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
 
@@ -1619,7 +1624,7 @@ mod tests {
                 first,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
 
@@ -1679,7 +1684,7 @@ mod tests {
                                     .into_text()
                                     .unwrap();
                                 assert!(matches!(
-                                    serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                    crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap(),
                                     ClientMessage::ConnectionInit { .. }
                                 ));
                                 socket
@@ -1698,7 +1703,7 @@ mod tests {
                                     .into_text()
                                     .unwrap();
                                 let client_id = if let ClientMessage::Subscribe { id, .. } =
-                                    serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                    crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap()
                                 {
                                     id
                                 } else {
@@ -1712,7 +1717,7 @@ mod tests {
                                         serde_json::to_string(&ServerMessage::Next {
                                             id: client_id.clone(),
                                             payload: graphql::Response::builder()
-                                                .data(serde_json_bytes::json!({"userWasCreated": {"username": username}}))
+                                                .data(apollo_json::json!({"userWasCreated": {"username": username}}))
                                                 .build(),
                                         })
                                         .unwrap(),
@@ -1774,7 +1779,7 @@ mod tests {
                                     .into_text()
                                     .unwrap();
                                 assert!(matches!(
-                                    serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                    crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap(),
                                     ClientMessage::ConnectionInit { .. }
                                 ));
                                 socket
@@ -1793,7 +1798,7 @@ mod tests {
                                     .into_text()
                                     .unwrap();
                                 let client_id = if let ClientMessage::OldStart { id, .. } =
-                                    serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                    crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap()
                                 {
                                     id
                                 } else {
@@ -1860,7 +1865,7 @@ mod tests {
                                 let msg =
                                     socket.recv().await.unwrap().unwrap().into_text().unwrap();
                                 assert!(matches!(
-                                    serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                    crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap(),
                                     ClientMessage::ConnectionInit { .. }
                                 ));
                                 socket
@@ -1873,7 +1878,7 @@ mod tests {
                                 let msg =
                                     socket.recv().await.unwrap().unwrap().into_text().unwrap();
                                 let client_id = if let ClientMessage::Subscribe { id, .. } =
-                                    serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                    crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap()
                                 {
                                     id
                                 } else {
@@ -1884,7 +1889,7 @@ mod tests {
                                         serde_json::to_string(&ServerMessage::Next {
                                             id: client_id,
                                             payload: graphql::Response::builder()
-                                                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                                .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                                                 .build(),
                                         })
                                         .unwrap(),
@@ -1925,7 +1930,7 @@ mod tests {
                 .on_upgrade(move |mut socket| async move {
                     let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                     assert!(matches!(
-                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                        crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap(),
                         ClientMessage::ConnectionInit { .. }
                     ));
                     socket
@@ -1937,7 +1942,7 @@ mod tests {
                     let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                     let client_id =
                         if let ClientMessage::Subscribe { id, .. } =
-                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                            crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap()
                         {
                             id
                         } else {
@@ -1948,7 +1953,7 @@ mod tests {
                             serde_json::to_string(&ServerMessage::Next {
                                 id: client_id,
                                 payload: graphql::Response::builder()
-                                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                                     .build(),
                             })
                             .unwrap(),
@@ -2007,7 +2012,7 @@ mod tests {
                                         .into_text()
                                         .unwrap();
                                     assert!(matches!(
-                                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                                        crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap(),
                                         ClientMessage::ConnectionInit { .. }
                                     ));
                                     socket
@@ -2026,7 +2031,7 @@ mod tests {
                                         .unwrap();
                                     let client_id =
                                         if let ClientMessage::Subscribe { id, .. } =
-                                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                                            crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap()
                                         {
                                             id
                                         } else {
@@ -2037,7 +2042,7 @@ mod tests {
                                             serde_json::to_string(&ServerMessage::Next {
                                                 id: client_id,
                                                 payload: graphql::Response::builder()
-                                                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                                                     .build(),
                                             })
                                             .unwrap(),
@@ -2090,7 +2095,7 @@ mod tests {
                 .on_upgrade(move |mut socket| async move {
                     let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                     assert!(matches!(
-                        serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                        crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap(),
                         ClientMessage::ConnectionInit { .. }
                     ));
                     socket
@@ -2102,7 +2107,7 @@ mod tests {
                     let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                     let client_id =
                         if let ClientMessage::Subscribe { id, .. } =
-                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                            crate::protocols::websocket::parse_client_message(msg.as_bytes()).unwrap()
                         {
                             id
                         } else {
@@ -2113,7 +2118,7 @@ mod tests {
                             serde_json::to_string(&ServerMessage::Next {
                                 id: client_id,
                                 payload: graphql::Response::builder()
-                                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                                     .build(),
                             })
                             .unwrap(),
@@ -2173,7 +2178,8 @@ mod tests {
                     .on_upgrade(move |mut socket| async move {
                         let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                         assert!(matches!(
-                            serde_json::from_str::<ClientMessage>(&msg).unwrap(),
+                            crate::protocols::websocket::parse_client_message(msg.as_bytes())
+                                .unwrap(),
                             ClientMessage::ConnectionInit { .. }
                         ));
                         socket
@@ -2184,7 +2190,8 @@ mod tests {
                             .unwrap();
                         let msg = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                         let client_id = if let ClientMessage::Subscribe { id, .. } =
-                            serde_json::from_str::<ClientMessage>(&msg).unwrap()
+                            crate::protocols::websocket::parse_client_message(msg.as_bytes())
+                                .unwrap()
                         {
                             id
                         } else {
@@ -2341,7 +2348,7 @@ mod tests {
             first,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                 .build()
         );
 
@@ -2359,7 +2366,7 @@ mod tests {
             second,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "grace_hopper"}}))
+                .data(apollo_json::json!({"userWasCreated": {"username": "grace_hopper"}}))
                 .build()
         );
 
@@ -2420,7 +2427,7 @@ mod tests {
             first,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                 .build()
         );
 
@@ -2436,7 +2443,7 @@ mod tests {
             second,
             graphql::Response::builder()
                 .subscribed(true)
-                .data(serde_json_bytes::json!({"userWasCreated": {"username": "grace_hopper"}}))
+                .data(apollo_json::json!({"userWasCreated": {"username": "grace_hopper"}}))
                 .build()
         );
 
@@ -2495,7 +2502,7 @@ mod tests {
                 first.unwrap(),
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
 
@@ -2513,7 +2520,7 @@ mod tests {
                 second,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
 
@@ -2588,7 +2595,7 @@ mod tests {
                 first,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
 
@@ -2766,7 +2773,7 @@ mod tests {
                 first,
                 graphql::Response::builder()
                     .subscribed(true)
-                    .data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}}))
+                    .data(apollo_json::json!({"userWasCreated": {"username": "ada_lovelace"}}))
                     .build()
             );
 

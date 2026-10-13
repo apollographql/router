@@ -1,5 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::schema;
+use apollo_json::JsonKind;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Error as _;
@@ -18,13 +19,13 @@ pub(crate) struct InvalidValue;
 pub(crate) struct InvalidInputValue(pub(crate) String);
 
 fn describe_json_value(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "map",
+    match value.kind() {
+        JsonKind::Null => "null",
+        JsonKind::Bool => "boolean",
+        JsonKind::Number => "number",
+        JsonKind::String => "string",
+        JsonKind::Array => "array",
+        JsonKind::Object => "map",
     }
 }
 
@@ -157,15 +158,15 @@ fn validate_input_value(
     let type_name = match ty {
         schema::Type::Named(name) | schema::Type::NonNullNamed(name) => name,
         schema::Type::List(inner_type) | schema::Type::NonNullList(inner_type) => {
-            if let Value::Array(vec) = value {
-                for (i, x) in vec.iter().enumerate() {
+            if value.is_array() {
+                for (i, x) in value.array_iter().enumerate() {
                     let path = JsonValuePath::ArrayItem {
                         index: i,
                         parent: path,
                     };
                     validate_input_value(
                         inner_type,
-                        Some(x),
+                        Some(&x),
                         schema,
                         &path,
                         strict_variable_validation,
@@ -212,16 +213,17 @@ fn validate_input_value(
         // rather than falling back to the supergraph schema, which would leak
         // `@inaccessible` structure to the client.
         .ok_or_else(invalid)?;
-    match (type_def, value) {
+    match (type_def, value.kind()) {
         // Custom scalar: accept any JSON value
         (schema::ExtendedType::Scalar(_), _) => Ok(()),
 
-        (schema::ExtendedType::Enum(def), Value::String(s)) => {
-            from_bool(def.values.contains_key(s.as_str()))
-        }
+        (schema::ExtendedType::Enum(def), JsonKind::String) => match value.as_str_owned() {
+            Some(s) => from_bool(def.values.contains_key(s.as_str())),
+            None => Err(invalid()),
+        },
         (schema::ExtendedType::Enum(_), _) => Err(invalid()),
 
-        (schema::ExtendedType::InputObject(def), Value::Object(obj)) => {
+        (schema::ExtendedType::InputObject(def), JsonKind::Object) => {
             // Extract the supergraph type definition so we can distinguish between unknown and inaccessible inputs
             let supergraph_type_def_fields = schema
                 .supergraph_schema()
@@ -243,8 +245,15 @@ fn validate_input_value(
                 ))
             };
 
-            let unknown_input_fields_iter = obj
-                .keys()
+            // The keys are materialized up front so the `&str` borrows below outlive
+            // the iterator: apollo-json yields owned key strings.
+            let input_field_names: Vec<String> = value
+                .object_iter()
+                .map(|(key, _)| key.into_owned())
+                .collect();
+
+            let unknown_input_fields_iter = input_field_names
+                .iter()
                 .map(|k| k.as_str())
                 // filter to fields which are not present in the API schema
                 .filter(|&k| !def.fields.contains_key(k));
@@ -275,8 +284,8 @@ fn validate_input_value(
 
             // Pre-coercion @oneOf check: exactly one field provided and non-null.
             if def.directives.get("oneOf").is_some() {
-                let provided_count = obj
-                    .keys()
+                let provided_count = input_field_names
+                    .iter()
                     .filter(|k| def.fields.contains_key(k.as_str()))
                     .count();
                 if provided_count != 1 {
@@ -286,15 +295,14 @@ fn validate_input_value(
                         fmt_path(path),
                     )));
                 }
-                if let Some((field_name, field_value)) = obj
-                    .iter()
-                    .find(|(k, _)| def.fields.contains_key(k.as_str()))
+                if let Some((field_name, field_value)) = value
+                    .object_iter()
+                    .find(|(k, _)| def.fields.contains_key(k.as_ref()))
                     && field_value.is_null()
                 {
                     return Err(InvalidInputValue(format!(
-                        "invalid {}: `@oneOf` input type `{type_name}` field `{}` must be non-null",
+                        "invalid {}: `@oneOf` input type `{type_name}` field `{field_name}` must be non-null",
                         fmt_path(path),
-                        field_name.as_str(),
                     )));
                 }
             }
@@ -305,8 +313,11 @@ fn validate_input_value(
                     key: &field.name,
                     parent: path,
                 };
-                match obj.get(field.name.as_str()) {
-                    Some(&Value::Null) | None => {
+                match value
+                    .get(field.name.as_str())
+                    .filter(|field_value| !field_value.is_null())
+                {
+                    None => {
                         let default = field
                             .default_value
                             .as_ref()
@@ -319,9 +330,9 @@ fn validate_input_value(
                             strict_variable_validation,
                         )
                     }
-                    value => validate_input_value(
+                    Some(field_value) => validate_input_value(
                         &field.ty,
-                        value,
+                        Some(&field_value),
                         schema,
                         &path,
                         strict_variable_validation,

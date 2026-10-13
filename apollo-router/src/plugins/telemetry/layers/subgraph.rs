@@ -2,19 +2,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ::tracing::Span;
+use apollo_json::JsonKind;
 use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
 use opentelemetry::KeyValue;
 use opentelemetry::trace::TraceContextExt;
 use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
-use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::Context;
+use crate::json_ext;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::telemetry::EnableSubgraphFtv1;
 use crate::plugins::telemetry::SUBGRAPH_FTV1;
@@ -61,21 +62,28 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .extensions()
         .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
-        && let Some(serde_json_bytes::Value::String(ftv1)) =
-            resp.response.body().extensions.get("ftv1")
+        && let Some(ftv1) = resp
+            .response
+            .body()
+            .extensions
+            .get("ftv1")
+            .and_then(|ftv1| ftv1.as_str().map(|ftv1| ftv1.into_owned()))
     {
         // Record the ftv1 trace for processing later
         Span::current().record("apollo_private.ftv1", ftv1.as_str());
         resp.context
             .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
-                let mut vec = match value {
-                    Value::Array(array) => array,
+                let mut entries: Vec<Value> = match value.kind() {
+                    JsonKind::Array => value.array_iter().collect(),
                     // upsert_json_value populate the entry with null if it was vacant
-                    Value::Null => Vec::new(),
+                    JsonKind::Null => Vec::new(),
                     _ => panic!("unexpected JSON value kind"),
                 };
-                vec.push(json!([subgraph_name, ftv1]));
-                Value::Array(vec)
+                entries.push(json_ext::array([
+                    json_ext::string(subgraph_name.as_str()),
+                    json_ext::string(ftv1),
+                ]));
+                json_ext::array(entries)
             })
     }
     resp
@@ -555,13 +563,7 @@ mod tests {
                 tower_test::mock::pair::<SubgraphRequest, SubgraphResponse>();
             let driver = tokio::spawn(async move {
                 let (req, responder) = handle.next_request().await.unwrap();
-                let mut extension = crate::json_ext::Object::new();
-                extension.insert(
-                    serde_json_bytes::ByteString::from("status"),
-                    serde_json_bytes::Value::String(ByteString::from(
-                        "custom_error_for_propagation",
-                    )),
-                );
+                let extension = apollo_json::json!({"status": "custom_error_for_propagation"});
                 let _ = req
                     .context
                     .insert("my_key", "my_custom_attribute_from_context".to_string())
@@ -593,7 +595,8 @@ mod tests {
                                 .build(),
                         )
                         .build()
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                 )
                 .subgraph_name("my_subgraph_name")
                 .build();
@@ -655,7 +658,8 @@ mod tests {
                                 .build(),
                         )
                         .build()
-                        .unwrap(),
+                        .unwrap()
+                        .into(),
                 )
                 .subgraph_name("my_subgraph_name_error")
                 .build();
@@ -688,7 +692,6 @@ mod tests {
         use opentelemetry::trace::TraceFlags;
         use opentelemetry::trace::TraceId;
         use opentelemetry::trace::TraceState;
-        use serde_json_bytes::json;
         use tracing::Instrument;
         use tracing_subscriber::layer::SubscriberExt;
 
@@ -882,7 +885,10 @@ mod tests {
                     .context
                     .get_json_value(SUBGRAPH_FTV1)
                     .expect("SUBGRAPH_FTV1 should be populated");
-                assert_eq!(stored, json!([[SUBGRAPH_NAME, "encoded-trace"]]));
+                assert_eq!(
+                    stored,
+                    apollo_json::json!([[SUBGRAPH_NAME, "encoded-trace"]])
+                );
 
                 crate::plugin::test::await_mock_driver(driver).await;
             }

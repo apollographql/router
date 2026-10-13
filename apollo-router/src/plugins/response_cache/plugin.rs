@@ -15,6 +15,7 @@ use apollo_compiler::resolvers;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_federation::connectors::StringTemplate;
+use apollo_json::JsonKind;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use itertools::Itertools;
@@ -26,8 +27,6 @@ use opentelemetry::StringValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
@@ -64,9 +63,14 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
-use crate::json_ext::Object;
+use crate::graphql::json_object::empty_object;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::json_ext::Value;
+use crate::json_ext::ValueExt;
+use crate::json_ext::object;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::authorization::CacheKeyMetadata;
@@ -743,29 +747,26 @@ impl PluginPrivate for ResponseCache {
 
                     if debug_data.is_some() || cdn_invalidation_debug.is_some() {
                         return response.map_stream(move |mut body| {
-                            let mut payload = Object::new();
-                            payload.insert(
-                                ByteString::from("version".to_string()),
-                                Value::from(CACHE_DEBUGGER_VERSION),
-                            );
+                            let mut payload = empty_object();
+                            payload.object_insert("version", CACHE_DEBUGGER_VERSION);
                             // Always present, even when empty: `data` not being an empty array
                             // would be a shape change for existing consumers of this extension,
                             // depending only on whether `CacheService` happened to populate any
                             // per-entry debug info for this particular response.
-                            payload.insert(
-                                ByteString::from("data".to_string()),
+                            payload.object_insert(
+                                "data",
                                 debug_data
                                     .clone()
-                                    .unwrap_or_else(|| Value::Array(Vec::new())),
+                                    .unwrap_or_else(|| json_ext::array(Vec::new())),
                             );
                             if let Some(cdn_debug) = cdn_invalidation_debug.clone() {
-                                payload.insert(
-                                    ByteString::from("cdnInvalidation".to_string()),
-                                    serde_json_bytes::to_value(&cdn_debug).unwrap_or_default(),
+                                payload.object_insert(
+                                    "cdnInvalidation",
+                                    apollo_json::to_value(&cdn_debug).unwrap_or_default(),
                                 );
                             }
                             body.extensions
-                                .insert(CACHE_DEBUG_EXTENSIONS_KEY, Value::Object(payload));
+                                .object_insert(CACHE_DEBUG_EXTENSIONS_KEY, payload);
                             body
                         });
                     }
@@ -1448,7 +1449,7 @@ impl CacheService {
                                 .extension_code("INVALID_CACHE_CONTROL_HEADER")
                                 .build(),
                         )
-                        .extensions(Object::default())
+                        .extensions(empty_object())
                         .build()
                         .answered_by_router());
                 }
@@ -1650,13 +1651,13 @@ impl CacheService {
                 if self
                     .indexes
                     .tracks_invalidation_labels(self.cdn_invalidation_enabled)
-                    && let Some(Value::Array(extension_tags)) = response
+                    && let Some(extension_tags) = response
                         .get_from_extensions(GRAPHQL_RESPONSE_EXTENSION_ROOT_FIELDS_CACHE_TAGS)
+                    && extension_tags.kind() == JsonKind::Array
                 {
                     let extension_tag_strings: Vec<String> = extension_tags
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.to_owned())
+                        .array_iter()
+                        .filter_map(|v| v.as_str_owned())
                         .collect();
 
                     // Fine-grained tags only ever aggregate onto the live `InvalidationLabels`
@@ -1837,7 +1838,7 @@ impl CacheService {
                             cdn_invalidation_enabled: self.cdn_invalidation_enabled,
                             kind: CacheEntryKind::Entity {
                                 typename: ir.typename.clone(),
-                                entity_key: ir.entity_key.clone().unwrap_or_default(),
+                                entity_key: debug_entity_key(ir.entity_key.as_ref()),
                             },
                             subgraph_name: self.name.clone(),
                             subgraph_request: request.subgraph_request.body().clone(),
@@ -1878,16 +1879,16 @@ impl CacheService {
                         let (new_entities, new_errors) =
                             assemble_response_from_errors(&[graphql_error], &mut cache_result.0);
 
-                        let mut data = Object::default();
-                        data.insert(ENTITIES, new_entities.into());
+                        let mut data = empty_object();
+                        data.object_insert(ENTITIES, json_ext::array(new_entities));
 
                         let mut response = subgraph::Response::builder()
                             .context(context)
-                            .data(Value::Object(data))
+                            .data(data)
                             .id(req_id)
                             .errors(new_errors)
                             .subgraph_name(self.name)
-                            .extensions(Object::new())
+                            .extensions(empty_object())
                             .build();
                         CacheControl::default_no_store()
                             .update_response_headers(response.response.headers_mut())?;
@@ -1993,7 +1994,7 @@ async fn cache_lookup_root(
         HashSet::new()
     };
     let body = request.subgraph_request.body_mut();
-    body.variables.sort_keys();
+    body.variables.object_sort_keys();
 
     let (key, mut cache_tags) = extract_cache_key_root(
         &name,
@@ -2142,8 +2143,10 @@ async fn cache_lookup_root(
                 }
 
                 let mut response = subgraph::Response::builder()
-                    .data(value.data)
-                    .extensions(Object::new())
+                    // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+                    // serde_json_bytes values
+                    .data(json_ext::from_legacy(&value.data))
+                    .extensions(empty_object())
                     .id(request.id)
                     .context(request.context)
                     .subgraph_name(request.subgraph_name.clone())
@@ -2259,7 +2262,10 @@ fn get_invalidation_root_keys_from_schema(
                 });
 
             let mut vars = IndexMap::default();
-            vars.insert("$args".to_string(), Value::Object(info.arguments().clone()));
+            vars.insert(
+                "$args".to_string(),
+                serde_json_bytes::Value::Object(info.arguments().clone()),
+            );
 
             for template in templates {
                 match template.interpolate(&vars) {
@@ -2300,12 +2306,18 @@ fn get_invalidation_root_keys_from_schema(
         result: RefCell::new(Ok(HashSet::new())),
     };
     let subgraph_request = request.subgraph_request.body();
+    // PERF(apollo-json): legacy bridge, revisit -- apollo-compiler's resolver API takes a
+    // serde_json_bytes map of variable values
+    let raw_variable_values = match json_ext::to_legacy(&subgraph_request.variables) {
+        serde_json_bytes::Value::Object(map) => map,
+        _ => serde_json_bytes::Map::new(),
+    };
     // FIXME: in principle we should use the subgraph schema here.
     // Maybe this is good enough as far as finding root fields is concerned?
     resolvers::Execution::new(&supergraph_schema, executable_document)
         .operation_name(subgraph_request.operation_name.as_deref())
         .unwrap()
-        .raw_variable_values(&subgraph_request.variables)
+        .raw_variable_values(&raw_variable_values)
         .execute_sync(&root)
         .map_err(|e| anyhow::Error::msg(e.message().to_string()))?;
 
@@ -2335,7 +2347,7 @@ async fn cache_lookup_entities(
         &name,
         supergraph_schema,
         subgraph_enums,
-        &mut request,
+        &request,
         is_known_private,
         private_id,
         debug,
@@ -2385,12 +2397,12 @@ async fn cache_lookup_entities(
         }
     };
 
-    let body = request.subgraph_request.body_mut();
-
-    let representations = body
+    let representations = request
+        .subgraph_request
+        .body()
         .variables
-        .get_mut(REPRESENTATIONS)
-        .and_then(|value| value.as_array_mut())
+        .get(REPRESENTATIONS)
+        .and_then(|value| value.as_array())
         .expect("we already checked that representations exist");
     // When no-cache is set, skip recording cache metrics: the cache was not consulted so
     // registering every entity as a miss would produce misleading telemetry data.
@@ -2442,9 +2454,16 @@ async fn cache_lookup_entities(
         InvalidationLabels::add_type(&request.context, &name, &entry.typename);
     }
 
+    // The body's representations always become the set that still has to be
+    // fetched -- empty on a full cache hit. The debugger records this body as
+    // the subgraph request a cache entry stands in for, so it has to reflect
+    // what would actually go to the subgraph after cache filtering.
+    request.subgraph_request.body_mut().variables.object_insert(
+        REPRESENTATIONS,
+        json_ext::array(new_representations.iter().cloned()),
+    );
+
     if !new_representations.is_empty() {
-        body.variables
-            .insert(REPRESENTATIONS, new_representations.into());
         let cache_status = if cache_result.is_empty() {
             opentelemetry::Value::String("miss".into())
         } else {
@@ -2486,7 +2505,7 @@ async fn cache_lookup_entities(
                         invalidation_keys,
                         kind: CacheEntryKind::Entity {
                             typename: ir.typename.clone(),
-                            entity_key: ir.entity_key.clone().unwrap_or_default(),
+                            entity_key: debug_entity_key(ir.entity_key.as_ref()),
                         },
                         subgraph_name: name.clone(),
                         subgraph_request: request.subgraph_request.body().clone(),
@@ -2510,15 +2529,17 @@ async fn cache_lookup_entities(
         let entities = cache_result
             .into_iter()
             .filter_map(|res| res.cache_entry)
-            .map(|entry| entry.data)
+            // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+            // serde_json_bytes values
+            .map(|entry| json_ext::from_legacy(&entry.data))
             .collect::<Vec<_>>();
-        let mut data = Object::default();
-        data.insert(ENTITIES, entities.into());
+        let mut data = empty_object();
+        data.object_insert(ENTITIES, json_ext::array(entities));
 
         let mut response = subgraph::Response::builder()
             .data(data)
             .id(request.id.clone())
-            .extensions(Object::new())
+            .extensions(empty_object())
             .subgraph_name(request.subgraph_name)
             .context(request.context)
             .build();
@@ -2575,7 +2596,10 @@ async fn cache_store_root_from_response(
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let document = Document {
                 key: cache_key,
-                data: data.clone(),
+                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+                // serde_json_bytes values. This copy is also the retention boundary: a stored
+                // apollo-json handle would pin the whole response arena.
+                data: json_ext::to_legacy(data),
                 control: cache_control,
                 cache_tags,
                 cdn_invalidation_tags,
@@ -2617,12 +2641,12 @@ async fn cache_store_entities_from_response(
     indexes: Arc<InvalidationIndexes>,
     cdn_invalidation_enabled: bool,
 ) -> Result<(), BoxError> {
-    let mut data = response.response.body_mut().data.take();
+    let data = response.response.body_mut().data.take();
+    let mut data_object = data.filter(|value| value.is_object());
 
-    if let Some(mut entities) = data
+    if let Some(entities) = data_object
         .as_mut()
-        .and_then(|v| v.as_object_mut())
-        .and_then(|o| o.remove(ENTITIES))
+        .and_then(|data_object| data_object.object_remove(ENTITIES))
     {
         // if the scope is private but we do not have a way to differentiate users, do not store anything in the cache
         let should_cache_private = !cache_control.private() || private_id.is_some();
@@ -2655,12 +2679,11 @@ async fn cache_store_entities_from_response(
             .extensions
             .get(GRAPHQL_RESPONSE_EXTENSION_ENTITY_CACHE_TAGS)
             .and_then(|value| value.as_array())
-            .map(|vec| vec.as_slice())
             .unwrap_or_default();
 
         let (new_entities, new_errors) = insert_entities_in_result(
             entities
-                .as_array_mut()
+                .as_array()
                 .ok_or_else(|| FetchError::MalformedResponse {
                     reason: "expected an array of entities".to_string(),
                 })?,
@@ -2673,7 +2696,7 @@ async fn cache_store_entities_from_response(
             update_key_private,
             should_cache_private,
             &response.subgraph_name,
-            per_entity_surrogate_keys,
+            &per_entity_surrogate_keys,
             response.context.clone(),
             subgraph_request,
             indexes,
@@ -2681,10 +2704,10 @@ async fn cache_store_entities_from_response(
         )
         .await?;
 
-        data.as_mut()
-            .and_then(|v| v.as_object_mut())
-            .map(|o| o.insert(ENTITIES, new_entities.into()));
-        response.response.body_mut().data = data;
+        if let Some(data_object) = data_object.as_mut() {
+            data_object.object_insert(ENTITIES, json_ext::array(new_entities));
+        }
+        response.response.body_mut().data = data_object;
         // Errors that could not be reindexed into an entity slot are not the merge's to discard.
         let mut errors = non_entity_errors(&response.response.body().errors);
         errors.extend(new_errors);
@@ -2693,10 +2716,10 @@ async fn cache_store_entities_from_response(
         let (new_entities, new_errors) =
             assemble_response_from_errors(&response.response.body().errors, &mut result_from_cache);
 
-        let mut data = Object::default();
-        data.insert(ENTITIES, new_entities.into());
+        let mut data = empty_object();
+        data.object_insert(ENTITIES, json_ext::array(new_entities));
 
-        response.response.body_mut().data = Some(Value::Object(data));
+        response.response.body_mut().data = Some(data);
         response.response.body_mut().errors = new_errors;
     }
 
@@ -2753,7 +2776,17 @@ struct CacheMetadata {
     // `Document::cdn_invalidation_tags`.
     cdn_invalidation_tags: Vec<String>,
     // Only set when debug mode is enabled
-    entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+    entity_key: Option<Value>,
+}
+
+/// The debugger's entity key, in the representation serde can buffer.
+// PERF(apollo-json): legacy bridge, revisit -- `CacheEntryKind` is an untagged enum, and serde
+// buffers those on the way in
+pub(super) fn debug_entity_key(entity_key: Option<&Value>) -> json_ext::LegacyMap {
+    match entity_key.map(json_ext::to_legacy) {
+        Some(serde_json_bytes::Value::Object(map)) => map,
+        _ => json_ext::LegacyMap::new(),
+    }
 }
 
 // build a list of keys to get from the cache in one query
@@ -2762,7 +2795,7 @@ fn extract_cache_keys(
     subgraph_name: &str,
     supergraph_schema: Arc<Valid<Schema>>,
     subgraph_enums: &HashMap<String, String>,
-    request: &mut subgraph::Request,
+    request: &subgraph::Request,
     is_known_private: bool,
     private_id: Option<&str>,
     debug: bool,
@@ -2776,17 +2809,17 @@ fn extract_cache_keys(
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(
         subgraph_name,
-        request.subgraph_request.body_mut(),
+        request.subgraph_request.body(),
         context,
         authorization,
     );
 
     let representations = request
         .subgraph_request
-        .body_mut()
+        .body()
         .variables
-        .get_mut(REPRESENTATIONS)
-        .and_then(|value| value.as_array_mut())
+        .get(REPRESENTATIONS)
+        .and_then(|value| value.as_array())
         .expect("we already checked that representations exist");
 
     // Get entity key to only get the right fields in representations
@@ -2794,37 +2827,50 @@ fn extract_cache_keys(
     let entities = representations.len() as u64;
     let mut typenames = HashSet::new();
     for representation in representations {
-        let representation =
-            representation
-                .as_object_mut()
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: "representation variable should be an array of object".to_string(),
-                })?;
+        if !representation.is_object() {
+            return Err(FetchError::MalformedRequest {
+                reason: "representation variable should be an array of object".to_string(),
+            }
+            .into());
+        }
         let typename_value =
             representation
-                .remove(TYPENAME)
+                .get(TYPENAME)
                 .ok_or_else(|| FetchError::MalformedRequest {
                     reason: "missing __typename in representation".to_string(),
                 })?;
 
-        let typename = typename_value
-            .as_str()
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "__typename in representation is not a string".to_string(),
-            })?;
-        typenames.insert(typename.to_string());
+        let typename =
+            typename_value
+                .as_str_owned()
+                .ok_or_else(|| FetchError::MalformedRequest {
+                    reason: "__typename in representation is not a string".to_string(),
+                })?;
+        typenames.insert(typename.clone());
+
+        // The cache key identifies the entity by its `@key` fields, so `__typename` — which the
+        // subgraph still needs on the wire — is excluded here rather than stripped from the
+        // request and put back.
+        let entity_fields = object(
+            representation
+                .object_iter()
+                .filter(|(key, _)| key != TYPENAME),
+        );
 
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
             let selection_set = find_matching_key_field_set(
-                representation,
-                typename,
+                &entity_fields,
+                &typename,
                 subgraph_name,
                 &supergraph_schema,
                 subgraph_enums,
             )?;
 
-            get_entity_key_from_selection_set(representation, &selection_set).into()
+            Some(get_entity_key_from_selection_set(
+                &entity_fields,
+                &selection_set,
+            ))
         } else {
             None
         };
@@ -2832,8 +2878,8 @@ fn extract_cache_keys(
         // Create primary cache key for an entity
         let key = PrimaryCacheKeyEntity {
             subgraph_name,
-            entity_type: typename,
-            representation,
+            entity_type: &typename,
+            representation: &entity_fields,
             subgraph_query_hash: &query_hash,
             additional_data_hash: &additional_data_hash,
             private_id: if is_known_private { private_id } else { None },
@@ -2859,8 +2905,8 @@ fn extract_cache_keys(
                     &supergraph_schema,
                     subgraph_name,
                     subgraph_enums,
-                    typename,
-                    representation,
+                    &typename,
+                    &entity_fields,
                 )?
             } else {
                 HashSet::new()
@@ -2883,8 +2929,6 @@ fn extract_cache_keys(
             InvalidationLabels::add_tags(context, invalidation_cache_keys.into_iter().collect());
         }
 
-        // Restore the `representation` back whole again
-        representation.insert(TYPENAME, typename_value);
         let cache_key_metadata = CacheMetadata {
             cache_key: key,
             cache_tags,
@@ -2922,7 +2966,7 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
     subgraph_name: &str,
     subgraph_enums: &HashMap<String, String>,
     typename: &str,
-    representations: &serde_json_bytes::Map<ByteString, Value>,
+    representations: &Value,
 ) -> Result<HashSet<String>, anyhow::Error> {
     // `filter_dir`: Check if the `@join_directive` directives are for the current subgraph's cacheTags
     let filter_dir = |dir: &apollo_compiler::ast::Directive| {
@@ -3022,7 +3066,9 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
     });
     let mut vars = IndexMap::default();
     // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
-    vars.insert("$key".to_string(), Value::Object(representations.clone()));
+    // PERF(apollo-json): legacy bridge, revisit -- `StringTemplate::interpolate` takes
+    // serde_json_bytes values
+    vars.insert("$key".to_string(), json_ext::to_legacy(representations));
     let invalidation_cache_keys = cache_keys
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<_, _>>()?;
@@ -3030,7 +3076,7 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
 }
 
 pub(in crate::plugins) fn find_matching_key_field_set(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
+    representation: &Value,
     typename: &str,
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
@@ -3106,7 +3152,7 @@ fn collect_key_field_sets(
 // fields, but it makes practical sense if you're wanting to cache partial responses.
 pub(in crate::plugins) fn matches_selection_set(
     // the JSON representation of the entity data
-    representation: &serde_json_bytes::Map<ByteString, Value>,
+    representation: &Value,
     // the parsed @key fields to use for matching
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
@@ -3125,7 +3171,7 @@ pub(in crate::plugins) fn matches_selection_set(
         // This field selection is not expecting any subdata.
         if field.selection_set.is_empty() {
             // Scalar (or array of scalars) fields are always a match.
-            if !is_scalar_or_array_of_scalar(value) {
+            if !is_scalar_or_array_of_scalar(&value) {
                 // Mismatch: Scalar value was expected.
                 return false;
             }
@@ -3134,25 +3180,26 @@ pub(in crate::plugins) fn matches_selection_set(
 
         // The field selection is expecting a subdata. See if given `value` matches the shape of
         // its sub-selection set.
-        let result = match value {
-            Value::Object(obj) => {
+        let result = match value.kind() {
+            JsonKind::Object => {
                 // Recurse into object value
-                matches_selection_set(obj, &field.selection_set)
+                matches_selection_set(&value, &field.selection_set)
             }
 
-            Value::Array(arr) => {
+            JsonKind::Array => {
                 // Recurse into array values, filtering out any `null` objects if we're allowed to do so
                 // NB: we have to do this here where the field type is known, as the selection set doesn't
                 //  include knowledge of whether the type is nullable
                 // See NB(nullability-note)
                 let list_item_is_nullable = !field.definition.ty.item_type().is_non_null();
-                let exclude_value = |value: &&Value| list_item_is_nullable && value.is_null();
-                let arr = arr.iter().filter(|value| !exclude_value(value));
-                matches_array_of_objects(arr, &field.selection_set)
+                let items = value
+                    .array_iter()
+                    .filter(|item| !(list_item_is_nullable && item.is_null()));
+                matches_array_of_objects(items, &field.selection_set)
             }
 
             // See NB(nullability-note)
-            Value::Null => {
+            JsonKind::Null => {
                 return true;
             }
 
@@ -3170,9 +3217,11 @@ pub(in crate::plugins) fn matches_selection_set(
 }
 
 fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
-    match value {
-        Value::Object(_) => false,
-        Value::Array(arr) => arr.iter().all(is_scalar_or_array_of_scalar),
+    match value.kind() {
+        JsonKind::Object => false,
+        JsonKind::Array => value
+            .array_iter()
+            .all(|item| is_scalar_or_array_of_scalar(&item)),
         _ => true,
     }
 }
@@ -3181,14 +3230,14 @@ fn is_scalar_or_array_of_scalar(value: &Value) -> bool {
 /// * Note: The array can be multi-dimensional. (the @key field set can match any levels of nested
 ///   arrays)
 /// * Precondition: `selection_set` must be non-empty.
-fn matches_array_of_objects<'a, I: Iterator<Item = &'a Value>>(
+fn matches_array_of_objects<I: Iterator<Item = Value>>(
     arr: I,
     selection_set: &apollo_compiler::executable::SelectionSet,
 ) -> bool {
     for item in arr {
-        let result = match item {
-            Value::Object(obj) => matches_selection_set(obj, selection_set),
-            Value::Array(arr) => matches_array_of_objects(arr.iter(), selection_set),
+        let result = match item.kind() {
+            JsonKind::Object => matches_selection_set(&item, selection_set),
+            JsonKind::Array => matches_array_of_objects(item.array_iter(), selection_set),
             _other => false,
         };
         if !result {
@@ -3202,71 +3251,57 @@ fn matches_array_of_objects<'a, I: Iterator<Item = &'a Value>>(
 // - Returns None if the representation doesn't match the selection set.
 // Note: This function mirrors `hash_representation_inner` in cache/entity.rs.
 fn get_entity_key_from_selection_set(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
+    representation: &Value,
     selection_set: &apollo_compiler::executable::SelectionSet,
-) -> serde_json_bytes::Map<ByteString, Value> {
+) -> Value {
     fn traverse_object(
-        state: &mut serde_json_bytes::Map<ByteString, Value>,
-        fields: &serde_json_bytes::Map<ByteString, Value>,
+        fields: &Value,
         selection_set: &apollo_compiler::executable::SelectionSet,
-    ) {
+    ) -> Value {
         let default_document = Default::default();
         let sorted_selections = selection_set
             .root_fields(&default_document)
             .sorted_by(|a, b| a.name.cmp(&b.name));
+        let mut state = empty_object();
         for field in sorted_selections {
             let key = field.name.as_str();
             let Some(val) = fields.get(key) else {
                 continue;
             };
-            match val {
-                serde_json_bytes::Value::Object(obj) => {
-                    let mut obj_state = serde_json_bytes::Map::new();
-                    traverse_object(&mut obj_state, obj, &field.selection_set);
-                    state.insert(ByteString::from(key), Value::Object(obj_state));
+            match val.kind() {
+                JsonKind::Object => {
+                    let nested = traverse_object(&val, &field.selection_set);
+                    state.object_insert(key, nested);
                 }
-                Value::Array(arr) => {
-                    let mut arr_state = Vec::new();
-                    traverse_array(&mut arr_state, arr, &field.selection_set);
-                    state.insert(ByteString::from(key), Value::Array(arr_state));
-                }
-                // scalar value
-                val => {
-                    state.insert(ByteString::from(key), val.clone());
-                }
-            }
-        }
-    }
-
-    fn traverse_array(
-        state: &mut Vec<Value>,
-        items: &[Value],
-        selection_set: &apollo_compiler::executable::SelectionSet,
-    ) {
-        items.iter().for_each(|v| {
-            match v {
-                serde_json_bytes::Value::Object(obj) => {
-                    let mut obj_state = serde_json_bytes::Map::new();
-                    traverse_object(&mut obj_state, obj, selection_set);
-                    state.push(Value::Object(obj_state));
-                }
-                Value::Array(arr) => {
-                    let mut arr_state = Vec::new();
-                    traverse_array(&mut arr_state, arr, selection_set);
-                    state.push(Value::Array(arr_state));
+                JsonKind::Array => {
+                    state.object_insert(key, traverse_array(&val, &field.selection_set));
                 }
                 // scalar value
                 _ => {
-                    state.push(v.clone());
+                    state.object_insert(key, val);
                 }
             }
-        });
+        }
+        state
     }
 
-    let mut state = serde_json_bytes::Map::new();
-    traverse_object(&mut state, representation, selection_set);
+    fn traverse_array(
+        items: &Value,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+    ) -> Value {
+        let mut state: Vec<Value> = Vec::new();
+        for item in items.array_iter() {
+            state.push(match item.kind() {
+                JsonKind::Object => traverse_object(&item, selection_set),
+                JsonKind::Array => traverse_array(&item, selection_set),
+                // scalar value
+                _ => item,
+            });
+        }
+        json_ext::array(state)
+    }
 
-    state
+    traverse_object(representation, selection_set)
 }
 
 /// represents the result of a cache lookup for an entity type and key
@@ -3277,7 +3312,7 @@ pub(super) struct IntermediateResult {
     // See `CacheMetadata::cdn_invalidation_tags`.
     pub(super) cdn_invalidation_tags: Vec<String>,
     // Only set when debug mode is enabled
-    pub(super) entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+    pub(super) entity_key: Option<Value>,
     pub(super) cache_entry: Option<CacheEntry>,
 }
 
@@ -3286,7 +3321,7 @@ pub(super) struct IntermediateResult {
 fn filter_representations(
     subgraph_name: &str,
     subgraph_req_id: &SubgraphRequestId,
-    representations: &mut Vec<Value>,
+    representations: Vec<Value>,
     // keys: Vec<(String, Vec<String>)>,
     keys: Vec<CacheMetadata>,
     mut cache_result: Vec<Option<CacheEntry>>,
@@ -3302,7 +3337,7 @@ fn filter_representations(
 
     for (
         (
-            mut representation,
+            representation,
             CacheMetadata {
                 cache_key: key,
                 cache_tags,
@@ -3312,18 +3347,18 @@ fn filter_representations(
         ),
         mut cache_entry,
     ) in representations
-        .drain(..)
+        .into_iter()
         .zip(keys)
         .zip(cache_result.drain(..))
     {
-        let opt_type = representation
-            .as_object_mut()
-            .and_then(|o| o.remove(TYPENAME))
-            .ok_or_else(|| FetchError::MalformedRequest {
-                reason: "missing __typename in representation".to_string(),
-            })?;
+        let opt_type =
+            representation
+                .get(TYPENAME)
+                .ok_or_else(|| FetchError::MalformedRequest {
+                    reason: "missing __typename in representation".to_string(),
+                })?;
 
-        let typename = opt_type.as_str().unwrap_or("-").to_string();
+        let typename = opt_type.as_str_owned().unwrap_or_else(|| "-".to_string());
 
         // do not use that cache entry if it is stale
         if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
@@ -3333,9 +3368,6 @@ fn filter_representations(
             None => {
                 cache_hit.entry(typename.clone()).or_default().miss += 1;
 
-                representation
-                    .as_object_mut()
-                    .map(|o| o.insert(TYPENAME, opt_type));
                 new_representations.push(representation);
             }
             Some(entry) => {
@@ -3446,7 +3478,7 @@ pub(super) struct EntityCacheMiss<'a> {
     pub(super) cache_tags: Vec<CacheTag>,
     pub(super) cdn_invalidation_tags: Vec<String>,
     pub(super) typename: String,
-    pub(super) entity_key: Option<serde_json_bytes::Map<ByteString, Value>>,
+    pub(super) entity_key: Option<Value>,
     pub(super) invalidation_keys: Vec<String>,
     pub(super) has_tags: bool,
 }
@@ -3459,7 +3491,10 @@ pub(super) fn build_entity_store_document(
 ) -> Document {
     Document {
         control: cache_control.clone(),
-        data: miss.value.clone(),
+        // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+        // serde_json_bytes values. This copy is also the retention boundary: a
+        // stored apollo-json handle would pin the whole response arena.
+        data: json_ext::to_legacy(miss.value),
         key: miss.key.clone(),
         cache_tags: miss.cache_tags.clone(),
         cdn_invalidation_tags: miss.cdn_invalidation_tags.clone(),
@@ -3495,7 +3530,7 @@ pub(super) fn build_entity_debug_entry(
         cdn_invalidation_enabled,
         kind: CacheEntryKind::Entity {
             typename: miss.typename.clone(),
-            entity_key: miss.entity_key.clone().unwrap_or_default(),
+            entity_key: debug_entity_key(miss.entity_key.as_ref()),
         },
         subgraph_name: subgraph_name.to_string(),
         subgraph_request,
@@ -3512,7 +3547,7 @@ pub(super) fn build_entity_debug_entry(
 // fill in the entities for the response
 #[allow(clippy::too_many_arguments)]
 async fn insert_entities_in_result(
-    entities: &mut Vec<Value>,
+    entities: Vec<Value>,
     errors: &[Error],
     cache: Storage,
     default_subgraph_ttl: Duration,
@@ -3541,7 +3576,7 @@ async fn insert_entities_in_result(
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
     let mut to_insert: Vec<_> = Vec::new();
     let mut debug_ctx_entries = Vec::new();
-    let mut entities_it = entities.drain(..).enumerate();
+    let mut entities_it = entities.into_iter().enumerate();
     // iterate through per-entity cache tags in parallel with entities; tags are matched
     // positionally, meaning the first tag array applies to the first entity, etc
     let mut per_entity_surrogate_keys_it = per_entity_surrogate_keys.iter();
@@ -3562,7 +3597,9 @@ async fn insert_entities_in_result(
     {
         match cache_entry {
             Some(v) => {
-                new_entities.push(v.data);
+                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+                // serde_json_bytes values
+                new_entities.push(json_ext::from_legacy(&v.data));
             }
             None => {
                 let (entity_idx, value) =
@@ -3585,13 +3622,11 @@ async fn insert_entities_in_result(
 
                 // Per-entity cache tags from the subgraph's `apolloEntityCacheTags` extension.
                 if indexes.tracks_invalidation_labels(cdn_invalidation_enabled)
-                    && let Some(Value::Array(keys)) = specific_surrogate_keys
+                    && let Some(keys) = specific_surrogate_keys
+                    && keys.kind() == JsonKind::Array
                 {
-                    let entity_tags: Vec<String> = keys
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .map(|s| s.to_owned())
-                        .collect();
+                    let entity_tags: Vec<String> =
+                        keys.array_iter().filter_map(|v| v.as_str_owned()).collect();
 
                     if !entity_tags.is_empty() {
                         // Recorded whenever either consumer got us into this block (the outer
@@ -3700,10 +3735,12 @@ pub(super) fn assemble_response_from_errors(
     for (new_entity_idx, IntermediateResult { cache_entry, .. }) in result.drain(..).enumerate() {
         match cache_entry {
             Some(v) => {
-                new_entities.push(v.data);
+                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
+                // serde_json_bytes values
+                new_entities.push(json_ext::from_legacy(&v.data));
             }
             None => {
-                new_entities.push(Value::Null);
+                new_entities.push(Value::default());
 
                 for mut error in graphql_errors.iter().cloned() {
                     error.path = Some(Path(vec![
@@ -3793,6 +3830,8 @@ mod tests {
     use super::Subgraph;
     use super::Ttl;
     use crate::configuration::subgraph::SubgraphConfiguration;
+    use crate::json_ext;
+    use crate::json_ext::Value;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::response_cache::plugin::ResponseCache;
@@ -3827,6 +3866,14 @@ mod tests {
             serde_json_bytes::from_value(serde_json_bytes::json!({ "subgraph": { "all": {} } }))
                 .unwrap();
         assert_eq!(config.subgraph.all.enabled, Some(true));
+    }
+
+    /// Builds an entity representation from a `serde_json_bytes::json!` fixture, since apollo-json
+    /// has no literal macro of its own.
+    fn object(value: serde_json_bytes::Value) -> Value {
+        let value = json_ext::from_legacy(&value);
+        assert!(value.is_object(), "must provide an object");
+        value
     }
 
     #[tokio::test]
@@ -4436,7 +4483,7 @@ mod tests {
             .unwrap();
 
         // Test with complex nested array structure
-        let representation = json!({
+        let representation = object(json!({
             "id": "TEST123",
             "locale": "en_US",
             "lists": [
@@ -4461,10 +4508,7 @@ mod tests {
                     "location": "WAREHOUSE_B"
                 }
             ]
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        }));
 
         assert!(
             matches_selection_set(&representation, &field_set.selection_set),
@@ -4491,10 +4535,7 @@ mod tests {
             )
             .expect("should be able to parse field set");
 
-        matches_selection_set(
-            representation.as_object().expect("must provide an object"),
-            &field_set.selection_set,
-        )
+        matches_selection_set(&object(representation), &field_set.selection_set)
     }
 
     #[rstest::rstest]
@@ -4617,7 +4658,7 @@ mod tests {
             .unwrap();
 
         // Test with complex nested array structure
-        let representation = json!({
+        let representation = object(json!({
             "id": "TEST123",
             "locale": "en_US",
             "lists": [
@@ -4641,10 +4682,7 @@ mod tests {
                     "location": "WAREHOUSE_B"
                 }
             ]
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        }));
 
         assert!(!matches_selection_set(
             &representation,
@@ -4698,13 +4736,10 @@ mod tests {
             .unwrap();
 
         // Note second location: it's `null`
-        let representation = json!({
+        let representation = object(json!({
             "id": "TEST123",
             "nullable": null,
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        }));
 
         assert!(
             matches_selection_set(&representation, &field_set.selection_set),
@@ -4745,7 +4780,7 @@ mod tests {
             .unwrap();
 
         // Test with complex nested array structure
-        let representation = json!({
+        let representation = object(json!({
             "id": "TEST123",
             "locale": "en_US",
             "lists": [
@@ -4770,10 +4805,7 @@ mod tests {
                     "location": "WAREHOUSE_B"
                 }
             ]
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        }));
 
         assert!(matches_selection_set(
             &representation,
@@ -4783,7 +4815,7 @@ mod tests {
             get_entity_key_from_selection_set(&representation, &field_set.selection_set);
         assert_eq!(
             &entity_key,
-            json!({
+            &object(json!({
                 "id": "TEST123",
                 "locale": "en_US",
                 "lists": [
@@ -4808,9 +4840,7 @@ mod tests {
                         "location": "WAREHOUSE_B"
                     }
                 ]
-            })
-            .as_object()
-            .unwrap()
+            }))
         );
     }
 
@@ -4847,7 +4877,7 @@ mod tests {
             .unwrap();
 
         // Test with complex nested array structure
-        let representation = json!({
+        let representation = object(json!({
             "id": "TEST123",
             "locale": "en_US",
             "lists": [
@@ -4872,10 +4902,7 @@ mod tests {
                     "location": "WAREHOUSE_B"
                 }
             ]
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        }));
 
         assert!(matches_selection_set(
             &representation,
@@ -4885,7 +4912,7 @@ mod tests {
             get_entity_key_from_selection_set(&representation, &field_set.selection_set);
         assert_eq!(
             &entity_key,
-            json!({
+            &object(json!({
                 "id": "TEST123",
                 "locale": "en_US",
                 "lists": [
@@ -4907,9 +4934,7 @@ mod tests {
                         "location": "WAREHOUSE_B"
                     }
                 ]
-            })
-            .as_object()
-            .unwrap()
+            }))
         );
     }
 
@@ -5090,10 +5115,7 @@ mod tests {
             ("INVENTORY".into(), "inventory".into()),
         ]);
         // Jumping from "search" to "inventory" via the object type "Book"
-        let representation = serde_json_bytes::json!({"__typename": "Book", "id": "123"})
-            .as_object()
-            .unwrap()
-            .clone();
+        let representation = object(serde_json_bytes::json!({"__typename": "Book", "id": "123"}));
 
         let result = get_invalidation_entity_keys_from_schema(
             &schema,
@@ -5147,10 +5169,7 @@ mod tests {
             ("INVENTORY".into(), "inventory".into()),
         ]);
         // Jumping from "search" to "inventory" via the interface object "Item"
-        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
-            .as_object()
-            .unwrap()
-            .clone();
+        let representation = object(serde_json_bytes::json!({"__typename": "Item", "id": "123"}));
 
         let result = get_invalidation_entity_keys_from_schema(
             &schema,
@@ -5212,10 +5231,7 @@ mod tests {
             ("IRRELEVANT".into(), "irrelevant".into()),
         ]);
         // Jumping from "search" to "inventory" via the interface object "Item"
-        let representation = serde_json_bytes::json!({"__typename": "Item", "id": "123"})
-            .as_object()
-            .unwrap()
-            .clone();
+        let representation = object(serde_json_bytes::json!({"__typename": "Item", "id": "123"}));
 
         let result = get_invalidation_entity_keys_from_schema(
             &schema,
@@ -5260,13 +5276,10 @@ mod tests {
         let subgraph_enums = HashMap::from([("PRODUCTS".into(), "products".into())]);
 
         // when isInterfaceObject: false, typename in _entities is the concrete type "Product"
-        let representation = serde_json_bytes::json!({
+        let representation = object(serde_json_bytes::json!({
             "__typename": "Product",  // NB: concrete type, not "Item"
             "id": "123"
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        }));
 
         let result = get_invalidation_entity_keys_from_schema(
             &schema,

@@ -1,16 +1,15 @@
 //! Describe primary cache key for both root fields and entities
+use std::borrow::Cow;
 use std::fmt::Write;
 
+use apollo_json::JsonKind;
 use itertools::Itertools;
 use serde::Serialize;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Map;
-use serde_json_bytes::Value;
 
 use super::plugin::RESPONSE_CACHE_VERSION;
 use crate::Context;
 use crate::graphql;
-use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::response_cache::cache_tag::CacheScope;
 use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
@@ -66,7 +65,7 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
 pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
-    pub(super) representation: &'a Map<ByteString, Value>,
+    pub(super) representation: &'a Value,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be
     /// reused for all entities in this query
     pub(super) subgraph_query_hash: &'a str,
@@ -85,7 +84,7 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             representation,
         } = self;
 
-        let hashed_representation = if representation.is_empty() {
+        let hashed_representation = if representation.is_empty().unwrap_or(true) {
             String::new()
         } else {
             sort_and_hash_object(representation)
@@ -156,7 +155,7 @@ impl<'a> ConnectorCacheKeyRoot<'a> {
 pub(super) struct ConnectorCacheKeyEntity<'a> {
     pub(super) source_name: &'a str,
     pub(super) entity_type: &'a str,
-    pub(super) representation: &'a Map<ByteString, Value>,
+    pub(super) representation: &'a Value,
     pub(super) operation_hash: &'a str,
     pub(super) additional_data_hash: &'a str,
     pub(super) private_id: Option<&'a str>,
@@ -173,7 +172,7 @@ impl<'a> ConnectorCacheKeyEntity<'a> {
             representation,
         } = self;
 
-        let hashed_representation = if representation.is_empty() {
+        let hashed_representation = if representation.is_empty().unwrap_or(true) {
             String::new()
         } else {
             sort_and_hash_object(representation)
@@ -236,17 +235,18 @@ fn hash_str(value: &str) -> String {
 /// collide on the same cache key and leak one user's data to another.
 pub(super) fn hash_connector_additional_data(
     source_name: &str,
-    variables: &Object,
+    variables: &Value,
     context: &Context,
     cache_key: &CacheKeyMetadata,
-    key_inputs: &Value,
+    key_inputs: &serde_json_bytes::Value,
 ) -> String {
     let mut hasher = blake3::Hasher::new();
 
-    let repr_key = ByteString::from(REPRESENTATIONS);
     hash(
         &mut hasher,
-        variables.iter().filter(|(key, _value)| key != &&repr_key),
+        variables
+            .object_iter()
+            .filter(|(key, _value)| key != REPRESENTATIONS),
     );
 
     cache_key
@@ -260,10 +260,9 @@ pub(super) fn hash_connector_additional_data(
         .expect("this serializer doesn't throw any errors; qed");
 
     // Takes value specific for a connector source, if it doesn't exist take value for all
-    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
+    if let Some(cache_data) = context.get_json_value(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data
             .get("connectors")
-            .and_then(|s| s.as_object())
             .and_then(|connector_data| connector_data.get(source_name))
         {
             v.serialize(Blake3Serializer::new(&mut hasher))
@@ -294,12 +293,11 @@ pub(super) fn hash_additional_data(
 ) -> String {
     let mut hasher = blake3::Hasher::new();
 
-    let repr_key = ByteString::from(REPRESENTATIONS);
     hash(
         &mut hasher,
         body.variables
-            .iter()
-            .filter(|(key, _value)| key != &&repr_key),
+            .object_iter()
+            .filter(|(key, _value)| key != REPRESENTATIONS),
     );
 
     cache_key
@@ -307,10 +305,9 @@ pub(super) fn hash_additional_data(
         .expect("this serializer doesn't throw any errors; qed");
 
     // Takes value specific for a subgraph, if it doesn't exist take value for all subgraphs, and if you have data specific for an operation name add it in the hash
-    if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
+    if let Some(cache_data) = context.get_json_value(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data
             .get("subgraphs")
-            .and_then(|s| s.as_object())
             .and_then(|subgraph_data| subgraph_data.get(subgraph_name))
         {
             v.serialize(Blake3Serializer::new(&mut hasher))
@@ -333,31 +330,32 @@ pub(super) fn hash_additional_data(
 }
 
 // Order-insensitive structural hash of a map, ie a representation or entity key
-fn sort_and_hash_object(object: &Map<ByteString, Value>) -> String {
+fn sort_and_hash_object(object: &Value) -> String {
     let mut digest = blake3::Hasher::new();
-    hash(&mut digest, object.iter());
+    hash(&mut digest, object.object_iter());
     digest.finalize().to_hex().to_string()
 }
 
-/// Hashes elements of a serde_json_bytes::Value::Object when yielded via `map.iter()`.
+/// Hashes the members of a JSON object. Members are visited in key order, so two
+/// objects differing only in key order hash the same; arrays keep their order.
 fn hash<'a, I>(state: &mut blake3::Hasher, fields: I)
 where
-    I: Iterator<Item = (&'a ByteString, &'a Value)>,
+    I: Iterator<Item = (Cow<'a, str>, Value)>,
 {
-    fields.sorted_by(|a, b| a.0.cmp(b.0)).for_each(|(k, v)| {
-        state.update(k.as_str().as_bytes());
+    fields.sorted_by(|a, b| a.0.cmp(&b.0)).for_each(|(k, v)| {
+        state.update(k.as_bytes());
         state.update(":".as_bytes());
-        match v {
-            Value::Object(obj) => {
+        match v.kind() {
+            JsonKind::Object => {
                 state.update("{".as_bytes());
-                hash(state, obj.iter());
+                hash(state, v.object_iter());
                 state.update("}".as_bytes());
             }
-            Value::String(s) => {
-                state.update(s.as_str().as_bytes());
+            JsonKind::String => {
+                state.update(v.as_str().unwrap_or_default().as_bytes());
             }
             _ => {
-                state.update(serde_json::to_string(v).unwrap().as_bytes());
+                state.update(v.to_string().as_bytes());
             }
         }
     });
@@ -374,7 +372,7 @@ mod tests {
         let context = Context::new();
         context.insert_json_value(
             CONTEXT_CACHE_KEY,
-            serde_json_bytes::json!({
+            apollo_json::json!({
                 "all": {
                   "locale": "be"
                 },
@@ -435,15 +433,15 @@ mod tests {
     fn top_level_hash_is_order_insensitive() {
         // hash should not vary based on the order that the keys are provided.
         // NB: this doesn't check any nested arrays, that's done in serde_blake3
-        let data = serde_json_bytes::json!({"hello": "world", "order": "doesn't matter"});
-        let data_obj = data.as_object().unwrap();
+        let data = apollo_json::json!({"hello": "world", "order": "doesn't matter"});
+        let entries: Vec<(Cow<'_, str>, Value)> = data.object_iter().collect();
 
         let mut hasher = blake3::Hasher::new();
-        super::hash(&mut hasher, data_obj.iter());
+        super::hash(&mut hasher, entries.iter().cloned());
         let value1 = hasher.finalize();
 
         let mut hasher = blake3::Hasher::new();
-        super::hash(&mut hasher, data_obj.iter().rev());
+        super::hash(&mut hasher, entries.iter().rev().cloned());
         let value2 = hasher.finalize();
 
         assert_eq!(value1, value2);
@@ -454,11 +452,11 @@ mod tests {
     fn nested_hash_is_order_sensitive() {
         // hash does vary based on the order that the vec values are provided.
         // NB: I'm not sure if this is intentional, but adding a test for the existing behavior.
-        let data = serde_json_bytes::json!({"nested": ["does", "order", "matter"]});
-        let value1 = super::sort_and_hash_object(data.as_object().unwrap());
+        let data = apollo_json::json!({"nested": ["does", "order", "matter"]});
+        let value1 = super::sort_and_hash_object(&data);
 
-        let data = serde_json_bytes::json!({"nested": ["order", "does", "matter"]});
-        let value2 = super::sort_and_hash_object(data.as_object().unwrap());
+        let data = apollo_json::json!({"nested": ["order", "does", "matter"]});
+        let value2 = super::sort_and_hash_object(&data);
 
         assert_ne!(value1, value2);
         assert_snapshot!(value1);
@@ -548,11 +546,11 @@ mod tests {
 
     #[test]
     fn connector_entity_cache_key_format() {
-        let repr = serde_json_bytes::json!({"id": "1"});
+        let repr = apollo_json::json!({"id": "1"});
         let mut key = ConnectorCacheKeyEntity {
             source_name: "mysubgraph.my_api",
             entity_type: "User",
-            representation: repr.as_object().unwrap(),
+            representation: &repr,
             operation_hash: "abc123",
             additional_data_hash: "def456",
             private_id: None,
@@ -567,7 +565,7 @@ mod tests {
 
     #[test]
     fn connector_entity_cache_key_empty_representation() {
-        let repr = serde_json_bytes::Map::new();
+        let repr = crate::graphql::json_object::empty_object();
         let mut key = ConnectorCacheKeyEntity {
             source_name: "mysubgraph.my_api",
             entity_type: "User",
@@ -582,12 +580,12 @@ mod tests {
 
     #[test]
     fn connector_entity_cache_key_representation_changes_hash() {
-        let repr1 = serde_json_bytes::json!({"id": "1"});
-        let repr2 = serde_json_bytes::json!({"id": "2"});
+        let repr1 = apollo_json::json!({"id": "1"});
+        let repr2 = apollo_json::json!({"id": "2"});
         let mut key1 = ConnectorCacheKeyEntity {
             source_name: "mysubgraph.my_api",
             entity_type: "User",
-            representation: repr1.as_object().unwrap(),
+            representation: &repr1,
             operation_hash: "abc123",
             additional_data_hash: "def456",
             private_id: None,
@@ -595,7 +593,7 @@ mod tests {
         let mut key2 = ConnectorCacheKeyEntity {
             source_name: "mysubgraph.my_api",
             entity_type: "User",
-            representation: repr2.as_object().unwrap(),
+            representation: &repr2,
             operation_hash: "abc123",
             additional_data_hash: "def456",
             private_id: None,
@@ -646,7 +644,7 @@ mod tests {
         let context = Context::new();
         context.insert_json_value(
             CONTEXT_CACHE_KEY,
-            serde_json_bytes::json!({
+            apollo_json::json!({
                 "all": { "locale": "en" },
                 "connectors": {
                     "source_a": { "foo": "bar" },
@@ -654,17 +652,17 @@ mod tests {
                 }
             }),
         );
-        let vars = serde_json_bytes::json!({"key": "value"});
+        let vars = apollo_json::json!({"key": "value"});
         let hash_a = hash_connector_additional_data(
             "source_a",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &serde_json_bytes::Value::Null,
         );
         let hash_b = hash_connector_additional_data(
             "source_b",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &serde_json_bytes::Value::Null,
@@ -677,24 +675,24 @@ mod tests {
         let context = Context::new();
         context.insert_json_value(
             CONTEXT_CACHE_KEY,
-            serde_json_bytes::json!({
+            apollo_json::json!({
                 "all": { "locale": "en" },
                 "connectors": {
                     "source_a": { "foo": "bar" }
                 }
             }),
         );
-        let vars = serde_json_bytes::json!({"key": "value"});
+        let vars = apollo_json::json!({"key": "value"});
         let hash_unknown_1 = hash_connector_additional_data(
             "unknown_source",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &serde_json_bytes::Value::Null,
         );
         let hash_unknown_2 = hash_connector_additional_data(
             "another_unknown",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &serde_json_bytes::Value::Null,
@@ -719,7 +717,7 @@ mod tests {
     #[test]
     fn hash_connector_additional_data_partitions_on_key_inputs() {
         let context = Context::new();
-        let vars = serde_json_bytes::json!({"key": "value"});
+        let vars = apollo_json::json!({"key": "value"});
         // Two requests identical except for a referenced forwarded-header value must NOT collide.
         let inputs_alice = serde_json_bytes::json!({
             "context": {},
@@ -731,14 +729,14 @@ mod tests {
         });
         let hash_alice = hash_connector_additional_data(
             "src",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &inputs_alice,
         );
         let hash_bob = hash_connector_additional_data(
             "src",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &inputs_bob,
@@ -751,7 +749,7 @@ mod tests {
         // Identical key inputs must produce identical hashes (cache still works within a user).
         let hash_alice_again = hash_connector_additional_data(
             "src",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &inputs_alice,
@@ -767,18 +765,13 @@ mod tests {
         // other — only that each hashes stably across calls, so identical requests keep getting
         // identical cache keys.
         let context = Context::new();
-        let vars = serde_json_bytes::json!({"key": "value"});
+        let vars = apollo_json::json!({"key": "value"});
         let empty = serde_json_bytes::json!({ "context": {}, "headers": {} });
-        let with_empty = hash_connector_additional_data(
-            "src",
-            vars.as_object().unwrap(),
-            &context,
-            &Default::default(),
-            &empty,
-        );
+        let with_empty =
+            hash_connector_additional_data("src", &vars, &context, &Default::default(), &empty);
         let with_null = hash_connector_additional_data(
             "src",
-            vars.as_object().unwrap(),
+            &vars,
             &context,
             &Default::default(),
             &serde_json_bytes::Value::Null,
@@ -786,19 +779,13 @@ mod tests {
         // They need not be equal to each other, but each must be stable; assert determinism.
         assert_eq!(
             with_empty,
-            hash_connector_additional_data(
-                "src",
-                vars.as_object().unwrap(),
-                &context,
-                &Default::default(),
-                &empty,
-            )
+            hash_connector_additional_data("src", &vars, &context, &Default::default(), &empty,)
         );
         assert_eq!(
             with_null,
             hash_connector_additional_data(
                 "src",
-                vars.as_object().unwrap(),
+                &vars,
                 &context,
                 &Default::default(),
                 &serde_json_bytes::Value::Null,

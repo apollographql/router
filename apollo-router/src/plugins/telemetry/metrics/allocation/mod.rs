@@ -193,22 +193,27 @@ mod tests {
         async {
             let allocated_bytes = Arc::new(AtomicU64::new(0));
             let allocated_bytes_clone = allocated_bytes.clone();
+            let deallocated_bytes = Arc::new(AtomicU64::new(0));
+            let deallocated_bytes_clone = deallocated_bytes.clone();
 
             // Create a simple service that allocates memory
             let service = tower::service_fn(move |_req: router::Request| {
                 let allocated_bytes_clone = allocated_bytes_clone.clone();
+                let deallocated_bytes_clone = deallocated_bytes_clone.clone();
                 async move {
-                    // Allocate some memory during request processing
-                    let _v = Vec::<u8>::with_capacity(10000);
+                    // Allocate and release some memory during request processing
+                    let v = Vec::<u8>::with_capacity(10000);
+                    drop(v);
                     let result =
                         Ok::<_, tower::BoxError>(router::Response::fake_builder().build().unwrap());
 
-                    allocated_bytes_clone.as_ref().store(
-                        crate::allocator::current()
-                            .expect("stats should be set")
-                            .bytes_allocated() as u64,
-                        Ordering::Relaxed,
-                    );
+                    let stats = crate::allocator::current().expect("stats should be set");
+                    allocated_bytes_clone
+                        .as_ref()
+                        .store(stats.bytes_allocated() as u64, Ordering::Relaxed);
+                    deallocated_bytes_clone
+                        .as_ref()
+                        .store(stats.bytes_deallocated() as u64, Ordering::Relaxed);
 
                     result
                 }
@@ -223,6 +228,9 @@ mod tests {
             let _response = service.ready().await.unwrap().call(request).await.unwrap();
 
             assert!(allocated_bytes.load(Ordering::Relaxed) > 10000);
+            // The vec dominates the deallocations; response construction can
+            // release a few hundred bytes of its own.
+            assert!(deallocated_bytes.load(Ordering::Relaxed) >= 10000);
 
             // Verify metrics were recorded
             assert_histogram_sum!(
@@ -235,7 +243,7 @@ mod tests {
 
             assert_histogram_sum!(
                 "apollo.router.request.memory",
-                10000,
+                deallocated_bytes.load(Ordering::Relaxed),
                 "allocation.type" = "deallocated",
                 "context" = "router.request"
             );

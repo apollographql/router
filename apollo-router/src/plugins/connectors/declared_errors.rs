@@ -41,10 +41,11 @@
 //!
 //! [spec]: https://spec.graphql.org/draft/#sec-Errors.Execution-Errors
 
-use serde_json_bytes::Value;
-
 use crate::Context;
 use crate::graphql;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
+use crate::json_ext::Value;
 
 /// Extension key marking an error in a connector subgraph response as declared
 /// by `->withError` rather than raised by a failure.
@@ -93,7 +94,11 @@ impl ConnectorDeclaredErrors {
 
         let mut declared = Vec::new();
         errors.retain_mut(|error| {
-            if error.extensions.remove(DECLARED_ERROR_MARKER).is_none() {
+            if error
+                .extensions
+                .object_remove(DECLARED_ERROR_MARKER)
+                .is_none()
+            {
                 return true;
             }
             declared.push(std::mem::take(error));
@@ -120,21 +125,20 @@ impl ConnectorDeclaredErrors {
         if errors.is_empty() {
             return None;
         }
-        Some(Value::Array(
+        Some(json_ext::array(
             errors
                 .into_iter()
                 // A `graphql::Error` serializes to exactly the `message`,
                 // `path` and `extensions` shape wanted here, minus the fields
                 // it already skips when empty.
-                .filter_map(|error| serde_json_bytes::to_value(error).ok())
-                .collect(),
+                .filter_map(|error| json_ext::to_value(&error).ok()),
         ))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json_bytes::json;
+    use apollo_json::json;
 
     use super::*;
     use crate::json_ext::Path;
@@ -144,7 +148,7 @@ mod tests {
             .message(message)
             .path(Path::from("account/balance"))
             .extension_code("CONNECTORS_MAPPING_ERROR")
-            .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+            .extension(DECLARED_ERROR_MARKER, json!(true))
             .build()
     }
 
@@ -172,9 +176,9 @@ mod tests {
         let taken = ConnectorDeclaredErrors::drain(&context).expect("the declared error");
         let taken = taken.as_array().expect("an array");
         assert_eq!(taken.len(), 1);
-        assert_eq!(taken[0].get("message"), Some(&json!("balance unavailable")));
+        assert_eq!(taken[0].get("message"), Some(json!("balance unavailable")));
         // The path `response_at_path` computed is what the client sees.
-        assert_eq!(taken[0].get("path"), Some(&json!(["account", "balance"])));
+        assert_eq!(taken[0].get("path"), Some(json!(["account", "balance"])));
     }
 
     /// The reported `path` follows the spec's _response path_ shape even
@@ -190,7 +194,7 @@ mod tests {
                 .message("bad code")
                 .path(Path::from("account/rows/0/code"))
                 .extension_code("CONNECTORS_MAPPING_ERROR")
-                .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+                .extension(DECLARED_ERROR_MARKER, json!(true))
                 .build(),
         ];
 
@@ -201,7 +205,7 @@ mod tests {
             taken.as_array().unwrap()[0].get("path"),
             // `0` and not `"0"`: the spec's path segments for list indices are
             // integers.
-            Some(&json!(["account", "rows", 0, "code"])),
+            Some(json!(["account", "rows", 0, "code"])),
         );
     }
 
@@ -222,7 +226,7 @@ mod tests {
         // Stripping it must not take the author's own fields with it.
         assert_eq!(
             extensions.get("code"),
-            Some(&json!("CONNECTORS_MAPPING_ERROR")),
+            Some(json!("CONNECTORS_MAPPING_ERROR")),
         );
     }
 
@@ -267,7 +271,7 @@ mod tests {
         let taken = ConnectorDeclaredErrors::drain(&context).expect("both errors");
         let taken = taken.as_array().expect("an array");
         assert_eq!(taken.len(), 2);
-        assert_eq!(taken[0].get("message"), Some(&json!("first")));
-        assert_eq!(taken[1].get("message"), Some(&json!("second")));
+        assert_eq!(taken[0].get("message"), Some(json!("first")));
+        assert_eq!(taken[1].get("message"), Some(json!("second")));
     }
 }

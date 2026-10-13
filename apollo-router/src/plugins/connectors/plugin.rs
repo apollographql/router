@@ -13,6 +13,8 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use super::query_plans::get_connectors;
+use crate::json_ext;
+use crate::json_ext::ObjectExt;
 use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -143,13 +145,17 @@ impl Plugin for Connectors {
                                 if let Some(errors) = ConnectorDeclaredErrors::drain(&context) {
                                     chunk
                                         .extensions
-                                        .insert(CONNECTOR_ERRORS_EXTENSION_KEY, errors);
+                                        .object_insert(CONNECTOR_ERRORS_EXTENSION_KEY, errors);
                                 }
                                 if let Some(debug) = &debug {
                                     let serialized = { &debug.lock().clone().serialize() };
-                                    chunk.extensions.insert(
+                                    chunk.extensions.object_insert(
                                         CONNECTORS_DEBUG_KEY,
-                                        json!({"version": "2", "data": serialized }),
+                                        // PERF(apollo-json): legacy bridge, revisit -- the
+                                        // connector debug payload is serde_json_bytes
+                                        json_ext::from_legacy(
+                                            &json!({"version": "2", "data": serialized }),
+                                        ),
                                     );
                                 }
                                 chunk
@@ -213,7 +219,6 @@ register_plugin!("apollo", PLUGIN_NAME, Connectors);
 #[cfg(test)]
 mod tests {
     use futures::StreamExt;
-    use serde_json_bytes::Value;
 
     use super::*;
     use crate::graphql;
@@ -227,7 +232,7 @@ mod tests {
             .message("balance unavailable")
             .path(Path::from("account/balance"))
             .extension_code("CONNECTORS_MAPPING_ERROR")
-            .extension(DECLARED_ERROR_MARKER, Value::Bool(true))
+            .extension(DECLARED_ERROR_MARKER, apollo_json::json!(true))
             .build()
     }
 
@@ -253,7 +258,7 @@ mod tests {
             ConnectorDeclaredErrors::take_marked(&req.context, &mut vec![declared()]);
 
             supergraph::Response::fake_builder()
-                .data(json!({ "account": { "balance": 0 } }))
+                .data(apollo_json::json!({ "account": { "balance": 0 } }))
                 .context(req.context)
                 .build()
         });
@@ -265,7 +270,7 @@ mod tests {
         assert!(chunks[0].errors.is_empty());
         assert_eq!(
             chunks[0].extensions.get(CONNECTOR_ERRORS_EXTENSION_KEY),
-            Some(&json!([{
+            Some(apollo_json::json!([{
                 "message": "balance unavailable",
                 "path": ["account", "balance"],
                 "extensions": { "code": "CONNECTORS_MAPPING_ERROR" },
@@ -294,7 +299,7 @@ mod tests {
 
         let service = harness.supergraph_service(|req| async move {
             supergraph::Response::fake_builder()
-                .data(json!({ "account": { "balance": 0 } }))
+                .data(apollo_json::json!({ "account": { "balance": 0 } }))
                 .context(req.context)
                 .build()
         });

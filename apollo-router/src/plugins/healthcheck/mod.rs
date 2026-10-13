@@ -357,20 +357,20 @@ mod test {
         let svc = match response_status_code {
             StatusCode::OK => test_harness.router_service(|_req| async {
                 router::Response::fake_builder()
-                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .data(json_value!({"data": {"field": "value"}}))
                     .header("x-custom-header", "test-value")
                     .build()
             }),
             StatusCode::GATEWAY_TIMEOUT => test_harness.router_service(|_req| async {
                 router::Response::fake_builder()
-                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .data(json_value!({"data": {"field": "value"}}))
                     .header("x-custom-header", "test-value")
                     .status_code(StatusCode::GATEWAY_TIMEOUT)
                     .build()
             }),
             StatusCode::SERVICE_UNAVAILABLE => test_harness.router_service(|_req| async {
                 router::Response::fake_builder()
-                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .data(json_value!({"data": {"field": "value"}}))
                     .header("x-custom-header", "test-value")
                     .status_code(StatusCode::SERVICE_UNAVAILABLE)
                     .build()

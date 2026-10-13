@@ -264,7 +264,7 @@ where
         &self,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        response_value: &serde_json_bytes::Value,
+        response_value: &crate::json_ext::Value,
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
