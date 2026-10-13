@@ -1,0 +1,27 @@
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(
+            url: "https://specs.apollo.dev/federation/v2.12"
+            import: ["@key", "@cacheTag"]
+          )
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "example", http: { baseURL: "http://example" })
+
+        type Query {
+          users: [User] @cacheTag(format: "users") @connect(source: "example", http: { GET: "/users" }, selection: "id name")
+          products: [Product] @connect(source: "example", http: { GET: "/products" }, selection: "id title")
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+          name: String
+        }
+
+        type Product @key(fields: "id") {
+          id: ID!
+          title: String
+        }

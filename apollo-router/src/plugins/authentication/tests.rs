@@ -1604,8 +1604,8 @@ async fn jwks_send_headers() {
         poll_interval: Duration::from_secs(60),
         allow_missing_exp: false,
         headers: vec![Header {
-            name: HeaderName::from_static("jwks-authz"),
-            value: HeaderValue::from_static("user1"),
+            name: HeaderName::from_static("jwks-authz").into(),
+            value: HeaderValue::from_static("user1").into(),
         }],
     }])
     .await

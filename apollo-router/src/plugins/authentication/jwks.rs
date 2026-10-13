@@ -192,7 +192,7 @@ pub(super) async fn get_jwks(url: Url, headers: Vec<Header>) -> Option<JwkSet> {
             .header(ACCEPT, APPLICATION_JSON.essence_str());
 
         for header in headers.into_iter() {
-            builder = builder.header(header.name, header.value);
+            builder = builder.header((*header.name).clone(), (*header.value).clone());
         }
 
         builder

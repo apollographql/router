@@ -175,15 +175,24 @@ Identical requests joined by [query deduplication](./traffic-shaping#query-dedup
 
 The router records a request as a failure when:
 
-- The response carries a `5xx` or `429` HTTP status, whether the target sent it or a coprocessor, rhai script, or native plugin built it. A coprocessor `break` is judged by the status it breaks with. A `429` means the target is overloaded, which is what a circuit protects it from.
+- The response carries a `5xx` or `429` HTTP status. A `429` means the target is overloaded, which is what a circuit protects it from.
 - The request fails with an error. For example, the router can't connect, the connection drops before the whole response arrives, or a coprocessor can't be reached.
 - The request runs past its traffic shaping timeout.
 
 Timeouts count because a target that has stopped responding never returns an error of its own, so the timeout is the only evidence the circuit gets. They count only for a subgraph or connector source that traffic shaping configures, in `traffic_shaping.all`, `traffic_shaping.subgraphs`, `traffic_shaping.connector.all`, or `traffic_shaping.connector.sources`; its timeout is 30 seconds unless that block sets another. Without one, nothing ends a request to a target that has stopped responding except the router-level timeout or the client giving up, and neither of those is recorded. The timeout covers the whole of execution, including time spent in coprocessors and rhai scripts before the request reaches the target.
 
-Everything else, including any other `4xx` response and GraphQL errors in an otherwise successful response, counts as a success. A `4xx` usually says something about the request rather than the health of the target. A response cache hit counts as a success too.
+Everything else, including any other `4xx` response and GraphQL errors in an otherwise successful response, counts as a success. A `4xx` usually says something about the request rather than the health of the target.
 
-Some requests end without the router recording anything, because the target might still have answered them: the client disconnects, the router-level request timeout fires, the operation stops waiting after another fetch fails, or the router shuts down. If a recovery probe ends this way, the circuit stays half-open and the next request becomes the probe, without another wait.
+Some responses say nothing about the target's health, so the router records no outcome for them, whatever their status:
+
+- A coprocessor or rhai script turns the request away before it's sent: a coprocessor `break`, or a rhai script that throws from a subgraph request callback. For example, a coprocessor that rejects unauthenticated requests with a `401` can't change the circuit's state or its failure rate, however many requests it rejects.
+- A native plugin fails a connector request with `into_error_response`.
+- The router answers the request itself: the response cache returns a cached response or rejects an invalid `Cache-Control` header, or demand control rejects the request as too expensive.
+- A [file upload](/graphos/routing/operations/file-upload) fails part way through because the client's upload stream failed while the router was forwarding it to the subgraph.
+
+A `5xx` or `429` from the target still counts as a failure when a coprocessor, rhai script, or native plugin let the request through or ran on its response. A native plugin that answers a subgraph request itself, instead of sending it on, is judged by the status of its answer, like a response from the subgraph.
+
+Some requests end without the router recording anything, because the target might still have answered them: the client disconnects, the router-level request timeout fires, the operation stops waiting after another fetch fails, or the router shuts down. If a recovery probe ends this way, or with one of the responses above that say nothing about the target's health, the circuit stays half-open and the next request becomes the probe, without another wait.
 
 A mapping-only connector (a `@connect` with no `http` argument) never makes a request, so it's invisible to the circuit and keeps being served while the circuit is open, even when the connector names a `@source`.
 
@@ -193,7 +202,7 @@ A subgraph fetch that joins a [subgraph batch](/graphos/routing/performance/quer
 
 Because timeouts count as failures, a traffic shaping timeout shorter than a target's normal response time opens its circuit even while the target is healthy. Time a slow coprocessor or rhai script spends before the request reaches the target counts toward that timeout too. Size the timeout, `consecutive_failures`, and `failure_rate_threshold` with that in mind. If the router-level request timeout isn't longer than a target's timeout, that target's timeouts never count.
 
-For the same reason, a coprocessor that is unreachable or breaks requests with a `5xx` status, a rhai script that throws, or a native plugin that returns errors counts against the circuit of every target it runs for. This applies to connectors too: a coprocessor that breaks a connector request is judged by the status it breaks with, so a `401` break counts as a success and a `503` break as a failure. A native plugin that fails a connector request with `into_error_response` gives it no status, so that counts as a failure.
+For the same reason, a coprocessor that is unreachable, a rhai script that throws from a response callback, or a native plugin whose service fails the request with an error (rather than breaking it) counts against the circuit of every target it runs for.
 
 </Note>
 

@@ -13,6 +13,7 @@ expression: changed_settings(&config)
           "x-user-id"
         ]
       }
-    }
+    },
+    "enabled": true
   }
 }

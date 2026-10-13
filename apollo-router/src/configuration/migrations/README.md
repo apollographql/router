@@ -7,6 +7,7 @@ A migration has the following format:
 
 The filename should begin with a 4 digit numerical prefix. This allows us to apply migrations in a deterministic order.
 `Filename: 0001-name.yaml`. It must start with the current major version of the router. For example for router 2.x it should start with `2001-name.yaml`. If it doesn't start with the right version then it would be considered as a real breaking change and won't be automatically migrated when the router starts.
+Use the next unused number; two migrations for the current major version must not share a prefix. To add the first migration for a new major version, bump the crate's major version first.
 
 The yaml consists of a description and a number of actions:
 ```yaml

@@ -279,9 +279,9 @@ impl Default for ApolloUsageReportsBatchProcessorConfiguration {
 impl From<&BatchProcessorConfig> for ApolloUsageReportsBatchProcessorConfiguration {
     fn from(value: &BatchProcessorConfig) -> Self {
         ApolloUsageReportsBatchProcessorConfiguration {
-            scheduled_delay: value.scheduled_delay,
+            scheduled_delay: *value.scheduled_delay,
             max_queue_size: value.max_queue_size,
-            max_export_timeout: value.max_export_timeout,
+            max_export_timeout: *value.max_export_timeout,
         }
     }
 }

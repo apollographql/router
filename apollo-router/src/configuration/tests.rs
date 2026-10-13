@@ -15,6 +15,7 @@ use walkdir::WalkDir;
 
 use super::apollo_configuration_parse::ExternalValues;
 use super::apollo_configuration_parse::Migration;
+use super::apollo_configuration_parse::STARTUP_MIGRATED_SETTING;
 use super::apollo_configuration_parse::parse_configuration;
 use super::apollo_configuration_parse::parse_without_inputs;
 use super::subgraph::SubgraphConfiguration;
@@ -27,7 +28,7 @@ use crate::error::SchemaError;
 fn schema_generation() {
     let schema = generate_config_schema();
     insta::with_settings!({sort_maps => true}, {
-        assert_json_snapshot!(&schema)
+        assert_json_snapshot!(&schema);
     });
     let json_schema =
         serde_json::to_string_pretty(&schema).expect("must be able to deserialize schema");
@@ -481,19 +482,21 @@ fn schema_validation_errors_do_not_print_expanded_secret_values() {
     assert!(error.contains("unexpected"), "{error}");
 }
 
-/// Pins a known difference from router v2.x: apollo-configuration converts an expanded value only
-/// to the type its setting's schema declares, and connector `$config` values declare none, so
-/// `${env.FIVE}` stays the string `"5"` where v2.x produced the number `5`. When
-/// apollo-configuration converts values at untyped positions as YAML does, this should assert the
-/// number.
+/// Connector `$config` values declare no type, so an expanded value resolves as the same text
+/// written directly in YAML would.
 #[test]
-fn expanded_connector_config_values_stay_strings() {
+fn expanded_connector_config_values_resolve_like_yaml() {
     let expansion = Expansion::builder()
         .supported_mode("env")
         .mocked_env_var("FIVE", "5")
+        .mocked_env_var("FALSE", "false")
+        .mocked_env_var("NULL", "~")
+        .mocked_env_var("EMPTY", "")
+        .mocked_env_var("PADDED", "0042")
+        .mocked_env_var("TEXT", "hello")
         .build();
     let config = parse_configuration(
-        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n",
+        "connectors:\n  sources:\n    products.api:\n      $config:\n        timeout: ${env.FIVE}\n        enabled: ${env.FALSE}\n        region: ${env.NULL}\n        token: ${env.EMPTY}\n        code: ${env.PADDED}\n        name: ${env.TEXT}\n        label: count-${env.FIVE}\n",
         expansion,
         Migration::None,
     )
@@ -501,8 +504,39 @@ fn expanded_connector_config_values_stay_strings() {
 
     let document = config.validated_yaml.expect("the retained document");
     assert_eq!(
-        document["connectors"]["sources"]["products.api"]["$config"]["timeout"],
-        json!("5")
+        document["connectors"]["sources"]["products.api"]["$config"],
+        json!({
+            "timeout": 5,
+            "enabled": false,
+            "region": null,
+            "token": null,
+            "code": "0042",
+            "name": "hello",
+            "label": "count-5",
+        })
+    );
+}
+
+/// gRPC metadata values are header values, so an expanded value that looks like a number or a
+/// boolean must stay a string rather than resolve as YAML.
+#[test]
+fn expanded_otlp_grpc_metadata_values_stay_strings() {
+    let expansion = Expansion::builder()
+        .supported_mode("env")
+        .mocked_env_var("API_KEY", "12345")
+        .mocked_env_var("FLAG", "true")
+        .build();
+    let config = parse_configuration(
+        "telemetry:\n  exporters:\n    tracing:\n      otlp:\n        enabled: true\n        protocol: grpc\n        grpc:\n          metadata:\n            x-api-key: ${env.API_KEY}\n            x-flags:\n              - ${env.FLAG}\n",
+        expansion,
+        Migration::None,
+    )
+    .expect("the metadata values are strings");
+
+    let document = config.validated_yaml.expect("the retained document");
+    assert_eq!(
+        document["telemetry"]["exporters"]["tracing"]["otlp"]["grpc"]["metadata"],
+        json!({ "x-api-key": "12345", "x-flags": ["true"] })
     );
 }
 
@@ -538,7 +572,7 @@ fn errors_about_an_anchored_expansion_quote_the_value_aliased_into_a_secret_fiel
     );
 }
 
-/// With legacy CORS settings, startup migrates the document first and loads the migrated copy,
+/// With a removed setting, startup migrates the document first and loads the migrated copy,
 /// which fails on the timeout. Pins the same known limitation as above: the copy has no YAML
 /// aliases, so the error quotes the value the anchored reference resolved to, whether the variable
 /// or the reference's default supplies it. The secret field itself stays redacted.
@@ -553,7 +587,9 @@ fn migrated_anchored_expansions_quote_the_value_aliased_into_a_secret_field() {
             expansion = expansion.mocked_env_var("TEST_CONFIG_REDIS_PASSWORD", secret);
         }
         let error = parse_configuration(
-            "cors:\n  origins:\n    - https://example.com\napq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${env.TEST_CONFIG_REDIS_PASSWORD:-fallback-secret-value}\n        password: *pw\n",
+            &format!(
+                "{STARTUP_MIGRATED_SETTING}apq:\n  router:\n    cache:\n      redis:\n        urls: [\"redis://localhost\"]\n        timeout: &pw ${{env.TEST_CONFIG_REDIS_PASSWORD:-fallback-secret-value}}\n        password: *pw\n"
+            ),
             expansion.build(),
             Migration::WithinMajor,
         )
@@ -1297,6 +1333,44 @@ fn enhanced_client_awareness_rejects_unknown_keys() {
 #[test]
 fn progressive_override_rejects_unknown_keys() {
     assert_rejects_unknown_key("progressive_override:\n  enabeld: false\n", "enabeld");
+}
+
+/// Nested plugin config types use the configuration attribute, so their sections reject unknown
+/// keys too. Each case is a section that accepted, and ignored, unknown keys before.
+#[test]
+fn nested_plugin_sections_reject_unknown_keys() {
+    for (yaml, key) in [
+        (
+            "authorization:\n  directives:\n    errors:\n      lgo: false\n",
+            "lgo",
+        ),
+        (
+            "authorization:\n  directives:\n    enabeld: false\n",
+            "enabeld",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  router:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  supergraph:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  execution:\n    reqest: {}\n",
+            "reqest",
+        ),
+        (
+            "coprocessor:\n  url: http://127.0.0.1:8081\n  connector:\n    alll: {}\n",
+            "alll",
+        ),
+        (
+            "telemetry:\n  exporters:\n    tracing:\n      otlp:\n        enabled: false\n        batch_processor:\n          max_queue_sise: 10\n",
+            "max_queue_sise",
+        ),
+    ] {
+        assert_rejects_unknown_key(yaml, key);
+    }
 }
 
 #[test]
