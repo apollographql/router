@@ -184,8 +184,9 @@ impl Variables {
             let mut variables = used_variables(variable_usages, &body.variables);
 
             // Every representation goes into one arena, rather than one
-            // arena each.
-            let mut pending = ValueBuilder::new_array();
+            // arena each, and the array is written in one pass, so the
+            // builder's working buffers are allocated once.
+            let mut pending: Vec<NewValue<'_>> = Vec::new();
             let mut paths: Vec<Path> = Vec::new();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
@@ -195,9 +196,7 @@ impl Variables {
 
                 let representation = select(&value, requires, schema, None);
                 if matches!(&representation, NewValue::Object(members) if !members.is_empty()) {
-                    pending
-                        .push(representation)
-                        .expect("the builder root is an array, which accepts elements");
+                    pending.push(representation);
                     paths.push(path.clone());
                 }
             });
@@ -206,7 +205,7 @@ impl Variables {
                 return None;
             }
 
-            let pending = pending.seal();
+            let pending = json_ext::rooted_value(NewValue::Array(pending));
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::with_capacity(paths.len());
             for (mut value, path) in pending.array_iter().zip(paths) {
