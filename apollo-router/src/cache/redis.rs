@@ -288,6 +288,33 @@ where
     }
 }
 
+/// `key` prefixed with `namespace` and a colon when there is one, written into
+/// a buffer of exactly its size. This runs once per key of every fetch and
+/// insert, and `format!` would grow its buffer as it writes.
+fn namespaced_key(namespace: Option<&str>, key: &impl fmt::Display) -> String {
+    use std::fmt::Write as _;
+
+    /// Measures formatted text without writing it anywhere.
+    struct Measure(usize);
+    impl fmt::Write for Measure {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            self.0 += s.len();
+            Ok(())
+        }
+    }
+
+    let mut measure = Measure(0);
+    let _ = write!(measure, "{key}");
+    let prefix_len = namespace.map_or(0, |namespace| namespace.len() + 1);
+    let mut out = String::with_capacity(prefix_len + measure.0);
+    if let Some(namespace) = namespace {
+        out.push_str(namespace);
+        out.push(':');
+    }
+    let _ = write!(out, "{key}");
+    out
+}
+
 impl RedisCacheStorage {
     /// Create a new RedisCacheStorage without an inner client. To create an inner client, you must call `create_client_pool`
     pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
@@ -766,11 +793,13 @@ impl RedisCacheStorage {
         Some(Expiration::EX(ttl.as_secs() as i64))
     }
 
+    /// The key as stored in Redis, prefixed with the namespace when there is
+    /// one.
     pub(crate) fn make_key<K: KeyType>(&self, key: RedisKey<K>) -> String {
-        match &self.namespace {
-            Some(namespace) => format!("{namespace}:{key}"),
-            None => key.to_string(),
-        }
+        namespaced_key(
+            self.namespace.as_ref().map(|namespace| namespace.as_str()),
+            &key.0,
+        )
     }
 
     pub(crate) async fn get<K: KeyType, V: ValueType>(
@@ -1159,6 +1188,20 @@ impl RedisCacheStorage {
 #[cfg(test)]
 mod test {
     use std::time::SystemTime;
+
+    #[test]
+    fn namespaced_keys_are_written_at_their_exact_size() {
+        for (namespace, key, expected) in [
+            (Some("ns"), "version:1:key", "ns:version:1:key"),
+            (None, "version:1:key", "version:1:key"),
+            (Some("ns"), "", "ns:"),
+        ] {
+            let made = super::namespaced_key(namespace, &key);
+            assert_eq!(made, expected);
+            assert_eq!(made.capacity(), made.len());
+        }
+        assert_eq!(super::namespaced_key(Some("ns"), &42), "ns:42");
+    }
 
     use url::Url;
 

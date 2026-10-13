@@ -65,7 +65,6 @@ pub(super) struct Document {
 /// cache_control data.
 #[derive(Debug, Clone)]
 pub(super) struct CacheEntry {
-    pub(super) key: String,
     pub(super) data: crate::json_ext::Value,
     pub(super) control: CacheControl,
     /// Invalidation labels are those labels used to invalidate cached data; they pick out data

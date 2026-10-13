@@ -101,10 +101,9 @@ mod raw_json {
     }
 }
 
-impl From<(&str, CacheValue)> for CacheEntry {
-    fn from((cache_key, cache_value): (&str, CacheValue)) -> Self {
+impl From<CacheValue> for CacheEntry {
+    fn from(cache_value: CacheValue) -> Self {
         CacheEntry {
-            key: cache_key.to_string(),
             data: cache_value.data,
             control: cache_value.cache_control,
             // cache tags are used to populate the initial set of invalidation labels; they get
@@ -485,17 +484,15 @@ impl CacheStorage for Storage {
             .storage
             .get_with_options(RedisKey(cache_key), options)
             .await?;
-        Ok(CacheEntry::from((cache_key, value.0)))
+        Ok(CacheEntry::from(value.0))
     }
 
     async fn internal_fetch_multiple(
         &self,
         cache_keys: &[&str],
     ) -> StorageResult<Vec<StorageResult<CacheEntry>>> {
-        let keys: Vec<RedisKey<String>> = cache_keys
-            .iter()
-            .map(|key| RedisKey(key.to_string()))
-            .collect();
+        // Borrowed: `make_key` writes each into the one string Redis gets.
+        let keys: Vec<RedisKey<&str>> = cache_keys.iter().map(|key| RedisKey(*key)).collect();
         let options = Options {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
@@ -507,10 +504,9 @@ impl CacheStorage for Storage {
 
         let entries = values
             .into_iter()
-            .zip(cache_keys)
-            .map(|(opt_value, cache_key)| {
+            .map(|opt_value| {
                 opt_value
-                    .map(|value| CacheEntry::from((*cache_key, value.0)))
+                    .map(|value| CacheEntry::from(value.0))
                     .map_err(Into::into)
             })
             .collect();

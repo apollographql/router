@@ -1827,7 +1827,7 @@ impl CacheService {
                     let debug_cache_keys_ctx = cache_result.0.iter().filter_map(|ir| {
                         ir.cache_entry.as_ref().map(|cache_entry| CacheKeyContext {
                             hashed_private_id: private_id.clone(),
-                            key: cache_entry.key.clone(),
+                            key: ir.key.clone(),
                             invalidation_keys: InvalidationLabels {
                                 tags: ir.cdn_invalidation_tags.iter().cloned().collect(),
                                 types: HashSet::from([(self.name.clone(), ir.typename.to_string())]),
@@ -2093,7 +2093,7 @@ async fn cache_lookup_root(
                     .user_facing_only();
 
                     let cache_key_context = CacheKeyContext {
-                        key: debug_value.key,
+                        key: key.clone(),
                         has_tags,
                         cdn_invalidation_enabled,
                         hashed_private_id: private_id.map(ToString::to_string),
