@@ -320,7 +320,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::time::Duration;
 
     use futures::FutureExt;
@@ -334,7 +333,7 @@ mod tests {
     use tower_test::mock::Handle;
 
     use super::QueryDeduplicationService;
-    use crate::batching::Batch;
+    use crate::batching::BatchQuery;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::traffic_shaping::timeout::SubgraphTimeoutLayer;
     use crate::query_planner::fetch::OperationKind;
@@ -444,8 +443,7 @@ mod tests {
 
             let mut svc = dedup_service(mock);
             let request = SubgraphRequest::fake_builder().build();
-            let batch = Arc::new(Batch::spawn_handler(1));
-            let batch_query = Batch::query_for_index(batch, 0).expect("a valid batch index");
+            let batch_query = BatchQuery::for_test();
             request
                 .context
                 .extensions()

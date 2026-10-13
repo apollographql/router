@@ -86,6 +86,13 @@ impl fmt::Display for BatchQuery {
 }
 
 impl BatchQuery {
+    /// A query at index 0 of a new batch of one, for tests outside this module.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Batch::query_for_index(Arc::new(Batch::spawn_handler(1)), 0)
+            .expect("index 0 exists in a batch of one")
+    }
+
     /// The batch query a fetch to `subgraph_name` in this request joins, if it joins one: batching
     /// must be enabled for that subgraph, and the request's batch query must still be waiting for
     /// its fetches.
@@ -251,7 +258,7 @@ fn get_query_hash(request: &HttpRequest) -> Arc<QueryHash> {
 // TODO: Do we want to generate a UUID for a batch for observability reasons?
 // TODO: Do we want to track the size of a batch?
 #[derive(Debug)]
-pub(crate) struct Batch {
+struct Batch {
     /// A sender channel to communicate with the batching handler
     senders: PMutex<Vec<Option<mpsc::Sender<BatchHandlerMessage>>>>,
 
@@ -269,7 +276,7 @@ pub(crate) struct Batch {
 impl Batch {
     /// Creates a new batch, spawning an async task for handling updates to the
     /// batch lifecycle.
-    pub(crate) fn spawn_handler(size: usize) -> Self {
+    fn spawn_handler(size: usize) -> Self {
         tracing::debug!("New batch created with size {size}");
 
         // Create the message channel pair for sending update events to the spawned task
@@ -436,7 +443,7 @@ impl Batch {
     /// Create a batch query for a specific index in this batch
     ///
     /// This function may fail if the index doesn't exist or has already been taken
-    pub(crate) fn query_for_index(
+    fn query_for_index(
         batch: Arc<Batch>,
         index: usize,
     ) -> Result<BatchQuery, SubgraphBatchingError> {
