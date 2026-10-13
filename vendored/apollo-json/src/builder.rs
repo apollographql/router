@@ -1480,7 +1480,7 @@ impl ValueBuilder {
         loop {
             let mut child = match next.take() {
                 Some(id) => {
-                    let slot = &mut tree.slots[id.0 as usize];
+                    let slot = tree.slot_mut(id);
                     match std::mem::replace(&mut slot.value, Pending::Value(NewValue::Null)) {
                         Pending::Object { first, .. } => {
                             stack.push(PendingFrame {
@@ -1518,7 +1518,7 @@ impl ValueBuilder {
                         // Keys are unique by construction, so no duplicate
                         // check: `PendingTree::member_slot` reuses a present
                         // key.
-                        let key = &tree.slots[frame.current as usize].key;
+                        let key = &tree.slot(PendingId(frame.current)).key;
                         let key = KeyRef::Owned(self.arena.alloc_text(key));
                         scratch.entries.push(Entry { key, child });
                     } else {
@@ -1527,7 +1527,7 @@ impl ValueBuilder {
                 }
                 if frame.next != NONE {
                     frame.current = frame.next;
-                    frame.next = tree.slots[frame.current as usize].next;
+                    frame.next = tree.slot(PendingId(frame.current)).next;
                     next = Some(PendingId(frame.current));
                     break;
                 }

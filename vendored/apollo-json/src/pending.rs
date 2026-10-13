@@ -74,9 +74,35 @@ pub(crate) enum Pending<'a> {
 ///     r#"{"people":[{"name":"bob","age":19}]}"#
 /// );
 /// ```
-#[derive(Default)]
 pub struct PendingTree<'a> {
-    pub(crate) slots: Vec<PendingSlot<'a>>,
+    /// Slots in segments that never move: segment `k` holds
+    /// `FIRST_SEGMENT << k` slots, allocated when the one before it is full.
+    /// A growing `Vec` would copy every slot on each reallocation, and its
+    /// reallocations together allocate about twice its final size.
+    segments: [Vec<PendingSlot<'a>>; SEGMENTS],
+    len: u32,
+}
+
+/// Slots in the first segment.
+const FIRST_SEGMENT: usize = 32;
+
+/// Enough segments for every id below [`DETACHED`].
+const SEGMENTS: usize = 27;
+
+/// The segment holding slot `id`, and the slot's index in it.
+fn locate(id: u32) -> (usize, usize) {
+    let id = id as usize;
+    let segment = (usize::BITS - 1 - (id / FIRST_SEGMENT + 1).leading_zeros()) as usize;
+    (segment, id - FIRST_SEGMENT * ((1 << segment) - 1))
+}
+
+impl Default for PendingTree<'_> {
+    fn default() -> Self {
+        PendingTree {
+            segments: [const { Vec::new() }; SEGMENTS],
+            len: 0,
+        }
+    }
 }
 
 impl<'a> PendingTree<'a> {
@@ -84,16 +110,33 @@ impl<'a> PendingTree<'a> {
         Self::default()
     }
 
+    pub(crate) fn slot(&self, id: PendingId) -> &PendingSlot<'a> {
+        let (segment, index) = locate(id.0);
+        &self.segments[segment][index]
+    }
+
+    pub(crate) fn slot_mut(&mut self, id: PendingId) -> &mut PendingSlot<'a> {
+        let (segment, index) = locate(id.0);
+        &mut self.segments[segment][index]
+    }
+
     fn add(&mut self, key: Cow<'a, str>, value: Pending<'a>) -> PendingId {
-        let id = u32::try_from(self.slots.len())
-            .ok()
-            .filter(|&id| id < DETACHED)
-            .expect("a pending tree holds under 2^32 - 2 slots");
-        self.slots.push(PendingSlot {
+        let id = self.len;
+        let (segment, index) = locate(id);
+        assert!(
+            segment < SEGMENTS,
+            "a pending tree holds under 2^32 - 32 slots"
+        );
+        let slots = &mut self.segments[segment];
+        if index == 0 {
+            *slots = Vec::with_capacity(FIRST_SEGMENT << segment);
+        }
+        slots.push(PendingSlot {
             key,
             value,
             next: DETACHED,
         });
+        self.len += 1;
         PendingId(id)
     }
 
@@ -120,12 +163,12 @@ impl<'a> PendingTree<'a> {
 
     /// Writes `value` at `id`, abandoning anything the slot held.
     pub fn set(&mut self, id: PendingId, value: impl Into<NewValue<'a>>) {
-        self.slots[id.0 as usize].value = Pending::Value(value.into());
+        self.slot_mut(id).value = Pending::Value(value.into());
     }
 
     /// Writes an empty object at `id`.
     pub fn set_object(&mut self, id: PendingId) {
-        self.slots[id.0 as usize].value = Pending::Object {
+        self.slot_mut(id).value = Pending::Object {
             first: NONE,
             last: NONE,
         };
@@ -133,7 +176,7 @@ impl<'a> PendingTree<'a> {
 
     /// Writes an empty array at `id`.
     pub fn set_array(&mut self, id: PendingId) {
-        self.slots[id.0 as usize].value = Pending::Array {
+        self.slot_mut(id).value = Pending::Array {
             first: NONE,
             last: NONE,
         };
@@ -141,7 +184,7 @@ impl<'a> PendingTree<'a> {
 
     /// The value at `id` when it is not a container of this tree.
     pub fn get(&self, id: PendingId) -> Option<&NewValue<'a>> {
-        match &self.slots[id.0 as usize].value {
+        match &self.slot(id).value {
             Pending::Value(value) => Some(value),
             _ => None,
         }
@@ -158,15 +201,15 @@ impl<'a> PendingTree<'a> {
     }
 
     pub fn is_object(&self, id: PendingId) -> bool {
-        matches!(self.slots[id.0 as usize].value, Pending::Object { .. })
+        matches!(self.slot(id).value, Pending::Object { .. })
     }
 
     pub fn is_array(&self, id: PendingId) -> bool {
-        matches!(self.slots[id.0 as usize].value, Pending::Array { .. })
+        matches!(self.slot(id).value, Pending::Array { .. })
     }
 
     fn first_last(&self, id: PendingId) -> Option<(u32, u32)> {
-        match self.slots[id.0 as usize].value {
+        match self.slot(id).value {
             Pending::Object { first, last } | Pending::Array { first, last } => Some((first, last)),
             Pending::Value(_) => None,
         }
@@ -181,7 +224,7 @@ impl<'a> PendingTree<'a> {
 
     /// The member or element after `id` in its container.
     pub fn next(&self, id: PendingId) -> Option<PendingId> {
-        let next = self.slots[id.0 as usize].next;
+        let next = self.slot(id).next;
         (next < DETACHED).then_some(PendingId(next))
     }
 
@@ -192,7 +235,7 @@ impl<'a> PendingTree<'a> {
 
     /// The key of the object member at `id`.
     pub fn key(&self, id: PendingId) -> &str {
-        &self.slots[id.0 as usize].key
+        &self.slot(id).key
     }
 
     /// The member at `key` of the object at `object`.
@@ -203,9 +246,9 @@ impl<'a> PendingTree<'a> {
 
     /// Appends `child` to the container at `container`.
     fn link(&mut self, container: PendingId, child: u32) {
-        self.slots[child as usize].next = NONE;
+        self.slot_mut(PendingId(child)).next = NONE;
         let (Pending::Object { first, last } | Pending::Array { first, last }) =
-            &mut self.slots[container.0 as usize].value
+            &mut self.slot_mut(container).value
         else {
             panic!("not a pending container");
         };
@@ -213,7 +256,7 @@ impl<'a> PendingTree<'a> {
         if previous == NONE {
             *first = child;
         } else {
-            self.slots[previous as usize].next = child;
+            self.slot_mut(PendingId(previous)).next = child;
         }
     }
 
@@ -252,7 +295,7 @@ impl<'a> PendingTree<'a> {
     pub fn append(&mut self, array: PendingId, root: PendingId) {
         assert!(self.is_array(array), "not a pending array");
         assert!(
-            self.slots[root.0 as usize].next == DETACHED && root != array,
+            self.slot_mut(root).next == DETACHED && root != array,
             "not a root slot"
         );
         self.link(array, root.0);
@@ -301,7 +344,7 @@ impl<'a> PendingTree<'a> {
 impl std::fmt::Debug for PendingTree<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PendingTree")
-            .field("slots", &self.slots.len())
+            .field("slots", &self.len)
             .finish()
     }
 }
@@ -360,6 +403,36 @@ mod tests {
         }));
         assert!(result.is_err());
         assert_eq!(tree.seal(list).to_string(), r#"[{"i":0},{"i":2}]"#);
+    }
+
+    #[test]
+    fn slots_are_located_across_segment_boundaries() {
+        assert_eq!(locate(0), (0, 0));
+        assert_eq!(locate(31), (0, 31));
+        assert_eq!(locate(32), (1, 0));
+        assert_eq!(locate(95), (1, 63));
+        assert_eq!(locate(96), (2, 0));
+        let last = (FIRST_SEGMENT * ((1 << SEGMENTS) - 1) - 1) as u32;
+        assert_eq!(
+            locate(last),
+            (SEGMENTS - 1, (FIRST_SEGMENT << (SEGMENTS - 1)) - 1)
+        );
+        assert!(last < DETACHED);
+
+        let mut tree = PendingTree::new();
+        let list = tree.array();
+        for i in 0..1000i64 {
+            let element = tree.push(list);
+            tree.set(element, i);
+        }
+        let expected = format!(
+            "[{}]",
+            (0..1000)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert_eq!(tree.seal(list).to_string(), expected);
     }
 
     #[test]
