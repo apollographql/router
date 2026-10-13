@@ -1,18 +1,12 @@
 use std::ops::Range;
 
 use apollo_compiler::Schema;
-<<<<<<< HEAD
-=======
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::FieldDefinition;
->>>>>>> 6f09c74 (fix(composition): check implementation @deprecated against merged interfaces (#10462))
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::SubgraphLocation;
@@ -110,10 +104,10 @@ pub(crate) fn apply_fed3_upgrade(schema: &mut Schema, subgraph_name: &str) -> Ve
 
 /// An `@deprecated` removed by [`strip_invalid_implementation_deprecations`].
 pub(crate) struct StrippedDeprecation {
-    pub(crate) type_name: Name,
-    pub(crate) field_name: Name,
-    pub(crate) interface_name: Name,
-    pub(crate) directive: Node<Directive>,
+    pub(crate) type_name: apollo_compiler::Name,
+    pub(crate) field_name: apollo_compiler::Name,
+    pub(crate) interface_name: apollo_compiler::Name,
+    pub(crate) directive: apollo_compiler::Node<Directive>,
 }
 
 impl StrippedDeprecation {
@@ -225,41 +219,6 @@ fn upgrade_fields_and_args(
     }
 }
 
-<<<<<<< HEAD
-/// For each interface this type implements, strip `@deprecated` from fields
-/// where the corresponding interface field is not deprecated.
-fn strip_deprecated_on_non_deprecated_interface_fields(
-    hints: &mut Vec<CompositionHint>,
-    implements_interfaces: &IndexSet<ComponentName>,
-    fields: &mut IndexMap<apollo_compiler::Name, Component<apollo_compiler::ast::FieldDefinition>>,
-    type_name: &apollo_compiler::Name,
-    iface_non_deprecated: &IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>>,
-    subgraph_name: &str,
-    sources: &SourceMap,
-) {
-    for iface_name in implements_interfaces {
-        if let Some(non_deprecated_fields) = iface_non_deprecated.get(&iface_name.name) {
-            for field in fields.values_mut() {
-                let field_name = field.name.clone();
-                if non_deprecated_fields.contains(&field_name) {
-                    let field_def = field.make_mut();
-                    strip_deprecated_without_interface(
-                        hints,
-                        &mut field_def.directives,
-                        type_name,
-                        &field_name,
-                        &iface_name.name,
-                        subgraph_name,
-                        sources,
-                    );
-                }
-            }
-        }
-    }
-}
-
-=======
->>>>>>> 6f09c74 (fix(composition): check implementation @deprecated against merged interfaces (#10462))
 /// Returns a map from interface name to the set of non-deprecated field names
 /// for every interface type in the schema. Fields the interface does not declare
 /// are absent, so the 2025 rule never applies to them.
@@ -329,41 +288,6 @@ fn strip_deprecated_reason_null(
     }
 }
 
-<<<<<<< HEAD
-/// Strip `@deprecated` from an implementing field when the corresponding
-/// interface field is not deprecated, emitting a hint for each occurrence.
-fn strip_deprecated_without_interface(
-    hints: &mut Vec<CompositionHint>,
-    directives: &mut apollo_compiler::ast::DirectiveList,
-    type_name: &apollo_compiler::Name,
-    field_name: &apollo_compiler::Name,
-    interface_name: &apollo_compiler::Name,
-    subgraph_name: &str,
-    sources: &SourceMap,
-) {
-    let deprecated = directives.0.iter().find(|d| d.name == "deprecated");
-    if let Some(directive) = deprecated {
-        let range = directive
-            .line_column_range(sources)
-            .unwrap_or_else(default_range);
-        directives.0.retain(|d| d.name != "deprecated");
-        hints.push(CompositionHint {
-            definition: &DEPRECATED_IMPLEMENTING_FIELD_WITHOUT_INTERFACE,
-            message: format!(
-                "Stripped `@deprecated` from `{type_name}.{field_name}` because \
-                 `{interface_name}.{field_name}` is not deprecated. Either deprecate \
-                 the interface field or remove `@deprecated` from the implementation."
-            ),
-            locations: vec![SubgraphLocation {
-                subgraph: subgraph_name.to_owned(),
-                range,
-            }],
-        });
-    }
-}
-
-=======
->>>>>>> 6f09c74 (fix(composition): check implementation @deprecated against merged interfaces (#10462))
 #[cfg(test)]
 mod tests {
     use apollo_compiler::coord;
@@ -746,57 +670,6 @@ mod tests {
             "Upgrade hints should precede merge hints, got: {hint_codes:?}"
         );
     }
-<<<<<<< HEAD
-=======
-
-    /// The upgrade runs on every subgraph, whatever federation version it is written against, and
-    /// each transformation is reported exactly once — the hints reach the result through a single
-    /// channel, so a subgraph's hints must not be reported again by a later stage.
-    #[test]
-    fn reports_one_hint_per_subgraph_upgraded() {
-        // Fed1: reaches `Validated` through the fed1 -> fed2 upgrade.
-        let s1 = Subgraph::parse(
-            "s1",
-            "http://s1",
-            r#"
-                type Query {
-                    s1Field: String @deprecated(reason: null)
-                }
-            "#,
-        )
-        .expect("should parse s1 subgraph");
-        // Fed2: skips that upgrade.
-        let s2 = Subgraph::parse(
-            "s2",
-            "http://s2",
-            r#"
-                extend schema
-                    @link(url: "https://specs.apollo.dev/federation/v2.0", import: ["@key"])
-
-                type Query {
-                    s2Field: String @deprecated(reason: null)
-                }
-            "#,
-        )
-        .expect("should parse s2 subgraph");
-
-        let result = crate::composition::compose(vec![s1, s2], CompositionOptions::default())
-            .expect("should compose test supergraph");
-        let hint_codes: Vec<_> = result
-            .hints()
-            .iter()
-            .map(|h| h.code().to_string())
-            .collect();
-        let reason_null_hints = hint_codes
-            .iter()
-            .filter(|code| *code == "DEPRECATED_REASON_NULL")
-            .count();
-        assert_eq!(
-            reason_null_hints, 2,
-            "Expected one DEPRECATED_REASON_NULL hint per subgraph, got: {hint_codes:?}"
-        );
-    }
-
     const MULTI_SUBGRAPH_LINK: &str = r#"extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@shareable", "@interfaceObject"])"#;
 
     fn compose_subgraphs(
@@ -898,5 +771,4 @@ mod tests {
         assert_eq!(hints.len(), 1, "expected one strip hint, got: {hints:?}");
         assert_eq!(hints[0].locations[0].subgraph, "products");
     }
->>>>>>> 6f09c74 (fix(composition): check implementation @deprecated against merged interfaces (#10462))
 }
