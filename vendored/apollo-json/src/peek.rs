@@ -73,7 +73,7 @@ impl<'b> BuilderRef<'b> {
         match self.node() {
             Node::Object(slab) => Some(self.arena.entries(slab)),
             Node::MutObject(index) if self.local => {
-                Some(&self.builder.object_overlay(index as usize).1)
+                Some(self.builder.object_overlay(index as usize))
             }
             _ => None,
         }
@@ -83,9 +83,7 @@ impl<'b> BuilderRef<'b> {
     fn children(&self) -> Option<&'b [Child]> {
         match self.node() {
             Node::Array(slab) => Some(self.arena.children(slab)),
-            Node::MutArray(index) if self.local => {
-                Some(&self.builder.array_overlay(index as usize).1)
-            }
+            Node::MutArray(index) if self.local => Some(self.builder.array_overlay(index as usize)),
             _ => None,
         }
     }

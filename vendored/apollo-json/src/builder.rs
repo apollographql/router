@@ -8,11 +8,13 @@
 //! makes mutation isolation structural — no shared document can ever observe
 //! a builder's changes.
 //!
-//! Container children live in immutable arena slabs. Replacing a child slot
-//! writes the slab in place; a container that grows (new keys, appended
-//! elements) is opened into a mutable overlay ([`Node::MutArray`] /
-//! [`Node::MutObject`]) that [`ValueBuilder::seal`] flattens back into
-//! slabs, so the sealed document is always in the packed immutable form.
+//! Container children live in arena slabs. Replacing a child slot writes the
+//! slab in place; a container that grows (new keys, appended elements) is
+//! marked open ([`Node::MutArray`] / [`Node::MutObject`]) and its run grows
+//! in the slabs with room to spare, at the end of the chunk being filled when
+//! it is already there and in a fresh run otherwise. [`ValueBuilder::seal`]
+//! trims each open run to the members written, so the sealed document is in
+//! the packed immutable form without copying anything again.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -271,9 +273,14 @@ fn shape_of(node: Node) -> Shape {
 pub struct ValueBuilder {
     arena: Arena,
     root: Child,
-    /// Overlays for containers opened for growth, flattened at seal.
-    array_overlays: Vec<(NodeId, Vec<Child>)>,
-    object_overlays: Vec<(NodeId, Vec<Entry>)>,
+    /// Containers opened for growth: each one's run in the arena's slabs and
+    /// how much of it is written. Seal trims each run to that length.
+    array_overlays: Vec<Grown>,
+    object_overlays: Vec<Grown>,
+    /// Reused while a shared container is copied on write, so the copy goes
+    /// into the arena's slabs without a buffer of its own.
+    import_children: Vec<Child>,
+    import_entries: Vec<Entry>,
     /// What a non-finite float written through this builder becomes. Set once
     /// at construction rather than passed per write, so a cursor handed out by
     /// the builder inherits it.
@@ -292,12 +299,16 @@ impl ValueBuilder {
         crate::peek::BuilderRef::new(self, self.root)
     }
 
-    pub(crate) fn object_overlay(&self, index: usize) -> &(NodeId, Vec<Entry>) {
-        &self.object_overlays[index]
+    /// The members written so far to an object opened for growth.
+    pub(crate) fn object_overlay(&self, index: usize) -> &[Entry] {
+        let grown = &self.object_overlays[index];
+        &self.arena.entries(grown.run)[..grown.len]
     }
 
-    pub(crate) fn array_overlay(&self, index: usize) -> &(NodeId, Vec<Child>) {
-        &self.array_overlays[index]
+    /// The elements written so far to an array opened for growth.
+    pub(crate) fn array_overlay(&self, index: usize) -> &[Child] {
+        let grown = &self.array_overlays[index];
+        &self.arena.children(grown.run)[..grown.len]
     }
 }
 
@@ -311,6 +322,8 @@ impl ValueBuilder {
             root: Child::local(root),
             array_overlays: Vec::new(),
             object_overlays: Vec::new(),
+            import_children: Vec::new(),
+            import_entries: Vec::new(),
             non_finite: NonFinite::Reject,
         }
     }
@@ -325,6 +338,8 @@ impl ValueBuilder {
             root: Child::local(root),
             array_overlays: Vec::new(),
             object_overlays: Vec::new(),
+            import_children: Vec::new(),
+            import_entries: Vec::new(),
             non_finite: NonFinite::Reject,
         }
     }
@@ -358,6 +373,8 @@ impl ValueBuilder {
                 root: Child::local(root),
                 array_overlays: Vec::new(),
                 object_overlays: Vec::new(),
+                import_children: Vec::new(),
+                import_entries: Vec::new(),
                 non_finite: NonFinite::Reject,
             },
             Err(shared) => {
@@ -368,22 +385,25 @@ impl ValueBuilder {
                     root,
                     array_overlays: Vec::new(),
                     object_overlays: Vec::new(),
+                    import_children: Vec::new(),
+                    import_entries: Vec::new(),
                     non_finite: NonFinite::Reject,
                 }
             }
         }
     }
 
-    /// Freezes the builder into an immutable, shareable value, flattening
-    /// every mutable overlay into packed arena slabs.
+    /// Freezes the builder into an immutable, shareable value. Each
+    /// container that grew already lives in the arena's slabs, so sealing
+    /// trims its run to the members written rather than copying it.
     pub fn seal(mut self) -> Value {
-        for (id, items) in std::mem::take(&mut self.array_overlays) {
-            let slab = self.arena.alloc_children(&items);
-            self.arena.set_node(id, Node::Array(slab));
+        for grown in std::mem::take(&mut self.array_overlays) {
+            let slab = grown.run.prefix(grown.len);
+            self.arena.set_node(grown.id, Node::Array(slab));
         }
-        for (id, members) in std::mem::take(&mut self.object_overlays) {
-            let slab = self.arena.alloc_entries(&members);
-            self.arena.set_node(id, Node::Object(slab));
+        for grown in std::mem::take(&mut self.object_overlays) {
+            let slab = grown.run.prefix(grown.len);
+            self.arena.set_node(grown.id, Node::Object(slab));
         }
         match self.root.as_local() {
             Some(id) => Value::rooted(self.arena, id),
@@ -525,8 +545,7 @@ impl ValueBuilder {
                         return Err(JsonError::PathNotFound { segment: 0 });
                     }
                     let key = KeyRef::Owned(self.arena.alloc_text(key));
-                    let overlay = self.open_object(at);
-                    self.object_overlays[overlay].1.push(Entry { key, child });
+                    self.push_entry(at, Entry { key, child });
                 }
             },
             PathSegment::Index(index) => {
@@ -537,8 +556,7 @@ impl ValueBuilder {
                 if index < len {
                     self.set_array_child(at, index, child);
                 } else if index == len {
-                    let overlay = self.open_array(at);
-                    self.array_overlays[overlay].1.push(child);
+                    self.push_child(at, child);
                 } else {
                     return Err(JsonError::PathNotFound { segment: 0 });
                 }
@@ -572,16 +590,14 @@ impl ValueBuilder {
         match *segment {
             PathSegment::Key(key) => match self.find_member(at, key) {
                 Some(j) => {
-                    let overlay = self.open_object(at);
-                    self.object_overlays[overlay].1.remove(j);
+                    self.remove_entry(at, j);
                     true
                 }
                 None => false,
             },
             PathSegment::Index(index) => {
                 if shape_of(self.arena.node(at)) == Shape::Array && index < self.array_len(at) {
-                    let overlay = self.open_array(at);
-                    self.array_overlays[overlay].1.remove(index);
+                    self.remove_child(at, index);
                     true
                 } else {
                     false
@@ -620,8 +636,7 @@ impl ValueBuilder {
             return Err(JsonError::PathNotFound { segment: 0 });
         }
         let child = self.new_child(value, self.non_finite)?;
-        let overlay = self.open_array(at);
-        self.array_overlays[overlay].1.push(child);
+        self.push_child(at, child);
         Ok(())
     }
 
@@ -690,8 +705,7 @@ impl ValueBuilder {
                             None => {
                                 let key = KeyRef::Owned(self.arena.alloc_text(&key_text));
                                 let child = self.import_child(sowner, snode);
-                                let overlay = self.open_object(target);
-                                self.object_overlays[overlay].1.push(Entry { key, child });
+                                self.push_entry(target, Entry { key, child });
                             }
                         }
                     }
@@ -706,8 +720,7 @@ impl ValueBuilder {
                             });
                         } else {
                             let child = self.import_child(sowner, snode);
-                            let overlay = self.open_array(target);
-                            self.array_overlays[overlay].1.push(child);
+                            self.push_child(target, child);
                         }
                     }
                 }
@@ -787,11 +800,13 @@ impl ValueBuilder {
                     None => {
                         let id = self.arena.push_node(Node::Object(SlabRef::EMPTY));
                         let key = KeyRef::Owned(self.arena.alloc_text(key));
-                        let overlay = self.open_object(cur);
-                        self.object_overlays[overlay].1.push(Entry {
-                            key,
-                            child: Child::local(id),
-                        });
+                        self.push_entry(
+                            cur,
+                            Entry {
+                                key,
+                                child: Child::local(id),
+                            },
+                        );
                         return Ok(id);
                     }
                 }
@@ -825,9 +840,9 @@ impl ValueBuilder {
     }
 
     /// Ensures a child is a node in the builder's arena, shallow-copying a
-    /// foreign node: its own structure is copied, its children become
-    /// references into the source arena (path copying, one level at a time).
-    /// Foreign containers open directly into a mutable overlay.
+    /// foreign node: its own structure is copied into the arena's slabs, its
+    /// children become references into the source arena (path copying, one
+    /// level at a time).
     fn localize_child(&mut self, child: Child) -> NodeId {
         if let Some(id) = child.as_local() {
             return id;
@@ -856,39 +871,30 @@ impl ValueBuilder {
             ),
             Node::OwnedString(text) => Node::OwnedString(self.arena.alloc_text(src.text_str(text))),
             Node::Array(slab) => {
-                let imported: Vec<Child> = src
-                    .children(slab)
-                    .iter()
-                    .map(|&c| {
-                        let (owner, id) = src.resolve_owner(c);
-                        self.arena.push_foreign(owner, id)
-                    })
-                    .collect();
-                let id = self
-                    .arena
-                    .push_node(Node::MutArray(overlay_index(self.array_overlays.len())));
-                self.array_overlays.push((id, imported));
-                return id;
+                let mut imported = std::mem::take(&mut self.import_children);
+                imported.extend(src.children(slab).iter().map(|&c| {
+                    let (owner, id) = src.resolve_owner(c);
+                    self.arena.push_foreign(owner, id)
+                }));
+                let slab = self.arena.alloc_children(&imported);
+                imported.clear();
+                self.import_children = imported;
+                Node::Array(slab)
             }
             Node::Object(slab) => {
-                let imported: Vec<Entry> = src
-                    .entries(slab)
-                    .iter()
-                    .map(|entry| {
-                        let (owner, id) = src.resolve_owner(entry.child);
-                        let key =
-                            KeyRef::Owned(self.arena.alloc_text(&src.key_unescaped(entry.key)));
-                        Entry {
-                            key,
-                            child: self.arena.push_foreign(owner, id),
-                        }
-                    })
-                    .collect();
-                let id = self
-                    .arena
-                    .push_node(Node::MutObject(overlay_index(self.object_overlays.len())));
-                self.object_overlays.push((id, imported));
-                return id;
+                let mut imported = std::mem::take(&mut self.import_entries);
+                imported.extend(src.entries(slab).iter().map(|entry| {
+                    let (owner, id) = src.resolve_owner(entry.child);
+                    let key = KeyRef::Owned(self.arena.alloc_text(&src.key_unescaped(entry.key)));
+                    Entry {
+                        key,
+                        child: self.arena.push_foreign(owner, id),
+                    }
+                }));
+                let slab = self.arena.alloc_entries(&imported);
+                imported.clear();
+                self.import_entries = imported;
+                Node::Object(slab)
             }
             Node::MutArray(_) | Node::MutObject(_) => {
                 unreachable!("sealed documents contain no overlays")
@@ -897,21 +903,20 @@ impl ValueBuilder {
         self.arena.push_node(copied)
     }
 
-    /// Opens a local container for growth, copying its slab into a mutable
-    /// overlay once; further growth appends to the overlay.
+    /// Marks a local object open for growth and returns its overlay index.
+    /// Its members stay where they are until a write needs more room.
     fn open_object(&mut self, id: NodeId) -> usize {
         match self.arena.node(id) {
             Node::MutObject(i) => i as usize,
             Node::Object(slab) => {
-                // Opened containers usually grow; leave headroom so the
-                // first appends do not immediately reallocate.
-                let entries = self.arena.entries(slab);
-                let mut members = Vec::with_capacity(entries.len() * 2 + 8);
-                members.extend_from_slice(entries);
                 let index = self.object_overlays.len();
                 self.arena
                     .set_node(id, Node::MutObject(overlay_index(index)));
-                self.object_overlays.push((id, members));
+                self.object_overlays.push(Grown {
+                    id,
+                    run: slab,
+                    len: slab.len(),
+                });
                 index
             }
             _ => unreachable!("caller checked the node is an object"),
@@ -922,17 +927,56 @@ impl ValueBuilder {
         match self.arena.node(id) {
             Node::MutArray(i) => i as usize,
             Node::Array(slab) => {
-                let children = self.arena.children(slab);
-                let mut items = Vec::with_capacity(children.len() * 2 + 8);
-                items.extend_from_slice(children);
                 let index = self.array_overlays.len();
                 self.arena
                     .set_node(id, Node::MutArray(overlay_index(index)));
-                self.array_overlays.push((id, items));
+                self.array_overlays.push(Grown {
+                    id,
+                    run: slab,
+                    len: slab.len(),
+                });
                 index
             }
             _ => unreachable!("caller checked the node is an array"),
         }
+    }
+
+    /// Appends a member to the local object `id`.
+    fn push_entry(&mut self, id: NodeId, entry: Entry) {
+        let index = self.open_object(id);
+        let Grown { run, len, .. } = self.object_overlays[index];
+        let run = self.arena.grow_entries(run, len);
+        self.arena.entries_mut(run)[len] = entry;
+        self.object_overlays[index].run = run;
+        self.object_overlays[index].len = len + 1;
+    }
+
+    /// Appends an element to the local array `id`.
+    fn push_child(&mut self, id: NodeId, child: Child) {
+        let index = self.open_array(id);
+        let Grown { run, len, .. } = self.array_overlays[index];
+        let run = self.arena.grow_children(run, len);
+        self.arena.children_mut(run)[len] = child;
+        self.array_overlays[index].run = run;
+        self.array_overlays[index].len = len + 1;
+    }
+
+    /// Removes member `at` of the local object `id`, keeping the order of the
+    /// rest.
+    fn remove_entry(&mut self, id: NodeId, at: usize) {
+        let index = self.open_object(id);
+        let Grown { run, len, .. } = self.object_overlays[index];
+        self.arena.entries_mut(run)[at..len].copy_within(1.., 0);
+        self.object_overlays[index].len = len - 1;
+    }
+
+    /// Removes element `at` of the local array `id`, shifting later elements
+    /// left.
+    fn remove_child(&mut self, id: NodeId, at: usize) {
+        let index = self.open_array(id);
+        let Grown { run, len, .. } = self.array_overlays[index];
+        self.arena.children_mut(run)[at..len].copy_within(1.., 0);
+        self.array_overlays[index].len = len - 1;
     }
 
     /// Writes a [`NewValue`] into this builder's arena and returns the child
@@ -1105,7 +1149,7 @@ impl ValueBuilder {
     fn object_members(&self, obj: NodeId) -> Option<&[Entry]> {
         match self.arena.node(obj) {
             Node::Object(slab) => Some(self.arena.entries(slab)),
-            Node::MutObject(i) => Some(&self.object_overlays[i as usize].1),
+            Node::MutObject(i) => Some(self.object_overlay(i as usize)),
             _ => None,
         }
     }
@@ -1117,7 +1161,10 @@ impl ValueBuilder {
     fn set_object_child(&mut self, obj: NodeId, index: usize, child: Child) {
         match self.arena.node(obj) {
             Node::Object(slab) => self.arena.entries_mut(slab)[index].child = child,
-            Node::MutObject(i) => self.object_overlays[i as usize].1[index].child = child,
+            Node::MutObject(i) => {
+                let run = self.object_overlays[i as usize].run;
+                self.arena.entries_mut(run)[index].child = child;
+            }
             _ => unreachable!("caller checked the node is an object"),
         }
     }
@@ -1125,7 +1172,7 @@ impl ValueBuilder {
     fn array_len(&self, arr: NodeId) -> usize {
         match self.arena.node(arr) {
             Node::Array(slab) => slab.len(),
-            Node::MutArray(i) => self.array_overlays[i as usize].1.len(),
+            Node::MutArray(i) => self.array_overlays[i as usize].len,
             _ => unreachable!("caller checked the node is an array"),
         }
     }
@@ -1133,7 +1180,7 @@ impl ValueBuilder {
     fn array_child(&self, arr: NodeId, index: usize) -> Child {
         match self.arena.node(arr) {
             Node::Array(slab) => self.arena.children(slab)[index],
-            Node::MutArray(i) => self.array_overlays[i as usize].1[index],
+            Node::MutArray(i) => self.array_overlay(i as usize)[index],
             _ => unreachable!("caller checked the node is an array"),
         }
     }
@@ -1141,7 +1188,10 @@ impl ValueBuilder {
     fn set_array_child(&mut self, arr: NodeId, index: usize, child: Child) {
         match self.arena.node(arr) {
             Node::Array(slab) => self.arena.children_mut(slab)[index] = child,
-            Node::MutArray(i) => self.array_overlays[i as usize].1[index] = child,
+            Node::MutArray(i) => {
+                let run = self.array_overlays[i as usize].run;
+                self.arena.children_mut(run)[index] = child;
+            }
             _ => unreachable!("caller checked the node is an array"),
         }
     }
@@ -1163,6 +1213,15 @@ impl std::fmt::Debug for ValueBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ValueBuilder").finish_non_exhaustive()
     }
+}
+
+/// A container opened for growth: its run in the arena's slabs, of which the
+/// first `len` elements are written.
+#[derive(Clone, Copy)]
+struct Grown {
+    id: NodeId,
+    run: SlabRef,
+    len: usize,
 }
 
 fn overlay_index(index: usize) -> u32 {

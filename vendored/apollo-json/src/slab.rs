@@ -33,6 +33,18 @@ impl SlabRef {
     pub(crate) fn len(&self) -> usize {
         self.len as usize
     }
+
+    /// The first `len` elements of this run.
+    pub(crate) fn prefix(self, len: usize) -> SlabRef {
+        debug_assert!(len <= self.len as usize, "prefix within the run");
+        if len == 0 {
+            return SlabRef::EMPTY;
+        }
+        SlabRef {
+            len: len as u32,
+            ..self
+        }
+    }
 }
 
 pub(crate) struct Slabs<T> {
@@ -110,6 +122,61 @@ impl<T: Copy> Slabs<T> {
         &mut self.chunks[slab.chunk as usize][start..start + slab.len as usize]
     }
 
+    /// Makes room in `run` for at least one element past its first `used`,
+    /// returning the run to write into; elements past `used` are `filler`
+    /// until written.
+    ///
+    /// A run that ends the chunk being filled grows where it is. Any other
+    /// run moves to the end of storage with room to double, so a container
+    /// growing one element at a time is copied O(log n) times, and the run it
+    /// leaves behind is dead space in the chunk, like any replaced slot.
+    pub(crate) fn grow(&mut self, run: SlabRef, used: usize, filler: T) -> SlabRef {
+        debug_assert!(used <= run.len(), "the used prefix lies within the run");
+        if used < run.len() {
+            return run;
+        }
+        if used > 0 && run.chunk as usize == self.current {
+            let chunk = &mut self.chunks[self.current];
+            let end = run.start as usize + used;
+            if end == chunk.len() && end < chunk.capacity() {
+                let extra = used.max(4).min(chunk.capacity() - end);
+                chunk.resize(end + extra, filler);
+                return SlabRef {
+                    len: u32::try_from(used + extra).expect("slab length within the arena cap"),
+                    ..run
+                };
+            }
+        }
+        let capacity = (used * 2).max(used + 4);
+        if !self.fits_in_current(capacity) {
+            self.provision(capacity);
+        }
+        let to = self.current;
+        let from = run.chunk as usize;
+        let start = self.chunks[to].len();
+        if used > 0 {
+            let range = run.start as usize..run.start as usize + used;
+            if from == to {
+                self.chunks[to].extend_from_within(range);
+            } else {
+                let (source, target) = if from < to {
+                    let (low, high) = self.chunks.split_at_mut(to);
+                    (&low[from], &mut high[0])
+                } else {
+                    let (low, high) = self.chunks.split_at_mut(from);
+                    (&high[0], &mut low[to])
+                };
+                target.extend_from_slice(&source[range]);
+            }
+        }
+        self.chunks[to].resize(start + capacity, filler);
+        SlabRef {
+            chunk: u16::try_from(to).expect("chunk count within the arena cap"),
+            start: u16::try_from(start).expect("in-chunk offsets fit in u16"),
+            len: u32::try_from(capacity).expect("slab length within the arena cap"),
+        }
+    }
+
     fn fits_in_current(&self, need: usize) -> bool {
         self.chunks
             .get(self.current)
@@ -168,6 +235,64 @@ mod tests {
         for (slab, expected) in refs {
             assert_eq!(slabs.get(slab), expected.as_slice());
         }
+    }
+
+    /// Appends one element to the used prefix of `run`, the way a builder
+    /// grows an open container.
+    fn push(slabs: &mut Slabs<u32>, run: SlabRef, used: usize, value: u32) -> SlabRef {
+        let run = slabs.grow(run, used, u32::MAX);
+        slabs.get_mut(run)[used] = value;
+        run
+    }
+
+    #[test]
+    fn a_run_ending_the_current_chunk_grows_in_place() {
+        let mut slabs: Slabs<u32> = Slabs::new();
+        slabs.alloc(&[0; 64]);
+        let run = slabs.alloc(&[1, 2, 3]);
+        let grown = push(&mut slabs, run, 3, 4);
+        assert_eq!((grown.chunk, grown.start), (run.chunk, run.start));
+        assert_eq!(&slabs.get(grown)[..4], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn growing_runs_interleaved_keep_every_run_intact() {
+        // Runs growing in turn cannot all end the chunk, so each move leaves
+        // the others untouched and carries its own prefix along.
+        let mut slabs: Slabs<u32> = Slabs::new();
+        let mut runs: Vec<(SlabRef, Vec<u32>)> = (0..50u32)
+            .map(|i| (slabs.alloc(&[i * 1000]), vec![i * 1000]))
+            .collect();
+        for step in 1..200u32 {
+            for (i, (run, expected)) in runs.iter_mut().enumerate() {
+                let value = i as u32 * 1000 + step;
+                *run = push(&mut slabs, *run, expected.len(), value);
+                expected.push(value);
+            }
+        }
+        for (run, expected) in &runs {
+            assert_eq!(&slabs.get(*run)[..expected.len()], expected.as_slice());
+        }
+    }
+
+    #[test]
+    fn growth_copies_a_run_a_logarithmic_number_of_times() {
+        let mut slabs: Slabs<u32> = Slabs::new();
+        let mut run = SlabRef::EMPTY;
+        let mut moves = 0;
+        for used in 0..10_000usize {
+            // Another run allocated after this one keeps it from simply
+            // extending at the chunk's end, so every regrowth is a move.
+            let before = (run.chunk, run.start);
+            run = push(&mut slabs, run, used, used as u32);
+            if (run.chunk, run.start) != before {
+                moves += 1;
+                slabs.alloc(&[0]);
+            }
+        }
+        assert!(moves <= 20, "{moves} moves");
+        let expected: Vec<u32> = (0..10_000).collect();
+        assert_eq!(&slabs.get(run)[..10_000], expected.as_slice());
     }
 
     #[test]

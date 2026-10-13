@@ -197,6 +197,22 @@ impl Arena {
         self.children.get_mut(slab)
     }
 
+    /// Makes room in a container's child run for one more element past its
+    /// first `used`; see [`Slabs::grow`].
+    pub(crate) fn grow_children(&mut self, run: SlabRef, used: usize) -> SlabRef {
+        self.children.grow(run, used, Child::local(0))
+    }
+
+    /// Makes room in an object's entry run for one more member past its first
+    /// `used`; see [`Slabs::grow`].
+    pub(crate) fn grow_entries(&mut self, run: SlabRef, used: usize) -> SlabRef {
+        let filler = Entry {
+            key: KeyRef::Owned(SlabRef::EMPTY),
+            child: Child::local(0),
+        };
+        self.entries.grow(run, used, filler)
+    }
+
     pub(crate) fn alloc_entries(&mut self, items: &[Entry]) -> SlabRef {
         self.entries.alloc(items)
     }
