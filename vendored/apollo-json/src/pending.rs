@@ -74,35 +74,48 @@ pub(crate) enum Pending<'a> {
 ///     r#"{"people":[{"name":"bob","age":19}]}"#
 /// );
 /// ```
+#[derive(Default)]
 pub struct PendingTree<'a> {
-    /// Slots in segments that never move: segment `k` holds
-    /// `FIRST_SEGMENT << k` slots, allocated when the one before it is full.
-    /// A growing `Vec` would copy every slot on each reallocation, and its
+    /// Slots in segments that never move, allocated when the one before is
+    /// full. Segments double from [`FIRST_SEGMENT`] slots up to
+    /// [`LARGEST_SEGMENT`], then stay that size, so a small tree allocates
+    /// little and a large one overshoots by under one segment. A growing
+    /// `Vec` would copy every slot on each reallocation, and its
     /// reallocations together allocate about twice its final size.
-    segments: [Vec<PendingSlot<'a>>; SEGMENTS],
+    segments: Vec<Vec<PendingSlot<'a>>>,
     len: u32,
 }
 
 /// Slots in the first segment.
 const FIRST_SEGMENT: usize = 32;
 
-/// Enough segments for every id below [`DETACHED`].
-const SEGMENTS: usize = 27;
+/// Segments that double before growth turns linear.
+const DOUBLING_SEGMENTS: usize = 6;
+
+/// Slots in every segment after the doubling ones: 64 KiB of slots.
+const LARGEST_SEGMENT: usize = FIRST_SEGMENT << (DOUBLING_SEGMENTS - 1);
+
+/// Slots in the doubling segments together.
+const DOUBLING_SLOTS: usize = FIRST_SEGMENT * ((1 << DOUBLING_SEGMENTS) - 1);
 
 /// The segment holding slot `id`, and the slot's index in it.
 fn locate(id: u32) -> (usize, usize) {
     let id = id as usize;
-    let segment = (usize::BITS - 1 - (id / FIRST_SEGMENT + 1).leading_zeros()) as usize;
-    (segment, id - FIRST_SEGMENT * ((1 << segment) - 1))
+    if id < DOUBLING_SLOTS {
+        let segment = (usize::BITS - 1 - (id / FIRST_SEGMENT + 1).leading_zeros()) as usize;
+        (segment, id - FIRST_SEGMENT * ((1 << segment) - 1))
+    } else {
+        let rest = id - DOUBLING_SLOTS;
+        (
+            DOUBLING_SEGMENTS + rest / LARGEST_SEGMENT,
+            rest % LARGEST_SEGMENT,
+        )
+    }
 }
 
-impl Default for PendingTree<'_> {
-    fn default() -> Self {
-        PendingTree {
-            segments: [const { Vec::new() }; SEGMENTS],
-            len: 0,
-        }
-    }
+/// Slots in segment `segment`.
+fn segment_size(segment: usize) -> usize {
+    FIRST_SEGMENT << segment.min(DOUBLING_SEGMENTS - 1)
 }
 
 impl<'a> PendingTree<'a> {
@@ -122,16 +135,13 @@ impl<'a> PendingTree<'a> {
 
     fn add(&mut self, key: Cow<'a, str>, value: Pending<'a>) -> PendingId {
         let id = self.len;
+        assert!(id < DETACHED, "a pending tree holds under 2^32 - 2 slots");
         let (segment, index) = locate(id);
-        assert!(
-            segment < SEGMENTS,
-            "a pending tree holds under 2^32 - 32 slots"
-        );
-        let slots = &mut self.segments[segment];
         if index == 0 {
-            *slots = Vec::with_capacity(FIRST_SEGMENT << segment);
+            self.segments
+                .push(Vec::with_capacity(segment_size(segment)));
         }
-        slots.push(PendingSlot {
+        self.segments[segment].push(PendingSlot {
             key,
             value,
             next: DETACHED,
@@ -412,22 +422,22 @@ mod tests {
         assert_eq!(locate(32), (1, 0));
         assert_eq!(locate(95), (1, 63));
         assert_eq!(locate(96), (2, 0));
-        let last = (FIRST_SEGMENT * ((1 << SEGMENTS) - 1) - 1) as u32;
-        assert_eq!(
-            locate(last),
-            (SEGMENTS - 1, (FIRST_SEGMENT << (SEGMENTS - 1)) - 1)
-        );
-        assert!(last < DETACHED);
+        assert_eq!(locate(2015), (5, 1023));
+        assert_eq!(locate(2016), (6, 0));
+        assert_eq!(locate(3039), (6, 1023));
+        assert_eq!(locate(3040), (7, 0));
+        assert_eq!(segment_size(5), 1024);
+        assert_eq!(segment_size(40), 1024);
 
         let mut tree = PendingTree::new();
         let list = tree.array();
-        for i in 0..1000i64 {
+        for i in 0..5000i64 {
             let element = tree.push(list);
             tree.set(element, i);
         }
         let expected = format!(
             "[{}]",
-            (0..1000)
+            (0..5000)
                 .map(|i| i.to_string())
                 .collect::<Vec<_>>()
                 .join(",")
