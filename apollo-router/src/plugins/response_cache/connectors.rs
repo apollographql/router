@@ -1114,19 +1114,6 @@ impl ConnectorCacheService {
                             has_tags,
                         };
 
-                        if !has_errors
-                            && !is_null_entity
-                            && !unstorable_private_response
-                            && response_cache_control.should_store()
-                        {
-                            to_insert.push(build_entity_store_document(
-                                &miss,
-                                CacheScope::Connector,
-                                ttl,
-                                &response_cache_control,
-                            ));
-                        }
-
                         if debug && let Some(ref debug_req) = debug_request {
                             debug_ctx_entries.push(build_entity_debug_entry(
                                 &miss,
@@ -1137,6 +1124,19 @@ impl ConnectorCacheService {
                                 indexes,
                                 connector_cdn_invalidation_enabled(),
                                 debug_req.clone(),
+                            ));
+                        }
+
+                        if !has_errors
+                            && !is_null_entity
+                            && !unstorable_private_response
+                            && response_cache_control.should_store()
+                        {
+                            to_insert.push(build_entity_store_document(
+                                miss,
+                                CacheScope::Connector,
+                                ttl,
+                                &response_cache_control,
                             ));
                         }
 

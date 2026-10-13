@@ -3514,8 +3514,10 @@ pub(super) struct EntityCacheMiss<'a> {
     pub(super) has_tags: bool,
 }
 
+/// Takes the miss by value: the store document is the last use of its key and
+/// tags, so they move rather than being copied. Build any debug entry first.
 pub(super) fn build_entity_store_document(
-    miss: &EntityCacheMiss<'_>,
+    miss: EntityCacheMiss<'_>,
     scope: CacheScope,
     expire: Duration,
     cache_control: &CacheControl,
@@ -3525,9 +3527,9 @@ pub(super) fn build_entity_store_document(
         // The handle pins the response arena only until the insert has
         // serialized it.
         data: miss.value.clone(),
-        key: miss.key.clone(),
-        cache_tags: miss.cache_tags.clone(),
-        cdn_invalidation_tags: miss.cdn_invalidation_tags.clone(),
+        key: miss.key,
+        cache_tags: miss.cache_tags,
+        cdn_invalidation_tags: miss.cdn_invalidation_tags,
         expire,
         scope,
         // Entity mapping problems are deliberately not persisted: a fully cached entity fetch
@@ -3688,12 +3690,17 @@ async fn insert_entities_in_result(
                 }
 
                 let has_tags = !cdn_invalidation_tags.is_empty();
-                let invalidation_keys = InvalidationLabels {
-                    tags: cdn_invalidation_tags.iter().cloned().collect(),
-                    types: HashSet::from([(subgraph_name.to_string(), typename.to_string())]),
-                    subgraphs: HashSet::from([subgraph_name.to_string()]),
-                }
-                .user_facing_only();
+                // Only the debugger shows these, so they are built only for it.
+                let invalidation_keys = if subgraph_request.is_some() {
+                    InvalidationLabels {
+                        tags: cdn_invalidation_tags.iter().cloned().collect(),
+                        types: HashSet::from([(subgraph_name.to_string(), typename.to_string())]),
+                        subgraphs: HashSet::from([subgraph_name.to_string()]),
+                    }
+                    .user_facing_only()
+                } else {
+                    Vec::new()
+                };
                 let miss = EntityCacheMiss {
                     key,
                     value: &value,
@@ -3720,7 +3727,7 @@ async fn insert_entities_in_result(
                 }
                 if !has_errors && cache_control.should_store() && should_cache_private {
                     to_insert.push(build_entity_store_document(
-                        &miss,
+                        miss,
                         CacheScope::Subgraph,
                         ttl,
                         &cache_control,
