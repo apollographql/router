@@ -2428,6 +2428,10 @@ async fn cache_lookup_entities(
     // `apolloEntityCacheTags` when the entity was originally written, on a *previous* request)
     // live on `entry.cache_entry.invalidation_labels` instead, so that's what gets merged here,
     // mirroring `cache_lookup_root`'s hit-path handling.
+    //
+    // The coarse tiers get one update per distinct type rather than one per
+    // entity: they are sets, and each update takes the context lock.
+    let mut labelled_types: Vec<&str> = Vec::new();
     for entry in cache_result.iter() {
         // Fine-grained tags only ever aggregate onto the live `InvalidationLabels` context
         // when `cdn_invalidation_enabled` — matching `CdnInvalidationConfig`'s documented
@@ -2448,8 +2452,15 @@ async fn cache_lookup_entities(
             InvalidationLabels::merge(&request.context, hit_labels);
         }
 
+        if !labelled_types.contains(&&*entry.typename) {
+            labelled_types.push(&entry.typename);
+        }
+    }
+    if !labelled_types.is_empty() {
         InvalidationLabels::add_subgraph(&request.context, &name);
-        InvalidationLabels::add_type(&request.context, &name, &entry.typename);
+    }
+    for typename in labelled_types {
+        InvalidationLabels::add_type(&request.context, &name, typename);
     }
 
     // The body's representations always become the set that still has to be

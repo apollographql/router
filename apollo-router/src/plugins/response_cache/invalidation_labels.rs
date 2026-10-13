@@ -352,9 +352,12 @@ impl InvalidationLabels {
     /// must always be available regardless of indexing configuration.
     pub(crate) fn add_type(context: &Context, subgraph: &str, r#type: &str) {
         context.extensions().with_lock(|lock| {
-            lock.get_or_default_mut::<InvalidationLabels>()
-                .types
-                .insert((subgraph.to_string(), r#type.to_string()));
+            let types = &mut lock.get_or_default_mut::<InvalidationLabels>().types;
+            // Allocate the pair only when it is new. The set holds one pair per
+            // touched type, so a scan is cheap.
+            if !types.iter().any(|(s, t)| s == subgraph && t == r#type) {
+                types.insert((subgraph.to_string(), r#type.to_string()));
+            }
         });
     }
 
@@ -363,9 +366,10 @@ impl InvalidationLabels {
     /// Called unconditionally, same as `add_type`.
     pub(crate) fn add_subgraph(context: &Context, subgraph: &str) {
         context.extensions().with_lock(|lock| {
-            lock.get_or_default_mut::<InvalidationLabels>()
-                .subgraphs
-                .insert(subgraph.to_string());
+            let subgraphs = &mut lock.get_or_default_mut::<InvalidationLabels>().subgraphs;
+            if !subgraphs.contains(subgraph) {
+                subgraphs.insert(subgraph.to_string());
+            }
         });
     }
 }
@@ -376,6 +380,27 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
+
+    #[test]
+    fn repeated_type_and_subgraph_updates_keep_one_entry_each() {
+        let context = Context::new();
+        for _ in 0..3 {
+            InvalidationLabels::add_subgraph(&context, "accounts");
+            InvalidationLabels::add_type(&context, "accounts", "User");
+            InvalidationLabels::add_type(&context, "accounts", "Review");
+        }
+        InvalidationLabels::add_type(&context, "reviews", "User");
+        let labels = InvalidationLabels::get_or_create(&context);
+        assert_eq!(labels.subgraphs, HashSet::from(["accounts".to_string()]));
+        assert_eq!(
+            labels.types,
+            HashSet::from([
+                ("accounts".to_string(), "User".to_string()),
+                ("accounts".to_string(), "Review".to_string()),
+                ("reviews".to_string(), "User".to_string()),
+            ])
+        );
+    }
 
     fn cdn_config(overrides: impl FnOnce(&mut CdnInvalidationConfig)) -> CdnInvalidationConfig {
         let mut config = CdnInvalidationConfig::default();
