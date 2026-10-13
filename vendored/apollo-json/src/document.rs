@@ -421,6 +421,12 @@ impl Value {
         crate::serialize::serialize(self.value(), hint)
     }
 
+    /// Appends the serialized value to `out`, for a caller assembling a larger
+    /// buffer around it, so the value needs no buffer of its own.
+    pub fn serialize_into(&self, out: &mut Vec<u8>) {
+        crate::serialize::serialize_into(self.value(), out);
+    }
+
     /// Serializes the value to a JSON string.
     ///
     /// The output is UTF-8 by construction — string spans were validated at
