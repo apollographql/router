@@ -151,26 +151,15 @@ fn upgrade_fields_and_args(
 /// where the corresponding interface field is not deprecated.
 fn strip_deprecated_on_non_deprecated_interface_fields(
     hints: &mut Vec<CompositionHint>,
-<<<<<<< HEAD
     implements_interfaces: &IndexSet<ComponentName>,
     fields: &mut IndexMap<apollo_compiler::Name, Component<apollo_compiler::ast::FieldDefinition>>,
     type_name: &apollo_compiler::Name,
-    iface_deprecated: &IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>>,
-=======
-    implements_interfaces: &IndexSet<Node<Name>>,
-    fields: &mut IndexMap<Name, Node<FieldDefinition>>,
-    type_name: &Name,
-    iface_non_deprecated: &IndexMap<Name, IndexSet<Name>>,
->>>>>>> 30aa0b8 (fix(federation): keep @deprecated on fields an interface does not declare (#10416))
+    iface_non_deprecated: &IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>>,
     subgraph_name: &str,
     sources: &SourceMap,
 ) {
     for iface_name in implements_interfaces {
-<<<<<<< HEAD
-        if let Some(deprecated_fields) = iface_deprecated.get(&iface_name.name) {
-=======
-        if let Some(non_deprecated_fields) = iface_non_deprecated.get(&**iface_name) {
->>>>>>> 30aa0b8 (fix(federation): keep @deprecated on fields an interface does not declare (#10416))
+        if let Some(non_deprecated_fields) = iface_non_deprecated.get(&iface_name.name) {
             for field in fields.values_mut() {
                 let field_name = field.name.clone();
                 if non_deprecated_fields.contains(&field_name) {
@@ -190,18 +179,12 @@ fn strip_deprecated_on_non_deprecated_interface_fields(
     }
 }
 
-<<<<<<< HEAD
-/// Returns a map from interface name to the set of deprecated field names
-/// for every interface type in the schema.
-fn collect_interface_deprecated_fields(
-    schema: &Schema,
-) -> IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>> {
-=======
 /// Returns a map from interface name to the set of non-deprecated field names
 /// for every interface type in the schema. Fields the interface does not declare
 /// are absent, so the 2025 rule never applies to them.
-fn collect_interface_non_deprecated_fields(schema: &Schema) -> IndexMap<Name, IndexSet<Name>> {
->>>>>>> 30aa0b8 (fix(federation): keep @deprecated on fields an interface does not declare (#10416))
+fn collect_interface_non_deprecated_fields(
+    schema: &Schema,
+) -> IndexMap<apollo_compiler::Name, IndexSet<apollo_compiler::Name>> {
     let mut result = IndexMap::default();
     for ty in schema.types.values() {
         if let ExtendedType::Interface(interface) = ty {
