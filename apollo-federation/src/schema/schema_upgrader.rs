@@ -33,7 +33,6 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::SchemaElement;
 use crate::schema::SubgraphMetadata;
-use crate::schema::fed3_upgrader::StrippedDeprecation;
 use crate::schema::field_set::FieldSetValidation;
 use crate::subgraph::SubgraphError;
 use crate::subgraph::typestate::Expanded;
@@ -1042,18 +1041,12 @@ pub fn upgrade_subgraphs_if_necessary(
     // subgraph gets its own back once it reaches `Validated`; whatever is left over belongs to a
     // subgraph that failed on the way there, and is reported with the errors.
     let mut fed3_hints: IndexMap<String, Vec<CompositionHint>> = IndexMap::default();
-    // Stripped deprecations only matter to the merge, so they are dropped with any subgraph that
-    // fails before reaching `Validated`.
-    let mut fed3_stripped: IndexMap<String, Vec<StrippedDeprecation>> = IndexMap::default();
     let subgraphs = subgraphs
         .into_iter()
         .filter_map(|mut sg| {
-            let upgrade = sg.apply_fed3_upgrade();
-            if !upgrade.hints.is_empty() {
-                fed3_hints.insert(sg.name.clone(), upgrade.hints);
-            }
-            if !upgrade.stripped_deprecations.is_empty() {
-                fed3_stripped.insert(sg.name.clone(), upgrade.stripped_deprecations);
+            let upgrade_hints = sg.apply_fed3_upgrade();
+            if !upgrade_hints.is_empty() {
+                fed3_hints.insert(sg.name.clone(), upgrade_hints);
             }
             match sg.normalize_root_types() {
                 Ok(s) => Some(s),
@@ -1091,9 +1084,6 @@ pub fn upgrade_subgraphs_if_necessary(
                 Ok(mut s) => {
                     if let Some(upgrade_hints) = fed3_hints.shift_remove(&s.name) {
                         s.prepend_hints(upgrade_hints);
-                    }
-                    if let Some(stripped) = fed3_stripped.shift_remove(&s.name) {
-                        s.set_stripped_deprecations(stripped);
                     }
                     Some(s)
                 }
