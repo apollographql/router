@@ -3059,12 +3059,18 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
                 }
             })
     });
+    let cache_keys: Vec<StringTemplate> = cache_keys.collect();
+    if cache_keys.is_empty() {
+        return Ok(HashSet::new());
+    }
     let mut vars = IndexMap::default();
     // It's safe to use representations variables (not only entity keys) because at the composition level we already checked if it was only using entity keys
-    // PERF(apollo-json): legacy bridge, revisit -- `StringTemplate::interpolate` takes
-    // serde_json_bytes values
+    // PERF(apollo-json): legacy bridge -- apollo-federation's `StringTemplate::interpolate`
+    // takes serde_json_bytes values, so a type with `@cacheTag` still copies its
+    // representation once
     vars.insert("$key".to_string(), json_ext::to_legacy(representations));
     let invalidation_cache_keys = cache_keys
+        .into_iter()
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))
         .collect::<Result<_, _>>()?;
     Ok(invalidation_cache_keys)
