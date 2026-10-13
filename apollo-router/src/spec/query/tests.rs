@@ -256,6 +256,44 @@ fn reformat_typename_of_query_not_named_query() {
 }
 
 #[test]
+fn reformat_keeps_escaped_strings_enums_and_typenames_as_sent() {
+    let schema = with_supergraph_boilerplate(
+        "type Query { things: [Thing] }
+        interface Thing { name: String }
+        type Book implements Thing { name: String kind: Kind }
+        enum Kind { HARD SOFT }",
+        "Query",
+    );
+    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let query = Query::parse(
+        "{ things { __typename name ... on Book { kind } } }",
+        None,
+        &schema,
+        &Default::default(),
+    )
+    .expect("could not parse query");
+    let data = Value::parse(
+        br#"{"things":[{"__typename":"Book","name":"caf\u00e9","kind":"HARD"},{"__typename":"Book","name":"x","kind":"OTHER"},{"__typename":"Nope","name":"y"}]}"#
+            .to_vec(),
+    )
+    .unwrap();
+    let mut response = Response::builder().data(data).build();
+
+    query.format_response(
+        &mut response,
+        empty_object(),
+        schema.api_schema(),
+        BooleanValues { bits: 0 },
+        true,
+    );
+
+    assert_eq!(
+        response.data.unwrap().to_string(),
+        r#"{"things":[{"__typename":"Book","name":"caf\u00e9","kind":"HARD"},{"__typename":"Book","name":"x","kind":null},null]}"#
+    );
+}
+
+#[test]
 fn reformat_response_data_field() {
     FormatTest::builder()
         .schema(

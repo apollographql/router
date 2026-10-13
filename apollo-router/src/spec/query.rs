@@ -12,6 +12,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
+use apollo_json::JsonKind;
 use apollo_json::NewValue;
 use apollo_json::ValueBuilder;
 use derivative::Derivative;
@@ -642,8 +643,8 @@ impl Query {
                 // An enum value outside the schema's value set is nullified,
                 // exactly as the previous `unwrap_or_default()` on a value did.
                 *output = match input
-                    .as_str_owned()
-                    .filter(|value| enum_type.values.contains_key(value.as_str()))
+                    .as_str()
+                    .filter(|value| enum_type.values.contains_key(value.as_ref()))
                 {
                     Some(_) => NewValue::Node(input.clone()),
                     None => NewValue::Null,
@@ -654,10 +655,12 @@ impl Query {
         }
 
         if input.is_object() {
-            // One member scan and one owned string for both uses below: the
-            // schema check here and the concrete-type resolution that follows.
-            let input_typename = input.get(TYPENAME).and_then(|val| val.as_str_owned());
-            if let Some(input_type) = &input_typename {
+            // One member scan for both uses below: the schema check here and the
+            // concrete-type resolution that follows, which takes the schema's own
+            // name for the type rather than an owned copy of the input's.
+            let input_typename = input.get(TYPENAME);
+            let mut typename = None;
+            if let Some(input_type) = input_typename.as_ref().and_then(|val| val.as_str()) {
                 // If there is a __typename, make sure the pointed type is a valid type of the
                 // schema. Otherwise, something is wrong, and in case we might be inadvertently
                 // leaking some data for an @inacessible type or something, nullify the whole
@@ -666,13 +669,14 @@ impl Query {
                 // this is fine (that is, we should not return such a __typename to the user, but
                 // as long as it's not returned, having it in the internal data is ok and sometimes
                 // expected).
-                let Some(ExtendedType::Object(_) | ExtendedType::Interface(_)) =
-                    parameters.schema.types.get(input_type.as_str())
+                let Some((name, ExtendedType::Object(_) | ExtendedType::Interface(_))) =
+                    parameters.schema.types.get_key_value(input_type.as_ref())
                 else {
                     parameters.nullified.push(Path::from_response_slice(path));
                     *output = NewValue::Null;
                     return Ok(());
                 };
+                typename = Some(apollo_compiler::ast::Type::Named(name.clone()));
             }
 
             // Taking the output leaves the slot null while the members are
@@ -690,10 +694,6 @@ impl Query {
                 // this function, which writes a pending object or a null.
                 _ => return Err(InvalidValue),
             };
-
-            let typename = input_typename
-                .and_then(|s| apollo_compiler::ast::NamedType::new(&s).ok())
-                .map(apollo_compiler::ast::Type::Named);
 
             let current_type = match parameters.schema.types.get(field_type.inner_named_type()) {
                 Some(ExtendedType::Interface(..) | ExtendedType::Union(..)) => {
@@ -828,7 +828,7 @@ impl Query {
         input: &Value,
         output: &mut NewValue<'_>,
     ) -> Result<(), InvalidValue> {
-        if input.as_str().is_some() {
+        if input.kind() == JsonKind::String {
             *output = NewValue::Node(input.clone());
             Ok(())
         } else {
