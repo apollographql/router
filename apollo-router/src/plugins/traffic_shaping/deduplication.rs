@@ -464,7 +464,7 @@ mod tests {
         .await;
     }
 
-    // When the leader is dropped (for example by a timeout above deduplication), the fetch it
+    // When the leader is dropped (for example because its client disconnected), the fetch it
     // started keeps running for the follower, so each is counted under its own outcome and the
     // subgraph receives one request.
     #[tokio::test(flavor = "multi_thread")]
