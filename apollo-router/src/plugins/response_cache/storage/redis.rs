@@ -24,6 +24,7 @@ use tower::BoxError;
 
 use super::CacheEntry;
 use super::CacheStorage;
+use super::CacheTag;
 use super::Document;
 use super::StorageResult;
 use crate::cache::redis::RedisCacheStorage;
@@ -99,6 +100,43 @@ mod raw_json {
         let raw: Box<str> = Box::<RawValue>::deserialize(deserializer)?.into();
         Value::parse(raw.into_string().into_bytes()).map_err(D::Error::custom)
     }
+}
+
+/// The members of a [`CacheValue`] after `data`, borrowed, serialized exactly as
+/// the derived `Serialize` writes them.
+#[derive(Serialize)]
+struct CacheValueTail<'a> {
+    cache_control: &'a CacheControl,
+    cache_tags: Option<&'a HashSet<String>>,
+    #[serde(skip_serializing_if = "<[Problem]>::is_empty")]
+    mapping_problems: &'a [Problem],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
+}
+
+/// The JSON stored for `value`: byte for byte what serializing the
+/// [`CacheValue`] writes, assembled in one buffer. The data is serialized
+/// straight into it rather than into a string of its own, then a `RawValue`,
+/// then the entry.
+fn stored_entry_json(value: &CacheValue) -> Result<Vec<u8>, serde_json::Error> {
+    let mut out = Vec::with_capacity(512);
+    out.extend_from_slice(br#"{"data":"#);
+    value.data.serialize_into(&mut out);
+    let tail = out.len();
+    serde_json::to_writer(
+        &mut out,
+        &CacheValueTail {
+            cache_control: &value.cache_control,
+            cache_tags: value.cache_tags.as_ref(),
+            mapping_problems: &value.mapping_problems,
+            status: value.status,
+        },
+    )?;
+    // The tail is an object of its own; its opening brace becomes the comma
+    // continuing this one. It always has `cache_control`, so it is never
+    // empty.
+    out[tail] = b',';
+    Ok(out)
 }
 
 impl From<CacheValue> for CacheEntry {
@@ -346,45 +384,37 @@ impl CacheStorage for Storage {
 
         let now = now();
 
-        // For the cache debugger and the supergraph response cache-tag propagation
-        // (router#9481): snapshot the user-facing tag values per document. Sourced from
-        // `cdn_invalidation_tags` rather than filtering `cache_tags` — the latter is
-        // pre-filtered by `IndexMode::CacheTag` (it drives phase 1/2's `ZADD`s below), while
-        // `cdn_invalidation_tags` is populated whenever CDN invalidation wants it too, even if
-        // that index is off. Internal tags (Subgraph and Type) never appear in either.
-        let cdn_invalidation_tags_per_doc: Vec<Vec<String>> = batch_docs
-            .iter()
-            .map(|document| document.cdn_invalidation_tags.clone())
-            .collect();
-
         // phase 1: render every document's tag list to its Redis ZSET keys, scoped per document
-        // so connector entries land in a namespace disjoint from subgraph entries.
-        let redis_keys_per_doc: Vec<Vec<String>> = batch_docs
-            .iter()
-            .map(|document| {
-                document
-                    .cache_tags
-                    .iter()
-                    .map(|tag| tag.to_redis_key(document.scope, subgraph_name))
-                    .collect()
-            })
-            .collect();
+        // so connector entries land in a namespace disjoint from subgraph entries. Documents of
+        // a batch mostly share their tags (the subgraph tag, one type tag per type), so each
+        // distinct tag is rendered once for the batch rather than once per document.
+        let mut rendered: HashMap<(CacheScope, &CacheTag), String> = HashMap::new();
+        for document in &batch_docs {
+            for tag in &document.cache_tags {
+                rendered
+                    .entry((document.scope, tag))
+                    .or_insert_with(|| tag.to_redis_key(document.scope, subgraph_name));
+            }
+        }
 
-        // phase 2: build the per-ZSET membership list and ZADD each one.
-        let num_cache_tags_estimate = 2 * batch_docs.len();
-        let mut cache_tags_to_pcks: HashMap<String, Vec<(f64, String)>> =
+        // phase 2: build the per-ZSET membership list and ZADD each one. A document's key is
+        // a member of each of its tags' sets; it is copied once into a shared buffer, and each
+        // membership holds a reference to it.
+        let num_cache_tags_estimate = rendered.len();
+        let mut cache_tags_to_pcks: HashMap<&str, Vec<(f64, bytes::Bytes)>> =
             HashMap::with_capacity(num_cache_tags_estimate);
-        for (document, redis_keys) in batch_docs.iter().zip(redis_keys_per_doc.iter()) {
-            let cache_tag_value = (
-                (now + document.expire.as_secs()) as f64,
-                document.key.clone(),
-            );
-            for redis_key in redis_keys {
-                if let Some(entry) = cache_tags_to_pcks.get_mut(redis_key) {
-                    entry.push(cache_tag_value.clone());
-                } else {
-                    cache_tags_to_pcks.insert(redis_key.clone(), vec![cache_tag_value.clone()]);
-                }
+        for document in &batch_docs {
+            if document.cache_tags.is_empty() {
+                continue;
+            }
+            let expiry = (now + document.expire.as_secs()) as f64;
+            let member = bytes::Bytes::copy_from_slice(document.key.as_bytes());
+            for tag in &document.cache_tags {
+                let redis_key = rendered[&(document.scope, tag)].as_str();
+                cache_tags_to_pcks
+                    .entry(redis_key)
+                    .or_default()
+                    .push((expiry, member.clone()));
             }
         }
 
@@ -394,7 +424,7 @@ impl CacheStorage for Storage {
         };
         let pipeline = self.storage.pipeline().await?.with_options(&options);
         for (cache_tag_key, elements) in cache_tags_to_pcks.into_iter() {
-            self.send_to_maintenance_queue(cache_tag_key.clone());
+            self.send_to_maintenance_queue(cache_tag_key.to_string());
 
             // NB: expiry time being max + 1 is important! if you use a volatile TTL eviction policy,
             // Redis will evict the keys with the shortest TTLs - we have to make sure that the cache
@@ -442,20 +472,24 @@ impl CacheStorage for Storage {
 
         // phase 3
         let pipeline = self.storage.pipeline().await?.with_options(&options);
-        for (document, cdn_invalidation_tags) in
-            batch_docs.into_iter().zip(cdn_invalidation_tags_per_doc)
-        {
+        for document in batch_docs {
+            // For the cache debugger and the supergraph response cache-tag propagation
+            // (router#9481): store the user-facing tag values with the document. Sourced from
+            // `cdn_invalidation_tags` rather than filtering `cache_tags` — the latter is
+            // pre-filtered by `IndexMode::CacheTag` (it drives phase 1/2's `ZADD`s above), while
+            // `cdn_invalidation_tags` is populated whenever CDN invalidation wants it too, even if
+            // that index is off. Internal tags (Subgraph and Type) never appear in either.
             let value = CacheValue {
                 data: document.data,
                 cache_control: document.control,
-                cache_tags: Some(cdn_invalidation_tags.into_iter().collect()),
+                cache_tags: Some(document.cdn_invalidation_tags.into_iter().collect()),
                 mapping_problems: document.mapping_problems,
                 status: document.status,
             };
             let _: () = pipeline
                 .set::<(), _, _>(
-                    self.make_key(document.key),
-                    &serde_json::to_string(&value)?,
+                    self.make_key(RedisKey(document.key.as_str())),
+                    bytes::Bytes::from(stored_entry_json(&value)?),
                     Some(Expiration::EXAT((now + document.expire.as_secs()) as i64)),
                     None,
                     false,
@@ -837,6 +871,37 @@ mod tests {
     /// * a document's TTL must be shorter than the TTL of all its related cache tags
     /// * a document's TTL will always be less than or equal to its score in all its related cache tags
     /// * only expired keys will be removed via the cache maintenance
+    #[test]
+    fn stored_entry_json_is_what_serializing_the_entry_writes() {
+        let problem = apollo_federation::connectors::runtime::mapping::Problem {
+            message: "bad".to_string(),
+            path: "a.b".to_string(),
+            count: 2,
+            location: apollo_federation::connectors::ProblemLocation::ConnectPath,
+        };
+        for (cache_tags, mapping_problems, status) in [
+            (None, Vec::new(), None),
+            (Some(HashSet::new()), Vec::new(), None),
+            (
+                Some(HashSet::from(["tag".to_string()])),
+                vec![problem],
+                Some(404),
+            ),
+        ] {
+            let value = super::CacheValue {
+                data: apollo_json::json!({"a": [1, "é", {"b": null}], "c": 2.5}),
+                cache_control: Default::default(),
+                cache_tags,
+                mapping_problems,
+                status,
+            };
+            assert_eq!(
+                String::from_utf8(super::stored_entry_json(&value).unwrap()).unwrap(),
+                serde_json::to_string(&value).unwrap()
+            );
+        }
+    }
+
     #[test]
     fn cache_value_data_is_stored_as_plain_json() {
         let value = super::CacheValue {
