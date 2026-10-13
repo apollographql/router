@@ -87,17 +87,16 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             representation,
         } = self;
 
-        let mut fields = representation
-            .object_iter()
-            .filter(|(key, _)| key != TYPENAME)
-            .peekable();
-        let hashed_representation = if fields.peek().is_none() {
-            String::new()
-        } else {
+        let has_fields = representation.object_iter().any(|(key, _)| key != TYPENAME);
+        let hashed_representation = has_fields.then(|| {
             let mut digest = blake3::Hasher::new();
-            hash(&mut digest, fields);
-            digest.finalize().to_hex().to_string()
-        };
+            hash_object(&mut digest, representation, Some(TYPENAME));
+            digest.finalize().to_hex()
+        });
+        let hashed_representation = hashed_representation
+            .as_ref()
+            .map(|hex| hex.as_str())
+            .unwrap_or_default();
 
         // - response cache version: current version of the hash
         // - subgraph name: caching is done per subgraph
@@ -105,13 +104,36 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
         // - representation: representation variable value
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-        let mut key = format!(
-            "version:{RESPONSE_CACHE_VERSION}:{}:{subgraph_name}:type:{entity_type}:representation:{hashed_representation}:hash:{subgraph_query_hash}:data:{additional_data_hash}",
-            CacheScope::Subgraph.word()
-        );
-
+        //
+        // Assembled in a buffer of exactly the key's size: `format!` would grow
+        // its buffer several times for a key this long, and this runs once per
+        // entity.
+        let parts = [
+            "version:",
+            RESPONSE_CACHE_VERSION,
+            ":",
+            CacheScope::Subgraph.word(),
+            ":",
+            subgraph_name,
+            ":type:",
+            entity_type,
+            ":representation:",
+            hashed_representation,
+            ":hash:",
+            subgraph_query_hash,
+            ":data:",
+            additional_data_hash,
+        ];
+        let private_id = private_id.as_deref();
+        let len = parts.iter().map(|part| part.len()).sum::<usize>()
+            + private_id.map_or(0, |id| id.len() + 1);
+        let mut key = String::with_capacity(len);
+        for part in parts {
+            key.push_str(part);
+        }
         if let Some(private_id) = private_id {
-            let _ = write!(&mut key, ":{private_id}");
+            key.push(':');
+            key.push_str(private_id);
         }
 
         key
@@ -302,12 +324,7 @@ pub(super) fn hash_additional_data(
 ) -> String {
     let mut hasher = blake3::Hasher::new();
 
-    hash(
-        &mut hasher,
-        body.variables
-            .object_iter()
-            .filter(|(key, _value)| key != REPRESENTATIONS),
-    );
+    hash_object(&mut hasher, &body.variables, Some(REPRESENTATIONS));
 
     cache_key
         .serialize(Blake3Serializer::new(&mut hasher))
@@ -341,8 +358,30 @@ pub(super) fn hash_additional_data(
 // Order-insensitive structural hash of a map, ie a representation or entity key
 fn sort_and_hash_object(object: &Value) -> String {
     let mut digest = blake3::Hasher::new();
-    hash(&mut digest, object.object_iter());
+    hash_object(&mut digest, object, None);
     digest.finalize().to_hex().to_string()
+}
+
+/// Hashes the members of `object` other than `skip`, exactly as [`hash`] does.
+/// Members already in key order, as they usually are, are hashed as they are
+/// visited rather than collected and sorted first.
+fn hash_object(state: &mut blake3::Hasher, object: &Value, skip: Option<&str>) {
+    let fields = || {
+        object
+            .object_iter()
+            .filter(move |(key, _)| Some(&**key) != skip)
+    };
+    let mut previous: Option<Cow<'_, str>> = None;
+    let in_order = fields().all(|(key, _)| {
+        let in_order = previous.as_ref().is_none_or(|previous| *previous <= key);
+        previous = Some(key);
+        in_order
+    });
+    if in_order {
+        fields().for_each(|(key, value)| hash_member(state, &key, &value));
+    } else {
+        hash(state, fields());
+    }
 }
 
 /// Hashes the members of a JSON object. Members are visited in key order, so two
@@ -351,23 +390,42 @@ fn hash<'a, I>(state: &mut blake3::Hasher, fields: I)
 where
     I: Iterator<Item = (Cow<'a, str>, Value)>,
 {
-    fields.sorted_by(|a, b| a.0.cmp(&b.0)).for_each(|(k, v)| {
-        state.update(k.as_bytes());
-        state.update(":".as_bytes());
-        match v.kind() {
-            JsonKind::Object => {
-                state.update("{".as_bytes());
-                hash(state, v.object_iter());
-                state.update("}".as_bytes());
-            }
-            JsonKind::String => {
-                state.update(v.as_str().unwrap_or_default().as_bytes());
-            }
-            _ => {
-                state.update(v.to_string().as_bytes());
-            }
+    fields
+        .sorted_by(|a, b| a.0.cmp(&b.0))
+        .for_each(|(k, v)| hash_member(state, &k, &v));
+}
+
+fn hash_member(state: &mut blake3::Hasher, key: &str, value: &Value) {
+    state.update(key.as_bytes());
+    state.update(":".as_bytes());
+    match value.kind() {
+        JsonKind::Object => {
+            state.update("{".as_bytes());
+            hash_object(state, value, None);
+            state.update("}".as_bytes());
         }
-    });
+        JsonKind::String => {
+            state.update(value.as_str().unwrap_or_default().as_bytes());
+        }
+        // A number's text is what serializing it writes, so it is hashed
+        // in place rather than through a `String`.
+        JsonKind::Number => {
+            state.update(value.raw_number().unwrap_or_default().as_bytes());
+        }
+        JsonKind::Bool => {
+            state.update(if value.as_bool() == Some(true) {
+                b"true"
+            } else {
+                b"false"
+            });
+        }
+        JsonKind::Null => {
+            state.update(b"null");
+        }
+        _ => {
+            state.update(value.to_string().as_bytes());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -436,6 +494,86 @@ mod tests {
         );
         // Because it takes the same data from context `all`
         assert_eq!(hashed_data_3, hashed_data_4);
+    }
+
+    /// The hashing as it was before members were hashed in place: always
+    /// sorted through a buffer, scalars other than strings through their
+    /// serialized text. Cache keys already in Redis were made this way.
+    fn reference_hash(state: &mut blake3::Hasher, object: &Value, skip: Option<&str>) {
+        object
+            .object_iter()
+            .filter(|(key, _)| Some(&**key) != skip)
+            .sorted_by(|a, b| a.0.cmp(&b.0))
+            .for_each(|(k, v)| {
+                state.update(k.as_bytes());
+                state.update(":".as_bytes());
+                match v.kind() {
+                    JsonKind::Object => {
+                        state.update("{".as_bytes());
+                        reference_hash(state, &v, None);
+                        state.update("}".as_bytes());
+                    }
+                    JsonKind::String => {
+                        state.update(v.as_str().unwrap_or_default().as_bytes());
+                    }
+                    _ => {
+                        state.update(v.to_string().as_bytes());
+                    }
+                }
+            });
+    }
+
+    #[test]
+    fn members_hash_as_before_in_any_order_and_of_every_kind() {
+        let documents = [
+            r#"{"__typename":"T","a":1,"b":"s","c":true,"d":null,"e":[1,"x",{"z":2}],"f":{"g":1.50,"h":false}}"#,
+            r#"{"f":{"h":false,"g":1.50},"e":[1,"x",{"z":2}],"d":null,"c":true,"b":"s","a":1,"__typename":"T"}"#,
+            r#"{"id":"1"}"#,
+            r#"{"__typename":"T","n":-12e3}"#,
+        ];
+        for document in documents {
+            let value = Value::parse(document.as_bytes().to_vec()).unwrap();
+            for skip in [None, Some(TYPENAME)] {
+                let mut expected = blake3::Hasher::new();
+                reference_hash(&mut expected, &value, skip);
+                let mut actual = blake3::Hasher::new();
+                hash_object(&mut actual, &value, skip);
+                assert_eq!(
+                    actual.finalize(),
+                    expected.finalize(),
+                    "{document} {skip:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn entity_key_is_built_as_before() {
+        let representation =
+            Value::parse(br#"{"__typename":"Product","upc":"1","n":2}"#.to_vec()).unwrap();
+        let mut digest = blake3::Hasher::new();
+        reference_hash(&mut digest, &representation, Some(TYPENAME));
+        let hashed = digest.finalize().to_hex();
+        for private_id in [None, Some("private")] {
+            let key = PrimaryCacheKeyEntity {
+                subgraph_name: "products",
+                entity_type: "Product",
+                representation: &representation,
+                subgraph_query_hash: "query",
+                additional_data_hash: "data",
+                private_id,
+            }
+            .hash();
+            let mut expected = format!(
+                "version:{RESPONSE_CACHE_VERSION}:subgraph:products:type:Product:representation:{hashed}:hash:query:data:data"
+            );
+            if let Some(private_id) = private_id {
+                expected.push(':');
+                expected.push_str(private_id);
+            }
+            assert_eq!(key, expected);
+            assert_eq!(key.capacity(), key.len());
+        }
     }
 
     #[test]
