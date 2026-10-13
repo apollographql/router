@@ -33,7 +33,7 @@ type StorageResult<T> = Result<T, Error>;
 #[derive(Debug, Clone)]
 pub(super) struct Document {
     pub(super) key: String,
-    pub(super) data: serde_json_bytes::Value,
+    pub(super) data: crate::json_ext::Value,
     pub(super) control: CacheControl,
     pub(super) cache_tags: Vec<CacheTag>,
     /// The fine-grained tag values (schema `@cacheTag` or `apolloCacheTags`/
@@ -66,7 +66,7 @@ pub(super) struct Document {
 #[derive(Debug, Clone)]
 pub(super) struct CacheEntry {
     pub(super) key: String,
-    pub(super) data: serde_json_bytes::Value,
+    pub(super) data: crate::json_ext::Value,
     pub(super) control: CacheControl,
     /// Invalidation labels are those labels used to invalidate cached data; they pick out data
     /// uniquely or, if the label applies more coarsely, to sets of data. They're used for Redis

@@ -1548,9 +1548,8 @@ async fn a_burst_of_connector_requests_the_response_cache_rejects_records_nothin
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 #[tokio::test]
 async fn a_burst_of_connector_cache_hits_records_nothing() {
-    let store = crate::plugins::response_cache::AlwaysHit::new(
-        serde_json_bytes::json!({ "hello": "cached" }),
-    );
+    let store =
+        crate::plugins::response_cache::AlwaysHit::new(apollo_json::json!({ "hello": "cached" }));
     let answers = source_around_cache_answers(Arc::new(store), None).await;
     for response in answers {
         assert!(response.error().is_none(), "the cache should have answered");
@@ -1565,9 +1564,8 @@ async fn a_burst_of_subgraph_cache_hits_records_nothing() {
     use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
     use crate::plugins::circuit_breaker::test_support::subgraph_request;
 
-    let store = crate::plugins::response_cache::AlwaysHit::new(
-        serde_json_bytes::json!({ "hello": "cached" }),
-    );
+    let store =
+        crate::plugins::response_cache::AlwaysHit::new(apollo_json::json!({ "hello": "cached" }));
     let schema = apollo_compiler::Schema::parse_and_validate("type Query { hello: String }", "")
         .expect("schema is valid");
     let document = Arc::new(
@@ -1644,9 +1642,8 @@ async fn a_burst_of_subgraph_entity_cache_hits_records_nothing() {
     use crate::plugins::circuit_breaker::test_support::assert_router_answers_record_nothing;
     use crate::plugins::circuit_breaker::test_support::subgraph_request;
 
-    let store = crate::plugins::response_cache::AlwaysHit::new(
-        serde_json_bytes::json!({ "name": "cached" }),
-    );
+    let store =
+        crate::plugins::response_cache::AlwaysHit::new(apollo_json::json!({ "name": "cached" }));
     let entity_fetch = || {
         let mut request = subgraph_request("Products");
         request.subgraph_request.body_mut().variables.object_insert(

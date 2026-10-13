@@ -908,9 +908,7 @@ impl ConnectorCacheService {
             let entities = intermediate_results
                 .iter()
                 .filter_map(|r| r.cache_entry.as_ref())
-                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-                // serde_json_bytes values
-                .map(|entry| json_ext::from_legacy(&entry.data));
+                .map(|entry| entry.data.clone());
 
             let data = json_ext::object([(ENTITIES, json_ext::array(entities))]);
 
@@ -1053,9 +1051,7 @@ impl ConnectorCacheService {
             match cache_entry {
                 Some(entry) => {
                     // Was cached - use cached value
-                    // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-                    // serde_json_bytes values
-                    new_entities.push(json_ext::from_legacy(&entry.data));
+                    new_entities.push(entry.data);
                 }
                 None => {
                     // Was not cached - take from response and store. A response with fewer
@@ -1647,7 +1643,9 @@ impl ConnectorRequestCacheService {
                     answered_by_router: true,
                     mapped_response:
                         apollo_federation::connectors::runtime::responses::MappedResponse::Data {
-                            data: entry.data,
+                            // PERF(apollo-json): legacy bridge -- apollo-federation's
+                            // mapped connector response holds serde_json_bytes values
+                            data: json_ext::to_legacy(&entry.data),
                             key: request.key,
                             // Replay the mapping problems recorded when this entry was stored,
                             // so `ConnectorSelector::ResponseMappingProblems` and the cache
@@ -1806,7 +1804,9 @@ impl ConnectorRequestCacheService {
 
                         let document = Document {
                             key: cache_key,
-                            data: data.clone(),
+                            // PERF(apollo-json): legacy bridge -- apollo-federation's
+                            // mapped connector response holds serde_json_bytes values
+                            data: json_ext::from_legacy(data),
                             control: cache_control,
                             cache_tags,
                             expire: ttl,

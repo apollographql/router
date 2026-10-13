@@ -2143,9 +2143,7 @@ async fn cache_lookup_root(
                 }
 
                 let mut response = subgraph::Response::builder()
-                    // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-                    // serde_json_bytes values
-                    .data(json_ext::from_legacy(&value.data))
+                    .data(value.data)
                     .extensions(empty_object())
                     .id(request.id)
                     .context(request.context)
@@ -2529,9 +2527,7 @@ async fn cache_lookup_entities(
         let entities = cache_result
             .into_iter()
             .filter_map(|res| res.cache_entry)
-            // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-            // serde_json_bytes values
-            .map(|entry| json_ext::from_legacy(&entry.data))
+            .map(|entry| entry.data)
             .collect::<Vec<_>>();
         let mut data = empty_object();
         data.object_insert(ENTITIES, json_ext::array(entities));
@@ -2596,10 +2592,9 @@ async fn cache_store_root_from_response(
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let document = Document {
                 key: cache_key,
-                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-                // serde_json_bytes values. This copy is also the retention boundary: a stored
-                // apollo-json handle would pin the whole response arena.
-                data: json_ext::to_legacy(data),
+                // The handle pins the response arena only until the insert has
+                // serialized it.
+                data: data.clone(),
                 control: cache_control,
                 cache_tags,
                 cdn_invalidation_tags,
@@ -3491,10 +3486,9 @@ pub(super) fn build_entity_store_document(
 ) -> Document {
     Document {
         control: cache_control.clone(),
-        // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-        // serde_json_bytes values. This copy is also the retention boundary: a
-        // stored apollo-json handle would pin the whole response arena.
-        data: json_ext::to_legacy(miss.value),
+        // The handle pins the response arena only until the insert has
+        // serialized it.
+        data: miss.value.clone(),
         key: miss.key.clone(),
         cache_tags: miss.cache_tags.clone(),
         cdn_invalidation_tags: miss.cdn_invalidation_tags.clone(),
@@ -3597,9 +3591,7 @@ async fn insert_entities_in_result(
     {
         match cache_entry {
             Some(v) => {
-                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-                // serde_json_bytes values
-                new_entities.push(json_ext::from_legacy(&v.data));
+                new_entities.push(v.data);
             }
             None => {
                 let (entity_idx, value) =
@@ -3735,9 +3727,7 @@ pub(super) fn assemble_response_from_errors(
     for (new_entity_idx, IntermediateResult { cache_entry, .. }) in result.drain(..).enumerate() {
         match cache_entry {
             Some(v) => {
-                // PERF(apollo-json): legacy bridge, revisit -- cache storage holds
-                // serde_json_bytes values
-                new_entities.push(json_ext::from_legacy(&v.data));
+                new_entities.push(v.data);
             }
             None => {
                 new_entities.push(Value::default());

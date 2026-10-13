@@ -48,7 +48,8 @@ const CACHE_TAG_CHANNEL_SIZE: usize = 1000;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct CacheValue {
-    data: serde_json_bytes::Value,
+    #[serde(with = "raw_json")]
+    data: crate::json_ext::Value,
     cache_control: CacheControl,
     // The `@cacheTag`/extension-derived tag values for this entry — always present once
     // computed (not gated by debug mode), since a later cache hit needs them both for the
@@ -68,6 +69,37 @@ struct CacheValue {
 }
 
 impl ValueType for CacheValue {}
+
+/// Writes a cached value as the JSON text apollo-json serializes, and reads it
+/// back by parsing that text, so the value never passes through serde's data
+/// model. Entries written as serde_json_bytes values read back the same way.
+mod raw_json {
+    use serde::Deserialize;
+    use serde::Deserializer;
+    use serde::Serialize;
+    use serde::Serializer;
+    use serde::de::Error as _;
+    use serde::ser::Error as _;
+    use serde_json::value::RawValue;
+
+    use crate::json_ext::Value;
+
+    pub(super) fn serialize<S: Serializer>(
+        value: &Value,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        RawValue::from_string(value.to_string())
+            .map_err(S::Error::custom)?
+            .serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Value, D::Error> {
+        let raw: Box<str> = Box::<RawValue>::deserialize(deserializer)?.into();
+        Value::parse(raw.into_string().into_bytes()).map_err(D::Error::custom)
+    }
+}
 
 impl From<(&str, CacheValue)> for CacheEntry {
     fn from((cache_key, cache_value): (&str, CacheValue)) -> Self {
@@ -661,7 +693,7 @@ pub(crate) struct AlwaysHit(fred::types::Value);
     any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux"))
 ))]
 impl AlwaysHit {
-    pub(crate) fn new(data: serde_json_bytes::Value) -> Self {
+    pub(crate) fn new(data: crate::json_ext::Value) -> Self {
         let entry = CacheValue {
             data,
             cache_control: CacheControl::default(),
@@ -809,6 +841,29 @@ mod tests {
     /// * a document's TTL must be shorter than the TTL of all its related cache tags
     /// * a document's TTL will always be less than or equal to its score in all its related cache tags
     /// * only expired keys will be removed via the cache maintenance
+    #[test]
+    fn cache_value_data_is_stored_as_plain_json() {
+        let value = super::CacheValue {
+            data: apollo_json::json!({"a": [1, "é"], "b": null}),
+            cache_control: Default::default(),
+            cache_tags: None,
+            mapping_problems: Vec::new(),
+            status: None,
+        };
+        let stored: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert_eq!(
+            stored["data"],
+            serde_json::json!({"a": [1, "é"], "b": null})
+        );
+
+        // An entry written from a serde_json_bytes value reads back the same.
+        let mut written_before = stored;
+        written_before["data"] = serde_json::json!({"name": "café", "n": 2.5});
+        let read: super::CacheValue = serde_json::from_str(&written_before.to_string()).unwrap();
+        assert_eq!(read.data, apollo_json::json!({"name": "café", "n": 2.5}));
+    }
+
     mod ttl_guarantees {
         use std::collections::HashMap;
         use std::time::Duration;
@@ -1096,7 +1151,7 @@ mod tests {
 
             let document = Document {
                 expire: Duration::from_secs(60),
-                data: serde_json_bytes::Value::Number(1.into()),
+                data: apollo_json::json!(1),
                 ..common_document()
             };
             let document_key = document.key.clone();
@@ -1124,7 +1179,7 @@ mod tests {
             // update the document with new data and a shorter TTL
             let document = Document {
                 expire: Duration::from_secs(10),
-                data: serde_json_bytes::Value::Number(2.into()),
+                data: apollo_json::json!(2),
                 ..common_document()
             };
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
@@ -1164,7 +1219,7 @@ mod tests {
 
             let document = Document {
                 expire: Duration::from_secs(60),
-                data: serde_json_bytes::Value::Number(1.into()),
+                data: apollo_json::json!(1),
                 ..common_document()
             };
             let document_key = document.key.clone();
@@ -1180,7 +1235,7 @@ mod tests {
             let old_ttl = document.expire;
             let document = Document {
                 expire: old_ttl * 2,
-                data: serde_json_bytes::Value::Number(2.into()),
+                data: apollo_json::json!(2),
                 ..common_document()
             };
             storage.insert(document.clone(), SUBGRAPH_NAME).await?;
