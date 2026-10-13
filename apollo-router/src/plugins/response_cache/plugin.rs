@@ -2843,17 +2843,9 @@ fn extract_cache_keys(
                 })?;
         typenames.insert(typename.clone());
 
-        // The cache key identifies the entity by its `@key` fields, so `__typename` — which the
-        // subgraph still needs on the wire — is excluded here rather than stripped from the
-        // request and put back.
-        let entity_fields = object(
-            representation
-                .object_iter()
-                .filter(|(key, _)| key != TYPENAME),
-        );
-
         // Get the entity key from `representation`, only needed in debug for the cache debugger
         let representation_entity_key = if debug {
+            let entity_fields = without_typename(&representation);
             let selection_set = find_matching_key_field_set(
                 &entity_fields,
                 &typename,
@@ -2871,10 +2863,13 @@ fn extract_cache_keys(
         };
 
         // Create primary cache key for an entity
+        // The cache key identifies the entity by its `@key` fields, so `__typename` — which the
+        // subgraph still needs on the wire — is left out of the hash rather than stripped from
+        // the request and put back.
         let key = PrimaryCacheKeyEntity {
             subgraph_name,
             entity_type: &typename,
-            representation: &entity_fields,
+            representation: &representation,
             subgraph_query_hash: &query_hash,
             additional_data_hash: &additional_data_hash,
             private_id: if is_known_private { private_id } else { None },
@@ -2901,7 +2896,7 @@ fn extract_cache_keys(
                     subgraph_name,
                     subgraph_enums,
                     &typename,
-                    &entity_fields,
+                    &representation,
                 )?
             } else {
                 HashSet::new()
@@ -2955,7 +2950,17 @@ fn extract_cache_keys(
     Ok(res)
 }
 
-/// Get invalidation keys from @cacheTag directives in supergraph schema for entities
+/// A representation's members other than `__typename`: the entity's `@key` fields.
+pub(super) fn without_typename(representation: &Value) -> Value {
+    object(
+        representation
+            .object_iter()
+            .filter(|(key, _)| key != TYPENAME),
+    )
+}
+
+/// Get invalidation keys from @cacheTag directives in supergraph schema for entities. A
+/// `__typename` member of `representations` is ignored.
 pub(super) fn get_invalidation_entity_keys_from_schema(
     supergraph_schema: &Arc<Valid<Schema>>,
     subgraph_name: &str,
@@ -3068,7 +3073,10 @@ pub(super) fn get_invalidation_entity_keys_from_schema(
     // PERF(apollo-json): legacy bridge -- apollo-federation's `StringTemplate::interpolate`
     // takes serde_json_bytes values, so a type with `@cacheTag` still copies its
     // representation once
-    vars.insert("$key".to_string(), json_ext::to_legacy(representations));
+    vars.insert(
+        "$key".to_string(),
+        json_ext::to_legacy(&without_typename(representations)),
+    );
     let invalidation_cache_keys = cache_keys
         .into_iter()
         .map(|ck| ck.interpolate(&vars).map(|(res, _)| res))

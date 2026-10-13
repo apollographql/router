@@ -16,6 +16,7 @@ use crate::plugins::response_cache::plugin::CONTEXT_CACHE_KEY;
 use crate::plugins::response_cache::plugin::REPRESENTATIONS;
 use crate::plugins::response_cache::serde_blake3::Blake3Serializer;
 use crate::spec::QueryHash;
+use crate::spec::TYPENAME;
 
 /// Cache key for root field
 pub(super) struct PrimaryCacheKeyRoot<'a> {
@@ -65,6 +66,8 @@ impl<'a> PrimaryCacheKeyRoot<'a> {
 pub(super) struct PrimaryCacheKeyEntity<'a> {
     pub(super) subgraph_name: &'a str,
     pub(super) entity_type: &'a str,
+    /// The entity's representation. Its `__typename` is left out of the hash,
+    /// since `entity_type` already names the type.
     pub(super) representation: &'a Value,
     /// NB: hashed before insertion into this struct, so that the hashed representation can be
     /// reused for all entities in this query
@@ -84,10 +87,16 @@ impl<'a> PrimaryCacheKeyEntity<'a> {
             representation,
         } = self;
 
-        let hashed_representation = if representation.is_empty().unwrap_or(true) {
+        let mut fields = representation
+            .object_iter()
+            .filter(|(key, _)| key != TYPENAME)
+            .peekable();
+        let hashed_representation = if fields.peek().is_none() {
             String::new()
         } else {
-            sort_and_hash_object(representation)
+            let mut digest = blake3::Hasher::new();
+            hash(&mut digest, fields);
+            digest.finalize().to_hex().to_string()
         };
 
         // - response cache version: current version of the hash
@@ -599,6 +608,32 @@ mod tests {
             private_id: None,
         };
         assert_ne!(key1.hash(), key2.hash());
+    }
+
+    #[test]
+    fn entity_cache_key_leaves_typename_out_of_the_representation_hash() {
+        let key = |representation: &Value| {
+            PrimaryCacheKeyEntity {
+                subgraph_name: "products",
+                entity_type: "Product",
+                representation,
+                subgraph_query_hash: "abc123",
+                additional_data_hash: "def456",
+                private_id: None,
+            }
+            .hash()
+        };
+        let with_typename = apollo_json::json!({"__typename": "Product", "upc": "1"});
+        let without = apollo_json::json!({"upc": "1"});
+        assert_eq!(key(&with_typename), key(&without));
+        assert_eq!(
+            key(&apollo_json::json!({"__typename": "Product"})),
+            key(&apollo_json::json!({}))
+        );
+        assert!(key(&without).contains(&format!(
+            ":representation:{}:",
+            sort_and_hash_object(&without)
+        )));
     }
 
     #[test]
