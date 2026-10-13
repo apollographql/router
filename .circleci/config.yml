@@ -528,7 +528,7 @@ jobs:
             CHANGED=$(git diff --name-only "$BASE" HEAD)
             echo "Changed files:"
             echo "$CHANGED"
-            if echo "$CHANGED" | grep -qE '^(apollo-router/(src|tests|benches|build)/|apollo-federation/|Cargo\.(toml|lock)|[^/]+/Cargo\.toml|rust-toolchain\.toml|xtask/)'; then
+            if echo "$CHANGED" | grep -qE '^(apollo-router/(src|tests|benches|build)/|apollo-federation/|vendored/|Cargo\.(toml|lock)|[^/]+/Cargo\.toml|rust-toolchain\.toml|xtask/)'; then
               echo "Source files changed -- running tests"
               exit 0
             fi
@@ -537,6 +537,12 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      # vendored/apollo-json is a standalone workspace, so `xtask test --workspace` skips it.
+      # Run its tests while the copy carries changes that are not yet upstream.
+      - run:
+          name: Run vendored apollo-json tests
+          command: |
+            cargo test --locked --manifest-path vendored/apollo-json/Cargo.toml
       # Native plugin builds may set `--cfg tracing_unstable`, which compiles code paths (such as
       # structured `valuable` log fields) that the default build excludes. Exercise them nightly on
       # one platform, since changing RUSTFLAGS forces a full rebuild.

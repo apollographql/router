@@ -29,6 +29,11 @@ members = [
     "fuzz/subgraph",
     "xtask",
 ]
+exclude = [
+    # Standalone vendored crate, tested by its own CI step; see
+    # vendored/apollo-json/Cargo.toml.
+    "vendored/apollo-json",
+]
 
 # Line tables keep file:line in backtraces while making rebuilds and the build output smaller.
 # For full debug info (e.g. inspecting locals in a debugger), build with
