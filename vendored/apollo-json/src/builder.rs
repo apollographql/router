@@ -23,6 +23,7 @@ use crate::arena::{Arena, ForeignId};
 use crate::document::Value;
 use crate::error::JsonError;
 use crate::node::{Child, Entry, KeyRef, Node, NodeId};
+use crate::pending::{NONE, Pending, PendingId, PendingTree};
 use crate::slab::SlabRef;
 
 /// One step of a mutation path.
@@ -222,6 +223,19 @@ impl<'a> Frame<'a> {
             }
         }
     }
+}
+
+/// One open container while a [`PendingTree`] is written into an arena; the
+/// counterpart of [`Frame`], walking the container's member list.
+struct PendingFrame {
+    object: bool,
+    /// The member to descend into next, or [`NONE`].
+    next: u32,
+    /// The member being written, whose key an object takes when its value
+    /// finishes.
+    current: u32,
+    /// Start of this container's run in [`Scratch`].
+    base: usize,
 }
 
 /// Children of every open container in one pair of buffers, so writing a
@@ -1449,6 +1463,85 @@ impl ValueBuilder {
                         child = Some(self.close_frame(&mut scratch, closed));
                     }
                 }
+            }
+        }
+    }
+
+    /// Replaces the root with the subtree at `id` of `tree`, moving its values
+    /// out and leaving `null` at `id`. Non-finite floats become `null`.
+    ///
+    /// Written like [`ValueBuilder::new_child`] writes a [`NewValue`] tree:
+    /// with an explicit frame stack, depth-first, each container's slab
+    /// allocated once from the shared scratch buffers.
+    pub(crate) fn set_pending(&mut self, tree: &mut PendingTree<'_>, id: PendingId) {
+        let mut stack: Vec<PendingFrame> = Vec::new();
+        let mut scratch = Scratch::default();
+        let mut next = Some(id);
+        loop {
+            let mut child = match next.take() {
+                Some(id) => {
+                    let slot = &mut tree.slots[id.0 as usize];
+                    match std::mem::replace(&mut slot.value, Pending::Value(NewValue::Null)) {
+                        Pending::Object { first, .. } => {
+                            stack.push(PendingFrame {
+                                object: true,
+                                next: first,
+                                current: NONE,
+                                base: scratch.entries.len(),
+                            });
+                            None
+                        }
+                        Pending::Array { first, .. } => {
+                            stack.push(PendingFrame {
+                                object: false,
+                                next: first,
+                                current: NONE,
+                                base: scratch.children.len(),
+                            });
+                            None
+                        }
+                        Pending::Value(value) => Some(
+                            self.new_child(value, NonFinite::AsNull)
+                                .expect("non-finite floats are written as null"),
+                        ),
+                    }
+                }
+                None => None,
+            };
+            loop {
+                let Some(frame) = stack.last_mut() else {
+                    self.root = child.expect("the outermost value produced a child");
+                    return;
+                };
+                if let Some(child) = child.take() {
+                    if frame.object {
+                        // Keys are unique by construction, so no duplicate
+                        // check: `PendingTree::member_slot` reuses a present
+                        // key.
+                        let key = &tree.slots[frame.current as usize].key;
+                        let key = KeyRef::Owned(self.arena.alloc_text(key));
+                        scratch.entries.push(Entry { key, child });
+                    } else {
+                        scratch.children.push(child);
+                    }
+                }
+                if frame.next != NONE {
+                    frame.current = frame.next;
+                    frame.next = tree.slots[frame.current as usize].next;
+                    next = Some(PendingId(frame.current));
+                    break;
+                }
+                let closed = stack.pop().expect("the frame was just borrowed");
+                let node = if closed.object {
+                    let slab = self.arena.alloc_entries(&scratch.entries[closed.base..]);
+                    scratch.entries.truncate(closed.base);
+                    Node::Object(slab)
+                } else {
+                    let slab = self.arena.alloc_children(&scratch.children[closed.base..]);
+                    scratch.children.truncate(closed.base);
+                    Node::Array(slab)
+                };
+                child = Some(Child::local(self.arena.push_node(node)));
             }
         }
     }
