@@ -344,10 +344,10 @@ impl PlanNode {
                                             .iter()
                                             .any(|elem| matches!(elem, PathElement::Flatten(_)))
                                     {
-                                        for path in paths.iter().flatten() {
-                                            if err_path.equal_if_flattened(path) {
+                                        for path in paths.iter() {
+                                            if err_path.equal_if_flattened_to(path) {
                                                 let mut err = err.clone();
-                                                err.path = Some(path.clone());
+                                                err.path = Some(Path(path.to_vec()));
                                                 errors.push(err);
                                             }
                                         }

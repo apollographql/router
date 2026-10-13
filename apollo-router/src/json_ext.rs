@@ -475,7 +475,7 @@ fn shape_mismatch(shape: Shape) -> FetchError {
 /// the wrong shape to descend into. Nothing is written in that case.
 pub(crate) fn insert_at_path(
     builder: &mut ValueBuilder,
-    path: &Path,
+    path: &[PathElement],
     value: Value,
 ) -> Result<(), FetchError> {
     // Flattens and keys carrying type conditions filter the incoming value
@@ -486,7 +486,7 @@ pub(crate) fn insert_at_path(
             value = filter_type_conditions(value, conditions);
         }
     }
-    write_segments(builder, &path.0, value)
+    write_segments(builder, path, value)
 }
 
 /// Writes `leaf` at the position `elements` address under the builder's root;
@@ -1264,6 +1264,11 @@ impl Path {
     // whatever type condition applied, so a `Key` with a type condition and a `Key` without one at
     // the same position denote the same location and must compare equal here.
     pub fn equal_if_flattened(&self, other: &Path) -> bool {
+        self.equal_if_flattened_to(&other.0)
+    }
+
+    /// [`Path::equal_if_flattened`] against a path held as a slice.
+    pub(crate) fn equal_if_flattened_to(&self, other: &[PathElement]) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -1914,7 +1919,7 @@ mod tests {
             ("topProducts/@/0/name", json!("Table")),
             ("topProducts/@/2/name", json!("Chair")),
         ] {
-            insert_at_path(&mut builder, &Path::from(path), value).unwrap();
+            insert_at_path(&mut builder, &Path::from(path).0, value).unwrap();
         }
         assert_eq!(
             builder.seal(),
@@ -1931,7 +1936,7 @@ mod tests {
         let mut builder = Value::default().edit();
         for index in (0..1000).rev() {
             let path = Path::from(format!("_entities/{index}").as_str());
-            insert_at_path(&mut builder, &path, json!({"id": index})).unwrap();
+            insert_at_path(&mut builder, &path.0, json!({"id": index})).unwrap();
         }
         let placed = builder.seal();
         let entities = placed.get("_entities").unwrap();
@@ -1944,9 +1949,9 @@ mod tests {
     #[test]
     fn test_insert_at_path_shape_mismatch_writes_nothing() {
         let mut builder = json!({"a":{"b":1}}).edit();
-        let error = insert_at_path(&mut builder, &Path::from("a/b/c/0"), json!(2)).unwrap_err();
+        let error = insert_at_path(&mut builder, &Path::from("a/b/c/0").0, json!(2)).unwrap_err();
         assert!(matches!(error, FetchError::ExecutionPathNotFound { .. }));
-        let error = insert_at_path(&mut builder, &Path::from("a/0"), json!(2)).unwrap_err();
+        let error = insert_at_path(&mut builder, &Path::from("a/0").0, json!(2)).unwrap_err();
         assert!(matches!(error, FetchError::ExecutionPathNotFound { .. }));
         assert_eq!(builder.seal(), json!({"a":{"b":1}}));
     }
