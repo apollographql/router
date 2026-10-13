@@ -15,6 +15,13 @@ mkdir -p "$out"
   echo "restored target: $(du -sh target 2>/dev/null | cut -f1)"
 } > "$out/env.txt" 2>&1
 
+# Optionally link through the rust-lld bundled with the toolchain, using only stable flags.
+if [ "${MEMPROFILE_RUST_LLD:-false}" = true ]; then
+  gccld="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | awk '/^host:/{print $2}')/bin/gcc-ld"
+  export RUSTFLAGS="-Clink-arg=-fuse-ld=lld -Clink-arg=-B$gccld"
+fi
+echo "RUSTFLAGS=${RUSTFLAGS:-}" >> "$out/env.txt"
+
 python3 .circleci/memprofile/memsample.py "$out/samples.tsv" 0.5 &
 sampler=$!
 start=$(date +%s)

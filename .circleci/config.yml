@@ -50,7 +50,7 @@ executors:
   arm_linux_build: &arm_linux_build_executor
     docker:
       - image: ghcr.io/apollographql/ci-utility-docker-images/apollo-rust-builder:0.30.12
-    resource_class: arm.xlarge
+    resource_class: arm.large  # branch-only: 4 vCPU / 16GB for memprofile
     environment:
       MISE_ENV: ci
       CARGO_BUILD_JOBS: 4
@@ -647,6 +647,9 @@ jobs:
       build_jobs:
         type: integer
         default: 4
+      use_rust_lld:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -660,6 +663,7 @@ jobs:
           name: Build test binaries while sampling memory
           environment:
             CARGO_BUILD_JOBS: << parameters.build_jobs >>
+            MEMPROFILE_RUST_LLD: << parameters.use_rust_lld >>
           command: bash .circleci/memprofile/run.sh
       - store_artifacts:
           path: /tmp/memprofile
@@ -1151,19 +1155,18 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_build >>
     jobs:
-      # Control: the real test executor (2xlarge.gen2, 16 vCPU / 32GB) at CI's 4 jobs.
+      # arm64 links with GNU ld by default; these compare it to the toolchain's bundled rust-lld.
       - memprofile:
-          name: memprofile-amd-32gb-j4
-          platform: amd_linux_test
-      # Half the memory (xlarge.gen2, 8 vCPU / 16GB), same 4 jobs.
+          name: memprofile-arm-32gb-j4-rustlld
+          platform: arm_linux_test
+          use_rust_lld: true
       - memprofile:
-          name: memprofile-amd-16gb-j4
-          platform: amd_linux_build
-      # Same 32GB box, all 16 vCPUs used.
+          name: memprofile-arm-16gb-j4-gnuld
+          platform: arm_linux_build
       - memprofile:
-          name: memprofile-amd-32gb-j16
-          platform: amd_linux_test
-          build_jobs: 16
+          name: memprofile-arm-16gb-j4-rustlld
+          platform: arm_linux_build
+          use_rust_lld: true
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:
