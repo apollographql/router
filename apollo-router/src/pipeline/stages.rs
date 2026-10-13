@@ -6,8 +6,13 @@ use std::sync::Arc;
 
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use indexmap::IndexMap;
+use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::layer::LayerFn;
+use tower::layer::layer_fn;
+use tower::util::BoxCloneService;
+use tower::util::BoxService;
 
 use super::acquire::HttpClientInputsMaps;
 use crate::Configuration;
@@ -205,10 +210,13 @@ pub(crate) fn build_subgraph_service(
     let subscription_config = subscription_plugin_config(plugins).map(Arc::new);
     let apq_enabled = configuration.apq.subgraph.get(name).enabled;
 
-    // Box *inside* the buffer, as [`build_connector_request_services`] does: it erases the
-    // stack's type without a second box on the way out of [`SubgraphServices::get`], which
-    // runs once per fetch node per request.
+    // The stack is boxed at three points, so no layer wraps a type that names the whole stack
+    // beneath it; [`box_layer`] explains why that matters. The trade-off is one boxed future
+    // per box on every fetch. The outermost box sits *inside* the per-subgraph buffer, as in
+    // [`build_connector_request_services`], so [`SubgraphServices::get`], which runs once per
+    // fetch node per request, only adds the box that erases that buffer.
     let service = ServiceBuilder::new()
+        .layer(box_clone_layer())
         .apply_required_plugin_layer(plugins, |p: &IncludeSubgraphErrors| {
             p.tag_errors_with_subgraph_name_layer(Arc::from(name))
         })
@@ -222,6 +230,9 @@ pub(crate) fn build_subgraph_service(
         // service they can clone. The timeout answers its own errors, so it doesn't depend on
         // the layers above it.
         .buffered()
+        // The rate limit can't be cloned, so neither box beneath this buffer needs `Clone`; the
+        // buffer is what makes the stack cloneable again.
+        .layer(box_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_error_response_layer(name)
         })
@@ -231,6 +242,7 @@ pub(crate) fn build_subgraph_service(
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.rate_limit_layer(ShapingTarget::Subgraph(name))
         })
+        .layer(box_layer())
         .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
             t.subgraph_deduplication_layer(name)
         })
@@ -258,8 +270,7 @@ pub(crate) fn build_subgraph_service(
         ))
         .layer(SubgraphApqLayer::new(apq_enabled))
         .layer(content_negotiation::SubgraphContentNegotiationLayer::default())
-        .service(SubgraphService::new(name, http_service))
-        .boxed_clone();
+        .service(SubgraphService::new(name, http_service));
 
     // We apply the buffered() here separately so it works on an inner BoxCloneService, which makes
     // the type easier to name
@@ -291,15 +302,18 @@ pub(crate) fn build_connector_request_services(
     let mut map = HashMap::with_capacity(connector_http_services.len());
     for (source, http_client) in connector_http_services.into_iter() {
         // One buffer per connector source provides per-source backpressure and lets
-        // every clone from [`ConnectorRequestServices::get`] share this stack (mirrors
-        // the per-subgraph buffer in [`build_subgraph_service`]).
+        // every clone from [`ConnectorRequestServices::get`] share this stack. It mirrors
+        // the per-subgraph buffer in [`build_subgraph_service`], whose comment explains the
+        // boxes.
         let service = UnconstrainedBuffer::new(
             ServiceBuilder::new()
+                .layer(box_clone_layer())
                 .apply_required_plugin_layer(plugins, |h: &Headers| {
                     h.connector_headers_layer(&source)
                 })
                 .apply_plugin_layer(plugins, Telemetry::instrument_connector_layer)
                 .buffered()
+                .layer(box_layer())
                 .apply_required_plugin_layer(plugins, |t: &TrafficShaping| {
                     t.connector_source_error_response_layer(&source)
                 })
@@ -312,6 +326,7 @@ pub(crate) fn build_connector_request_services(
                 // The operation's `max_requests` is admission too: a request over it is never sent,
                 // so no plugin hook sees it.
                 .layer(RequestLimitLayer)
+                .layer(box_layer())
                 .apply_plugin_layer(plugins, |c: &CircuitBreaker| {
                     c.connector_source_circuit_layer(&source)
                 })
@@ -327,8 +342,7 @@ pub(crate) fn build_connector_request_services(
                 .rust_plugins(plugins.clone(), |plugin, service| {
                     plugin.connector_request_service(service, source.clone())
                 })
-                .service(ConnectorRequestService { http_client }.boxed_clone())
-                .boxed_clone(),
+                .service(ConnectorRequestService { http_client }.boxed_clone()),
             DEFAULT_BUFFER_SIZE,
         );
         map.insert(source, service);
@@ -337,6 +351,63 @@ pub(crate) fn build_connector_request_services(
     ConnectorRequestServices {
         services: Arc::new(map),
     }
+}
+
+/// The longest type name a service may have where [`box_layer`] or [`box_clone_layer`] boxes
+/// it: well above the largest boxed type in these stacks, and far below the unboxed stack.
+const MAX_BOXED_TYPE_NAME_LEN: usize = 100_000;
+
+/// A layer that boxes a service `S` into `Boxed`.
+type BoxingLayer<S, Boxed> = LayerFn<fn(S) -> Boxed>;
+
+/// A layer that boxes the service beneath it into a [`BoxService`], so the layers above wrap a
+/// short, fixed type.
+///
+/// Each optional layer is an `Either` that names the service beneath it twice, so an unboxed
+/// stack's type name grows exponentially with its layers, and with it the crate's debug info
+/// and the compiler's and linker's memory.
+///
+/// # Panics
+///
+/// In debug builds, when the stack is built, if the boxed service's type name is longer than
+/// [`MAX_BOXED_TYPE_NAME_LEN`].
+fn box_layer<S, Req>() -> BoxingLayer<S, BoxService<Req, S::Response, S::Error>>
+where
+    S: Service<Req> + Send + 'static,
+    S::Future: Send + 'static,
+{
+    layer_fn(|service| {
+        debug_assert_boxed_type_name_bounded::<S>();
+        BoxService::new(service)
+    })
+}
+
+/// Like [`box_layer`], into a [`BoxCloneService`] for a service that can be cloned.
+///
+/// # Panics
+///
+/// In debug builds, when the stack is built, if the boxed service's type name is longer than
+/// [`MAX_BOXED_TYPE_NAME_LEN`].
+fn box_clone_layer<S, Req>() -> BoxingLayer<S, BoxCloneService<Req, S::Response, S::Error>>
+where
+    S: Service<Req> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    layer_fn(|service| {
+        debug_assert_boxed_type_name_bounded::<S>();
+        BoxCloneService::new(service)
+    })
+}
+
+fn debug_assert_boxed_type_name_bounded<S>() {
+    let name = std::any::type_name::<S>();
+    debug_assert!(
+        name.len() <= MAX_BOXED_TYPE_NAME_LEN,
+        "a boxed service's type name is {} bytes, over the limit of {MAX_BOXED_TYPE_NAME_LEN}; \
+         see `box_layer` and box the stack again beneath this point. The type starts: {}",
+        name.len(),
+        name.get(..500).unwrap_or(name),
+    );
 }
 
 /// Builds a [`ConnectorService`] for each of the schema's connectors, keyed by the
@@ -604,4 +675,32 @@ pub(crate) fn build_warmup_service(
         .map_response(drop) // Ignore response
         .service(caching_query_planner)
         .boxed_clone()
+}
+
+#[cfg(test)]
+mod boxed_type_names {
+    use std::sync::Arc;
+
+    use super::*;
+
+    // Building a stack runs each box's type-name check, a debug assertion.
+    #[tokio::test]
+    async fn subgraph_stack_boxes_are_bounded() {
+        let (http, _) = tower_test::mock::pair();
+        build_subgraph_service(
+            "s",
+            http.boxed_clone(),
+            &Arc::new(Plugins::default()),
+            &Configuration::default(),
+        );
+    }
+
+    #[tokio::test]
+    async fn connector_source_stack_boxes_are_bounded() {
+        let (http, _) = tower_test::mock::pair();
+        build_connector_request_services(
+            IndexMap::from([("s.a".to_string(), http.boxed_clone())]),
+            &Arc::new(Plugins::default()),
+        );
+    }
 }
