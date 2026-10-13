@@ -50,6 +50,7 @@ use super::plugin::get_invalidation_entity_keys_from_schema;
 use super::plugin::hash_private_id;
 use super::plugin::non_entity_errors;
 use super::plugin::reindex_entity_errors;
+use super::plugin::remember_private_query;
 use super::plugin::update_cache_control;
 use super::storage;
 use super::storage::CacheEntry;
@@ -817,7 +818,7 @@ impl ConnectorCacheService {
                             "data": cache_entry.data.clone()
                         }),
                         warnings: Vec::new(),
-                        should_store: false,
+                        should_store: true,
                     }
                     .update_metadata()
                 })
@@ -976,12 +977,7 @@ impl ConnectorCacheService {
 
         // Track private queries in the LRU so future requests can short-circuit
         if response_cache_control.private() && !is_known_private {
-            let size = {
-                let mut pq = private_queries.write().await;
-                pq.put(private_query_key, ());
-                pq.len()
-            };
-            lru_size_instrument.update(size as u64);
+            remember_private_query(private_queries, private_query_key, lru_size_instrument).await;
         }
 
         // The response has a private scope but we don't have a way to differentiate
@@ -1141,6 +1137,7 @@ impl ConnectorCacheService {
                         if debug && let Some(ref debug_req) = debug_request {
                             debug_ctx_entries.push(build_entity_debug_entry(
                                 &miss,
+                                !has_errors && !is_null_entity,
                                 private_id.clone(),
                                 source_name,
                                 CacheKeySource::Connector,
@@ -1621,7 +1618,7 @@ impl ConnectorRequestCacheService {
                         cache_control: entry.control.clone(),
                         data: serde_json_bytes::json!({"data": entry.data.clone()}),
                         warnings: Vec::new(),
-                        should_store: false,
+                        should_store: true,
                     }
                     .update_metadata();
                     add_cache_key_to_context(&request.context, cache_key_context)?;
@@ -1726,12 +1723,12 @@ impl ConnectorRequestCacheService {
 
                     // Track private queries in the LRU so future requests can short-circuit
                     if cache_control.private() && !is_known_private {
-                        let size = {
-                            let mut pq = private_queries.write().await;
-                            pq.put(private_query_key, ());
-                            pq.len()
-                        };
-                        lru_size_instrument.update(size as u64);
+                        remember_private_query(
+                            &private_queries,
+                            private_query_key,
+                            &lru_size_instrument,
+                        )
+                        .await;
 
                         // Update cache key with private_id suffix now that we know the
                         // response is private (matching subgraph pattern at line 1278)
@@ -1793,7 +1790,8 @@ impl ConnectorRequestCacheService {
                                 cache_control: cache_control.clone(),
                                 data: serde_json_bytes::json!({"data": data.clone()}),
                                 warnings: Vec::new(),
-                                should_store: false,
+                                // Only built for a response that is about to be stored.
+                                should_store: true,
                             }
                             .update_metadata();
                             add_cache_key_to_context(&context, cache_key_context)?;
