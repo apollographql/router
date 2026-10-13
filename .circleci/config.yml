@@ -650,6 +650,13 @@ jobs:
       use_rust_lld:
         type: boolean
         default: false
+      variant:
+        type: enum
+        enum: [base, cuts, debug0, noexamples]
+        default: base
+      rep:
+        type: string
+        default: r1
     executor: << parameters.platform >>
     steps:
       - checkout
@@ -664,6 +671,7 @@ jobs:
           environment:
             CARGO_BUILD_JOBS: << parameters.build_jobs >>
             MEMPROFILE_RUST_LLD: << parameters.use_rust_lld >>
+            MEMPROFILE_VARIANT: << parameters.variant >>
           command: bash .circleci/memprofile/run.sh
       - store_artifacts:
           path: /tmp/memprofile
@@ -1155,16 +1163,14 @@ workflows:
           - << pipeline.parameters.quick_nightly >>
           - << pipeline.parameters.test_build >>
     jobs:
-      # arm64 with the toolchain's bundled rust-lld instead of GNU ld.
+      # Warm-cache PR-style build on the PR test executor, per build-layout variant, twice each.
       - memprofile:
-          name: memprofile-arm-16gb-j4-rustlld
-          platform: arm_linux_build
-          use_rust_lld: true
-      - memprofile:
-          name: memprofile-arm-32gb-j8-rustlld
-          platform: arm_linux_test
-          build_jobs: 8
-          use_rust_lld: true
+          name: memprofile-amd-<< matrix.variant >>-<< matrix.rep >>
+          platform: amd_linux_test
+          matrix:
+            parameters:
+              variant: [base, cuts, debug0, noexamples]
+              rep: [r1, r2]
   quick-nightly:
     when: << pipeline.parameters.quick_nightly >>
     jobs:

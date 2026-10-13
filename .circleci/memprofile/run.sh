@@ -24,15 +24,43 @@ if [ "$use_lld" = 1 ]; then
 fi
 echo "RUSTFLAGS=${RUSTFLAGS:-}" >> "$out/env.txt"
 
+# Build-layout variants (cumulative):
+#   cuts       — no test harness for the two examples without tests; `--tests` skips [[example]] targets
+#   debug0     — cuts + no debuginfo for workspace crates (dependencies keep their cached line tables)
+#   noexamples — cuts + example crates left out of this build
+extra=()
+variant=${MEMPROFILE_VARIANT:-base}
+if [ "$variant" != base ]; then
+  for m in examples/context/rust/Cargo.toml:context-data examples/supergraph-sdl/rust/Cargo.toml:supergraph_sdl; do
+    printf '\n[[bin]]\nname = "%s"\npath = "src/main.rs"\ntest = false\n' "${m##*:}" >> "${m%%:*}"
+  done
+  extra+=(--tests)
+fi
+if [ "$variant" = debug0 ]; then
+  # Per workspace member, so dependency fingerprints (and the restored cache) stay valid.
+  for p in $(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; [print(p["name"]) for p in json.load(sys.stdin)["packages"]]'); do
+    extra+=(--config "profile.dev.package.$p.debug=0")
+  done
+fi
+if [ "$variant" = noexamples ]; then
+  for p in $(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; [print(p["name"]) for p in json.load(sys.stdin)["packages"] if "/examples/" in p["manifest_path"]]'); do
+    extra+=(--exclude "$p")
+  done
+fi
+echo "variant=$variant extra=${extra[*]}" >> "$out/env.txt"
+
 python3 .circleci/memprofile/memsample.py "$out/samples.tsv" 0.5 &
 sampler=$!
-start=$(date +%s)
-cargo nextest run --no-run --workspace --locked --features ci,snapshot > "$out/build.log" 2>&1
+start=$(date +%s.%N)
+cargo test --no-run --workspace --locked --features ci,snapshot "${extra[@]}" --timings > "$out/build.log" 2>&1
 rc=$?
+end=$(date +%s.%N)
 kill "$sampler"
+cp target/cargo-timings/cargo-timing.html "$out/" 2>/dev/null
+echo "compiled=$(grep -c '^ *Compiling' "$out/build.log") wall_precise=$(python3 -c "print(round($end-$start,1))")" >> "$out/env.txt"
 
 {
-  echo "rc=$rc wall=$(( $(date +%s) - start ))s"
+  echo "rc=$rc wall=$(python3 -c "print(round($end-$start))")s"
   echo "cgroup peak bytes: $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes)"
   echo "cgroup events: $(tr '\n' ' ' < /sys/fs/cgroup/memory.events 2>/dev/null)"
 } >> "$out/env.txt"
