@@ -413,7 +413,8 @@ impl FetchNode {
                 tracing::trace!("received entities: {:?}", &entities);
 
                 if entities.kind() == JsonKind::Array {
-                    let mut value = Value::default();
+                    // One builder places every entity, sealed once at the end.
+                    let mut placed = Value::default().edit();
 
                     for (index, mut entity) in entities.array_iter().enumerate() {
                         rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
@@ -421,16 +422,17 @@ impl FetchNode {
                         if let Some(paths) = inverted_paths.get(index) {
                             if paths.len() > 1 {
                                 for path in &paths[1..] {
-                                    let _ = value.insert(path, entity.clone());
+                                    let _ =
+                                        json_ext::insert_at_path(&mut placed, path, entity.clone());
                                 }
                             }
 
                             if let Some(path) = paths.first() {
-                                let _ = value.insert(path, entity);
+                                let _ = json_ext::insert_at_path(&mut placed, path, entity);
                             }
                         }
                     }
-                    return (value, errors);
+                    return (placed.seal(), errors);
                 }
             }
 

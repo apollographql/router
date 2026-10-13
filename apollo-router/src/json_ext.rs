@@ -86,10 +86,6 @@ pub(crate) trait ValueExt {
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value;
 
-    /// Insert a `Value` at a `Path`
-    #[track_caller]
-    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError>;
-
     /// Get a `Value` from a `Path`
     #[track_caller]
     fn select_path(&self, schema: &Schema, path: &Path) -> Result<Value, FetchError>;
@@ -208,22 +204,10 @@ impl ValueExt for Value {
         // each key and returned before writing, so the deepest key it reached
         // holds null rather than `value`.
         let leaf = if truncated { Value::default() } else { value };
-        value_with_path(&Value::default(), &segments, leaf)
-            .expect("a value built from nothing has no conflicting shape")
-    }
-
-    #[track_caller]
-    fn insert(&mut self, path: &Path, value: Value) -> Result<(), FetchError> {
-        // Flattens and keys carrying type conditions filter the incoming value
-        // as the walk passes them, so fold them all before writing.
-        let mut value = value;
-        for element in path.iter() {
-            if let PathElement::Flatten(conditions) | PathElement::Key(_, conditions) = element {
-                value = filter_type_conditions(value, conditions);
-            }
-        }
-        *self = value_with_path(self, &insert_segments(path), value)?;
-        Ok(())
+        let mut builder = Value::default().edit();
+        write_segments(&mut builder, &segments, leaf)
+            .expect("a value built from nothing has no conflicting shape");
+        builder.seal()
     }
 
     #[track_caller]
@@ -325,9 +309,8 @@ impl ValueExt for Value {
 /// write. That suits objects of a handful of keys; response bodies build
 /// through a single long-lived builder instead.
 ///
-/// The names carry an `object_` prefix because [`ValueExt::insert`] already
-/// means "insert at a [`Path`]", and a bare `insert` would resolve to it
-/// with a confusing type error rather than the keyed write intended here.
+/// The names carry an `object_` prefix so a keyed write reads differently
+/// from a write addressed by a [`Path`], such as [`insert_at_path`].
 pub(crate) trait ObjectExt {
     /// Writes `value` at `key`, returning the previous value if the key was
     /// present.
@@ -483,63 +466,146 @@ fn shape_mismatch(shape: Shape) -> FetchError {
     }
 }
 
-/// Returns `base` with `leaf` written at `segments`.
+/// Writes `value` at `path` in the value `builder` is building.
 ///
-/// Every read here is on a sealed value. Writing through a
-/// [`ValueBuilder`] would mean reading the document back as it is built,
-/// and a container that has grown is a `MutObject`/`MutArray` overlay that
-/// `ValueRef`'s `get`, `index` and `len` do not see -- lookups report members
-/// absent and lengths zero, so a write overwrites a sibling or pads an array
-/// that was already populated.
+/// Type conditions on the path filter `value` first, and flattens and fragments
+/// address nothing themselves: the index after a flatten picks the list member.
 ///
-/// A missing container is created with the shape its segment addresses, an
-/// array grows with nulls up to an index past its end, and a scalar where a
-/// container is needed is an error.
-fn value_with_path(
-    base: &Value,
+/// Placing many values through one builder and sealing once keeps the cost
+/// linear in the number of values: each write edits the containers on its path
+/// in place, where sealing after every write would flatten every container it
+/// had grown again, and rebuilding the path as a fresh value would copy every
+/// sibling along it.
+///
+/// # Errors
+/// [`FetchError::ExecutionPathNotFound`] when an existing value on the path is
+/// the wrong shape to descend into. Nothing is written in that case.
+pub(crate) fn insert_at_path(
+    builder: &mut ValueBuilder,
+    path: &Path,
+    value: Value,
+) -> Result<(), FetchError> {
+    // Flattens and keys carrying type conditions filter the incoming value
+    // as the walk passes them, so fold them all before writing.
+    let mut value = value;
+    for element in path.iter() {
+        if let PathElement::Flatten(conditions) | PathElement::Key(_, conditions) = element {
+            value = filter_type_conditions(value, conditions);
+        }
+    }
+    write_segments(builder, &insert_segments(path), value)
+}
+
+/// Writes `leaf` at `segments` under the builder's root.
+///
+/// A missing or null container is created with the shape its segment
+/// addresses, an array grows with nulls up to an index past its end, and a
+/// scalar where a container is needed is an error, reported before anything is
+/// written.
+fn write_segments(
+    builder: &mut ValueBuilder,
     segments: &[&PathElement],
     leaf: Value,
-) -> Result<Value, FetchError> {
-    let Some((&first, rest)) = segments.split_first() else {
-        return Ok(leaf);
+) -> Result<(), FetchError> {
+    let Some(&first) = segments.first() else {
+        builder
+            .set_path(&[], NewValue::Node(leaf))
+            .expect("replacing the root always succeeds");
+        return Ok(());
     };
-    match first {
-        PathElement::Key(key, _) => match base.kind() {
-            JsonKind::Object => {
-                let child = base.get(key.as_str()).unwrap_or_default();
-                let mut written = Some(value_with_path(&child, rest, leaf)?);
-                let mut members = Vec::with_capacity(base.len().unwrap_or(0) + 1);
-                for (existing, value) in base.object_iter() {
-                    if existing == key.as_str() {
-                        members.push((existing, written.take().expect("a key matches once")));
-                    } else {
-                        members.push((existing, value));
-                    }
-                }
-                if let Some(appended) = written {
-                    members.push((Cow::Borrowed(key.as_str()), appended));
-                }
-                Ok(object(members))
+    check_writable(builder.value(), segments)?;
+    if builder.value().is_null() {
+        builder
+            .set_path(&[], empty_container(shape_of(first)))
+            .expect("replacing the root always succeeds");
+    }
+    write_checked(builder.root_mut(), segments, leaf);
+    Ok(())
+}
+
+/// Checks that every existing value on `segments` is a container of the shape
+/// its segment addresses, or null. The value at the final segment is replaced
+/// whatever it is, so it is not checked.
+fn check_writable(
+    mut at: apollo_json::BuilderRef<'_>,
+    segments: &[&PathElement],
+) -> Result<(), FetchError> {
+    for &segment in segments {
+        let shape = shape_of(segment);
+        match (at.kind(), shape) {
+            // Everything from here down is created.
+            (JsonKind::Null, _) => return Ok(()),
+            (JsonKind::Object, Shape::Object) | (JsonKind::Array, Shape::Array) => {}
+            _ => return Err(shape_mismatch(shape)),
+        }
+        match at_segment(at, segment) {
+            Some(child) => at = child,
+            None => return Ok(()),
+        }
+    }
+    Ok(())
+}
+
+/// Writes `leaf` at `segments` under `cursor`, which [`check_writable`] has
+/// already found to be the shape the first segment addresses.
+fn write_checked(mut cursor: ValueMut<'_>, segments: &[&PathElement], leaf: Value) {
+    let (&first, rest) = segments
+        .split_first()
+        .expect("the caller handles an empty path");
+    let slot = match first {
+        PathElement::Key(key, _) => apollo_json::PathSegment::Key(key.as_str()),
+        &PathElement::Index(index) => {
+            while cursor.value().len().unwrap_or(0) < index {
+                cursor
+                    .push(NewValue::Null)
+                    .expect("the cursor was checked to be an array");
             }
-            JsonKind::Null => Ok(object([(
-                key.clone(),
-                value_with_path(&Value::default(), rest, leaf)?,
-            )])),
-            _ => Err(shape_mismatch(Shape::Object)),
-        },
-        &PathElement::Index(index) => match base.kind() {
-            JsonKind::Array | JsonKind::Null => {
-                let mut items: Vec<Value> = base.array_iter().collect();
-                if items.len() <= index {
-                    items.resize_with(index + 1, Value::default);
-                }
-                let child = items[index].clone();
-                items[index] = value_with_path(&child, rest, leaf)?;
-                Ok(array(items))
-            }
-            _ => Err(shape_mismatch(Shape::Array)),
-        },
-        _ => unreachable!("addressing_segments yields only keys and indexes"),
+            apollo_json::PathSegment::Index(index)
+        }
+        _ => unreachable!("path segments are only keys and indexes"),
+    };
+    let Some(&next) = rest.first() else {
+        cursor
+            .set(slot, NewValue::Node(leaf))
+            .expect("the cursor was checked to fit the slot");
+        return;
+    };
+    if at_segment(cursor.value(), first).is_none_or(|child| child.is_null()) {
+        cursor
+            .set(slot, empty_container(shape_of(next)))
+            .expect("the cursor was checked to fit the slot");
+    }
+    let child = cursor
+        .get_mut(slot)
+        .expect("the slot holds a container now");
+    write_checked(child, rest, leaf);
+}
+
+/// The value at `segment` of `value`, if there is one.
+fn at_segment<'b>(
+    value: apollo_json::BuilderRef<'b>,
+    segment: &PathElement,
+) -> Option<apollo_json::BuilderRef<'b>> {
+    match segment {
+        PathElement::Key(key, _) => value.get(key.as_str()),
+        &PathElement::Index(index) => value.index(index),
+        _ => unreachable!("path segments are only keys and indexes"),
+    }
+}
+
+/// The container shape a path segment addresses.
+fn shape_of(segment: &PathElement) -> Shape {
+    match segment {
+        PathElement::Key(..) => Shape::Object,
+        PathElement::Index(_) => Shape::Array,
+        _ => unreachable!("path segments are only keys and indexes"),
+    }
+}
+
+fn empty_container(shape: Shape) -> NewValue<'static> {
+    match shape {
+        Shape::Object => NewValue::Object(Vec::new()),
+        Shape::Array => NewValue::Array(Vec::new()),
     }
 }
 
@@ -1835,6 +1901,54 @@ mod tests {
         let path = Path::from("obj/arr/@/obj2");
         let result = Value::from_path(&path, json);
         assert_eq!(result, json!({"obj":{"arr":null}}));
+    }
+
+    #[test]
+    fn test_insert_at_path_places_many_values_in_one_builder() {
+        // Entities arrive in any order and several can land under one list
+        // member, as when a fetch answers more than one path per entity.
+        let mut builder = Value::default().edit();
+        for (path, value) in [
+            ("topProducts/@/2/reviews", json!([{"id":"r3"}])),
+            ("topProducts/@/0/reviews", json!([{"id":"r1"}])),
+            ("topProducts/@/0/name", json!("Table")),
+            ("topProducts/@/2/name", json!("Chair")),
+        ] {
+            insert_at_path(&mut builder, &Path::from(path), value).unwrap();
+        }
+        assert_eq!(
+            builder.seal(),
+            json!({"topProducts":[
+                {"reviews":[{"id":"r1"}],"name":"Table"},
+                null,
+                {"reviews":[{"id":"r3"}],"name":"Chair"}
+            ]})
+        );
+    }
+
+    #[test]
+    fn test_insert_at_path_places_a_thousand_entities() {
+        let mut builder = Value::default().edit();
+        for index in (0..1000).rev() {
+            let path = Path::from(format!("_entities/{index}").as_str());
+            insert_at_path(&mut builder, &path, json!({"id": index})).unwrap();
+        }
+        let placed = builder.seal();
+        let entities = placed.get("_entities").unwrap();
+        assert_eq!(entities.len(), Some(1000));
+        for index in 0..1000 {
+            assert_eq!(entities.index(index).unwrap(), json!({"id": index}));
+        }
+    }
+
+    #[test]
+    fn test_insert_at_path_shape_mismatch_writes_nothing() {
+        let mut builder = json!({"a":{"b":1}}).edit();
+        let error = insert_at_path(&mut builder, &Path::from("a/b/c/0"), json!(2)).unwrap_err();
+        assert!(matches!(error, FetchError::ExecutionPathNotFound { .. }));
+        let error = insert_at_path(&mut builder, &Path::from("a/0"), json!(2)).unwrap_err();
+        assert!(matches!(error, FetchError::ExecutionPathNotFound { .. }));
+        assert_eq!(builder.seal(), json!({"a":{"b":1}}));
     }
 
     #[test]
