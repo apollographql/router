@@ -16,6 +16,7 @@ use fred::types::Value;
 use fred::types::sorted_sets::Ordering;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -99,6 +100,71 @@ mod raw_json {
     ) -> Result<Value, D::Error> {
         let raw: Box<str> = Box::<RawValue>::deserialize(deserializer)?.into();
         Value::parse(raw.into_string().into_bytes()).map_err(D::Error::custom)
+    }
+}
+
+/// A stored entry as read back. The data stays JSON text until the entries of a
+/// fetch have all been read, so they can be parsed together into one document
+/// rather than into one each.
+#[derive(Deserialize, Debug, Clone, Serialize)]
+struct StoredCacheValue {
+    data: Box<RawValue>,
+    cache_control: CacheControl,
+    cache_tags: Option<HashSet<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    mapping_problems: Vec<Problem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
+}
+
+impl ValueType for StoredCacheValue {}
+
+impl StoredCacheValue {
+    fn into_entry(self, data: crate::json_ext::Value) -> CacheEntry {
+        CacheEntry::from(CacheValue {
+            data,
+            cache_control: self.cache_control,
+            cache_tags: self.cache_tags,
+            mapping_problems: self.mapping_problems,
+            status: self.status,
+        })
+    }
+}
+
+/// Reports stored data that does not parse as the read failure it was when
+/// each entry was parsed as it was read.
+fn parse_error(error: apollo_json::JsonError) -> fred::error::Error {
+    fred::error::Error::new(
+        fred::error::ErrorKind::Parse,
+        format!("can't deserialize from JSON: {error}"),
+    )
+}
+
+/// Parses the stored data of several entries into one document, returning one
+/// value per entry, in order. They are parsed as the elements of one array: one
+/// arena, one set of parse buffers and one copy of the text for all of them,
+/// rather than one of each per entry. If the array does not parse, because one
+/// entry is malformed or all of them together exceed the document limits, each
+/// is parsed alone so that only a bad entry fails.
+fn parse_stored_data(
+    data: &[&RawValue],
+) -> Vec<Result<crate::json_ext::Value, apollo_json::JsonError>> {
+    let len = data.iter().map(|raw| raw.get().len() + 1).sum::<usize>() + 1;
+    let mut joined = Vec::with_capacity(len.max(2));
+    joined.push(b'[');
+    for (index, raw) in data.iter().enumerate() {
+        if index > 0 {
+            joined.push(b',');
+        }
+        joined.extend_from_slice(raw.get().as_bytes());
+    }
+    joined.push(b']');
+    match crate::json_ext::Value::parse(joined) {
+        Ok(array) if array.len() == Some(data.len()) => array.array_iter().map(Ok).collect(),
+        _ => data
+            .iter()
+            .map(|raw| crate::json_ext::Value::parse(raw.get().as_bytes().to_vec()))
+            .collect(),
     }
 }
 
@@ -514,11 +580,13 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let value: RedisValue<CacheValue> = self
+        let value: RedisValue<StoredCacheValue> = self
             .storage
             .get_with_options(RedisKey(cache_key), options)
             .await?;
-        Ok(CacheEntry::from(value.0))
+        let data = crate::json_ext::Value::parse(value.0.data.get().as_bytes().to_vec())
+            .map_err(parse_error)?;
+        Ok(value.0.into_entry(data))
     }
 
     async fn internal_fetch_multiple(
@@ -531,17 +599,29 @@ impl CacheStorage for Storage {
             timeout: Some(self.fetch_timeout()),
             ..Options::default()
         };
-        let values: Vec<Result<RedisValue<CacheValue>, _>> = self
+        let values: Vec<Result<RedisValue<StoredCacheValue>, _>> = self
             .storage
             .get_multiple_with_options(keys, options)
             .await?;
 
+        // The data of every entry found is parsed in one pass, into one
+        // document shared by all of them.
+        let found: Vec<&RawValue> = values
+            .iter()
+            .filter_map(|value| value.as_ref().ok())
+            .map(|value| &*value.0.data)
+            .collect();
+        let mut data = parse_stored_data(&found).into_iter();
+
         let entries = values
             .into_iter()
-            .map(|opt_value| {
-                opt_value
-                    .map(|value| CacheEntry::from(value.0))
-                    .map_err(Into::into)
+            .map(|value| {
+                let value = value?.0;
+                let data = data
+                    .next()
+                    .expect("one parsed value per entry found")
+                    .map_err(parse_error)?;
+                Ok(value.into_entry(data))
             })
             .collect();
 
@@ -871,6 +951,42 @@ mod tests {
     /// * a document's TTL must be shorter than the TTL of all its related cache tags
     /// * a document's TTL will always be less than or equal to its score in all its related cache tags
     /// * only expired keys will be removed via the cache maintenance
+    #[test]
+    fn stored_entries_are_parsed_together_and_a_bad_one_fails_alone() {
+        let raw = |text: &str| serde_json::value::RawValue::from_string(text.to_string()).unwrap();
+        let good = [
+            raw(r#"{"name":"caf\u00e9","n":2.50}"#),
+            raw("null"),
+            raw(r#"[1,{"a":"b"}]"#),
+        ];
+        let parsed = super::parse_stored_data(&good.iter().map(|raw| &**raw).collect::<Vec<_>>());
+        let texts: Vec<String> = parsed
+            .into_iter()
+            .map(|value| value.unwrap().to_string())
+            .collect();
+        // Each entry comes back in order, its text as stored.
+        assert_eq!(
+            texts,
+            [
+                r#"{"name":"caf\u00e9","n":2.50}"#,
+                "null",
+                r#"[1,{"a":"b"}]"#
+            ]
+        );
+
+        // Text serde accepts as one value but apollo-json rejects: an unpaired
+        // surrogate escape. The whole array fails, so each entry is parsed
+        // alone and only that one reports an error.
+        let mixed = [raw(r#"{"a":1}"#), raw(r#""\ud800""#), raw("2")];
+        let parsed = super::parse_stored_data(&mixed.iter().map(|raw| &**raw).collect::<Vec<_>>());
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].as_ref().unwrap().to_string(), r#"{"a":1}"#);
+        assert_eq!(parsed[2].as_ref().unwrap().to_string(), "2");
+        assert!(parsed[1].is_err());
+
+        assert!(super::parse_stored_data(&[]).is_empty());
+    }
+
     #[test]
     fn stored_entry_json_is_what_serializing_the_entry_writes() {
         let problem = apollo_federation::connectors::runtime::mapping::Problem {
