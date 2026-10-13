@@ -199,13 +199,18 @@ impl ValueExt for Value {
 
     #[track_caller]
     fn from_path(path: &Path, value: Value) -> Value {
-        let (segments, truncated) = addressing_segments(path);
         // A flatten cuts the path short: the walk left a null placeholder at
         // each key and returned before writing, so the deepest key it reached
         // holds null rather than `value`.
-        let leaf = if truncated { Value::default() } else { value };
+        let (elements, leaf) = match path
+            .iter()
+            .position(|e| matches!(e, PathElement::Flatten(_)))
+        {
+            Some(flatten) => (&path.0[..flatten], Value::default()),
+            None => (path.0.as_slice(), value),
+        };
         let mut builder = Value::default().edit();
-        write_segments(&mut builder, &segments, leaf)
+        write_segments(&mut builder, elements, leaf)
             .expect("a value built from nothing has no conflicting shape");
         builder.seal()
     }
@@ -427,32 +432,17 @@ enum Shape {
     Array,
 }
 
-/// The path elements that address a position, and whether a flatten cut the
-/// walk short. Fragments narrow a type rather than addressing a position, so
-/// they contribute nothing.
-fn addressing_segments(path: &Path) -> (Vec<&PathElement>, bool) {
-    let mut segments = Vec::with_capacity(path.len());
-    for element in path.iter() {
-        match element {
-            PathElement::Flatten(_) => return (segments, true),
-            PathElement::Fragment(_) => {}
-            addressing => segments.push(addressing),
-        }
-    }
-    (segments, false)
-}
-
-/// The path elements that address a position, for a walk that writes through a
-/// flatten rather than stopping at it.
+/// The first element of `elements` that addresses a position, and the
+/// elements after it.
 ///
-/// A flatten asserts that the value at that position is a list; the element
-/// after it (an index) is what addresses a member of that list, so the flatten
-/// itself contributes no step. [`addressing_segments`] stops at the first one
-/// instead, which is what building a fresh value from a path does.
-fn insert_segments(path: &Path) -> Vec<&PathElement> {
-    path.iter()
-        .filter(|element| !matches!(element, PathElement::Flatten(_) | PathElement::Fragment(_)))
-        .collect()
+/// Keys and indexes address positions. A fragment narrows a type and a flatten
+/// asserts that the value at its position is a list, whose member the index
+/// after it picks, so neither contributes a step of its own.
+fn split_addressing(elements: &[PathElement]) -> Option<(&PathElement, &[PathElement])> {
+    let at = elements
+        .iter()
+        .position(|element| matches!(element, PathElement::Key(..) | PathElement::Index(_)))?;
+    Some((&elements[at], &elements[at + 1..]))
 }
 
 /// The error a path walk reports when an existing value is the wrong shape to
@@ -493,10 +483,11 @@ pub(crate) fn insert_at_path(
             value = filter_type_conditions(value, conditions);
         }
     }
-    write_segments(builder, &insert_segments(path), value)
+    write_segments(builder, &path.0, value)
 }
 
-/// Writes `leaf` at `segments` under the builder's root.
+/// Writes `leaf` at the position `elements` address under the builder's root;
+/// see [`split_addressing`].
 ///
 /// A missing or null container is created with the shape its segment
 /// addresses, an array grows with nulls up to an index past its end, and a
@@ -504,33 +495,35 @@ pub(crate) fn insert_at_path(
 /// written.
 fn write_segments(
     builder: &mut ValueBuilder,
-    segments: &[&PathElement],
+    elements: &[PathElement],
     leaf: Value,
 ) -> Result<(), FetchError> {
-    let Some(&first) = segments.first() else {
+    let Some((first, _)) = split_addressing(elements) else {
         builder
             .set_path(&[], NewValue::Node(leaf))
             .expect("replacing the root always succeeds");
         return Ok(());
     };
-    check_writable(builder.value(), segments)?;
+    check_writable(builder.value(), elements)?;
     if builder.value().is_null() {
         builder
             .set_path(&[], empty_container(shape_of(first)))
             .expect("replacing the root always succeeds");
     }
-    write_checked(builder.root_mut(), segments, leaf);
+    write_checked(builder.root_mut(), elements, leaf);
     Ok(())
 }
 
-/// Checks that every existing value on `segments` is a container of the shape
-/// its segment addresses, or null. The value at the final segment is replaced
-/// whatever it is, so it is not checked.
+/// Checks that every existing value on the way to the position `elements`
+/// address is a container of the shape its segment addresses, or null. The
+/// value at the final segment is replaced whatever it is, so it is not
+/// checked.
 fn check_writable(
     mut at: apollo_json::BuilderRef<'_>,
-    segments: &[&PathElement],
+    mut elements: &[PathElement],
 ) -> Result<(), FetchError> {
-    for &segment in segments {
+    while let Some((segment, rest)) = split_addressing(elements) {
+        elements = rest;
         let shape = shape_of(segment);
         match (at.kind(), shape) {
             // Everything from here down is created.
@@ -546,12 +539,11 @@ fn check_writable(
     Ok(())
 }
 
-/// Writes `leaf` at `segments` under `cursor`, which [`check_writable`] has
-/// already found to be the shape the first segment addresses.
-fn write_checked(mut cursor: ValueMut<'_>, segments: &[&PathElement], leaf: Value) {
-    let (&first, rest) = segments
-        .split_first()
-        .expect("the caller handles an empty path");
+/// Writes `leaf` at the position `elements` address under `cursor`, which
+/// [`check_writable`] has already found to be the shape the first segment
+/// addresses.
+fn write_checked(mut cursor: ValueMut<'_>, elements: &[PathElement], leaf: Value) {
+    let (first, rest) = split_addressing(elements).expect("the caller handles an empty path");
     let slot = match first {
         PathElement::Key(key, _) => apollo_json::PathSegment::Key(key.as_str()),
         &PathElement::Index(index) => {
@@ -564,7 +556,7 @@ fn write_checked(mut cursor: ValueMut<'_>, segments: &[&PathElement], leaf: Valu
         }
         _ => unreachable!("path segments are only keys and indexes"),
     };
-    let Some(&next) = rest.first() else {
+    let Some((next, _)) = split_addressing(rest) else {
         cursor
             .set(slot, NewValue::Node(leaf))
             .expect("the cursor was checked to fit the slot");
